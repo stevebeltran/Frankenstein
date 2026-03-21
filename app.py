@@ -30,6 +30,39 @@ import gspread
 from google.oauth2.service_account import Credentials
 from smart_ingest import render_smart_uploader
 
+@st.cache_data
+def load_census_shapefile(uploaded_zip_bytes):
+    """
+    Properly ingest a Census.gov TIGER/Line shapefile zip into GeoPandas
+    for web map rendering. 
+    """
+    import tempfile
+    import os
+    import geopandas as gpd
+
+    # 1. Save Streamlit's in-memory upload to a temporary file on disk
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
+        tmp.write(uploaded_zip_bytes)
+        tmp_path = tmp.name
+        
+    try:
+        # 2. Read the .shp directly out of the zipped file
+        gdf = gpd.read_file(f"zip://{tmp_path}")
+        
+        # 3. Convert from Census NAD83 (EPSG:4269) to standard WGS84 (EPSG:4326)
+        if gdf.crs != "EPSG:4326":
+            gdf = gdf.to_crs(epsg=4326)
+            
+        # 4. Simplify the geometry to prevent browser crashing (0.001 degrees)
+        gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.001, preserve_topology=True)
+        
+        return gdf
+        
+    finally:
+        # Clean up the temporary file
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
 def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email):
     try:
         gmail_address  = st.secrets.get("GMAIL_ADDRESS", "")

@@ -28,6 +28,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import gspread
 from google.oauth2.service_account import Credentials
+from smart_ingest import render_smart_uploader
 
 def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email):
     try:
@@ -1138,85 +1139,12 @@ if not st.session_state['csvs_ready']:
                                      help="Fetch boundaries and launch the simulation.")
 
     with path_upload_col:
-        st.markdown(f"""
-        <div class="path-card" style="--accent:#39FF14;">
-            <span class="pc-icon">📂</span>
-            <div class="pc-tag">Path 02</div>
-            <div class="pc-title">Upload<br>Real CAD Data</div>
-            <div class="pc-desc">
-                Drop your own <code class="inline">calls.csv</code> and
-                <code class="inline">stations.csv</code> — both need
-                <code class="inline">lat</code> and <code class="inline">lon</code>
-                columns. Jurisdiction auto-detected from coordinates.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-
-        uploaded_files = st.file_uploader(
-            "Drop calls.csv & stations.csv",
-            accept_multiple_files=True,
-            label_visibility="collapsed",
-            help="Upload both files together. The uploader accepts multiple files at once."
+        render_smart_uploader(
+            accent_color=accent_color,
+            text_muted=text_muted,
+            card_bg=card_bg,
+            card_border=card_border,
         )
-
-        st.markdown("""
-        <div class="field-footnote">
-            <b style='color:#555;'>calls.csv</b> — lat, lon, priority (optional)<br>
-            <b style='color:#555;'>stations.csv</b> — lat, lon, name, type (optional)<br>
-            Max 25,000 calls · 100 stations
-        </div>
-        """, unsafe_allow_html=True)
-
-        call_file, station_file = None, None
-        if uploaded_files:
-            for f in uploaded_files:
-                fname = f.name.lower()
-                if fname == "calls.csv":    call_file = f
-                elif fname == "stations.csv": station_file = f
-
-            if call_file and station_file:
-                df_c = pd.read_csv(call_file)
-                df_c.columns = [str(c).lower().strip() for c in df_c.columns]
-                df_c = df_c.rename(columns={'latitude': 'lat', 'longitude': 'lon'})
-                if 'lat' not in df_c.columns or 'lon' not in df_c.columns:
-                    st.error(f"❌ calls.csv must have lat/lon columns. Found: {', '.join(df_c.columns)}")
-                    st.stop()
-                keep_c = ['lat', 'lon'] + (['priority'] if 'priority' in df_c.columns else [])
-                df_c = df_c[keep_c].dropna(subset=['lat', 'lon']).reset_index(drop=True)
-                st.session_state['total_original_calls'] = len(df_c)
-                if len(df_c) > 25000:
-                    df_c = df_c.sample(25000, random_state=42).reset_index(drop=True)
-                    st.toast("⚠️ Sampled to 25,000 calls for performance.")
-                st.session_state['df_calls'] = df_c
-                df_s = pd.read_csv(station_file)
-                df_s.columns = [str(c).lower().strip() for c in df_s.columns]
-                df_s = df_s.rename(columns={'latitude': 'lat', 'longitude': 'lon'})
-                if 'lat' not in df_s.columns or 'lon' not in df_s.columns:
-                    st.error(f"❌ stations.csv must have lat/lon columns. Found: {', '.join(df_s.columns)}")
-                    st.stop()
-                keep_s = ['lat', 'lon'] + [c for c in ['name', 'type'] if c in df_s.columns]
-                df_s = df_s[keep_s].dropna(subset=['lat', 'lon']).reset_index(drop=True)
-                if 'name' not in df_s.columns:
-                    df_s['name'] = [f"Station {i+1}" for i in range(len(df_s))]
-                if len(df_s) > 100:
-                    df_s = df_s.sample(100, random_state=42).reset_index(drop=True)
-                st.session_state['df_stations'] = df_s
-                with st.spinner("🌍 Auto-detecting jurisdiction…"):
-                    detected_state_full, detected_city = reverse_geocode_state(
-                        df_c['lat'].iloc[0], df_c['lon'].iloc[0]
-                    )
-                    if detected_state_full and detected_state_full in US_STATES_ABBR:
-                        st.session_state['active_state'] = US_STATES_ABBR[detected_state_full]
-                        if detected_city and detected_city != 'Unknown City':
-                            st.session_state['active_city'] = detected_city
-                        st.toast(f"📍 Detected: {st.session_state['active_city']}, {st.session_state['active_state']}")
-                st.session_state['csvs_ready'] = True
-                st.rerun()
-            elif call_file or station_file:
-                missing = "stations.csv" if call_file else "calls.csv"
-                st.warning(f"⚠️ Also upload **{missing}** to continue.")
 
     with path_demo_col:
         st.markdown(f"""

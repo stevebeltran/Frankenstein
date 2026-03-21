@@ -179,27 +179,38 @@ def _get_classifier() -> Pipeline:
 # §2  HEURISTIC RULES
 # ═══════════════════════════════════════════════════════════════
 
-_RE_LAT   = re.compile(r"\b(lat(itude)?|geoy|y_?coord|ylat|y_wgs84|y_4326)\b", re.I)
-_RE_LON   = re.compile(r"\b(lo?ng?(itude)?|geox|x_?coord|xlon|x_wgs84|x_4326)\b", re.I)
+_RE_LAT   = re.compile(r"\b(lat(itude)?|geoy|ylat|y_wgs84|y_4326)\b", re.I)
+_RE_LON   = re.compile(r"\b(lo?ng?(itude)?|geox|xlon|x_wgs84|x_4326)\b", re.I)
 _RE_XPROJ = re.compile(r"\b(easting|utm_?e|state_?plane_?x|sp_?[ex]|xsp|x_?sp|x_?ft|x_?feet|x_?meters|x_?nad|map_?x)\b", re.I)
 _RE_YPROJ = re.compile(r"\b(northing|utm_?n|state_?plane_?y|sp_?[ny]|ysp|y_?sp|y_?ft|y_?feet|y_?meters|y_?nad|map_?y)\b", re.I)
+_RE_XCOORD = re.compile(r"\bx_?coord(inate)?\b", re.I)   # ambiguous — resolve by values below
+_RE_YCOORD = re.compile(r"\by_?coord(inate)?\b", re.I)   # ambiguous — resolve by values below
 _RE_ADDR  = re.compile(r"\b(addr(ess)?|street|location|premise|dispatch_addr|site_addr|block_addr|blk_addr|full_addr|scene_addr)\b", re.I)
 _RE_CITY  = re.compile(r"\b(city|municipality|place|town|jurisdiction)\b", re.I)
 _RE_STATE = re.compile(r"\b(state(_?(code|abbr))?)\b", re.I)
 _RE_ZIP   = re.compile(r"\b(zip(_?code)?|postal(_?code)?|zip4)\b", re.I)
 _RE_PRI   = re.compile(r"\b(priority|prio|pri|urgency|severity|response_level)\b", re.I)
 _RE_NAT   = re.compile(r"\b(nature|call_?type|calltype|type|incident_?type|event_?type|offense|problem|call_reason|call_category)\b", re.I)
-_RE_DATE  = re.compile(r"\b(date|datetime|time|occurred|reported|dispatch|received|entry_date|event_date)\b", re.I)
+_RE_DATE  = re.compile(r"(date|datetime|received|dispatch|occurred|reported|entry_date|event_date|call_date|incident_date|call_time|incident_time)", re.I)
 _RE_JUNK  = re.compile(r"\b(objectid|globalid|shape|geometry|fid|oid|gid|master_incident)\b", re.I)
 
 
-def _heuristic_classify(col: str) -> Optional[str]:
+def _heuristic_classify(col: str, series: "Optional[pd.Series]" = None) -> Optional[str]:
     c = col.strip().lower().replace(" ","_").replace("-","_")
     if _RE_JUNK.search(c):   return "ignore"
     if _RE_LAT.search(c):    return "lat"
     if _RE_LON.search(c):    return "lon"
     if _RE_XPROJ.search(c):  return "x_proj"
     if _RE_YPROJ.search(c):  return "y_proj"
+    # X-Coordinate / Y-Coordinate are ambiguous — use actual values to decide
+    if _RE_XCOORD.search(c):
+        if series is not None and _looks_like_lon(series):      return "lon"
+        if series is not None and _looks_like_projected(series): return "x_proj"
+        return "lon"   # safe default: assume decimal degrees
+    if _RE_YCOORD.search(c):
+        if series is not None and _looks_like_lat(series):      return "lat"
+        if series is not None and _looks_like_projected(series): return "y_proj"
+        return "lat"   # safe default: assume decimal degrees
     if _RE_ADDR.search(c):   return "address"
     if _RE_CITY.search(c):   return "city"
     if _RE_STATE.search(c) and len(c) <= 12: return "state"
@@ -220,7 +231,9 @@ def classify_columns(df: pd.DataFrame) -> tuple[ClassifyResult, ConfidenceMap]:
     confidences: ConfidenceMap  = {}
 
     for col in df.columns:
-        label = _heuristic_classify(col)
+        # Pass the actual column values so ambiguous names (X-Coordinate, Y-Coordinate)
+        # can be resolved by inspecting whether values look like degrees or projected units
+        label = _heuristic_classify(col, df[col])
         if label == "ignore":
             confidences[col] = 1.0
             continue
@@ -237,6 +250,11 @@ def classify_columns(df: pd.DataFrame) -> tuple[ClassifyResult, ConfidenceMap]:
             if best_p >= _LOW_CONF and pred != "ignore":
                 if pred not in mapping.values():
                     mapping[col] = pred
+
+    # ── KEY RULE: if lat+lon are present, drop address to avoid geocoding ──
+    has_latlon = "lat" in mapping.values() and "lon" in mapping.values()
+    if has_latlon:
+        mapping = {c: l for c, l in mapping.items() if l != "address"}
 
     return mapping, confidences
 
@@ -261,12 +279,17 @@ def _is_high_confidence(mapping: ClassifyResult, confidences: ConfidenceMap) -> 
 # ═══════════════════════════════════════════════════════════════
 
 def _looks_like_lat(s: pd.Series) -> bool:
+    # Threshold 0.60: real CAD files often have 30-40% garbage rows mixed into
+    # coordinate columns (e.g. address strings, notes, blank rows). We only
+    # evaluate rows that parse as numeric, then check that >=60% are plausible lats.
     v = pd.to_numeric(s, errors="coerce").dropna()
-    return len(v) >= 5 and bool((v.abs() <= 90).mean() > 0.95 and (v.abs() > 0.01).mean() > 0.9)
+    if len(v) < 5: return False
+    return bool((v.abs() <= 90).mean() > 0.60 and (v.abs() > 0.01).mean() > 0.60)
 
 def _looks_like_lon(s: pd.Series) -> bool:
     v = pd.to_numeric(s, errors="coerce").dropna()
-    return len(v) >= 5 and bool((v.abs() <= 180).mean() > 0.95 and (v.abs() > 0.01).mean() > 0.9)
+    if len(v) < 5: return False
+    return bool((v.abs() <= 180).mean() > 0.60 and (v.abs() > 0.01).mean() > 0.60)
 
 def _looks_like_projected(s: pd.Series) -> bool:
     v = pd.to_numeric(s, errors="coerce").dropna()
@@ -557,30 +580,59 @@ def normalise_calls(
     out = pd.DataFrame()
     rev = {v:k for k,v in mapping.items()}   # label → first col with that label
 
-    # FORMAT A/B: decimal lat/lon
+    # ── PRIORITY ORDER ───────────────────────────────────────────
+    # 1. Explicit lat/lon columns                   (always fastest, most accurate)
+    # 2. X/Y columns that contain decimal degrees   (e.g. X-Coordinate, Y-Coordinate)
+    # 3. Projected X/Y that need reprojection        (UTM, State Plane, Web Mercator)
+    # 4. Address strings → Nominatim geocoding       (only when NO numeric coords exist)
+    #
+    # Crucially: if lat/lon OR numeric coordinate columns are found, the address
+    # column is IGNORED entirely — no geocoding is triggered.
+
+    # FORMAT A/B: decimal lat/lon — always preferred over address geocoding
     if "lat" in rev and "lon" in rev:
         lats = pd.to_numeric(df[rev["lat"]], errors="coerce")
         lons = pd.to_numeric(df[rev["lon"]], errors="coerce")
+        # Swap if columns appear transposed (lat values > 90 but lon values ≤ 90)
         if lats.dropna().abs().median() > 90 and lons.dropna().abs().median() <= 90:
-            lats, lons = lons, lats   # transposed — swap
+            lats, lons = lons, lats
         out["lat"] = lats.values
         out["lon"] = lons.values
 
-    # FORMAT F: projected X/Y
+    # FORMAT F/G: X/Y coordinate columns (projected or already decimal degrees)
     elif "x_proj" in rev and "y_proj" in rev:
         xv = pd.to_numeric(df[rev["x_proj"]], errors="coerce")
         yv = pd.to_numeric(df[rev["y_proj"]], errors="coerce")
         ok = xv.notna() & yv.notna()
-        epsg = _detect_epsg(xv[ok].values, yv[ok].values)
-        if not epsg:
-            st.warning("⚠️ Projected CRS not identified. Add lat/lon or adjust column mapping.")
-            return pd.DataFrame()
-        lons_arr, lats_arr = _project_to_wgs84(xv[ok].values, yv[ok].values, epsg)
-        tmp = df[ok].copy()
-        tmp["lat"] = lats_arr;  tmp["lon"] = lons_arr
-        out = tmp[["lat","lon"]].copy();  df = tmp
+        xok, yok = xv[ok].values, yv[ok].values
 
-    # FORMATS C/D/E: address strings (all three handled by normalize_address)
+        # Check if the "projected" columns actually contain decimal degrees already
+        # (e.g. "X-Coordinate" = -119.33, "Y-Coordinate" = 36.49 — common in CAD exports)
+        x_is_lon = bool(np.percentile(np.abs(xok), 95) <= 180)
+        y_is_lat = bool(np.percentile(np.abs(yok), 95) <= 90)
+
+        if x_is_lon and y_is_lat:
+            # Already WGS84 decimal degrees — use directly, swap if needed
+            if np.median(np.abs(yok)) > np.median(np.abs(xok)):
+                # y has larger magnitude → likely lon; swap
+                lons_arr, lats_arr = yok, xok
+            else:
+                lons_arr, lats_arr = xok, yok
+            tmp = df[ok].copy()
+            tmp["lat"] = lats_arr;  tmp["lon"] = lons_arr
+            out = tmp[["lat","lon"]].copy();  df = tmp
+        else:
+            # Genuine projected coordinates — reproject to WGS84
+            epsg = _detect_epsg(xok, yok)
+            if not epsg:
+                st.warning("⚠️ Projected CRS not identified. Add lat/lon or adjust column mapping.")
+                return pd.DataFrame()
+            lons_arr, lats_arr = _project_to_wgs84(xok, yok, epsg)
+            tmp = df[ok].copy()
+            tmp["lat"] = lats_arr;  tmp["lon"] = lons_arr
+            out = tmp[["lat","lon"]].copy();  df = tmp
+
+    # FORMATS C/D/E: address strings — ONLY reached when no numeric coords were found
     elif "address" in rev:
         st.info("📍 Address-based file — geocoding via Nominatim (≤1 req/s, max 5,000 rows).")
         geocoded = _batch_geocode(df, mapping, max_rows=5_000, progress_cb=geocode_progress_cb)
@@ -777,7 +829,7 @@ def render_smart_uploader(
         st.error(f"❌ Could not read **{call_file.name}**: {exc}")
         return
 
-    raw_calls.columns = [str(c).strip() for c in raw_calls.columns]
+    raw_calls.columns = [str(c).strip().strip("'\"") for c in raw_calls.columns]
     st.success(f"✅ **{call_file.name}** — {len(raw_calls):,} rows × {len(raw_calls.columns)} columns")
 
     # ── CLASSIFY ─────────────────────────────────────────────

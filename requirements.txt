@@ -11,4 +11,3 @@ kaleido
 pyarrow
 gspread
 google-auth
-scikit-learn

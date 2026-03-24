@@ -2715,48 +2715,6 @@ if st.session_state['csvs_ready']:
         analytics_html_block = generate_command_center_html(df_calls, total_orig_calls=st.session_state.get('total_original_calls', total_calls))
         components.html(analytics_html_block, height=1600, scrolling=False)
 
-
-    # --- GENERATE AI BUSINESS SPONSORSHIP LETTER ---
-    avg_ground_speed = CONFIG["DEFAULT_TRAFFIC_SPEED"] * (1 - traffic_level/100)
-    avg_time_saved = ((sum((d['radius_m']/1609.34*1.4/avg_ground_speed)*60 for d in active_drones)/len(active_drones)) - avg_resp_time) if active_drones and avg_ground_speed > 0 else 0.0
-    time_saved_text = f"up to {avg_time_saved:.1f} minutes faster than a standard patrol car navigating through traffic" if avg_time_saved > 0 else "faster than traditional ground transport"
-    
-    jurisdiction_list = ", ".join(selected_names) if selected_names else st.session_state.get('active_city', 'City')
-    total_fleet = actual_k_responder + actual_k_guardian
-
-    sponsor_letter_text = f"""Subject: Partnering to Enhance Security at [Business Name] with Drone as a First Responder (DFR)
-
-Dear [Business Owner / General Manager],
-
-As a cornerstone of the {jurisdiction_list} business community, the safety of your employees, customers, and property is our highest priority. We are reaching out to share an innovative new public safety initiative and invite you to become a founding partner.
-
-The {jurisdiction_list} Police Department is implementing a Drone as a First Responder (DFR) program. Using purpose-built BRINC drones, we can dispatch aerial support directly to 911 calls at retail centers, malls, and commercial districts in seconds. 
-
-Based on our latest geographic modeling, a DFR fleet of {total_fleet} drones ({actual_k_responder} Responders and {actual_k_guardian} Guardians) will provide an estimated response time of just {avg_resp_time:.1f} minutes to your area—arriving {time_saved_text}. 
-
-For retail and commercial properties, this means:
-• Immediate aerial overwatch for parking lot security and deterrence.
-• Lightning-fast response to retail theft, property crimes, or disturbances.
-• Real-time video streaming to responding officers, ensuring they know exactly what is happening before they arrive on your property.
-
-The total capital expenditure to secure our commercial corridors with this technology is ${fleet_capex:,.0f}. To make this a reality without passing the full burden to taxpayers, we are seeking forward-thinking community partners. We are asking local business leaders to consider a tax-deductible sponsorship or donation to help fund this deployment. 
-
-By contributing to the DFR program, you are directly investing in a faster, smarter, and safer emergency response network for your business and the surrounding community. 
-
-We would welcome the opportunity to show you a live demonstration of how this technology will specifically cover your property. Please let us know when you might be available for a brief meeting.
-
-Sincerely,
-
-[Chief of Police / Command Staff Name]
-{jurisdiction_list} Police Department
-"""
-
-    st.markdown("---")
-    st.markdown(f"<h3 style='color:{text_main};'>🤝 Community Sponsorship Letter</h3>", unsafe_allow_html=True)
-    st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>An AI-generated draft designed to pitch the DFR program to local retail and commercial businesses, requesting financial sponsorship. Easily copy and paste into an email or word processor.</div>", unsafe_allow_html=True)
-    st.code(sponsor_letter_text, language='markdown')
-
-
     # ── EXPORT BUTTONS ──
     if fleet_capex > 0:
         st.sidebar.markdown("---")
@@ -2816,7 +2774,7 @@ Sincerely,
         logo_b64 = get_base64_of_bin_file("logo.png")
         logo_html_str = f'<img src="data:image/png;base64,{logo_b64}" style="height:32px;">' if logo_b64 else '<div style="font-size:24px;font-weight:900;letter-spacing:3px;color:#fff;">BRINC</div>'
 
-        all_station_types = df_stations_all['type'].dropna().unique().tolist() if 'type' in df_stations_all.columns else []
+        jurisdiction_list = ", ".join(selected_names) if selected_names else prop_city
         police_dept_names = [d['name'] for d in active_drones if '[Police]' in d['name']]
         fire_dept_names   = [d['name'] for d in active_drones if '[Fire]' in d['name']]
         ems_dept_names    = [d['name'] for d in active_drones if '[EMS]' in d['name']]
@@ -2827,7 +2785,47 @@ Sincerely,
         if ems_dept_names:    dept_summary_parts.append(f"{len(ems_dept_names)} EMS station{'s' if len(ems_dept_names)>1 else ''}")
         dept_summary = ", ".join(dept_summary_parts) if dept_summary_parts else f"{len(active_drones)} municipal stations"
         police_names_str = (", ".join([n.replace('[Police] ','') for n in police_dept_names[:6]]) + ("..." if len(police_dept_names)>6 else "")) if police_dept_names else "municipal facilities"
+        total_fleet = actual_k_responder + actual_k_guardian
         area_sq_mi_est = int((maxx - minx) * (maxy - miny) * 3280)
+
+        # Generate specific calculations for the AI Sponsorship Pitch
+        avg_ground_speed = CONFIG["DEFAULT_TRAFFIC_SPEED"] * (1 - traffic_level/100)
+        avg_time_saved = ((sum((d['radius_m']/1609.34*1.4/avg_ground_speed)*60 for d in active_drones)/len(active_drones)) - avg_resp_time) if active_drones and avg_ground_speed > 0 else 0.0
+        time_saved_text = f"up to {avg_time_saved:.1f} minutes faster than a standard patrol car" if avg_time_saved > 0 else "faster than traditional ground transport"
+
+        immersive_sponsor_html = f"""
+        <h2>Community Sponsorship Pitch (AI Draft)</h2>
+        <div class="disclaimer"><strong>INSTRUCTIONS:</strong> Print this page or save as a PDF to present directly to local retail centers, malls, and large commercial businesses.</div>
+        <div style="border: 1px solid #ddd; border-radius: 12px; overflow: hidden; background: #fff; margin-bottom: 40px; box-shadow: 0 10px 30px rgba(0,0,0,0.05);">
+            <div style="background: #000; padding: 30px; text-align: center; border-bottom: 4px solid #00D2FF;">
+                {logo_html_str}
+                <h2 style="color: #fff; border-bottom: none; margin: 15px 0 5px 0; padding: 0;">Community Security Partnership</h2>
+                <div style="color: #00D2FF; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; font-size: 13px;">Drone as a First Responder (DFR) Initiative</div>
+            </div>
+            <div style="padding: 40px 50px; font-family: 'Times New Roman', serif; font-size: 16px; color: #222; line-height: 1.6;">
+                <p><strong>To:</strong> [Business Owner / General Manager]<br>
+                <strong>From:</strong> [Chief of Police / Command Staff Name], {jurisdiction_list} Police Department<br>
+                <strong>Date:</strong> {datetime.datetime.now().strftime("%B %d, %Y")}<br>
+                <strong>Subject:</strong> Next-Generation Loss Prevention & Security for [Business Name]</p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                <p>Dear [Business Owner / General Manager],</p>
+                <p>Retail shrink, organized property crime, and safety incidents cost US businesses over $112 billion annually. Traditional security measures and ground-based patrols are increasingly constrained by traffic congestion and distance. To combat this, the {jurisdiction_list} Police Department is taking a revolutionary step to protect our local commercial partners by launching a <strong>Drone as a First Responder (DFR)</strong> program powered by BRINC Drones.</p>
+                <div style="background: #f8f9fa; border-left: 4px solid #00D2FF; padding: 20px; margin: 25px 0; font-family: 'Manrope', sans-serif;">
+                    <h4 style="margin-top: 0; color: #111; font-size: 16px;">Data-Driven Impact for Your Business</h4>
+                    <ul style="margin-bottom: 0; padding-left: 20px; line-height: 1.6; font-size: 14px; color: #444;">
+                        <li style="margin-bottom: 10px;"><strong>Ultra-Fast Response:</strong> Our geographic models project a <strong>{avg_resp_time:.1f}-minute</strong> arrival time to your property—arriving <strong>{time_saved_text}</strong>.</li>
+                        <li style="margin-bottom: 10px;"><strong>Loss Prevention & Deterrence:</strong> Immediate aerial overwatch drastically increases apprehension rates and acts as a highly visible deterrent to organized retail crime and vehicle break-ins.</li>
+                        <li><strong>Risk & Liability Reduction:</strong> High-definition aerial streaming allows our officers to assess threats in real-time before arriving on your property, de-escalating situations and minimizing liability.</li>
+                    </ul>
+                </div>
+                <p>We are deploying a dedicated fleet of {total_fleet} BRINC systems ({actual_k_responder} Responders and {actual_k_guardian} Guardians) to cover our commercial corridors. The capital expenditure for this cutting-edge network is <strong>${fleet_capex:,.0f}</strong>. To accelerate deployment without passing the full cost to taxpayers, we are offering exclusive founding sponsorships to forward-thinking community leaders like you.</p>
+                <p>By contributing a tax-deductible sponsorship to this program, you are making a direct, quantifiable investment in the safety and profitability of your business. We would welcome the opportunity to schedule a brief meeting to show you a live simulation of exactly how our new DFR fleet will secure your property.</p>
+                <p>Sincerely,</p>
+                <p style="margin-bottom: 0;"><strong>[Chief of Police / Command Staff Name]</strong><br>
+                {jurisdiction_list} Police Department</p>
+            </div>
+        </div>
+        """
 
         analytics_html_export = generate_command_center_html(df_calls, total_orig_calls=st.session_state.get('total_original_calls', total_calls), export_mode=True)
 
@@ -2915,9 +2913,7 @@ Sincerely,
               <a href="https://www.transportation.gov/grants" target="_blank">DOT RAISE</a> — Regional infrastructure and safety
             </p>
 
-            <h2>Community Sponsorship Pitch (AI Draft)</h2>
-            <div class="disclaimer"><strong>INSTRUCTIONS:</strong> Copy and paste this text onto official department letterhead. Customize bracketed information before sending to local retail centers, malls, and large commercial businesses.</div>
-            <div style="background: #fdfdfd; border: 1px solid #e0e0e0; border-radius: 6px; padding: 25px; font-family: 'Times New Roman', serif; font-size: 15px; color: #222; white-space: pre-wrap; margin-bottom: 40px;">{sponsor_letter_text}</div>
+            {immersive_sponsor_html}
             
             <div style="margin-top: 50px; font-family:'Manrope', Arial, sans-serif !important;">
                 <div style="border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">

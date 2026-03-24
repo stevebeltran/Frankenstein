@@ -3192,6 +3192,31 @@ if st.session_state['csvs_ready']:
         # Removed scrolling=True, set a large height to allow the component to natively expand
         components.html(analytics_html_block, height=1600, scrolling=False)
 
+    # ── PUBLIC BUILDING OPPORTUNITIES ──
+    st.markdown("---")
+    st.markdown(f"<h3 style='color:{text_main};'>🏢 Public Building Opportunities</h3>", unsafe_allow_html=True)
+    st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Complete directory of candidate launch locations (Police, Fire, EMS, Schools, etc.) loaded into the simulation environment.</div>", unsafe_allow_html=True)
+    
+    show_buildings = st.toggle("📋 Show Full Station Directory", value=False)
+    if show_buildings:
+        disp_df = df_stations_all.copy()
+        
+        # Build a fast 1-click Google Maps link for every station instead of freezing the app with 100 reverse-geocode requests
+        disp_df['Location'] = ["https://www.google.com/maps/search/?api=1&query=" + str(r['lat']) + "," + str(r['lon']) for _, r in disp_df.iterrows()]
+        
+        st.dataframe(
+            disp_df[['name', 'type', 'lat', 'lon', 'Location']],
+            column_config={
+                "name": "Facility Name",
+                "type": "Type",
+                "lat": st.column_config.NumberColumn("Latitude", format="%.5f"),
+                "lon": st.column_config.NumberColumn("Longitude", format="%.5f"),
+                "Location": st.column_config.LinkColumn("Google Maps", display_text="📍 View on Map")
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+
     # ── EXPORT BUTTONS ──
     if fleet_capex > 0:
         st.sidebar.markdown("---")
@@ -3240,7 +3265,10 @@ if st.session_state['csvs_ready']:
         )
         map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
         station_rows = "".join(f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>" for d in active_drones)
-
+        all_bldgs_rows = ""
+        for _, row in df_stations_all.iterrows():
+            gmaps_link = f"https://www.google.com/maps/search/?api=1&query={row['lat']},{row['lon']}"
+            all_bldgs_rows += f"<tr><td>{row['name']}</td><td>{row['type']}</td><td>{row['lat']:.5f}</td><td>{row['lon']:.5f}</td><td><a href='{gmaps_link}' target='_blank' style='color:#00D2FF; font-weight:bold; text-decoration:none;'>View Map ↗</a></td></tr>"
         logo_b64 = get_base64_of_bin_file("logo.png")
         logo_html_str = f'<img src="data:image/png;base64,{logo_b64}" style="height:32px;">' if logo_b64 else '<div style="font-size:24px;font-weight:900;letter-spacing:3px;color:#fff;">BRINC</div>'
 

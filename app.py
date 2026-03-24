@@ -2208,17 +2208,27 @@ if not st.session_state['csvs_ready']:
             except Exception as e:
                 st.warning(f"⚠️ Error reading custom stations: {e}. Falling back to random stations.")
 
-        # --- FALLBACK: GENERATE RANDOM STATIONS ---
+        # --- FALLBACK: PULL REAL STATIONS FROM OPENSTREETMAP ---
         if not custom_stations_used:
-            prog.progress(80, text="🏅 Placing stations — giving officers the best possible backup…")
-            station_points = generate_random_points_in_polygon(city_poly, 100)
-            types = ['Police', 'Fire', 'EMS'] * 34
-            st.session_state['df_stations'] = pd.DataFrame({
-                'name': [f'Station {i+1}' for i in range(len(station_points))],
-                'lat':  [p[0] for p in station_points],
-                'lon':  [p[1] for p in station_points],
-                'type': types[:len(station_points)]
-            })
+            prog.progress(80, text="🌐 Querying OpenStreetMap for real police, fire & schools…")
+            
+            # Use the simulated calls we just made to find the bounding box, and pull real OSM data!
+            df_s, osm_note = generate_stations_from_calls(st.session_state['df_calls'])
+            
+            if df_s is not None and not df_s.empty:
+                st.session_state['df_stations'] = df_s
+                st.toast(f"✅ {osm_note}")
+            else:
+                # Absolute worst-case scenario (no internet or OSM API is down): fall back to random
+                st.warning("⚠️ Could not reach OpenStreetMap for real stations. Falling back to random placements.")
+                station_points = generate_random_points_in_polygon(city_poly, 100)
+                types = ['Police', 'Fire', 'EMS'] * 34
+                st.session_state['df_stations'] = pd.DataFrame({
+                    'name': [f'Station {i+1}' for i in range(len(station_points))],
+                    'lat':  [p[0] for p in station_points],
+                    'lon':  [p[1] for p in station_points],
+                    'type': types[:len(station_points)]
+                })
 
         prog.progress(100, text="✅ Ready — built for the communities they protect and serve.")
         st.session_state['inferred_daily_calls_override'] = int(annual_cfs / 365)

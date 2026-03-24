@@ -106,10 +106,7 @@ def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, emai
         creds = Credentials.from_service_account_info(dict(creds_dict), scopes=scopes)
         client = gspread.authorize(creds)
         sheet = client.open_by_key(sheet_id).sheet1
-        
-        # Package the complex details into a raw JSON string to drop into the 10th column of the spreadsheet
         details_json_str = json.dumps(details) if details else ""
-        
         sheet.append_row([datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), city, state, file_type, k_resp, k_guard, round(coverage, 1), name, email, details_json_str])
     except: pass
 
@@ -450,7 +447,7 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
                 const tt = document.getElementById('dfr-tooltip');
                 tt.innerHTML = `
                     <div style="color:#00D2FF; margin-bottom:6px; font-size:12px; font-weight:bold; border-bottom:1px solid #252535; padding-bottom:4px;">${{mName}} ${{d}}, ${{y}} · ${{dowNames[dow]}}</div>
-                    <div style="margin-bottom:8px; font-size:13px;">Calls: <span style="color:#fff; font-weight:bold;">${{cnt}}</span> &nbsp;·&nbsp; ${{loadText}}</div>
+                    <div style="margin-bottom:8px; font-size:13px;">Calls: <span style="color:#fff; font-weight:bold;">${{cnt}}</span>  ·  ${{loadText}}</div>
                     <div style="background:#1a1a26; padding:8px; border-radius:4px;">
                         <div style="color:#7777a0; font-size:9px; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">Best ${{currentShift}}hr Shift</div>
                         <div style="color:#00D2FF; font-size:14px; font-weight:bold; margin-bottom:2px;">${{fmt(bestS)}} – ${{fmt(eHr)}}</div>
@@ -616,6 +613,25 @@ def generate_stations_from_calls(df_calls, max_stations=100):
 # CACHED DATA FUNCTIONS
 # ============================================================
 @st.cache_data
+def get_address_from_latlon(lat, lon):
+    url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=18&addressdetails=1"
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_DFR_Optimizer_App/2.0'})
+        with urllib.request.urlopen(req, timeout=2) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            if 'address' in data:
+                addr = data['address']
+                road = addr.get('road', '')
+                house_number = addr.get('house_number', '')
+                city = addr.get('city', addr.get('town', addr.get('village', '')))
+                if road:
+                    return f"{house_number} {road}, {city}".strip(', ')
+    except Exception:
+        pass
+    # Fallback to coordinates if an exact street address isn't found
+    return f"{lat:.5f}, {lon:.5f}"
+
+@st.cache_data
 def forward_geocode(address_str):
     import urllib.parse
     url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(address_str)}&limit=1"
@@ -662,23 +678,6 @@ def fetch_county_boundary_osm(state_abbr, county_name):
     return False, None
 
 @st.cache_data
-def get_address_from_latlon(lat, lon):
-    url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=18&addressdetails=1"
-    try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_DFR_Optimizer_App/2.0'})
-        with urllib.request.urlopen(req, timeout=2) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            if 'address' in data:
-                addr = data['address']
-                road = addr.get('road', '')
-                house_number = addr.get('house_number', '')
-                city = addr.get('city', addr.get('town', addr.get('village', '')))
-                if road:
-                    return f"{house_number} {road}, {city}".strip(', ')
-    except Exception:
-        pass
-    # Fallback to coordinates if an exact street address isn't found
-    return f"{lat:.5f}, {lon:.5f}"
 def reverse_geocode_state(lat, lon):
     url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=10&addressdetails=1"
     try:
@@ -694,10 +693,9 @@ def reverse_geocode_state(lat, lon):
 @st.cache_data
 def fetch_census_population(state_fips, place_name, is_county=False):
     if is_county:
-                # Switched to the new cache-busting, highly accurate OSM function
-                success, temp_gdf = fetch_county_boundary_osm(s_name, c_name)
-            else:
-                success, temp_gdf = fetch_tiger_city_shapefile(STATE_FIPS[s_name], c_name, SHAPEFILE_DIR)
+        url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=county:*&in=state:{state_fips}"
+    else:
+        url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=place:*&in=state:{state_fips}"
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=10) as response:
@@ -734,444 +732,6 @@ def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
             return True, city_gdf
     except Exception as e: return False, None
     return False, None
-
-def generate_mock_faa_grid(minx, miny, maxx, maxy):
-    features = []
-    x_steps = np.linspace(minx, maxx, 20)
-    y_steps = np.linspace(miny, maxy, 20)
-    mock_airports = [{"lon": minx + 0.3 * (maxx - minx), "lat": miny + 0.3 * (maxy - miny), "radius": 0.15, "name": "Mock Intl (MCK)"}]
-    for i in range(len(x_steps) - 1):
-        for j in range(len(y_steps) - 1):
-            cell_poly = [[x_steps[i], y_steps[j]], [x_steps[i+1], y_steps[j]], [x_steps[i+1], y_steps[j+1]], [x_steps[i], y_steps[j+1]], [x_steps[i], y_steps[j]]]
-            cell_center = Point((x_steps[i] + x_steps[i+1]) / 2, (y_steps[j] + y_steps[j+1]) / 2)
-            ceiling, arpt_name = None, ""
-            for ap in mock_airports:
-                dist_ratio = cell_center.distance(Point(ap["lon"], ap["lat"])) / ap["radius"]
-                if dist_ratio < 1.0:
-                    if   dist_ratio < 0.15: ceiling, arpt_name = 0,   ap["name"]
-                    elif dist_ratio < 0.35: ceiling, arpt_name = 50,  ap["name"]
-                    elif dist_ratio < 0.55: ceiling, arpt_name = 100, ap["name"]
-                    else:                   ceiling, arpt_name = 200, ap["name"]
-                    break
-            if ceiling is not None:
-                features.append({"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [cell_poly]}, "properties": {"CEILING": ceiling, "ARPT_Name": arpt_name}})
-    return {"type": "FeatureCollection", "features": features}
-
-@st.cache_data
-def load_faa_parquet(minx, miny, maxx, maxy):
-    if not os.path.exists("faa_uasfm.parquet"): return generate_mock_faa_grid(minx, miny, maxx, maxy)
-    try:
-        gdf = gpd.read_parquet("faa_uasfm.parquet")
-        pad = 0.05
-        filtered = gdf.cx[minx-pad:maxx+pad, miny-pad:maxy+pad]
-        if filtered.empty: return {"type": "FeatureCollection", "features": []}
-        return json.loads(filtered.to_json())
-    except Exception as e: return generate_mock_faa_grid(minx, miny, maxx, maxy)
-
-def add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=True):
-    if not faa_geojson or not faa_geojson.get("features"): return
-    text_lons, text_lats, text_strings, text_hovers = [], [], [], []
-    for feature in faa_geojson.get("features", []):
-        geom = feature.get("geometry")
-        props = feature.get("properties", {})
-        ceiling = props.get("CEILING")
-        arpt = props.get("ARPT_Name") or props.get("ARPT_NAME") or "Unknown Airport"
-        if ceiling is None or geom is None or geom.get("type") != "Polygon": continue
-        snapped = min(FAA_CEILING_COLORS.keys(), key=lambda v: abs(v - ceiling))
-        colors = FAA_CEILING_COLORS.get(snapped, FAA_DEFAULT_COLOR)
-        coords = geom["coordinates"][0]
-        bx, by = zip(*coords)
-        fig.add_trace(go.Scattermapbox(mode="lines", lon=list(bx), lat=list(by), fill="toself", fillcolor=colors["fill"], line=dict(color=colors["line"], width=1.5), hoverinfo="text", text=f"<b>{ceiling} ft AGL</b><br>{arpt}", name=f"LAANC {ceiling}ft", showlegend=False))
-        try:
-            centroid = shape(geom).centroid
-            text_lons.append(centroid.x); text_lats.append(centroid.y); text_strings.append(str(ceiling)); text_hovers.append(f"{ceiling} ft — {arpt}")
-        except Exception: pass
-    if text_lons:
-        fig.add_trace(go.Scattermapbox(mode="text", lon=text_lons, lat=text_lats, text=text_strings, hovertext=text_hovers, hoverinfo="text", textfont=dict(size=10, color="#ffffff" if is_dark else "#000000"), showlegend=False, name="LAANC Labels"))
-
-def get_station_faa_ceiling(lat, lon, faa_geojson):
-    if not faa_geojson or 'features' not in faa_geojson: return "400 ft (Class G)"
-    pt = Point(lon, lat)
-    for feature in faa_geojson['features']:
-        if 'geometry' in feature and feature['geometry']:
-            try:
-                s = shape(feature['geometry'])
-                if s.contains(pt):
-                    val = feature['properties'].get('CEILING')
-                    if val is not None: return f"{val} ft (Controlled)"
-            except Exception: pass
-    return "400 ft (Class G)"
-
-@st.cache_data
-def fetch_airfields(minx, miny, maxx, maxy):
-    pad = 0.2
-    query = f"""[out:json];(node["aeroway"~"aerodrome|heliport"]({miny-pad},{minx-pad},{maxy+pad},{maxx+pad});way["aeroway"~"aerodrome|heliport"]({miny-pad},{minx-pad},{maxy+pad},{maxx+pad}););out center;"""
-    try:
-        req = urllib.request.Request("https://overpass-api.de/api/interpreter", data=query.encode('utf-8'), headers={'User-Agent': 'BRINC_Optimizer'})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            airfields = []
-            for el in data.get('elements', []):
-                lat = el.get('lat') or el.get('center', {}).get('lat')
-                lon = el.get('lon') or el.get('center', {}).get('lon')
-                name = el.get('tags', {}).get('name', 'Unknown Airfield')
-                if lat and lon: airfields.append({'name': name, 'lat': lat, 'lon': lon})
-            return airfields
-    except Exception: return []
-
-def get_nearest_airfield(lat, lon, airfields):
-    if not airfields: return "No data"
-    min_dist = float('inf')
-    best = None
-    for af in airfields:
-        lat1, lon1, lat2, lon2 = map(math.radians, [lat, lon, af['lat'], af['lon']])
-        a = math.sin((lat2-lat1)/2)**2 + math.cos(lat1)*math.cos(lat2)*math.sin((lon2-lon1)/2)**2
-        dist = 3958.8 * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        if dist < min_dist:
-            y = math.sin(lon2-lon1)*math.cos(lat2)
-            x = math.cos(lat1)*math.sin(lat2) - math.sin(lat1)*math.cos(lat2)*math.cos(lon2-lon1)
-            bearing = (math.degrees(math.atan2(y, x)) + 360) % 360
-            dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW']
-            min_dist = dist
-            best = (af['name'], dist, dirs[int((bearing+11.25)/22.5) % 16])
-    if best:
-        n = best[0][:18] + ("..." if len(best[0]) > 18 else "")
-        return f"{best[1]:.1f}mi {best[2]} ({n})"
-    return "No data"
-
-def generate_random_points_in_polygon(polygon, num_points):
-    points = []
-    minx, miny, maxx, maxy = polygon.bounds
-    while len(points) < num_points:
-        x_coords = np.random.uniform(minx, maxx, 1000)
-        y_coords = np.random.uniform(miny, maxy, 1000)
-        for x, y in zip(x_coords, y_coords):
-            if len(points) >= num_points: break
-            if polygon.contains(Point(x, y)): points.append((y, x))
-    return points
-
-def generate_clustered_calls(polygon, num_points):
-    points = []
-    minx, miny, maxx, maxy = polygon.bounds
-    hotspots = []
-    while len(hotspots) < random.randint(5, 15):
-        hx, hy = random.uniform(minx, maxx), random.uniform(miny, maxy)
-        if polygon.contains(Point(hx, hy)): hotspots.append((hx, hy))
-    target_clustered = int(num_points * 0.75)
-    while len(points) < target_clustered:
-        hx, hy = random.choice(hotspots)
-        px, py = np.random.normal(hx, 0.02), np.random.normal(hy, 0.02)
-        if polygon.contains(Point(px, py)): points.append((py, px))
-    while len(points) < num_points:
-        px, py = random.uniform(minx, maxx), random.uniform(miny, maxy)
-        if polygon.contains(Point(px, py)): points.append((py, px))
-    np.random.shuffle(points)
-    return points
-
-def estimate_grants(population):
-    if population > 1000000: return "$1.5M - $3.0M+"
-    elif population > 500000: return "$500k - $1.5M"
-    elif population > 250000: return "$250k - $500k"
-    elif population > 100000: return "$100k - $250k"
-    else: return "$25k - $100k"
-
-def get_circle_coords(lat, lon, r_mi=2.0):
-    angles = np.linspace(0, 2*np.pi, 100)
-    c_lats = lat + (r_mi/69.172) * np.sin(angles)
-    c_lons = lon + (r_mi/(69.172 * np.cos(np.radians(lat)))) * np.cos(angles)
-    return c_lats, c_lons
-
-def format_3_lines(name_str):
-    match = re.search(r'\s(\d{1,5}\s+[A-Za-z])', name_str)
-    if match:
-        idx = match.start()
-        line1 = name_str[:idx].strip()
-        rest = name_str[idx:].strip()
-        if ',' in rest:
-            parts = rest.split(',', 1)
-            return f"{line1}<br>{parts[0].strip()},<br>{parts[1].strip()}"
-        return f"{line1}<br>{rest}"
-    if ',' in name_str:
-        parts = name_str.split(',')
-        if len(parts) >= 3:
-            return f"{parts[0].strip()},<br>{parts[1].strip()},<br>{','.join(parts[2:]).strip()}"
-    return name_str
-
-def to_kml_color(hex_str):
-    h = hex_str.lstrip('#')
-    return f"ff{h[4:6]}{h[2:4]}{h[0:2]}" if len(h) == 6 else "ff0000ff"
-
-def calculate_zoom(min_lon, max_lon, min_lat, max_lat):
-    lon_diff = max_lon - min_lon
-    lat_diff = max_lat - min_lat
-    if lon_diff <= 0 or lat_diff <= 0: return 12
-    return min(max(min(np.log2(360/lon_diff), np.log2(180/lat_diff)) + 1.6, 5), 18)
-
-def generate_kml(active_gdf, active_drones, calls_gdf):
-    kml = simplekml.Kml()
-    fol_bounds = kml.newfolder(name="Jurisdictions")
-    for _, row in active_gdf.iterrows():
-        geoms = [row.geometry] if isinstance(row.geometry, Polygon) else row.geometry.geoms
-        for geom in geoms:
-            pol = fol_bounds.newpolygon(name=row.get('DISPLAY_NAME', 'Boundary'))
-            pol.outerboundaryis = list(geom.exterior.coords)
-            pol.style.linestyle.color = simplekml.Color.red
-            pol.style.linestyle.width = 3
-            pol.style.polystyle.color = simplekml.Color.changealphaint(30, simplekml.Color.red)
-    fol_stations = kml.newfolder(name="Station Points")
-    fol_rings = kml.newfolder(name="Coverage Rings")
-    for d in active_drones:
-        kml_c = to_kml_color(d['color'])
-        pnt = fol_stations.newpoint(name=f"[{d['type'][:3]}] {d['name']}")
-        pnt.coords = [(d['lon'], d['lat'])]
-        pnt.style.iconstyle.icon.href = 'http://maps.google.com/mapfiles/kml/paddle/blu-blank.png'
-        lats, lons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
-        ring_coords = list(zip(lons, lats))
-        ring_coords.append(ring_coords[0])
-        pol = fol_rings.newpolygon(name=f"Range: {d['name']}")
-        pol.outerboundaryis = ring_coords
-        pol.style.linestyle.color = kml_c
-        pol.style.linestyle.width = 2
-        pol.style.polystyle.color = simplekml.Color.changealphaint(60, kml_c)
-    fol_calls = kml.newfolder(name="Incident Data (Sample)")
-    calls_export = calls_gdf.to_crs(epsg=4326)
-    if len(calls_export) > 2000:
-        calls_export = calls_export.sample(2000, random_state=42)
-    for _, row in calls_export.iterrows():
-        pnt = fol_calls.newpoint()
-        pnt.coords = [(row.geometry.x, row.geometry.y)]
-        pnt.style.iconstyle.scale = 0.5
-        pnt.style.iconstyle.icon.href = 'http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png'
-    return kml.kml()
-
-@st.cache_data
-def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir):
-    points_list = []
-    if calls_df is not None: points_list.append(calls_df[['lat', 'lon']])
-    if stations_df is not None: points_list.append(stations_df[['lat', 'lon']])
-    if not points_list: return None
-    full_points = pd.concat(points_list)
-    full_points = full_points[(full_points.lat.abs() > 1) & (full_points.lon.abs() > 1)]
-    scan_points = full_points.sample(50000, random_state=42) if len(full_points) > 50000 else full_points
-    points_gdf = gpd.GeoDataFrame(scan_points, geometry=gpd.points_from_xy(scan_points.lon, scan_points.lat), crs="EPSG:4326")
-    total_bounds = points_gdf.total_bounds
-    shp_files = glob.glob(os.path.join(shapefile_dir, "*.shp"))
-    relevant_polys = []
-    for shp_path in shp_files:
-        try:
-            gdf_chunk = gpd.read_file(shp_path, bbox=tuple(total_bounds))
-            if not gdf_chunk.empty:
-                if gdf_chunk.crs is None: gdf_chunk.set_crs(epsg=4269, inplace=True)
-                gdf_chunk = gdf_chunk.to_crs(epsg=4326)
-                hits = gpd.sjoin(gdf_chunk, points_gdf, how="inner", predicate="intersects")
-                if not hits.empty:
-                    subset = gdf_chunk.loc[hits.index.unique()].copy()
-                    subset['data_count'] = hits.index.value_counts()
-                    name_col = next((c for c in ['NAME','DISTRICT','NAMELSAD'] if c in subset.columns), subset.columns[0])
-                    subset['DISPLAY_NAME'] = subset[name_col].astype(str)
-                    relevant_polys.append(subset)
-        except Exception: continue
-    if not relevant_polys: return None
-    master_gdf = pd.concat(relevant_polys, ignore_index=True).sort_values(by='data_count', ascending=False)
-    master_gdf = master_gdf.dissolve(by='DISPLAY_NAME', aggfunc={'data_count': 'sum'}).reset_index()
-    master_gdf = master_gdf.sort_values(by='data_count', ascending=False)
-    if master_gdf['data_count'].sum() > 0:
-        master_gdf['pct_share'] = master_gdf['data_count'] / master_gdf['data_count'].sum()
-        master_gdf['cum_share'] = master_gdf['pct_share'].cumsum()
-        mask = (master_gdf['cum_share'] <= 0.98) | (master_gdf['pct_share'] > 0.01)
-        mask.iloc[0] = True
-        return master_gdf[mask]
-    return master_gdf
-
-@st.cache_resource
-def precompute_spatial_data(df_calls, df_stations_all, _city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash):
-    gdf_calls = gpd.GeoDataFrame(df_calls, geometry=gpd.points_from_xy(df_calls.lon, df_calls.lat), crs="EPSG:4326")
-    gdf_calls_utm = gdf_calls.to_crs(epsg=int(epsg_code))
-    try: calls_in_city = gdf_calls_utm[gdf_calls_utm.within(_city_m)]
-    except: calls_in_city = gdf_calls_utm
-    radius_resp_m = resp_radius_mi * 1609.34
-    radius_guard_m = guard_radius_mi * 1609.34
-    station_metadata = []
-    total_calls = len(calls_in_city)
-    n = len(df_stations_all)
-    resp_matrix = np.zeros((n, total_calls), dtype=bool)
-    guard_matrix = np.zeros((n, total_calls), dtype=bool)
-    dist_matrix_r = np.zeros((n, total_calls))
-    dist_matrix_g = np.zeros((n, total_calls))
-    display_calls = calls_in_city.sample(min(5000, total_calls), random_state=42).to_crs(epsg=4326) if not calls_in_city.empty else gpd.GeoDataFrame()
-    max_dist = max(((row['lon']-center_lon)**2 + (row['lat']-center_lat)**2)**0.5 for _, row in df_stations_all.iterrows()) or 1.0
-    if not calls_in_city.empty:
-        calls_array = np.array(list(zip(calls_in_city.geometry.x, calls_in_city.geometry.y)))
-        for idx_pos, (i, row) in enumerate(df_stations_all.iterrows()):
-            s_pt_m = gpd.GeoSeries([Point(row['lon'], row['lat'])], crs="EPSG:4326").to_crs(epsg=int(epsg_code)).iloc[0]
-            dists = np.sqrt((calls_array[:,0]-s_pt_m.x)**2 + (calls_array[:,1]-s_pt_m.y)**2)
-            dists_mi = dists / 1609.34
-            mask_r = dists <= radius_resp_m
-            mask_g = dists <= radius_guard_m
-            resp_matrix[idx_pos, :] = mask_r
-            guard_matrix[idx_pos, :] = mask_g
-            dist_matrix_r[idx_pos, :] = dists_mi
-            dist_matrix_g[idx_pos, :] = dists_mi
-            full_buf_2m = s_pt_m.buffer(radius_resp_m)
-            try: clipped_2m = full_buf_2m.intersection(_city_m)
-            except: clipped_2m = full_buf_2m
-            full_buf_guard = s_pt_m.buffer(radius_guard_m)
-            try: clipped_guard = full_buf_guard.intersection(_city_m)
-            except: clipped_guard = full_buf_guard
-            dist_c = ((row['lon']-center_lon)**2 + (row['lat']-center_lat)**2)**0.5
-            station_metadata.append({
-                'name': row['name'], 'lat': row['lat'], 'lon': row['lon'],
-                'clipped_2m': clipped_2m, 'clipped_guard': clipped_guard,
-                'avg_dist_r': dists_mi[mask_r].mean() if mask_r.any() else resp_radius_mi*(2/3),
-                'avg_dist_g': dists_mi[mask_g].mean() if mask_g.any() else guard_radius_mi*(2/3),
-                'centrality': 1.0 - (dist_c / max_dist)
-            })
-    return calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls
-
-def solve_mclp(resp_matrix, guard_matrix, dist_r, dist_g, num_resp, num_guard, allow_redundancy, incremental=True):
-    n_stations, n_calls = resp_matrix.shape
-    if n_calls == 0 or (num_resp == 0 and num_guard == 0): return [], [], [], []
-    df_profiles = pd.DataFrame(resp_matrix.T).astype(int).astype(str)
-    df_profiles['g'] = pd.DataFrame(guard_matrix.T).astype(int).astype(str).agg(''.join, axis=1)
-    df_profiles['r'] = df_profiles.drop(columns='g').agg(''.join, axis=1)
-    grouped = df_profiles.groupby(['r', 'g'], sort=False)
-    weights = grouped.size().values
-    unique_idx = grouped.head(1).index
-    u_resp = resp_matrix[:, unique_idx]
-    u_guard = guard_matrix[:, unique_idx]
-    u_dist_r = dist_r[:, unique_idx]
-    u_dist_g = dist_g[:, unique_idx]
-    n_u = len(weights)
-
-    def run_lp(target_r, target_g, locked_r, locked_g):
-        model = pulp.LpProblem("DroneCoverage", pulp.LpMaximize)
-        x_r = pulp.LpVariable.dicts("r_st", range(n_stations), 0, 1, pulp.LpBinary)
-        x_g = pulp.LpVariable.dicts("g_st", range(n_stations), 0, 1, pulp.LpBinary)
-        model += pulp.lpSum(x_r[i] for i in range(n_stations)) == target_r
-        model += pulp.lpSum(x_g[i] for i in range(n_stations)) == target_g
-        for r in locked_r: model += x_r[r] == 1
-        for g in locked_g: model += x_g[g] == 1
-        if not allow_redundancy:
-            for s in range(n_stations): model += x_r[s] + x_g[s] <= 1
-        y = pulp.LpVariable.dicts("cl", range(n_u), 0, 1, pulp.LpBinary)
-        penalty = 0.00001
-        model += pulp.lpSum(y[i]*weights[i] for i in range(n_u)) - pulp.lpSum(
-            x_r[s]*np.sum(u_dist_r[s,:])*penalty + x_g[s]*np.sum(u_dist_g[s,:])*penalty
-            for s in range(n_stations))
-        for i in range(n_u):
-            cover = [x_r[s] for s in range(n_stations) if u_resp[s,i]] + [x_g[s] for s in range(n_stations) if u_guard[s,i]]
-            if cover: model += y[i] <= pulp.lpSum(cover)
-            else: model += y[i] == 0
-        model.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=10, gapRel=0.0))
-        return (
-            [i for i in range(n_stations) if (pulp.value(x_r[i]) or 0) > 0.5],
-            [i for i in range(n_stations) if (pulp.value(x_g[i]) or 0) > 0.5]
-        )
-
-    if not incremental:
-        res_r, res_g = run_lp(num_resp, num_guard, [], [])
-        return res_r, res_g, res_r, res_g
-    curr_r, curr_g = [], []
-    chrono_r, chrono_g = [], []
-    for tg in range(1, num_guard+1):
-        next_r, next_g = run_lp(0, tg, curr_r, curr_g)
-        chrono_g.extend([x for x in next_g if x not in curr_g])
-        curr_r, curr_g = next_r, next_g
-    for tr in range(1, num_resp+1):
-        next_r, next_g = run_lp(tr, num_guard, curr_r, curr_g)
-        chrono_r.extend([x for x in next_r if x not in curr_r])
-        curr_r, curr_g = next_r, next_g
-    return curr_r, curr_g, chrono_r, chrono_g
-
-@st.cache_resource
-def compute_all_elbow_curves(n_calls, _resp_matrix, _guard_matrix, _geos_r, _geos_g, total_area, _bounds_hash, max_stations=100):
-    n_st_calls = min(_resp_matrix.shape[0], max_stations)
-    n_st_area_r = min(len(_geos_r), 25)
-    n_st_area_g = min(len(_geos_g), 25)
-
-    def greedy_calls(matrix):
-        uncovered = np.ones(n_calls, dtype=bool)
-        curve = [0.0]
-        cov_count = 0
-        import heapq as hq
-        pq = [(-matrix[i].sum(), i) for i in range(n_st_calls)]
-        hq.heapify(pq)
-        for _ in range(n_st_calls):
-            if not pq: break
-            best_s, best_cov = -1, -1
-            while pq:
-                neg_gain, idx = hq.heappop(pq)
-                actual_gain = (matrix[idx] & uncovered).sum()
-                if not pq or actual_gain >= -pq[0][0]:
-                    best_s, best_cov = idx, actual_gain
-                    break
-                else:
-                    hq.heappush(pq, (-actual_gain, idx))
-            if best_s != -1 and best_cov > 0:
-                uncovered = uncovered & ~matrix[best_s]
-                cov_count += best_cov
-                curve.append((cov_count / max(1, n_calls)) * 100)
-                if cov_count == n_calls: break
-            else:
-                break
-        return curve
-
-    def greedy_area(geos, limit):
-        if total_area <= 0 or limit <= 0: return [0.0]
-        current_union = Polygon()
-        curve = [0.0]
-        import heapq as hq
-        geos_sub = geos[:limit]
-        
-        pq = [(-geos_sub[i].area, i) for i in range(len(geos_sub))]
-        hq.heapify(pq)
-        
-        for _ in range(len(geos_sub)):
-            if not pq: break
-            best_s, best_gain = -1, -1
-            
-            while pq:
-                neg_gain, idx = hq.heappop(pq)
-                try:
-                    actual_gain = current_union.union(geos_sub[idx]).area - current_union.area
-                except Exception:
-                    actual_gain = 0
-                    
-                if not pq or actual_gain >= -pq[0][0]:
-                    best_s, best_gain = idx, actual_gain
-                    break
-                else:
-                    hq.heappush(pq, (-actual_gain, idx))
-                    
-            if best_s != -1 and best_gain > 0:
-                try:
-                    current_union = current_union.union(geos_sub[best_s])
-                    curve.append((current_union.area / total_area) * 100)
-                except Exception:
-                    pass
-            else:
-                break
-        return curve
-
-    with ThreadPoolExecutor() as executor:
-        f_cr = executor.submit(greedy_calls, _resp_matrix[:n_st_calls])
-        f_cg = executor.submit(greedy_calls, _guard_matrix[:n_st_calls])
-        f_ar = executor.submit(greedy_area, _geos_r, n_st_area_r)
-        f_ag = executor.submit(greedy_area, _geos_g, n_st_area_g)
-        c_r, c_g, a_r, a_g = f_cr.result(), f_cg.result(), f_ar.result(), f_ag.result()
-
-    max_len = max(len(c_r), len(c_g), len(a_r), len(a_g))
-    def pad(c):
-        r = list(c)
-        while len(r) < max_len: r.append(np.nan)
-        return r
-    return pd.DataFrame({
-        'Drones': range(max_len),
-        'Responder (Calls)': pad(c_r),
-        'Responder (Area)':  pad(a_r),
-        'Guardian (Calls)':  pad(c_g),
-        'Guardian (Area)':   pad(a_g)
-    })
 
 def generate_mock_faa_grid(minx, miny, maxx, maxy):
     features = []
@@ -1795,9 +1355,9 @@ if not st.session_state['csvs_ready']:
             c_val = st.session_state['target_cities'][i]['city'] if i < len(st.session_state['target_cities']) else ""
             s_val = st.session_state['target_cities'][i]['state'] if i < len(st.session_state['target_cities']) else "FL"
             c_name = c1.text_input(
-                f"City / Town {i+1}", value=c_val, key=f"c_{i}",
-                placeholder="e.g. Orlando",
-                help="Official municipality name used to fetch the Census boundary."
+                f"City or County {i+1}", value=c_val, key=f"c_{i}",
+                placeholder="e.g. Orlando OR Orange County",
+                help="Official municipality or county name."
             )
             state_idx = list(STATE_FIPS.keys()).index(s_val) if s_val in STATE_FIPS else 8
             s_name = c2.selectbox(
@@ -2282,6 +1842,8 @@ if st.session_state['csvs_ready']:
         </div>
         """, unsafe_allow_html=True)
 
+    st.sidebar.markdown('<div class="sidebar-section-header">① Configure</div>', unsafe_allow_html=True)
+
     total_pts = master_gdf['data_count'].sum()
     master_gdf['LABEL'] = master_gdf['DISPLAY_NAME'] + " (" + (master_gdf['data_count']/total_pts*100).round(1).astype(str) + "%)"
     options_map = dict(zip(master_gdf['LABEL'], master_gdf['DISPLAY_NAME']))
@@ -2383,11 +1945,10 @@ if st.session_state['csvs_ready']:
 
     k_responder = st.sidebar.slider("🚁 Responder Count", 0, max(1, max_resp_calc), val_r,
                                     help="Short-range tactical drones (2-3mi radius).")
-    k_guardian  = st.sidebar.slider("🦅 Guardian Count",  0, max(1, max_guard_calc), val_g,
-                                    help="Long-range heavy-lift drones (up to 8mi radius).")
+    k_guardian  = st.sidebar.slider("🦅 Guardian Range (mi) [⚡ 5mi Rapid]", 1, 8, int(st.session_state.get('r_guard', 8)), help="The 5-mile rapid response focus zone will automatically be highlighted inside the maximum perimeter.")
     
     resp_radius_mi  = st.sidebar.slider("🚁 Responder Range (mi)", 2.0, 3.0, st.session_state.get('r_resp', 2.0), step=0.5)
-    guard_radius_mi = st.sidebar.slider("🦅 Guardian Range (mi) [⚡ 5mi Rapid]", 1, 8, int(st.session_state.get('r_guard', 8)), help="The 5-mile rapid response focus zone will automatically be highlighted inside the maximum perimeter.")
+    guard_radius_mi = st.sidebar.slider("🦅 Guardian Range (mi)", 1, 8, int(st.session_state.get('r_guard', 8)))
 
     st.session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
 
@@ -2833,7 +2394,6 @@ if st.session_state['csvs_ready']:
             is_extended_guardian = (d['type'] == 'GUARDIAN' and d['radius_m']/1609.34 > 5.0)
             
             # The outer ring becomes relaxed (thinner, more transparent) if > 5 miles
-            # Note: We removed 'dash' because Mapbox does not support it!
             outer_width = 1.5 if is_extended_guardian else 4.5
             outer_opac = 0.4 if is_extended_guardian else 1.0
             
@@ -2902,7 +2462,6 @@ if st.session_state['csvs_ready']:
                 y_data = df_curve[col].dropna()
                 x_data = df_curve.loc[y_data.index,'Drones']
                 if not y_data.empty:
-                    # We added the hovertemplate with <extra></extra> to kill the unreadable side-box!
                     fig_curve.add_trace(go.Scatter(x=x_data, y=y_data, mode='lines+markers', name=col,
                         line=dict(color=color,width=2,dash=dash), marker=dict(size=4),
                         hovertemplate=f"<b>{col}</b><br>Drones: %{{x}}<br>Coverage: %{{y:.1f}}%<extra></extra>"))
@@ -2921,7 +2480,6 @@ if st.session_state['csvs_ready']:
                             font=dict(size=9,color=text_muted)),
                 margin=dict(l=10,r=10,t=20,b=10), height=260,
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                # Force the hover tooltip to use the dark theme colors!
                 hoverlabel=dict(bgcolor=card_bg, font_size=13, font_color=text_main, bordercolor=accent_color)
             )
             st.plotly_chart(fig_curve, use_container_width=True, config={'displayModeBar':False})
@@ -2930,20 +2488,10 @@ if st.session_state['csvs_ready']:
             st.markdown(f"""
             <h4 style='margin-top:8px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>
             <style>
-            /* This CSS creates the smooth pop-out hover effect */
-            .unit-card {{
-                transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
-                position: relative;
-                z-index: 1;
-            }}
-            .unit-card:hover {{
-                transform: scale(1.08);
-                box-shadow: 0 12px 24px rgba(0,210,255,0.15);
-                z-index: 10;
-            }}
+            .unit-card {{ transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; position: relative; z-index: 1; }}
+            .unit-card:hover {{ transform: scale(1.08); box-shadow: 0 12px 24px rgba(0,210,255,0.15); z-index: 10; }}
             </style>
             """, unsafe_allow_html=True)
-            
             if not active_drones:
                 st.markdown(f"""
                 <div style="background:{card_bg}; border:1px dashed {card_border}; border-radius:6px;
@@ -2974,8 +2522,6 @@ if st.session_state['csvs_ready']:
                             d_airport   = d['nearest_airport']
                             d_cost      = d['cost']
                             d_be        = d['be_text']
-                            
-                            # Grab the address and build the Google Maps Search link
                             d_lat       = d['lat']
                             d_lon       = d['lon']
                             d_address   = get_address_from_latlon(d_lat, d_lon)
@@ -3212,8 +2758,6 @@ if st.session_state['csvs_ready']:
     show_buildings = st.toggle("📋 Show Full Station Directory", value=False)
     if show_buildings:
         disp_df = df_stations_all.copy()
-        
-        # Build a fast 1-click Google Maps link for every station instead of freezing the app with 100 reverse-geocode requests
         disp_df['Location'] = ["https://www.google.com/maps/search/?api=1&query=" + str(r['lat']) + "," + str(r['lon']) for _, r in disp_df.iterrows()]
         
         st.dataframe(
@@ -3247,6 +2791,17 @@ if st.session_state['csvs_ready']:
         current_time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         safe_city = prop_city.replace(" ","_").replace("/","_")
 
+        export_details = {
+            "opt_strategy": opt_strategy,
+            "incremental_build": incremental_build,
+            "allow_redundancy": allow_redundancy,
+            "dfr_rate": int(dfr_dispatch_rate*100),
+            "deflect_rate": int(deflection_rate*100),
+            "fleet_capex": fleet_capex,
+            "annual_savings": annual_savings,
+            "active_drones": [{"name": d['name'], "type": d['type'], "lat": d['lat'], "lon": d['lon']} for d in active_drones]
+        }
+
         export_dict = {
             "city": prop_city, "state": prop_state,
             "k_resp": k_responder, "k_guard": k_guardian,
@@ -3277,10 +2832,12 @@ if st.session_state['csvs_ready']:
         )
         map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
         station_rows = "".join(f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>" for d in active_drones)
+
         all_bldgs_rows = ""
         for _, row in df_stations_all.iterrows():
             gmaps_link = f"https://www.google.com/maps/search/?api=1&query={row['lat']},{row['lon']}"
             all_bldgs_rows += f"<tr><td>{row['name']}</td><td>{row['type']}</td><td>{row['lat']:.5f}</td><td>{row['lon']:.5f}</td><td><a href='{gmaps_link}' target='_blank' style='color:#00D2FF; font-weight:bold; text-decoration:none;'>View Map ↗</a></td></tr>"
+
         logo_b64 = get_base64_of_bin_file("logo.png")
         logo_html_str = f'<img src="data:image/png;base64,{logo_b64}" style="height:32px;">' if logo_b64 else '<div style="font-size:24px;font-weight:900;letter-spacing:3px;color:#fff;">BRINC</div>'
 
@@ -3385,7 +2942,7 @@ if st.session_state['csvs_ready']:
             <p><strong>Program Design:</strong> The proposed fleet consists of {actual_k_responder} <strong>BRINC Responder</strong> units (short-range tactical response, {resp_radius_mi}-mile operational radius) and {actual_k_guardian} <strong>BRINC Guardian</strong> units (long-range heavy-lift, {guard_radius_mi}-mile operational radius). All deployment sites have been pre-screened against FAA LAANC UAS Facility Maps. The BRINC Drones platform provides automated launch-on-dispatch, live-streaming HD/thermal video to dispatch and responding officers, and full chain-of-custody flight logging. Average aerial response time under this configuration is projected at <strong>{avg_resp_time:.1f} minutes</strong> — approximately <strong>{avg_time_saved:.1f} minutes faster</strong> than current vehicular patrol response for equivalent distances.</p>
             <p><strong>Fiscal Impact & Return on Investment:</strong> Total program capital expenditure is <strong>${fleet_capex:,.0f}</strong>. Based on a {int(dfr_dispatch_rate*100)}% DFR dispatch rate and {int(deflection_rate*100)}% call resolution rate, the program is projected to generate <strong>${annual_savings:,.0f} in annual operational savings</strong> through reduced officer dispatch on drone-resolved incidents, reaching full cost recovery in <strong>{break_even_text.lower()}</strong>. At ${CONFIG["DRONE_COST_PER_CALL"]}/drone response versus ${CONFIG["OFFICER_COST_PER_CALL"]}/officer dispatch, the BRINC Drones platform delivers a demonstrated cost-per-response reduction of over {int((1 - CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}%.</p>
             <p><strong>About BRINC Drones:</strong> BRINC Drones, Inc. is the global leader in purpose-built Drone as a First Responder technology, with deployments across hundreds of law enforcement agencies in the United States. BRINC Drones designs, manufactures, and supports the only DFR platform built from the ground up for public safety — including the BRINC Responder for rapid tactical response and the BRINC Guardian for extended-range operations. BRINC provides full agency onboarding, FAA coordination support, pilot training, and ongoing operational guidance. Learn more at <a href="https://brincdrones.com" target="_blank">brincdrones.com</a>.</p>
-
+            
             <p style="background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #eee;"><strong>Potential Grant Funding Sources:</strong><br>
               <a href="https://bja.ojp.gov/program/jag/overview" target="_blank">DOJ Byrne JAG</a> — UAS and technology procurement eligible <br>
               <a href="https://www.fema.gov/grants/preparedness/homeland-security" target="_blank">FEMA HSGP</a> — CapEx offset for tactical deployments <br>
@@ -3405,7 +2962,6 @@ if st.session_state['csvs_ready']:
                     [ANALYTICS_HTML_EXPORT]
                 </div>
             </div>
-
         </div>
         <div class="footer">
             <div class="footer-logo">BRINC</div>
@@ -3423,7 +2979,6 @@ if st.session_state['csvs_ready']:
         </div>
         </div></body></html>"""
 
-        # Format safely using a plain text placeholder
         export_html = export_html.replace("[ANALYTICS_HTML_EXPORT]", analytics_html_export)
 
         if st.sidebar.download_button("💾 Save Deployment Plan", data=json.dumps(export_dict),
@@ -3431,20 +2986,20 @@ if st.session_state['csvs_ready']:
                                       mime="application/json", use_container_width=True):
             _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                           "BRINC", k_responder, k_guardian, calls_covered_perc,
-                          prop_name, prop_email)
+                          prop_name, prop_email, details=export_details)
             _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                            "BRINC", k_responder, k_guardian, calls_covered_perc,
-                           prop_name, prop_email)
+                           prop_name, prop_email, details=export_details)
 
         if st.sidebar.download_button("📄 Executive Summary (HTML)", data=export_html,
                                       file_name=f"Brinc_{safe_city}_Proposal_{current_time_str}.html",
                                       mime="text/html", use_container_width=True):
             _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                           "HTML", k_responder, k_guardian, calls_covered_perc,
-                          prop_name, prop_email)
+                          prop_name, prop_email, details=export_details)
             _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                            "HTML", k_responder, k_guardian, calls_covered_perc,
-                           prop_name, prop_email)
+                           prop_name, prop_email, details=export_details)
 
         if active_drones:
             if st.sidebar.download_button("🌏 Google Earth Briefing File", data=generate_kml(active_gdf, active_drones, calls_in_city),
@@ -3452,7 +3007,7 @@ if st.session_state['csvs_ready']:
                                           use_container_width=True):
                 _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                               "KML", k_responder, k_guardian, calls_covered_perc,
-                              prop_name, prop_email)
+                              prop_name, prop_email, details=export_details)
                 _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                                "KML", k_responder, k_guardian, calls_covered_perc,
-                               prop_name, prop_email)
+                               prop_name, prop_email, details=export_details)

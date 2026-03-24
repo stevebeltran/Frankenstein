@@ -161,7 +161,6 @@ def get_base64_of_bin_file(bin_file):
 # COMMAND CENTER ANALYTICS GENERATOR
 # ============================================================
 def generate_command_center_html(df, total_orig_calls, export_mode=False):
-    """Generates the full Command Center visual suite with interactive Javascript filtering."""
     if df is None or df.empty or 'date' not in df.columns:
         return "<div style='color:gray; padding:20px;'>Analytics unavailable. Missing date/time fields.</div>"
     
@@ -173,7 +172,6 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
     df_ana = df_ana.dropna(subset=['dt_obj'])
     if df_ana.empty: return "<div>No valid dates found in data.</div>"
     
-    # 1. Parse dates and build a lightweight records array for JavaScript
     records = []
     for _, r in df_ana.iterrows():
         dt = r['dt_obj']
@@ -182,19 +180,16 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
         records.append({
             'd': dt.strftime('%Y-%m-%d'),
             'h': dt.hour,
-            'dow': dt.dayofweek, # Mon=0, Sun=6
+            'dow': dt.dayofweek, 
             'p': p_val
         })
         
-    # 2. Dynamically identify all priority types
     unique_pris = sorted(list(set(r['p'] for r in records)))
     options_html = '<option value="ALL">ALL PRIORITIES</option>'
     for p in unique_pris:
-        # Clean up the display name slightly
         display_p = f"PRIORITY {p}" if len(p) <= 2 else p
         options_html += f'<option value="{p}">{display_p}</option>'
 
-    # 3. Build the initial HTML shell (JS will populate the numbers)
     month_keys = sorted(list(set(r['d'][:7] for r in records)))
     cal_html = "<div style='display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:15px; margin-top:20px;'>"
     
@@ -327,12 +322,10 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
                     if(!mMax[m] || daily[r.d] > mMax[m]) mMax[m] = daily[r.d];
                 }});
 
-                // Peak Hour
                 let peakHr = hourly.indexOf(Math.max(...hourly));
                 if(total === 0) peakHr = 0;
                 document.getElementById('kpi-peak-val').innerText = peakHr + ':00';
 
-                // Shifts
                 let shiftHtml = "";
                 [8, 10, 12].forEach(win => {{
                     let bestV = 0, bestS = 0;
@@ -362,7 +355,6 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
                 }});
                 document.getElementById('shift-container').innerHTML = shiftHtml;
 
-                // DOW
                 let maxDow = Math.max(...dowCounts, 1);
                 let dowHtml = "";
                 for(let i=0; i<7; i++) {{
@@ -376,14 +368,12 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
                 }}
                 document.getElementById('dow-container').innerHTML = dowHtml;
 
-                // Month Headers
                 document.querySelectorAll('[id^="month-total-"]').forEach(el => {{
                     let m = el.id.replace('month-total-','');
                     let cnt = mTotal[m] || 0;
                     el.innerText = cnt.toLocaleString() + ' calls';
                 }});
 
-                // Calendar Cells
                 document.querySelectorAll('.day-cell').forEach(cell => {{
                     if(!cell.hasAttribute('data-date')) return;
                     let d = cell.getAttribute('data-date');
@@ -470,7 +460,6 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
                 document.getElementById('dfr-tooltip').style.display = 'none';
             }}
 
-            // Run once to populate the dashboard on load
             updateDashboard();
         </script>
     </div>
@@ -537,7 +526,6 @@ def aggressive_parse_calls(uploaded_files):
     return pd.concat(all_calls_list, ignore_index=True).dropna(subset=['lat', 'lon'])
 
 def generate_stations_from_calls(df_calls, max_stations=100):
-    """Auto-generate stations by querying OpenStreetMap."""
     lats = df_calls['lat'].dropna().values
     lons = df_calls['lon'].dropna().values
     if len(lats) == 0: return None, "No coordinates available to generate stations."
@@ -590,7 +578,6 @@ def generate_stations_from_calls(df_calls, max_stations=100):
 
     df_s = pd.DataFrame(rows).drop_duplicates(subset=['lat', 'lon']).reset_index(drop=True)
     
-    # ENFORCE UNIQUE NAMES FOR OSM DATA
     counts = {}
     new_names = []
     for n in df_s['name']:
@@ -628,7 +615,6 @@ def get_address_from_latlon(lat, lon):
                     return f"{house_number} {road}, {city}".strip(', ')
     except Exception:
         pass
-    # Fallback to coordinates if an exact street address isn't found
     return f"{lat:.5f}, {lon:.5f}"
 
 @st.cache_data
@@ -646,7 +632,6 @@ def forward_geocode(address_str):
 
 @st.cache_data
 def fetch_county_boundary_local(state_abbr, county_name_input):
-    # 1. Clean the input
     search_name = county_name_input.lower().strip()
     if search_name.endswith(" county"):
         search_name = search_name.replace(" county", "").strip()
@@ -654,29 +639,21 @@ def fetch_county_boundary_local(state_abbr, county_name_input):
     state_fips = STATE_FIPS.get(state_abbr)
     if not state_fips: return False, None
     
-    # 2. Look for our new ultra-compressed parquet file
     local_file = "counties_lite.parquet"
     if not os.path.exists(local_file):
         st.error(f"Missing {local_file}! Please ensure it is uploaded to your repository.")
         return False, None
                 
-    # 3. Read directly from the Parquet file instantly
     try:
-        # Geopandas reads Parquet files in milliseconds!
         import geopandas as gpd
         gdf = gpd.read_parquet(local_file)
-        
-        # Filter for the exact State FIPS code and County Name
         match = gdf[(gdf['STATEFP'] == state_fips) & (gdf['NAME'].str.lower() == search_name)]
-        
         if not match.empty:
-            # Put the word "County" back on for the UI displays
             match['NAME'] = match['NAME'] + " County"
             return True, match[['NAME', 'geometry']]
     except Exception as e:
         st.error(f"Error reading local database: {e}")
         pass
-        
     return False, None
 
 @st.cache_data
@@ -1179,7 +1156,6 @@ def compute_all_elbow_curves(n_calls, _resp_matrix, _guard_matrix, _geos_r, _geo
 
 if not st.session_state['csvs_ready']:
 
-    # GRAB THE LOGO FOR THE UPLOAD PAGE
     logo_b64 = get_base64_of_bin_file("logo.png")
     hero_logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:48px; margin-bottom:15px; filter: brightness(0) invert(1);">' if logo_b64 else f'<div style="font-size:2.5rem; font-weight:900; letter-spacing:4px; color:#ffffff; margin-bottom:15px;">BRINC</div>'
 
@@ -1425,15 +1401,11 @@ if not st.session_state['csvs_ready']:
             return any(k in n for k in ['station','dept','agency','facility','police','fire','loc'])
 
         if uploaded_files and len(uploaded_files) >= 1:
-            
-            # --- 1. INTELLIGENTLY CHECK FOR .BRINC FILE ---
-            # Browsers sometimes append .json to .brinc files on download
             brinc_file = None
             for f in uploaded_files:
                 fname = f.name.lower()
                 if '.brinc' in fname or fname.endswith('.json'):
                     try:
-                        # Quick peek inside to see if it has our save data keys
                         f.seek(0)
                         peek = json.loads(f.getvalue().decode('utf-8'))
                         if 'k_resp' in peek and 'calls_data' in peek:
@@ -1459,7 +1431,6 @@ if not st.session_state['csvs_ready']:
                         
                         if save_data.get('calls_data'):
                             df_c = pd.DataFrame(save_data['calls_data'])
-                            # Safely cast to numeric so the map geometry doesn't crash
                             if 'lat' in df_c.columns: df_c['lat'] = pd.to_numeric(df_c['lat'], errors='coerce')
                             if 'lon' in df_c.columns: df_c['lon'] = pd.to_numeric(df_c['lon'], errors='coerce')
                             st.session_state['df_calls'] = df_c
@@ -1479,7 +1450,6 @@ if not st.session_state['csvs_ready']:
                         st.stop()
 
             else:
-                # --- 2. OTHERWISE, PROCESS AS NORMAL CSV CAD DATA ---
                 f_list = list(uploaded_files)
                 call_files = []
                 station_file = None
@@ -1728,7 +1698,6 @@ if not st.session_state['csvs_ready']:
         })
         st.session_state['df_calls'] = df_demo
 
-        # --- PROCESS OPTIONAL CUSTOM STATIONS ---
         custom_stations_used = False
         sim_uploader = st.session_state.get('sim_station_uploader')
         
@@ -1740,7 +1709,6 @@ if not st.session_state['csvs_ready']:
                 s_df = pd.read_csv(sim_uploader)
                 s_df.columns = [str(c).lower().strip() for c in s_df.columns]
                 
-                # Detect what columns the user provided
                 lat_col = next((c for c in s_df.columns if c in ['lat', 'latitude', 'y']), None)
                 lon_col = next((c for c in s_df.columns if c in ['lon', 'long', 'longitude', 'x']), None)
                 addr_col = next((c for c in s_df.columns if any(a in c for a in ['address', 'street', 'location'])), None)
@@ -1757,14 +1725,12 @@ if not st.session_state['csvs_ready']:
                         s_lat, s_lon = float(row[lat_col]), float(row[lon_col])
                     elif addr_col and pd.notna(row[addr_col]):
                         addr_str = str(row[addr_col])
-                        # Attempt geocoding
                         s_lat, s_lon = forward_geocode(addr_str)
                         if s_lat is None:
-                            # Fallback: Try appending the city and state to the address string
                             s_lat, s_lon = forward_geocode(f"{addr_str}, {active_targets[0]['city']}, {active_targets[0]['state']}")
                         if s_lat is None:
                             st.toast(f"⚠️ Could not geocode: {addr_str}")
-                        time.sleep(1) # Slow down requests slightly to prevent API blocking
+                        time.sleep(1)
                         
                     if s_lat and s_lon:
                         parsed_stations.append({
@@ -1782,18 +1748,14 @@ if not st.session_state['csvs_ready']:
             except Exception as e:
                 st.warning(f"⚠️ Error reading custom stations: {e}. Falling back to random stations.")
 
-        # --- FALLBACK: PULL REAL STATIONS FROM OPENSTREETMAP ---
         if not custom_stations_used:
             prog.progress(80, text="🌐 Querying OpenStreetMap for real police, fire & schools…")
-            
-            # Use the simulated calls we just made to find the bounding box, and pull real OSM data!
             df_s, osm_note = generate_stations_from_calls(st.session_state['df_calls'])
             
             if df_s is not None and not df_s.empty:
                 st.session_state['df_stations'] = df_s
                 st.toast(f"✅ {osm_note}")
             else:
-                # Absolute worst-case scenario (no internet or OSM API is down): fall back to random
                 st.warning("⚠️ Could not reach OpenStreetMap for real stations. Falling back to random placements.")
                 station_points = generate_random_points_in_polygon(city_poly, 100)
                 types = ['Police', 'Fire', 'EMS'] * 34
@@ -1822,23 +1784,19 @@ if st.session_state['csvs_ready']:
         master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR)
 
     if master_gdf is None or master_gdf.empty:
-        # Check if we are mapping a County! If so, grab the exact shape from our ultra-fast local file
         active_c = st.session_state.get('active_city', '')
         active_s = st.session_state.get('active_state', '')
         
-        # Use .lower() so it perfectly catches "ogle county", "Ogle County", or "OGLE COUNTY"
         if "county" in active_c.lower():
             success, c_gdf = fetch_county_boundary_local(active_s, active_c)
             if success:
                 master_gdf = c_gdf.copy()
-                # Ensure the display name gets mapped correctly for the sidebar
                 name_col = next((c for c in ['NAME', 'NAMELSAD'] if c in master_gdf.columns), master_gdf.columns[0])
                 master_gdf['DISPLAY_NAME'] = master_gdf[name_col]
                 if not master_gdf['DISPLAY_NAME'].iloc[0].lower().endswith('county'):
                     master_gdf['DISPLAY_NAME'] = master_gdf['DISPLAY_NAME'] + " County"
                 master_gdf['data_count'] = len(df_calls)
 
-        # If it is STILL empty (not a county, or shape is missing), fall back to the bounding box
         if master_gdf is None or master_gdf.empty:
             min_lon, min_lat = df_calls['lon'].min(), df_calls['lat'].min()
             max_lon, max_lat = df_calls['lon'].max(), df_calls['lat'].max()
@@ -1847,7 +1805,6 @@ if st.session_state['csvs_ready']:
             poly = box(min_lon-lon_pad, min_lat-lat_pad, max_lon+lon_pad, max_lat+lat_pad)
             master_gdf = gpd.GeoDataFrame({'DISPLAY_NAME':['Auto-Generated Boundary'],'data_count':[len(df_calls)]}, geometry=[poly], crs="EPSG:4326")
 
-    # --- DRAW SIDEBAR LOGO FIRST SO IT IS AT THE ABSOLUTE TOP ---
     logo_b64 = get_base64_of_bin_file("logo.png")
     if logo_b64:
         st.sidebar.markdown(f"""
@@ -1951,7 +1908,6 @@ if st.session_state['csvs_ready']:
 
     n = len(df_stations_all)
 
-    # Dynamic Sliders based on Area Size
     area_sq_mi = city_m.area / 2589988.11 if city_m and not city_m.is_empty else 100.0
     r_resp_est = st.session_state.get('r_resp', 2.0)
     r_guard_est = st.session_state.get('r_guard', 8.0)
@@ -1959,16 +1915,16 @@ if st.session_state['csvs_ready']:
     max_resp_calc = min(n, int(math.ceil(area_sq_mi / (math.pi * (r_resp_est**2)))) + 5)
     max_guard_calc = min(n, int(math.ceil(area_sq_mi / (math.pi * (r_guard_est**2)))) + 5)
 
-    # Safely pull the default values without exceeding the allowed maximums
+    # Respect the exact default settings requested
     val_r = min(st.session_state.get('k_resp', 2), max_resp_calc)
     val_g = min(st.session_state.get('k_guard', 0), max_guard_calc)
 
-    k_responder = st.sidebar.slider("🚁 Responder Count", 0, max(1, max_resp_calc), val_r,
-                                    help="Short-range tactical drones (2-3mi radius).")
-    k_guardian  = st.sidebar.slider("🦅 Guardian Range (mi) [⚡ 5mi Rapid]", 1, 8, int(st.session_state.get('r_guard', 8)), help="The 5-mile rapid response focus zone will automatically be highlighted inside the maximum perimeter.")
+    # Restored both independent Count sliders and Range sliders
+    k_responder = st.sidebar.slider("🚁 Responder Count", 0, max(1, max_resp_calc), val_r, help="Short-range tactical drones (2-3mi radius).")
+    k_guardian  = st.sidebar.slider("🦅 Guardian Count", 0, max(1, max_guard_calc), val_g, help="Long-range heavy-lift drones (up to 8mi radius).")
     
-    resp_radius_mi  = st.sidebar.slider("🚁 Responder Range (mi)", 2.0, 3.0, st.session_state.get('r_resp', 2.0), step=0.5)
-    guard_radius_mi = st.sidebar.slider("🦅 Guardian Range (mi)", 1, 8, int(st.session_state.get('r_guard', 8)))
+    resp_radius_mi  = st.sidebar.slider("🚁 Responder Range (mi)", 2.0, 3.0, float(st.session_state.get('r_resp', 2.0)), step=0.5)
+    guard_radius_mi = st.sidebar.slider("🦅 Guardian Range (mi) [⚡ 5mi Rapid]", 1, 8, int(st.session_state.get('r_guard', 8)), help="The 5-mile rapid response focus zone will automatically be highlighted inside the maximum perimeter.")
 
     st.session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
 
@@ -2002,7 +1958,6 @@ if st.session_state['csvs_ready']:
 
     st.sidebar.markdown('<div class="sidebar-section-header">③ Budget & Export</div>', unsafe_allow_html=True)
 
-    # We use the strat_expander we defined earlier in the sidebar to inject the sliders
     with strat_expander:
         st.markdown("---")
         inferred_daily = st.session_state.get('inferred_daily_calls_override', max(1, int(total_calls/365)))
@@ -2139,7 +2094,7 @@ if st.session_state['csvs_ready']:
     active_color_map = {}
     c_idx = 0
     for idx, d_type in ordered_deployments_raw:
-        key = f"{idx}_{d_type}" # Using strictly unique index instead of name
+        key = f"{idx}_{d_type}" 
         if key not in active_color_map:
             active_color_map[key] = STATION_COLORS[c_idx % len(STATION_COLORS)]
             c_idx += 1
@@ -2289,7 +2244,6 @@ if st.session_state['csvs_ready']:
             <span style="font-size:1.2em; background:rgba(128,128,128,0.15); padding:2px 10px; border-radius:4px;">{h_label}</span>
             </div>""", unsafe_allow_html=True)
 
-    # Safely compute traffic impacts with strict float casting to prevent any TypeErrors
     if simulate_traffic:
         avg_ground_speed = float(CONFIG["DEFAULT_TRAFFIC_SPEED"]) * (1 - float(traffic_level) / 100.0)
         eval_dist  = float(guard_radius_mi if active_guard_names else resp_radius_mi)
@@ -2306,7 +2260,6 @@ if st.session_state['csvs_ready']:
     orig_calls = st.session_state.get('total_original_calls', total_calls)
     call_str = f"{orig_calls:,}"
 
-    # Calculate Date Range of CAD data (if available)
     date_range_str = "Simulated / Unknown"
     if 'date' in df_calls.columns:
         try:
@@ -2318,7 +2271,6 @@ if st.session_state['csvs_ready']:
 
     avg_resp_time = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
 
-    # 1. THE SINGLE-LINE EXECUTIVE HEADER
     logo_b64 = get_base64_of_bin_file("logo.png")
     main_logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:24px; vertical-align:middle; margin-right:15px; filter: brightness(0) invert(1);">' if logo_b64 else f'<span style="font-size:1.5rem; font-weight:900; letter-spacing:2px; color:#ffffff; margin-right:15px;">BRINC</span>'
 
@@ -2339,10 +2291,8 @@ if st.session_state['csvs_ready']:
     """
     st.markdown(header_html, unsafe_allow_html=True)
 
-    # Cleanly evaluate dynamic CSS to avoid f-string syntax errors
     border_css = 'border-right: 1px solid #222; padding-right: 10px;' if gain_val is not None else ''
 
-    # If traffic simulation is on, nest the time saved right inside the Avg Response box!
     if gain_val is not None:
         resp_content = (
             f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace; line-height: 1.1;">{avg_resp_time:.1f}m</div>'
@@ -2351,7 +2301,6 @@ if st.session_state['csvs_ready']:
     else:
         resp_content = f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{avg_resp_time:.1f}m</div>'
 
-    # 2. THE STREAMLINED OPERATIONAL KPI BAR (FLATTENED TO PREVENT MARKDOWN ERRORS)
     kpi_html = (
         f'<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); background: {card_bg}; border: 1px solid {card_border}; border-radius: 8px; padding: 20px; margin-bottom: 15px; gap: 10px;">'
         f'<div style="border-right: 1px solid #222; padding-right: 10px; text-align: center;">'
@@ -2410,10 +2359,8 @@ if st.session_state['csvs_ready']:
             clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
             lbl = f"{d['name'].split(',')[0]} ({'Resp' if d['type']=='RESPONDER' else 'Guard'})"
             
-            # Determine if this is an extended Guardian (so we can relax the outer ring)
             is_extended_guardian = (d['type'] == 'GUARDIAN' and d['radius_m']/1609.34 > 5.0)
             
-            # The outer ring becomes relaxed (thinner, more transparent) if > 5 miles
             outer_width = 1.5 if is_extended_guardian else 4.5
             outer_opac = 0.4 if is_extended_guardian else 1.0
             
@@ -2425,7 +2372,6 @@ if st.session_state['csvs_ready']:
                 line=dict(color=d['color'], width=outer_width),
                 fill='toself', fillcolor='rgba(0,0,0,0)', name=lbl, hoverinfo='name'))
 
-            # The 5-mile Rapid Response ring gets the "Important" styling (thick, solid, heavier fill)
             if is_extended_guardian:
                 f_lats, f_lons = get_circle_coords(d['lat'], d['lon'], r_mi=5.0)
                 fig.add_trace(go.Scattermapbox(
@@ -2767,31 +2713,49 @@ if st.session_state['csvs_ready']:
     
     if show_cad_analytics:
         analytics_html_block = generate_command_center_html(df_calls, total_orig_calls=st.session_state.get('total_original_calls', total_calls))
-        # Removed scrolling=True, set a large height to allow the component to natively expand
         components.html(analytics_html_block, height=1600, scrolling=False)
 
-    # ── PUBLIC BUILDING OPPORTUNITIES ──
-    st.markdown("---")
-    st.markdown(f"<h3 style='color:{text_main};'>🏢 Public Building Opportunities</h3>", unsafe_allow_html=True)
-    st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Complete directory of candidate launch locations (Police, Fire, EMS, Schools, etc.) loaded into the simulation environment.</div>", unsafe_allow_html=True)
+
+    # --- GENERATE AI BUSINESS SPONSORSHIP LETTER ---
+    avg_ground_speed = CONFIG["DEFAULT_TRAFFIC_SPEED"] * (1 - traffic_level/100)
+    avg_time_saved = ((sum((d['radius_m']/1609.34*1.4/avg_ground_speed)*60 for d in active_drones)/len(active_drones)) - avg_resp_time) if active_drones and avg_ground_speed > 0 else 0.0
+    time_saved_text = f"up to {avg_time_saved:.1f} minutes faster than a standard patrol car navigating through traffic" if avg_time_saved > 0 else "faster than traditional ground transport"
     
-    show_buildings = st.toggle("📋 Show Full Station Directory", value=False)
-    if show_buildings:
-        disp_df = df_stations_all.copy()
-        disp_df['Location'] = ["https://www.google.com/maps/search/?api=1&query=" + str(r['lat']) + "," + str(r['lon']) for _, r in disp_df.iterrows()]
-        
-        st.dataframe(
-            disp_df[['name', 'type', 'lat', 'lon', 'Location']],
-            column_config={
-                "name": "Facility Name",
-                "type": "Type",
-                "lat": st.column_config.NumberColumn("Latitude", format="%.5f"),
-                "lon": st.column_config.NumberColumn("Longitude", format="%.5f"),
-                "Location": st.column_config.LinkColumn("Google Maps", display_text="📍 View on Map")
-            },
-            hide_index=True,
-            use_container_width=True
-        )
+    jurisdiction_list = ", ".join(selected_names) if selected_names else st.session_state.get('active_city', 'City')
+    total_fleet = actual_k_responder + actual_k_guardian
+
+    sponsor_letter_text = f"""Subject: Partnering to Enhance Security at [Business Name] with Drone as a First Responder (DFR)
+
+Dear [Business Owner / General Manager],
+
+As a cornerstone of the {jurisdiction_list} business community, the safety of your employees, customers, and property is our highest priority. We are reaching out to share an innovative new public safety initiative and invite you to become a founding partner.
+
+The {jurisdiction_list} Police Department is implementing a Drone as a First Responder (DFR) program. Using purpose-built BRINC drones, we can dispatch aerial support directly to 911 calls at retail centers, malls, and commercial districts in seconds. 
+
+Based on our latest geographic modeling, a DFR fleet of {total_fleet} drones ({actual_k_responder} Responders and {actual_k_guardian} Guardians) will provide an estimated response time of just {avg_resp_time:.1f} minutes to your area—arriving {time_saved_text}. 
+
+For retail and commercial properties, this means:
+• Immediate aerial overwatch for parking lot security and deterrence.
+• Lightning-fast response to retail theft, property crimes, or disturbances.
+• Real-time video streaming to responding officers, ensuring they know exactly what is happening before they arrive on your property.
+
+The total capital expenditure to secure our commercial corridors with this technology is ${fleet_capex:,.0f}. To make this a reality without passing the full burden to taxpayers, we are seeking forward-thinking community partners. We are asking local business leaders to consider a tax-deductible sponsorship or donation to help fund this deployment. 
+
+By contributing to the DFR program, you are directly investing in a faster, smarter, and safer emergency response network for your business and the surrounding community. 
+
+We would welcome the opportunity to show you a live demonstration of how this technology will specifically cover your property. Please let us know when you might be available for a brief meeting.
+
+Sincerely,
+
+[Chief of Police / Command Staff Name]
+{jurisdiction_list} Police Department
+"""
+
+    st.markdown("---")
+    st.markdown(f"<h3 style='color:{text_main};'>🤝 Community Sponsorship Letter</h3>", unsafe_allow_html=True)
+    st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>An AI-generated draft designed to pitch the DFR program to local retail and commercial businesses, requesting financial sponsorship. Easily copy and paste into an email or word processor.</div>", unsafe_allow_html=True)
+    st.code(sponsor_letter_text, language='markdown')
+
 
     # ── EXPORT BUTTONS ──
     if fleet_capex > 0:
@@ -2832,10 +2796,6 @@ if st.session_state['csvs_ready']:
             "faa_geojson": faa_geojson
         }
 
-        avg_resp_time  = sum(d['avg_time_min'] for d in active_drones)/len(active_drones) if active_drones else 0.0
-        avg_ground_speed = CONFIG["DEFAULT_TRAFFIC_SPEED"] * (1 - traffic_level/100)
-        avg_time_saved = ((sum((d['radius_m']/1609.34*1.4/avg_ground_speed)*60 for d in active_drones)/len(active_drones)) - avg_resp_time) if active_drones and avg_ground_speed > 0 else 0.0
-
         fig_for_export = go.Figure()
         for d in active_drones:
             clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
@@ -2853,26 +2813,13 @@ if st.session_state['csvs_ready']:
         map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
         station_rows = "".join(f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>" for d in active_drones)
 
-        all_bldgs_rows = ""
-        for _, row in df_stations_all.iterrows():
-            gmaps_link = f"https://www.google.com/maps/search/?api=1&query={row['lat']},{row['lon']}"
-            all_bldgs_rows += f"<tr><td>{row['name']}</td><td>{row['type']}</td><td>{row['lat']:.5f}</td><td>{row['lon']:.5f}</td><td><a href='{gmaps_link}' target='_blank' style='color:#00D2FF; font-weight:bold; text-decoration:none;'>View Map ↗</a></td></tr>"
-
         logo_b64 = get_base64_of_bin_file("logo.png")
         logo_html_str = f'<img src="data:image/png;base64,{logo_b64}" style="height:32px;">' if logo_b64 else '<div style="font-size:24px;font-weight:900;letter-spacing:3px;color:#fff;">BRINC</div>'
 
-        jurisdiction_list = ", ".join(selected_names) if selected_names else prop_city
         all_station_types = df_stations_all['type'].dropna().unique().tolist() if 'type' in df_stations_all.columns else []
         police_dept_names = [d['name'] for d in active_drones if '[Police]' in d['name']]
         fire_dept_names   = [d['name'] for d in active_drones if '[Fire]' in d['name']]
         ems_dept_names    = [d['name'] for d in active_drones if '[EMS]' in d['name']]
-
-        police_stations = [d['name'] for d in active_drones if 'Police' in d.get('name','') or (
-            'type' in df_stations_all.columns and
-            'Police' in str(df_stations_all[df_stations_all['name'].str.contains(
-                d['name'].split(']')[-1].strip(), na=False, regex=False
-            )]['type'].values[:1])
-        )]
 
         dept_summary_parts = []
         if police_dept_names: dept_summary_parts.append(f"{len(police_dept_names)} Police station{'s' if len(police_dept_names)>1 else ''}")
@@ -2880,10 +2827,8 @@ if st.session_state['csvs_ready']:
         if ems_dept_names:    dept_summary_parts.append(f"{len(ems_dept_names)} EMS station{'s' if len(ems_dept_names)>1 else ''}")
         dept_summary = ", ".join(dept_summary_parts) if dept_summary_parts else f"{len(active_drones)} municipal stations"
         police_names_str = (", ".join([n.replace('[Police] ','') for n in police_dept_names[:6]]) + ("..." if len(police_dept_names)>6 else "")) if police_dept_names else "municipal facilities"
-        total_fleet = actual_k_responder + actual_k_guardian
         area_sq_mi_est = int((maxx - minx) * (maxy - miny) * 3280)
 
-        # Build Analytics Block for Export
         analytics_html_export = generate_command_center_html(df_calls, total_orig_calls=st.session_state.get('total_original_calls', total_calls), export_mode=True)
 
         export_html = f"""<html><head><title>BRINC DFR Proposal — {prop_city}</title>
@@ -2970,12 +2915,9 @@ if st.session_state['csvs_ready']:
               <a href="https://www.transportation.gov/grants" target="_blank">DOT RAISE</a> — Regional infrastructure and safety
             </p>
 
-            <h2>Candidate Infrastructure Directory</h2>
-            <p>The following public buildings and facilities were evaluated as potential deployment locations during this optimization simulation:</p>
-            <table style="font-size: 12px; margin-bottom: 40px;">
-                <tr><th>Facility Name</th><th>Type</th><th>Latitude</th><th>Longitude</th><th>Location</th></tr>
-                {all_bldgs_rows}
-            </table>
+            <h2>Community Sponsorship Pitch (AI Draft)</h2>
+            <div class="disclaimer"><strong>INSTRUCTIONS:</strong> Copy and paste this text onto official department letterhead. Customize bracketed information before sending to local retail centers, malls, and large commercial businesses.</div>
+            <div style="background: #fdfdfd; border: 1px solid #e0e0e0; border-radius: 6px; padding: 25px; font-family: 'Times New Roman', serif; font-size: 15px; color: #222; white-space: pre-wrap; margin-bottom: 40px;">{sponsor_letter_text}</div>
             
             <div style="margin-top: 50px; font-family:'Manrope', Arial, sans-serif !important;">
                 <div style="border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">

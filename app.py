@@ -694,9 +694,10 @@ def reverse_geocode_state(lat, lon):
 @st.cache_data
 def fetch_census_population(state_fips, place_name, is_county=False):
     if is_county:
-        url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=county:*&in=state:{state_fips}"
-    else:
-        url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=place:*&in=state:{state_fips}"
+                # Switched to the new cache-busting, highly accurate OSM function
+                success, temp_gdf = fetch_county_boundary_osm(s_name, c_name)
+            else:
+                success, temp_gdf = fetch_tiger_city_shapefile(STATE_FIPS[s_name], c_name, SHAPEFILE_DIR)
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=10) as response:

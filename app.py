@@ -1822,12 +1822,25 @@ if st.session_state['csvs_ready']:
         master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR)
 
     if master_gdf is None or master_gdf.empty:
-        min_lon, min_lat = df_calls['lon'].min(), df_calls['lat'].min()
-        max_lon, max_lat = df_calls['lon'].max(), df_calls['lat'].max()
-        lon_pad = (max_lon - min_lon) * 0.1
-        lat_pad = (max_lat - min_lat) * 0.1
-        poly = box(min_lon-lon_pad, min_lat-lat_pad, max_lon+lon_pad, max_lat+lat_pad)
-        master_gdf = gpd.GeoDataFrame({'DISPLAY_NAME':['Auto-Generated Boundary'],'data_count':[len(df_calls)]}, geometry=[poly], crs="EPSG:4326")
+        # Check if we are mapping a County! If so, grab the exact shape from our ultra-fast local file
+        active_c = st.session_state.get('active_city', '')
+        active_s = st.session_state.get('active_state', '')
+        
+        if "County" in active_c:
+            success, c_gdf = fetch_county_boundary_local(active_s, active_c)
+            if success:
+                master_gdf = c_gdf.copy()
+                master_gdf['DISPLAY_NAME'] = master_gdf['NAME']
+                master_gdf['data_count'] = len(df_calls)
+
+        # If it is STILL empty (not a county, or shape is missing), fall back to the bounding box
+        if master_gdf is None or master_gdf.empty:
+            min_lon, min_lat = df_calls['lon'].min(), df_calls['lat'].min()
+            max_lon, max_lat = df_calls['lon'].max(), df_calls['lat'].max()
+            lon_pad = (max_lon - min_lon) * 0.1
+            lat_pad = (max_lat - min_lat) * 0.1
+            poly = box(min_lon-lon_pad, min_lat-lat_pad, max_lon+lon_pad, max_lat+lat_pad)
+            master_gdf = gpd.GeoDataFrame({'DISPLAY_NAME':['Auto-Generated Boundary'],'data_count':[len(df_calls)]}, geometry=[poly], crs="EPSG:4326")
 
     # --- DRAW SIDEBAR LOGO FIRST SO IT IS AT THE ABSOLUTE TOP ---
     logo_b64 = get_base64_of_bin_file("logo.png")

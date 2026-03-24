@@ -645,36 +645,38 @@ def forward_geocode(address_str):
     return None, None
 
 @st.cache_data
-def fetch_county_boundary_osm(state_abbr, county_name):
-    import urllib.parse
-    import json
-    from shapely.geometry import shape
+def fetch_county_boundary_local(state_abbr, county_name_input):
+    # 1. Clean the input
+    search_name = county_name_input.lower().strip()
+    if search_name.endswith(" county"):
+        search_name = search_name.replace(" county", "").strip()
+        
+    state_fips = STATE_FIPS.get(state_abbr)
+    if not state_fips: return False, None
     
-    # Convert "IL" to "Illinois"
-    state_full = next((k for k, v in US_STATES_ABBR.items() if v == state_abbr), state_abbr)
-    
-    # Try a strict structured search first, then fall back to a free-form search
-    urls_to_try = [
-        f"https://nominatim.openstreetmap.org/search?county={urllib.parse.quote(county_name)}&state={urllib.parse.quote(state_full)}&country=USA&polygon_geojson=1&format=json",
-        f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(county_name + ', ' + state_full)}&polygon_geojson=1&format=json"
-    ]
-    
-    for url in urls_to_try:
-        try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_DFR_Optimizer_App/3.0 (sales@brincdrones.com)'})
-            with urllib.request.urlopen(req, timeout=15) as response:
-                data = json.loads(response.read().decode('utf-8'))
-                if data:
-                    for item in data:
-                        # Ensure we grab the actual political county boundary, not a local business or hospital with the same name!
-                        if item.get('class') == 'boundary' and item.get('type') == 'administrative':
-                            if 'geojson' in item and item['geojson']['type'] in ['Polygon', 'MultiPolygon']:
-                                geom = shape(item['geojson'])
-                                gdf = gpd.GeoDataFrame({'NAME': [county_name]}, geometry=[geom], crs="EPSG:4326")
-                                return True, gdf
-        except Exception: 
-            pass
-            
+    # 2. Look for our new ultra-compressed parquet file
+    local_file = "counties_lite.parquet"
+    if not os.path.exists(local_file):
+        st.error(f"Missing {local_file}! Please ensure it is uploaded to your repository.")
+        return False, None
+                
+    # 3. Read directly from the Parquet file instantly
+    try:
+        # Geopandas reads Parquet files in milliseconds!
+        import geopandas as gpd
+        gdf = gpd.read_parquet(local_file)
+        
+        # Filter for the exact State FIPS code and County Name
+        match = gdf[(gdf['STATEFP'] == state_fips) & (gdf['NAME'].str.lower() == search_name)]
+        
+        if not match.empty:
+            # Put the word "County" back on for the UI displays
+            match['NAME'] = match['NAME'] + " County"
+            return True, match[['NAME', 'geometry']]
+    except Exception as e:
+        st.error(f"Error reading local database: {e}")
+        pass
+        
     return False, None
 
 @st.cache_data

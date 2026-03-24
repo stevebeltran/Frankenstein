@@ -2098,7 +2098,7 @@ if not st.session_state['csvs_ready']:
         all_gdfs = []
         total_estimated_pop = 0
 
-        for i, loc in enumerate(active_targets):
+    for i, loc in enumerate(active_targets):
             c_name = loc['city'].strip()
             s_name = loc['state']
             is_county = c_name.lower().endswith(" county")
@@ -2135,7 +2135,6 @@ if not st.session_state['csvs_ready']:
                         st.session_state.pop(f"c_{j}", None)
                         st.session_state.pop(f"s_{j}", None)
                     st.rerun()
-
         if not all_gdfs:
             prog.empty()
             st.error("❌ Could not find Census boundaries for any of the entered locations. Check spelling.")

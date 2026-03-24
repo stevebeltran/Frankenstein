@@ -658,6 +658,23 @@ def fetch_county_boundary_nominatim(state_abbr, county_name):
     return False, None
 
 @st.cache_data
+def get_address_from_latlon(lat, lon):
+    url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=18&addressdetails=1"
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_DFR_Optimizer_App/2.0'})
+        with urllib.request.urlopen(req, timeout=2) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            if 'address' in data:
+                addr = data['address']
+                road = addr.get('road', '')
+                house_number = addr.get('house_number', '')
+                city = addr.get('city', addr.get('town', addr.get('village', '')))
+                if road:
+                    return f"{house_number} {road}, {city}".strip(', ')
+    except Exception:
+        pass
+    # Fallback to coordinates if an exact street address isn't found
+    return f"{lat:.5f}, {lon:.5f}"
 def reverse_geocode_state(lat, lon):
     url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=10&addressdetails=1"
     try:
@@ -2935,13 +2952,25 @@ if st.session_state['csvs_ready']:
                             d_airport   = d['nearest_airport']
                             d_cost      = d['cost']
                             d_be        = d['be_text']
+                            
+                            # Grab the address and build the Google Maps Search link
+                            d_lat       = d['lat']
+                            d_lon       = d['lon']
+                            d_address   = get_address_from_latlon(d_lat, d_lon)
+                            gmaps_url   = f"https://www.google.com/maps/search/?api=1&query={d_lat},{d_lon}"
+
                             cols[j].markdown(f"""
 <div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color};
      border-left:1px solid {card_border}; border-right:1px solid {card_border};
      border-bottom:1px solid {card_border};
      border-radius:4px; padding:12px; margin-bottom:12px; cursor:default;">
     <div style="font-weight:700; font-size:0.73rem; color:{card_title}; margin-bottom:2px;">{short_name}</div>
-    <div style="font-size:0.58rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">{d_type} · Phase #{d_step}</div>
+    <div style="font-size:0.58rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">{d_type} · Phase #{d_step}</div>
+    <div style="font-size:0.62rem; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+        <a href="{gmaps_url}" target="_blank" title="Open in Google Maps" style="color:{accent_color}; text-decoration:none; font-weight:600;">
+            📍 {d_address} ↗
+        </a>
+    </div>
     <div style="background:rgba(0,210,255,0.07); border-radius:4px; padding:8px; text-align:center; margin-bottom:8px;">
         <div style="font-size:0.6rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
         <div style="font-size:1.25rem; font-weight:900; color:{accent_color};">${d_savings:,.0f}</div>

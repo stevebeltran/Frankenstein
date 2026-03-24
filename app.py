@@ -629,32 +629,36 @@ def forward_geocode(address_str):
     return None, None
 
 @st.cache_data
-def fetch_county_boundary_nominatim(state_abbr, county_name):
+def fetch_county_boundary_osm(state_abbr, county_name):
     import urllib.parse
     import json
-    # Convert "FL" to "Florida"
+    from shapely.geometry import shape
+    
+    # Convert "IL" to "Illinois"
     state_full = next((k for k, v in US_STATES_ABBR.items() if v == state_abbr), state_abbr)
     
-    # A free-form query is much more reliable for Nominatim than strict parameters
-    query = f"{county_name}, {state_full}, USA"
-    url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(query)}&polygon_geojson=1&format=json"
+    # Try a strict structured search first, then fall back to a free-form search
+    urls_to_try = [
+        f"https://nominatim.openstreetmap.org/search?county={urllib.parse.quote(county_name)}&state={urllib.parse.quote(state_full)}&country=USA&polygon_geojson=1&format=json",
+        f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(county_name + ', ' + state_full)}&polygon_geojson=1&format=json"
+    ]
     
-    try:
-        # We must provide a robust User-Agent so OSM doesn't block our heavy polygon requests
-        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_DFR_Optimizer_App/2.0 (sales@brincdrones.com)'})
-        with urllib.request.urlopen(req, timeout=15) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            if data:
-                # Loop through results to find the first valid geographic boundary
-                for item in data:
-                    if 'geojson' in item and item['geojson']['type'] in ['Polygon', 'MultiPolygon']:
-                        from shapely.geometry import shape
-                        geom = shape(item['geojson'])
-                        gdf = gpd.GeoDataFrame({'NAME': [county_name]}, geometry=[geom], crs="EPSG:4326")
-                        return True, gdf
-    except Exception as e: 
-        pass
-        
+    for url in urls_to_try:
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_DFR_Optimizer_App/3.0 (sales@brincdrones.com)'})
+            with urllib.request.urlopen(req, timeout=15) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                if data:
+                    for item in data:
+                        # Ensure we grab the actual political county boundary, not a local business or hospital with the same name!
+                        if item.get('class') == 'boundary' and item.get('type') == 'administrative':
+                            if 'geojson' in item and item['geojson']['type'] in ['Polygon', 'MultiPolygon']:
+                                geom = shape(item['geojson'])
+                                gdf = gpd.GeoDataFrame({'NAME': [county_name]}, geometry=[geom], crs="EPSG:4326")
+                                return True, gdf
+        except Exception: 
+            pass
+            
     return False, None
 
 @st.cache_data

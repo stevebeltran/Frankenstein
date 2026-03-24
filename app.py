@@ -1669,7 +1669,7 @@ if not st.session_state['csvs_ready']:
                           text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
             
             if is_county:
-                success, temp_gdf = fetch_county_boundary_osm(s_name, c_name)
+                success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
             else:
                 success, temp_gdf = fetch_tiger_city_shapefile(STATE_FIPS[s_name], c_name, SHAPEFILE_DIR)
                 

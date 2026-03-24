@@ -1826,11 +1826,16 @@ if st.session_state['csvs_ready']:
         active_c = st.session_state.get('active_city', '')
         active_s = st.session_state.get('active_state', '')
         
-        if "County" in active_c:
+        # Use .lower() so it perfectly catches "ogle county", "Ogle County", or "OGLE COUNTY"
+        if "county" in active_c.lower():
             success, c_gdf = fetch_county_boundary_local(active_s, active_c)
             if success:
                 master_gdf = c_gdf.copy()
-                master_gdf['DISPLAY_NAME'] = master_gdf['NAME']
+                # Ensure the display name gets mapped correctly for the sidebar
+                name_col = next((c for c in ['NAME', 'NAMELSAD'] if c in master_gdf.columns), master_gdf.columns[0])
+                master_gdf['DISPLAY_NAME'] = master_gdf[name_col]
+                if not master_gdf['DISPLAY_NAME'].iloc[0].lower().endswith('county'):
+                    master_gdf['DISPLAY_NAME'] = master_gdf['DISPLAY_NAME'] + " County"
                 master_gdf['data_count'] = len(df_calls)
 
         # If it is STILL empty (not a county, or shape is missing), fall back to the bounding box

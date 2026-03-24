@@ -2101,12 +2101,19 @@ if not st.session_state['csvs_ready']:
         for i, loc in enumerate(active_targets):
             c_name = loc['city'].strip()
             s_name = loc['state']
+            is_county = c_name.lower().endswith(" county")
+            
             prog.progress(10 + int((i / len(active_targets)) * 20),
                           text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
-            success, temp_gdf = fetch_tiger_city_shapefile(STATE_FIPS[s_name], c_name, SHAPEFILE_DIR)
+            
+            if is_county:
+                success, temp_gdf = fetch_county_boundary_osm(s_name, c_name)
+            else:
+                success, temp_gdf = fetch_tiger_city_shapefile(STATE_FIPS[s_name], c_name, SHAPEFILE_DIR)
+                
             if success:
                 all_gdfs.append(temp_gdf)
-                pop = fetch_census_population(STATE_FIPS[s_name], c_name)
+                pop = fetch_census_population(STATE_FIPS[s_name], c_name, is_county=is_county)
                 if pop:
                     total_estimated_pop += pop
                     st.toast(f"✅ {c_name} population verified: {pop:,}")
@@ -2124,9 +2131,9 @@ if not st.session_state['csvs_ready']:
                     rcity, rstate = random.choice(candidates)
                     st.session_state['_last_demo_city'] = rcity
                     st.session_state['target_cities'] = [{"city": rcity, "state": rstate}]
-                    for i in range(10):
-                        st.session_state.pop(f"c_{i}", None)
-                        st.session_state.pop(f"s_{i}", None)
+                    for j in range(10):
+                        st.session_state.pop(f"c_{j}", None)
+                        st.session_state.pop(f"s_{j}", None)
                     st.rerun()
 
         if not all_gdfs:

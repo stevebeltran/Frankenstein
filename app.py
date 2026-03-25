@@ -3317,6 +3317,17 @@ if st.session_state['csvs_ready']:
             _dur_min  = round((datetime.datetime.now() - _start_dt).total_seconds() / 60, 1)
         except Exception:
             _dur_min = ''
+
+        avg_resp_time    = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
+        avg_ground_speed = CONFIG["DEFAULT_TRAFFIC_SPEED"] * (1 - traffic_level / 100)
+        avg_time_saved   = ((sum((d['radius_m']/1609.34*1.4/avg_ground_speed)*60 for d in active_drones) / len(active_drones)) - avg_resp_time) if active_drones and avg_ground_speed > 0 else 0.0
+        _calls_lons = df_calls['lon'].dropna()
+        _calls_lats = df_calls['lat'].dropna()
+        minx = float(_calls_lons.min()) if len(_calls_lons) else 0
+        maxx = float(_calls_lons.max()) if len(_calls_lons) else 0
+        miny = float(_calls_lats.min()) if len(_calls_lats) else 0
+        maxy = float(_calls_lats.max()) if len(_calls_lats) else 0
+        area_sq_mi_est   = max(1, int((maxx - minx) * (maxy - miny) * 3280))
         export_details = {
             # Session
             "session_id":            st.session_state.get('session_id', ''),

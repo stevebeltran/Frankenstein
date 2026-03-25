@@ -613,11 +613,26 @@ def aggressive_parse_calls(uploaded_files):
 
     for cfile in uploaded_files:
         try:
-            content = cfile.getvalue().decode('utf-8', errors='ignore')
-            first_line = content.split('\n')[0]
-            delim = ',' if first_line.count(',') > first_line.count('\t') else '\t'
-            raw_df = pd.read_csv(io.StringIO(content), sep=delim, dtype=str)
-            raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
+            fname = cfile.name.lower()
+            excel_exts = ('.xlsx', '.xls', '.xlsb', '.xlsm')
+
+            if fname.endswith(excel_exts):
+                # ── Excel path ────────────────────────────────────────────────
+                raw_bytes = cfile.getvalue()
+                engine = 'openpyxl'
+                if fname.endswith('.xls'):
+                    engine = 'xlrd'
+                elif fname.endswith('.xlsb'):
+                    engine = 'pyxlsb'
+                raw_df = pd.read_excel(io.BytesIO(raw_bytes), engine=engine, dtype=str)
+                raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
+            else:
+                # ── CSV / TXT path ────────────────────────────────────────────
+                content = cfile.getvalue().decode('utf-8', errors='ignore')
+                first_line = content.split('\n')[0]
+                delim = ',' if first_line.count(',') > first_line.count('\t') else '\t'
+                raw_df = pd.read_csv(io.StringIO(content), sep=delim, dtype=str)
+                raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
             
             res = pd.DataFrame()
             for field in ['lat', 'lon']:
@@ -1717,8 +1732,8 @@ if not st.session_state['csvs_ready']:
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
         st.file_uploader(
-            "Optional: Custom stations (CSV)",
-            type=['csv'],
+            "Optional: Custom stations (CSV or Excel)",
+            type=['csv', 'xlsx', 'xls', 'xlsm', 'xlsb'],
             key="sim_station_uploader",
             help="Include 'lat'/'lon' OR 'address' columns. Max ~20 locations for auto-geocoding."
         )
@@ -1749,15 +1764,15 @@ if not st.session_state['csvs_ready']:
         uploaded_files = st.file_uploader(
             "Drop your CAD export (+ optional stations CSV)",
             accept_multiple_files=True,
-            type=['csv', 'brinc', 'json', 'txt'],
+            type=['csv', 'xlsx', 'xls', 'xlsb', 'xlsm', 'brinc', 'json', 'txt'],
             label_visibility="collapsed",
             help="One file = raw CAD export. Two files = calls + stations. OR drop a .brinc file to restore a previous session."
         )
 
         st.markdown("""
         <div class="field-footnote">
-            <b style='color:#555;'>1 file</b> — any CAD export; stations auto-built from OSM<br>
-            <b style='color:#555;'>2+ files</b> — calls + stations (any column names)<br>
+            <b style='color:#555;'>1 file</b> — any CAD export (CSV or Excel); stations auto-built from OSM<br>
+            <b style='color:#555;'>2+ files</b> — calls + stations (CSV or Excel, any column names)<br>
             <b style='color:#39FF14;'>.brinc file</b> — instantly restore a saved deployment<br>
             Max 25,000 calls · 100 stations
         </div>
@@ -1865,7 +1880,12 @@ if not st.session_state['csvs_ready']:
                     if station_file is not None:
                         with st.spinner("🔍 Reading stations file…"):
                             try:
-                                df_s = pd.read_csv(station_file)
+                                sfname = station_file.name.lower()
+                                if sfname.endswith(('.xlsx', '.xls', '.xlsm', '.xlsb')):
+                                    engine = 'xlrd' if sfname.endswith('.xls') else 'pyxlsb' if sfname.endswith('.xlsb') else 'openpyxl'
+                                    df_s = pd.read_excel(io.BytesIO(station_file.getvalue()), engine=engine)
+                                else:
+                                    df_s = pd.read_csv(station_file)
                                 df_s.columns = [str(c).lower().strip() for c in df_s.columns]
                                 if 'latitude' in df_s.columns: df_s = df_s.rename(columns={'latitude':'lat'})
                                 if 'longitude' in df_s.columns: df_s = df_s.rename(columns={'longitude':'lon'})

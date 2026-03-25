@@ -3026,22 +3026,11 @@ if st.session_state['csvs_ready']:
         if show_cards:
             st.markdown(f"""
             <h4 style='margin-top:8px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>
+            <div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:8px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>
             <style>
-            .unit-card {{ transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; position: relative; z-index: 1; }}
-            .unit-card:hover {{ transform: scale(1.02); box-shadow: 0 12px 24px rgba(0,210,255,0.15); z-index: 10; }}
+            .unit-card {{ transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; }}
+            .unit-card:hover {{ transform: scale(1.02); box-shadow: 0 8px 20px rgba(0,210,255,0.12); }}
             </style>
-            <script>
-            function equaliseCards() {{
-                var cards = window.parent.document.querySelectorAll('.unit-card');
-                var maxH = 0;
-                cards.forEach(function(c) {{ c.style.height = 'auto'; }});
-                cards.forEach(function(c) {{ if (c.offsetHeight > maxH) maxH = c.offsetHeight; }});
-                cards.forEach(function(c) {{ c.style.height = maxH + 'px'; }});
-            }}
-            window.addEventListener('load', equaliseCards);
-            setTimeout(equaliseCards, 400);
-            setTimeout(equaliseCards, 1200);
-            </script>
             """, unsafe_allow_html=True)
             if not active_drones:
                 st.markdown(f"""
@@ -3055,76 +3044,90 @@ if st.session_state['csvs_ready']:
                 </div>
                 """, unsafe_allow_html=True)
             else:
-                for i in range(0, len(active_drones), 2):
-                    cols = st.columns(2)
-                    for j in range(2):
-                        if i + j < len(active_drones):
-                            d = active_drones[i + j]
-                            short_name  = format_3_lines(d['name'])
-                            d_color     = d['color']
-                            d_type      = d['type']
-                            d_step      = d['deploy_step']
-                            d_savings   = d['annual_savings']
-                            d_flights   = d['marginal_flights']
-                            d_shared    = d['shared_flights']
-                            d_deflected = d['marginal_deflected']
-                            d_time      = d['avg_time_min']
-                            d_faa       = d['faa_ceiling']
-                            d_airport   = d['nearest_airport']
-                            d_cost      = d['cost']
-                            d_be        = d['be_text']
-                            d_lat       = d['lat']
-                            d_lon       = d['lon']
-                            d_address   = get_address_from_latlon(d_lat, d_lon)
-                            gmaps_url   = f"https://www.google.com/maps/search/?api=1&query={d_lat},{d_lon}"
+                # Build all card HTML at once so CSS grid can equalise heights natively.
+                # CSS grid with align-items:stretch is the only reliable cross-browser way
+                # to guarantee every card in a row is exactly the same height regardless
+                # of content — no JS, no fixed pixel heights needed.
+                MAX_PATROL_HOURS = 11.6
+                MAX_PATROL_MINS  = MAX_PATROL_HOURS * 60
 
-                            # Patrol time capacity line — shown when daily flights are high
-                            # BRINC Responder max patrol time = 11.6 hours/day
-                            MAX_PATROL_HOURS = 11.6
-                            MAX_PATROL_MINS  = MAX_PATROL_HOURS * 60  # 696 minutes
-                            total_daily_flights = d_flights + d_shared
-                            patrol_time_line = ""
-                            if total_daily_flights > 0 and d_savings > 0:
-                                mins_per_flight = MAX_PATROL_MINS / total_daily_flights
-                                # Show the line whenever flights are substantial enough to matter
-                                if total_daily_flights >= 5 or mins_per_flight < 60:
-                                    patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= 30 else "#00D2FF"
-                                    patrol_time_line = f'<div style="border-top:1px dashed rgba(255,255,255,0.15); margin-top:5px; padding-top:5px; font-size:0.58rem; color:{text_muted};">{total_daily_flights:.1f} flights ÷ {MAX_PATROL_HOURS}hr max = <span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight</span></div>'
+                cards_html = []
+                for d in active_drones:
+                    short_name  = format_3_lines(d["name"])
+                    d_color     = d["color"]
+                    d_type      = d["type"]
+                    d_step      = d["deploy_step"]
+                    d_savings   = d["annual_savings"]
+                    d_flights   = d["marginal_flights"]
+                    d_shared    = d["shared_flights"]
+                    d_deflected = d["marginal_deflected"]
+                    d_time      = d["avg_time_min"]
+                    d_faa       = d["faa_ceiling"]
+                    d_airport   = d["nearest_airport"]
+                    d_cost      = d["cost"]
+                    d_be        = d["be_text"]
+                    d_lat       = d["lat"]
+                    d_lon       = d["lon"]
+                    d_address   = get_address_from_latlon(d_lat, d_lon)
+                    gmaps_url   = f"https://www.google.com/maps/search/?api=1&query={d_lat},{d_lon}"
 
-                            cols[j].markdown(f"""
-<div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color}; border-left:1px solid {card_border}; border-right:1px solid {card_border}; border-bottom:1px solid {card_border}; border-radius:4px; padding:12px; margin-bottom:12px; cursor:default; display:flex; flex-direction:column; box-sizing:border-box; overflow:visible;">
-<div style="font-weight:700; font-size:0.73rem; color:{card_title}; margin-bottom:2px; line-height:1.2em;">{short_name}</div>
-<div style="font-size:0.58rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; white-space:nowrap;">{d_type} · Phase #{d_step}</div>
-<div style="font-size:0.62rem; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-<a href="{gmaps_url}" target="_blank" title="Open in Google Maps" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
-</div>
-<div style="background:rgba(0,210,255,0.07); border-radius:4px; padding:8px; text-align:center; margin-bottom:8px;">
-<div style="font-size:0.6rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
-<div style="font-size:1.25rem; font-weight:900; color:{accent_color};">${d_savings:,.0f}</div>
-{patrol_time_line}
-</div>
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem;">
-<div style="color:{text_muted};">Net Flights/day</div>
-<div style="text-align:right; font-weight:700; color:{accent_color};">{d_flights:.1f}</div>
-<div style="color:{text_muted};">Shared Flights/day</div>
-<div style="text-align:right; font-weight:700; color:{card_title};">{d_shared:.1f}</div>
-<div style="color:{text_muted};">Resolved/day</div>
-<div style="text-align:right; font-weight:700; color:{card_title};">{d_deflected:.1f}</div>
-<div style="color:{text_muted};">Avg Response</div>
-<div style="text-align:right; font-weight:700; color:{card_title};">{d_time:.1f} min</div>
-<div style="color:{text_muted};">FAA Ceiling</div>
-<div style="text-align:right; font-weight:700; color:{card_title};">{d_faa}</div>
-<div style="color:{text_muted};">Nearest Airfield</div>
-<div style="text-align:right; font-weight:700; color:{card_title}; font-size:0.55rem; word-break:break-word;">{d_airport}</div>
-</div>
-<div style="border-top:1px dashed {card_border}; margin-top:8px; padding-top:6px; display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem;">
-<div style="color:{text_muted};">CapEx</div>
-<div style="text-align:right; font-weight:700; color:{card_title};">${d_cost:,.0f}</div>
-<div style="color:{text_muted};">ROI</div>
-<div style="text-align:right; font-weight:800; color:{accent_color};">{d_be}</div>
-</div>
-</div>
-""", unsafe_allow_html=True)
+                    total_daily_flights = d_flights + d_shared
+                    patrol_time_line = ""
+                    if total_daily_flights > 0 and d_savings > 0:
+                        mins_per_flight = MAX_PATROL_MINS / total_daily_flights
+                        if total_daily_flights >= 5 or mins_per_flight < 60:
+                            patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= 30 else "#00D2FF"
+                            patrol_time_line = (
+                                f'<div style="border-top:1px dashed rgba(255,255,255,0.15); margin-top:5px; ' +
+                                f'padding-top:5px; font-size:0.58rem; color:{text_muted};">' +
+                                f'{total_daily_flights:.1f} flights ÷ {MAX_PATROL_HOURS}hr max = ' +
+                                f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight</span></div>'
+                            )
+
+                    cards_html.append(f"""
+<div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color}; border-left:1px solid {card_border}; border-right:1px solid {card_border}; border-bottom:1px solid {card_border}; border-radius:4px; padding:12px; cursor:default; display:flex; flex-direction:column; box-sizing:border-box;">
+  <div style="font-weight:700; font-size:0.73rem; color:{card_title}; margin-bottom:2px; line-height:1.25em;">{short_name}</div>
+  <div style="font-size:0.58rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{d_type} · Phase #{d_step}</div>
+  <div style="font-size:0.62rem; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+    <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
+  </div>
+  <div style="background:rgba(0,210,255,0.07); border-radius:4px; padding:8px; text-align:center; margin-bottom:8px;">
+    <div style="font-size:0.6rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
+    <div style="font-size:1.25rem; font-weight:900; color:{accent_color};">${d_savings:,.0f}</div>
+    {patrol_time_line}
+  </div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem; flex:1;">
+    <div style="color:{text_muted};">Net Flights/day</div>
+    <div style="text-align:right; font-weight:700; color:{accent_color};">{d_flights:.1f}</div>
+    <div style="color:{text_muted};">Shared Flights/day</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_shared:.1f}</div>
+    <div style="color:{text_muted};">Resolved/day</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_deflected:.1f}</div>
+    <div style="color:{text_muted};">Avg Response</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_time:.1f} min</div>
+    <div style="color:{text_muted};">FAA Ceiling</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_faa}</div>
+    <div style="color:{text_muted};">Nearest Airfield</div>
+    <div style="text-align:right; font-weight:700; color:{card_title}; font-size:0.55rem; word-break:break-word;">{d_airport}</div>
+  </div>
+  <div style="border-top:1px dashed {card_border}; margin-top:8px; padding-top:6px; display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem;">
+    <div style="color:{text_muted};">CapEx</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">${d_cost:,.0f}</div>
+    <div style="color:{text_muted};">ROI</div>
+    <div style="text-align:right; font-weight:800; color:{accent_color};">{d_be}</div>
+  </div>
+</div>""")
+
+                # Emit all cards in one markdown call inside a CSS grid.
+                # grid-template-columns: repeat(2, 1fr) gives 2 per row.
+                # align-items: stretch makes every cell the same height as the tallest.
+                all_cards_html = (
+                    f'<div style="display:grid; grid-template-columns:repeat(2,1fr); ' +
+                    f'gap:12px; align-items:stretch; margin-bottom:12px;">' +
+                    "".join(cards_html) +
+                    "</div>"
+                )
+                st.markdown(all_cards_html, unsafe_allow_html=True)
 
     # ── 3D SWARM SIMULATION ───────────────────────────────────────────
     if fleet_capex > 0:

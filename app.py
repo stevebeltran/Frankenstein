@@ -592,11 +592,15 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
 def aggressive_parse_calls(uploaded_files):
     all_calls_list = []
     CV = {
-        'date': ['received date','incident date','call date','call creation date','calldatetime','call datetime','calltime','timestamp','date','datetime','dispatch date','time received','incdate'],
-        'time': ['call creation time','call time','dispatch time','received time','time', 'hour', 'hour_rept'],
-        'priority': ['call priority', 'priority level', 'priority', 'pri', 'urgency', 'offense', 'event', 'type'],
-        'lat': ['latitude','lat', 'y coord', 'ycoord', 'ycoor','addressy','geoy'],
-        'lon': ['longitude','lon','long','x coord', 'xcoord', 'xcoor','addressx', 'geox']
+        'date': ['received date','incident date','call date','call creation date','calldatetime','call datetime','calltime','timestamp','date','datetime','dispatch date','time received','incdate','date_rept','date_occu'],
+        'time': ['call creation time','call time','dispatch time','received time','time', 'hour', 'hour_rept','hour_occu'],
+        'priority': ['call priority', 'priority level', 'priority', 'pri', 'urgency', 'offense', 'event', 'type','incident type','call type','nature'],
+        'lat': ['latitude','lat','y coord','ycoord','ycoor','addressy','geoy','y_coord','map_y',
+                'point_y','gps_lat','gps_latitude','ylat','coord_y','northing','y_wgs','lat_wgs',
+                'incident_lat','inc_lat','event_lat','y_coordinate','address_y','ylocation'],
+        'lon': ['longitude','lon','long','x coord','xcoord','xcoor','addressx','geox','x_coord',
+                'map_x','point_x','gps_lon','gps_long','gps_longitude','xlon','coord_x','easting',
+                'x_wgs','lon_wgs','incident_lon','inc_lon','event_lon','x_coordinate','address_x','xlocation']
     }
 
     def parse_priority(raw):
@@ -638,6 +642,49 @@ def aggressive_parse_calls(uploaded_files):
             for field in ['lat', 'lon']:
                 found = [c for c in raw_df.columns if any(s in c for s in CV[field])]
                 if found: res[field] = pd.to_numeric(raw_df[found[0]], errors='coerce')
+
+            # ── Fallback: no column name matched — scan numeric columns by value range ──
+            # Lat: -90 to 90, Lon: -180 to 180. Pick best candidate for each.
+            if 'lat' not in res.columns or 'lon' not in res.columns:
+                numeric_cols = []
+                for c in raw_df.columns:
+                    series = pd.to_numeric(raw_df[c], errors='coerce').dropna()
+                    if len(series) > 10:
+                        numeric_cols.append((c, series))
+
+                lat_candidates, lon_candidates = [], []
+                for c, series in numeric_cols:
+                    mn, mx = series.min(), series.max()
+                    # Reject if already assigned
+                    if c in (res.get('_lat_col',''), res.get('_lon_col','')):
+                        continue
+                    # Large integer coords (State Plane) — treat as potential coord pair
+                    if mx > 1000:
+                        lat_candidates.append((c, series))
+                        lon_candidates.append((c, series))
+                        continue
+                    if -90 <= mn and mx <= 90 and mn < -1:
+                        lat_candidates.append((c, series))
+                    if -180 <= mn and mx <= 180 and (mn < -90 or mx > 90):
+                        lon_candidates.append((c, series))
+
+                # Prefer candidate whose name hints at lat/lon
+                def _score(name, hints):
+                    return sum(1 for h in hints if h in name)
+
+                if 'lat' not in res.columns and lat_candidates:
+                    lat_candidates.sort(key=lambda x: -_score(x[0], ['lat','y','north']))
+                    best_lat_col = lat_candidates[0][0]
+                    res['lat'] = pd.to_numeric(raw_df[best_lat_col], errors='coerce')
+
+                if 'lon' not in res.columns and lon_candidates:
+                    # Don't reuse the lat column
+                    used = res.get('lat', pd.Series()).name if 'lat' in res.columns else None
+                    lon_candidates = [(c, s) for c, s in lon_candidates if c != used]
+                    if lon_candidates:
+                        lon_candidates.sort(key=lambda x: -_score(x[0], ['lon','long','x','east']))
+                        best_lon_col = lon_candidates[0][0]
+                        res['lon'] = pd.to_numeric(raw_df[best_lon_col], errors='coerce')
             
             p_found = [c for c in raw_df.columns if any(s in c for s in CV['priority'])]
             if p_found: res['priority'] = raw_df[p_found[0]].apply(parse_priority)

@@ -28,7 +28,8 @@ defaults = {
     'k_resp': 2, 'k_guard': 0, 'r_resp': 2.0, 'r_guard': 8.0,
     'dfr_rate': 25, 'deflect_rate': 30, 'total_original_calls': 0,
     'onboarding_done': False, 'trigger_sim': False, 'city_count': 1,
-    'brinc_user': 'steven.beltran'
+    'brinc_user': 'steven.beltran',
+    'pd_chief_name': '', 'pd_dept_name': '', 'pd_dept_email': '', 'pd_dept_phone': ''
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -532,29 +533,124 @@ def aggressive_parse_calls(uploaded_files):
                 res['date'] = dt_series.dt.strftime('%Y-%m-%d')
                 res['time'] = dt_series.dt.strftime('%H:%M:%S')
 
-            # --- COORDINATE CONVERSION (STATE PLANE DETECTOR) ---
+            # --- COORDINATE CONVERSION (STATE PLANE / LARGE-INTEGER DETECTOR) ---
             if not res.empty and 'lat' in res.columns and 'lon' in res.columns:
                 res = res[(res['lat'] != 0) & (res['lon'] != 0)].dropna(subset=['lat', 'lon'])
                 if not res.empty:
                     max_val = max(res['lat'].abs().max(), res['lon'].abs().max())
                     if max_val > 1000:
-                        try:
-                            # State Plane to WGS84 conversion (Defaulting to TX South Central for Victoria)
-                            scale = 100.0 if max_val > 100000000 else 1.0
-                            transformer = pyproj.Transformer.from_crs("EPSG:2278", "EPSG:4326", always_xy=True)
-                            lons, lats = transformer.transform(res['lon'].values / scale, res['lat'].values / scale)
-                            res['lon'], res['lat'] = lons, lats
-                        except Exception:
-                            pass
-            
+                        converted = False
+                        # Strategy 1: Try common State Plane CRS at /100 and /1 scales
+                        candidate_crs = [
+                            "EPSG:2278",  # TX South Central (ftUS)
+                            "EPSG:2277",  # TX Central (ftUS)
+                            "EPSG:2276",  # TX North Central (ftUS)
+                            "EPSG:2279",  # TX South (ftUS)
+                            "EPSG:32140", # TX South Central (m)
+                        ]
+                        for scale in [100.0, 1.0]:
+                            for crs in candidate_crs:
+                                try:
+                                    transformer = pyproj.Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+                                    test_lons, test_lats = transformer.transform(
+                                        res['lon'].values[:20] / scale,
+                                        res['lat'].values[:20] / scale
+                                    )
+                                    if (24 < float(test_lats.mean()) < 50 and
+                                            -130 < float(test_lons.mean()) < -60 and
+                                            float(test_lats.std()) < 5 and
+                                            float(test_lons.std()) < 5):
+                                        lons, lats = transformer.transform(
+                                            res['lon'].values / scale, res['lat'].values / scale
+                                        )
+                                        res['lon'], res['lat'] = lons, lats
+                                        converted = True
+                                        break
+                                except Exception:
+                                    continue
+                            if converted:
+                                break
+
+                        # Strategy 2: If CRS conversion failed, anchor to city column geocode
+                        if not converted:
+                            try:
+                                city_name = None
+                                for col in ['city', 'city_name', 'municipality', 'jurisdiction']:
+                                    if col in raw_df.columns:
+                                        top = raw_df[col].dropna().str.strip().value_counts()
+                                        if not top.empty:
+                                            city_name = top.index[0]
+                                            break
+                                state_name = None
+                                for col in ['state', 'state_name']:
+                                    if col in raw_df.columns:
+                                        top = raw_df[col].dropna().str.strip().value_counts()
+                                        if not top.empty:
+                                            state_name = top.index[0]
+                                            break
+                                if city_name:
+                                    query_str = f"{city_name}, {state_name}" if state_name else city_name
+                                    geo_url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(query_str)}&limit=1"
+                                    req = urllib.request.Request(geo_url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"})
+                                    with urllib.request.urlopen(req, timeout=10) as resp:
+                                        geo_data = json.loads(resp.read().decode("utf-8"))
+                                    if geo_data:
+                                        anchor_lat = float(geo_data[0]["lat"])
+                                        anchor_lon = float(geo_data[0]["lon"])
+                                        raw_cx = res["lon"].median()
+                                        raw_cy = res["lat"].median()
+                                        city_radius_deg = 0.35
+                                        raw_spread = max(res["lon"].std(), res["lat"].std(), 1)
+                                        deg_per_unit = city_radius_deg / raw_spread
+                                        res["lon"] = anchor_lon + (res["lon"] - raw_cx) * deg_per_unit
+                                        res["lat"] = anchor_lat + (res["lat"] - raw_cy) * deg_per_unit
+                                        converted = True
+                            except Exception:
+                                pass
+
+                        if converted:
+                            res = res[
+                                (res["lat"] > 18) & (res["lat"] < 72) &
+                                (res["lon"] > -170) & (res["lon"] < -60)
+                            ]
+
+            # City column detection: store top city name on rows for location detection
+            for col in ["city", "city_name", "municipality"]:
+                if col in raw_df.columns:
+                    top_city = raw_df[col].dropna().str.strip().value_counts()
+                    if not top_city.empty:
+                        res["_csv_city"] = top_city.index[0]
+                        break
+
             all_calls_list.append(res)
         except: continue
         
     if not all_calls_list: return pd.DataFrame()
     return pd.concat(all_calls_list, ignore_index=True).dropna(subset=['lat', 'lon'])
 
+def _make_random_stations(df_calls, n=40):
+    """Last-resort fallback: scatter synthetic stations across the call bounding box."""
+    lats = df_calls['lat'].dropna().values
+    lons = df_calls['lon'].dropna().values
+    if len(lats) == 0: return pd.DataFrame()
+    q1_la, q3_la = np.percentile(lats, 25), np.percentile(lats, 75)
+    q1_lo, q3_lo = np.percentile(lons, 25), np.percentile(lons, 75)
+    iqr_la, iqr_lo = q3_la - q1_la, q3_lo - q1_lo
+    mask = ((lats >= q1_la - 2*iqr_la) & (lats <= q3_la + 2*iqr_la) &
+            (lons >= q1_lo - 2*iqr_lo) & (lons <= q3_lo + 2*iqr_lo))
+    clean_lats, clean_lons = lats[mask], lons[mask]
+    np.random.seed(42)
+    idx = np.random.choice(len(clean_lats), min(n, len(clean_lats)), replace=False)
+    types = (['Police']*15 + ['Fire']*15 + ['School']*10)[:n]
+    return pd.DataFrame({
+        'name': [f"{t} Station {i+1}" for i, t in enumerate(types[:len(idx)])],
+        'lat':  clean_lats[idx],
+        'lon':  clean_lons[idx],
+        'type': types[:len(idx)]
+    })
+
 def generate_stations_from_calls(df_calls, max_stations=100):
-    """Auto-generate stations by querying OpenStreetMap."""
+    """Query OpenStreetMap for real stations; fall back gracefully if unavailable."""
     lats = df_calls['lat'].dropna().values
     lons = df_calls['lon'].dropna().values
     if len(lats) == 0: return None, "No coordinates available to generate stations."
@@ -566,63 +662,77 @@ def generate_stations_from_calls(df_calls, max_stations=100):
     mask = (lats >= q1_la - 2.5 * iqr_la) & (lats <= q3_la + 2.5 * iqr_la) & (lons >= q1_lo - 2.5 * iqr_lo) & (lons <= q3_lo + 2.5 * iqr_lo)
     cen_lat, cen_lon = lats[mask].mean(), lons[mask].mean()
 
-    R = 0.25 
-    bbox = f"{cen_lat - R},{cen_lon - R},{cen_lat + R},{cen_lon + R}"
-    query = (
-        f'[out:json][timeout:25];'
-        f'(node["amenity"="fire_station"]({bbox});'
-        f'node["amenity"="police"]({bbox});'
-        f'node["amenity"="school"]({bbox});'
-        f'way["amenity"="fire_station"]({bbox});'
-        f'way["amenity"="police"]({bbox});'
-        f'way["amenity"="school"]({bbox});'
-        f');out center;'
-    )
+    # Try a slightly larger radius first, then fall back to tighter if too many results
+    for R in [0.25, 0.45]:
+        bbox = f"{cen_lat - R},{cen_lon - R},{cen_lat + R},{cen_lon + R}"
+        query = (
+            f'[out:json][timeout:30];'
+            f'(node["amenity"="fire_station"]({bbox});'
+            f'node["amenity"="police"]({bbox});'
+            f'node["amenity"="school"]({bbox});'
+            f'way["amenity"="fire_station"]({bbox});'
+            f'way["amenity"="police"]({bbox});'
+            f'way["amenity"="school"]({bbox});'
+            f');out center;'
+        )
 
-    data = None
-    for osm_url in ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']:
-        try:
-            req = urllib.request.Request(f"{osm_url}?data={urllib.parse.quote(query)}", headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-            break
-        except Exception: continue
+        data = None
+        osm_urls = [
+            'https://overpass-api.de/api/interpreter',
+            'https://overpass.kumi.systems/api/interpreter',
+            'https://overpass.openstreetmap.ru/api/interpreter',  # third mirror
+        ]
+        for osm_url in osm_urls:
+            try:
+                req = urllib.request.Request(
+                    f"{osm_url}?data={urllib.parse.quote(query)}",
+                    headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'}
+                )
+                with urllib.request.urlopen(req, timeout=25) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+                break
+            except Exception:
+                continue
 
-    if data is None: return None, "OpenStreetMap query failed. Check your network connection."
+        if data is None:
+            continue  # try next radius / give up
 
-    elements = data.get('elements', [])
-    rows = []
-    for el in elements:
-        tags = el.get('tags', {})
-        lat = el.get('lat') or (el.get('center') or {}).get('lat')
-        lon = el.get('lon') or (el.get('center') or {}).get('lon')
-        if lat is None or lon is None: continue
-        
-        amenity = tags.get('amenity', '')
-        type_label = 'Fire' if amenity == 'fire_station' else 'Police' if amenity == 'police' else 'School'
-        fac_name = tags.get('name', f"{type_label} Station")
-        rows.append({'name': fac_name, 'lat': round(lat, 6), 'lon': round(lon, 6), 'type': type_label})
+        elements = data.get('elements', [])
+        rows = []
+        for el in elements:
+            tags = el.get('tags', {})
+            lat = el.get('lat') or (el.get('center') or {}).get('lat')
+            lon = el.get('lon') or (el.get('center') or {}).get('lon')
+            if lat is None or lon is None: continue
+            amenity = tags.get('amenity', '')
+            type_label = 'Fire' if amenity == 'fire_station' else 'Police' if amenity == 'police' else 'School'
+            fac_name = tags.get('name', f"{type_label} Station")
+            rows.append({'name': fac_name, 'lat': round(lat, 6), 'lon': round(lon, 6), 'type': type_label})
 
-    if not rows: return None, "No police/fire/school stations found near this area on OpenStreetMap."
+        if rows:
+            df_s = pd.DataFrame(rows).drop_duplicates(subset=['lat', 'lon']).reset_index(drop=True)
+            # Enforce unique names
+            counts = {}
+            new_names = []
+            for n in df_s['name']:
+                if n in counts:
+                    counts[n] += 1
+                    new_names.append(f"{n} ({counts[n]})")
+                else:
+                    counts[n] = 0
+                    new_names.append(n)
+            df_s['name'] = new_names
+            if len(df_s) > max_stations:
+                priority_order = {'Police': 0, 'Fire': 1, 'School': 2}
+                df_s['_pri'] = df_s['type'].map(priority_order).fillna(3)
+                df_s = df_s.sort_values('_pri').head(max_stations).drop(columns='_pri').reset_index(drop=True)
+            return df_s, f"Auto-generated {len(df_s)} stations from OpenStreetMap."
 
-    df_s = pd.DataFrame(rows).drop_duplicates(subset=['lat', 'lon']).reset_index(drop=True)
-    
-    # ENFORCE UNIQUE NAMES FOR OSM DATA
-    counts = {}
-    new_names = []
-    for n in df_s['name']:
-        if n in counts:
-            counts[n] += 1
-            new_names.append(f"{n} ({counts[n]})")
-        else:
-            counts[n] = 0
-            new_names.append(n)
-    df_s['name'] = new_names
-
-    if len(df_s) > max_stations:
-        priority_order = {'Police': 0, 'Fire': 1, 'School': 2}
-        df_s['_pri'] = df_s['type'].map(priority_order).fillna(3)
-        df_s = df_s.sort_values('_pri').head(max_stations).drop(columns='_pri').reset_index(drop=True)
+    # ── All OSM attempts failed — use random stations from call locations ──
+    df_fallback = _make_random_stations(df_calls, n=40)
+    if not df_fallback.empty:
+        return df_fallback, "⚠️ OpenStreetMap unavailable — using estimated station locations from call data. Upload a stations CSV for accuracy."
+    return None, "Could not generate stations — no valid call coordinates."
 
     return df_s, f"Auto-generated {len(df_s)} stations from OpenStreetMap."
 
@@ -1579,10 +1689,13 @@ if not st.session_state['csvs_ready']:
                     else:
                         with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools…"):
                             df_s, osm_note = generate_stations_from_calls(df_c)
-                        if df_s is None:
-                            st.error(f"❌ Could not auto-generate stations: {osm_note}")
-                            st.stop()
-                        st.toast(f"✅ {osm_note}")
+                        if df_s is None or df_s.empty:
+                            # Final safety net: scatter stations across call bounding box
+                            df_s = _make_random_stations(df_c, n=40)
+                            osm_note = "⚠️ Could not reach any map source — using estimated station positions from call data."
+                            st.warning(osm_note)
+                        else:
+                            st.toast(f"✅ {osm_note}")
 
                     if len(df_s) > 100:
                         df_s = df_s.sample(100, random_state=42).reset_index(drop=True)
@@ -1598,14 +1711,45 @@ if not st.session_state['csvs_ready']:
                     st.session_state['df_stations']          = df_s
 
                     with st.spinner(get_jurisdiction_message()):
-                        detected_state_full, detected_city = reverse_geocode_state(
-                            df_c['lat'].iloc[0], df_c['lon'].iloc[0]
-                        )
-                        if detected_state_full and detected_state_full in US_STATES_ABBR:
-                            st.session_state['active_state'] = US_STATES_ABBR[detected_state_full]
-                            if detected_city and detected_city != 'Unknown City':
-                                st.session_state['active_city'] = detected_city
-                            st.toast(f"📍 Detected: {st.session_state['active_city']}, {st.session_state['active_state']}")
+                        # Priority 1: use city name embedded in the CSV itself
+                        csv_city_detected = False
+                        if '_csv_city' in df_c.columns:
+                            csv_city_val = str(df_c['_csv_city'].iloc[0]).strip().title()
+                            if csv_city_val and csv_city_val.lower() not in ('nan', 'none', ''):
+                                # Forward-geocode to get the state abbreviation
+                                try:
+                                    geo_url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(csv_city_val)}&limit=1&countrycodes=us"
+                                    req_geo = urllib.request.Request(geo_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+                                    with urllib.request.urlopen(req_geo, timeout=8) as resp_geo:
+                                        geo_result = json.loads(resp_geo.read().decode('utf-8'))
+                                    if geo_result:
+                                        display_name = geo_result[0].get('display_name', '')
+                                        # display_name format: "City, County, State, US"
+                                        parts = [p.strip() for p in display_name.split(',')]
+                                        state_full = parts[2] if len(parts) >= 3 else ''
+                                        if state_full in US_STATES_ABBR:
+                                            st.session_state['active_city']  = csv_city_val
+                                            st.session_state['active_state'] = US_STATES_ABBR[state_full]
+                                            st.session_state['target_cities'] = [{"city": csv_city_val, "state": US_STATES_ABBR[state_full]}]
+                                            st.toast(f"📍 Detected from data: {csv_city_val}, {US_STATES_ABBR[state_full]}")
+                                            csv_city_detected = True
+                                except Exception:
+                                    pass
+
+                        # Priority 2: reverse-geocode a call coordinate
+                        if not csv_city_detected:
+                            try:
+                                detected_state_full, detected_city = reverse_geocode_state(
+                                    df_c['lat'].iloc[0], df_c['lon'].iloc[0]
+                                )
+                                if detected_state_full and detected_state_full in US_STATES_ABBR:
+                                    st.session_state['active_state'] = US_STATES_ABBR[detected_state_full]
+                                    if detected_city and detected_city != 'Unknown City':
+                                        st.session_state['active_city'] = detected_city
+                                        st.session_state['target_cities'] = [{"city": detected_city, "state": US_STATES_ABBR[detected_state_full]}]
+                                    st.toast(f"📍 Detected: {st.session_state['active_city']}, {st.session_state['active_state']}")
+                            except Exception:
+                                pass
                     st.session_state['csvs_ready'] = True
                     st.rerun()
 
@@ -2593,8 +2737,8 @@ if st.session_state['csvs_ready']:
                                     patrol_time_line = f'<div style="border-top:1px dashed rgba(255,255,255,0.15); margin-top:5px; padding-top:5px; font-size:0.58rem; color:{text_muted};">{total_daily_flights:.1f} flights ÷ {MAX_PATROL_HOURS}hr max = <span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight</span></div>'
 
                             cols[j].markdown(f"""
-<div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color}; border-left:1px solid {card_border}; border-right:1px solid {card_border}; border-bottom:1px solid {card_border}; border-radius:4px; padding:12px; margin-bottom:12px; cursor:default; height:360px; min-height:360px; max-height:360px; display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box;">
-<div style="font-weight:700; font-size:0.73rem; color:{card_title}; margin-bottom:2px; height:2.2em; overflow:hidden; line-height:1.1em;">{short_name}</div>
+<div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color}; border-left:1px solid {card_border}; border-right:1px solid {card_border}; border-bottom:1px solid {card_border}; border-radius:4px; padding:12px; margin-bottom:12px; cursor:default; height:390px; min-height:390px; max-height:390px; display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box;">
+<div style="font-weight:700; font-size:0.73rem; color:{card_title}; margin-bottom:2px; min-height:2.2em; max-height:3.5em; overflow:hidden; line-height:1.15em;">{short_name}</div>
 <div style="font-size:0.58rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; white-space:nowrap;">{d_type} · Phase #{d_step}</div>
 <div style="font-size:0.62rem; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
 <a href="{gmaps_url}" target="_blank" title="Open in Google Maps" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
@@ -2799,22 +2943,32 @@ if st.session_state['csvs_ready']:
         analytics_html_block = generate_command_center_html(df_calls, total_orig_calls=st.session_state.get('total_original_calls', total_calls))
         components.html(analytics_html_block, height=1600, scrolling=False)
 
-    # ── PUBLIC BUILDING OPPORTUNITIES ──
-    st.markdown("---")
-    st.markdown(f"<h3 style='color:{text_main};'>🏢 Public Building Opportunities</h3>", unsafe_allow_html=True)
-    st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Candidate launch locations (Police, Fire, EMS, Schools, etc.) are shown on the map above. The full directory with coordinates is included in the exported HTML proposal.</div>", unsafe_allow_html=True)
-
     # ── EXPORT BUTTONS ──
     if fleet_capex > 0:
         st.sidebar.markdown("---")
         
         brinc_user = st.sidebar.text_input("BRINC Email Prefix (first.last)", value=st.session_state.get('brinc_user', 'steven.beltran'), key='brinc_user', help="Enter 'first.last' to auto-generate your name and @brincdrones.com email address.")
         st.sidebar.caption("*(Press **Enter** after typing to apply changes)*")
+
+        st.sidebar.markdown(f"<div style='font-size:0.75rem; color:{text_muted}; margin-top:8px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;'>Police Dept Signatory</div>", unsafe_allow_html=True)
+        pd_chief_name  = st.sidebar.text_input("Chief / Signatory Name",  value=st.session_state.get('pd_chief_name', ''),  key='pd_chief_name',  placeholder="e.g. Chief Jane Smith")
+        pd_dept_name   = st.sidebar.text_input("Department Name",          value=st.session_state.get('pd_dept_name', ''),   key='pd_dept_name',   placeholder="e.g. Durham Police Department")
+        pd_dept_email  = st.sidebar.text_input("Department Email",         value=st.session_state.get('pd_dept_email', ''),  key='pd_dept_email',  placeholder="e.g. jsmith@durhampd.gov")
+        pd_dept_phone  = st.sidebar.text_input("Department Phone",         value=st.session_state.get('pd_dept_phone', ''),  key='pd_dept_phone',  placeholder="e.g. (919) 560-4322")
+        st.sidebar.caption("*(Press **Enter** after typing to apply)*")
         
         user_clean = brinc_user.strip()
         if not user_clean: user_clean = "steven.beltran"
         prop_email = f"{user_clean}@brincdrones.com"
         prop_name = " ".join([word.capitalize() for word in user_clean.split('.')])
+
+        # Police dept signatory — falls back gracefully if not filled in
+        pd_chief  = pd_chief_name.strip()  if pd_chief_name.strip()  else f"Chief of Police, {prop_city}"
+        pd_dept   = pd_dept_name.strip()   if pd_dept_name.strip()   else f"{prop_city} Police Department"
+        pd_email  = pd_dept_email.strip()  if pd_dept_email.strip()  else ""
+        pd_phone  = pd_dept_phone.strip()  if pd_dept_phone.strip()  else ""
+        pd_email_html = f'📧 <a href="mailto:{pd_email}">{pd_email}</a><br>' if pd_email else ""
+        pd_phone_html = f'📞 {pd_phone}<br>' if pd_phone else ""
 
         prop_city  = st.session_state.get('active_city', 'City')
         prop_state = st.session_state.get('active_state', 'FL')
@@ -3037,15 +3191,13 @@ if st.session_state['csvs_ready']:
 
             <p>To make a contribution or learn more about sponsorship opportunities, please contact:</p>
             <div style="background:#f8f9fa; border:1px solid #eee; border-radius:8px; padding:20px; margin:20px 0;">
-                <strong>{prop_name}</strong><br>
-                BRINC Drones — DFR Program Coordinator<br>
-                📧 <a href="mailto:{prop_email}">{prop_email}</a><br>
-                🌐 <a href="https://brincdrones.com" target="_blank">brincdrones.com</a><br>
-                📞 +1 (855) 950-0226
+                <strong>{pd_chief}</strong><br>
+                {pd_dept}<br>
+                {pd_email_html}{pd_phone_html}
             </div>
             <p>Together, we can build a safer, more prosperous {prop_city}. Thank you for your consideration and for your commitment to this community.</p>
             <p>Respectfully,</p>
-            <p><strong>{prop_name}</strong><br>BRINC Drones, Inc. | Drone as a First Responder Program</p>
+            <p><strong>{pd_chief}</strong><br>{pd_dept}</p>
             
             <div style="margin-top: 50px; font-family:'Manrope', Arial, sans-serif !important;">
                 <div style="border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">

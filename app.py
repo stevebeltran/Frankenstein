@@ -1793,27 +1793,24 @@ if not st.session_state['csvs_ready']:
                         detected_city_for_boundary = st.session_state.get('active_city', '')
                         detected_state_for_boundary = st.session_state.get('active_state', '')
                         if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
-                            boundary_found = False
-                            # Try TIGER city/place FIRST — CAD data is always for a city, not a county
-                            b_success, b_gdf = fetch_tiger_city_shapefile(
-                                STATE_FIPS[detected_state_for_boundary],
-                                detected_city_for_boundary,
-                                SHAPEFILE_DIR
-                            )
-                            if b_success and b_gdf is not None:
-                                boundary_found = True
-                            # Only fall back to county parquet if TIGER city lookup failed
-                            if not boundary_found:
-                                for county_try in [detected_city_for_boundary, detected_city_for_boundary + " County"]:
-                                    b_success, b_gdf = fetch_county_boundary_local(detected_state_for_boundary, county_try)
-                                    if b_success and b_gdf is not None:
-                                        try:
-                                            safe_n = detected_city_for_boundary.replace(" ", "_").replace("/", "_")
-                                            b_gdf.to_file(os.path.join(SHAPEFILE_DIR, f"{safe_n}_{detected_state_for_boundary}.shp"))
-                                            boundary_found = True
-                                        except Exception:
-                                            pass
-                                        break
+                            # Both city and county boundaries come from the local parquet.
+                            # County names in the parquet match city names for county-seat cities
+                            # (e.g. "Victoria" city → "Victoria" county).
+                            # Try the city name directly, then with " County" stripped, then
+                            # with " County" appended — fetch_county_boundary_local normalises all forms.
+                            for name_try in [detected_city_for_boundary,
+                                             detected_city_for_boundary + " County"]:
+                                b_success, b_gdf = fetch_county_boundary_local(
+                                    detected_state_for_boundary, name_try)
+                                if b_success and b_gdf is not None:
+                                    try:
+                                        safe_n = detected_city_for_boundary.replace(" ", "_").replace("/", "_")
+                                        b_gdf.to_file(os.path.join(
+                                            SHAPEFILE_DIR,
+                                            f"{safe_n}_{detected_state_for_boundary}.shp"))
+                                    except Exception:
+                                        pass
+                                    break
 
                     st.session_state['csvs_ready'] = True
                     st.rerun()
@@ -1894,18 +1891,15 @@ if not st.session_state['csvs_ready']:
             prog.progress(10 + int((i / len(active_targets)) * 20),
                           text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
             
-            if is_county:
-                success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
-            else:
-                # First try as a city/place via TIGER
-                success, temp_gdf = fetch_tiger_city_shapefile(STATE_FIPS[s_name], c_name, SHAPEFILE_DIR)
-                # If city lookup fails, fall back to county lookup in case the
-                # user typed a county name without the word "County" at the end
-                # (e.g. "Gilmer" instead of "Gilmer County")
-                if not success:
-                    success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
-                    if success:
-                        is_county = True  # treat downstream population logic correctly
+            # All boundaries come from the local counties_lite.parquet.
+            # fetch_county_boundary_local strips " County" before matching, so
+            # "Gilmer County", "Gilmer", "Victoria", "Victoria County" all work.
+            success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
+            if not success:
+                # Try appending County in case user typed bare name
+                success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
+            if success:
+                is_county = True  # all local matches are county-level
 
             # County boundaries come from the parquet, not from TIGER, so they are
             # never written to SHAPEFILE_DIR. find_relevant_jurisdictions() only scans

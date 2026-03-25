@@ -1906,6 +1906,20 @@ if st.session_state['csvs_ready']:
     except Exception as e:
         st.error(f"Geometry Error: {e}"); st.stop()
 
+    # --- STRICT GEOGRAPHIC FILTERING FOR STATIONS ---
+    # Delete any OSM-generated station that accidentally falls outside the city limits
+    if not df_stations_all.empty and city_m is not None:
+        st_gdf = gpd.GeoDataFrame(df_stations_all, geometry=gpd.points_from_xy(df_stations_all.lon, df_stations_all.lat), crs="EPSG:4326")
+        st_gdf_utm = st_gdf.to_crs(epsg=epsg_code)
+        
+        # We add a tiny 150-meter buffer so we don't accidentally delete a real station sitting right on a border road
+        mask = st_gdf_utm.within(city_m.buffer(150))
+        df_stations_all = df_stations_all[mask].reset_index(drop=True)
+        
+        if df_stations_all.empty:
+            st.warning("⚠️ Strict boundary filtering removed all stations. Check your data or allow overlap!")
+            st.stop()
+
     n = len(df_stations_all)
 
     area_sq_mi = city_m.area / 2589988.11 if city_m and not city_m.is_empty else 100.0
@@ -2497,7 +2511,8 @@ if st.session_state['csvs_ready']:
 <div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color};
      border-left:1px solid {card_border}; border-right:1px solid {card_border};
      border-bottom:1px solid {card_border};
-     border-radius:4px; padding:12px; margin-bottom:12px; cursor:default;">
+     border-radius:4px; padding:12px; margin-bottom:12px; cursor:default;
+     height:330px; display:flex; flex-direction:column;">
     <div style="font-weight:700; font-size:0.73rem; color:{card_title}; margin-bottom:2px;">{short_name}</div>
     <div style="font-size:0.58rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">{d_type} · Phase #{d_step}</div>
     <div style="font-size:0.62rem; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
@@ -2509,7 +2524,8 @@ if st.session_state['csvs_ready']:
         <div style="font-size:0.6rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
         <div style="font-size:1.25rem; font-weight:900; color:{accent_color};">${d_savings:,.0f}</div>
     </div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem;">
+    
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem; flex-grow:1;">
         <div style="color:{text_muted};">Net Flights/day</div>
         <div style="text-align:right; font-weight:700; color:{accent_color};">{d_flights:.1f}</div>
         <div style="color:{text_muted};">Shared Flights/day</div>
@@ -2523,6 +2539,7 @@ if st.session_state['csvs_ready']:
         <div style="color:{text_muted};">Nearest Airfield</div>
         <div style="text-align:right; font-weight:700; color:{card_title}; font-size:0.55rem;">{d_airport}</div>
     </div>
+    
     <div style="border-top:1px dashed {card_border}; margin-top:8px; padding-top:6px;
          display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem;">
         <div style="color:{text_muted};">CapEx</div>
@@ -2532,7 +2549,6 @@ if st.session_state['csvs_ready']:
     </div>
 </div>
 """, unsafe_allow_html=True)
-
     # ── 3D SWARM SIMULATION ───────────────────────────────────────────
     if fleet_capex > 0:
         st.markdown("---")

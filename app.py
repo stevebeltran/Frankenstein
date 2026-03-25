@@ -114,6 +114,49 @@ def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, emai
 # --- GLOBAL CONFIGURATION ---
 CONFIG = {"RESPONDER_COST": 80000, "GUARDIAN_COST": 160000, "RESPONDER_RANGE_MI": 2.0, "OFFICER_COST_PER_CALL": 82, "DRONE_COST_PER_CALL": 6, "DEFAULT_TRAFFIC_SPEED": 35.0, "RESPONDER_SPEED": 42.0, "GUARDIAN_SPEED": 60.0}
 STATE_FIPS = {"AL": "01", "AK": "02", "AZ": "04", "AR": "05", "CA": "06", "CO": "08", "CT": "09", "DE": "10", "FL": "12", "GA": "13", "HI": "15", "ID": "16", "IL": "17", "IN": "18", "IA": "19", "KS": "20", "KY": "21", "LA": "22", "ME": "23", "MD": "24", "MA": "25", "MI": "26", "MN": "27", "MS": "28", "MO": "29", "MT": "30", "NE": "31", "NV": "32", "NH": "33", "NJ": "34", "NM": "35", "NY": "36", "NC": "37", "ND": "38", "OH": "39", "OK": "40", "OR": "41", "PA": "42", "RI": "44", "SC": "45", "SD": "46", "TN": "47", "TX": "48", "UT": "49", "VT": "50", "VA": "51", "WA": "53", "WV": "54", "WI": "55", "WY": "56"}
+
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def normalize_state_abbr(state_value):
+    if not state_value:
+        return None
+    state_value = str(state_value).strip()
+    if state_value in STATE_FIPS:
+        return state_value
+    upper = state_value.upper()
+    if upper in STATE_FIPS:
+        return upper
+    state_names = {
+        "ALABAMA": "AL", "ALASKA": "AK", "ARIZONA": "AZ", "ARKANSAS": "AR", "CALIFORNIA": "CA",
+        "COLORADO": "CO", "CONNECTICUT": "CT", "DELAWARE": "DE", "FLORIDA": "FL", "GEORGIA": "GA",
+        "HAWAII": "HI", "IDAHO": "ID", "ILLINOIS": "IL", "INDIANA": "IN", "IOWA": "IA", "KANSAS": "KS",
+        "KENTUCKY": "KY", "LOUISIANA": "LA", "MAINE": "ME", "MARYLAND": "MD", "MASSACHUSETTS": "MA",
+        "MICHIGAN": "MI", "MINNESOTA": "MN", "MISSISSIPPI": "MS", "MISSOURI": "MO", "MONTANA": "MT",
+        "NEBRASKA": "NE", "NEVADA": "NV", "NEW HAMPSHIRE": "NH", "NEW JERSEY": "NJ", "NEW MEXICO": "NM",
+        "NEW YORK": "NY", "NORTH CAROLINA": "NC", "NORTH DAKOTA": "ND", "OHIO": "OH", "OKLAHOMA": "OK",
+        "OREGON": "OR", "PENNSYLVANIA": "PA", "RHODE ISLAND": "RI", "SOUTH CAROLINA": "SC", "SOUTH DAKOTA": "SD",
+        "TENNESSEE": "TN", "TEXAS": "TX", "UTAH": "UT", "VERMONT": "VT", "VIRGINIA": "VA",
+        "WASHINGTON": "WA", "WEST VIRGINIA": "WV", "WISCONSIN": "WI", "WYOMING": "WY", "DISTRICT OF COLUMBIA": "DC"
+    }
+    return state_names.get(upper)
+
+def normalize_place_name(name):
+    name = str(name or '').strip().lower()
+    name = re.sub(r'\s*,\s*', ' ', name)
+    name = re.sub(r'[.]', '', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+    return name
+
+def normalize_county_name(name):
+    name = normalize_place_name(name)
+    name = re.sub(r'\s+county$', '', name).strip()
+    name = re.sub(r'\s+co$', '', name).strip()
+    return name
+
+def looks_like_county(name):
+    cleaned = normalize_place_name(name)
+    return bool(re.search(r'\b(county|co)\.?$', cleaned))
+
 US_STATES_ABBR = {"Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA", "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL", "Indiana": "IN", "Iowa": "IA", "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA", "Maine": "ME", "Maryland": "MD", "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN", "Mississippi": "MS", "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV", "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK", "Oregon": "OR", "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD", "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT", "Virginia": "VA", "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY"}
 KNOWN_POPULATIONS = {"Victoria": 65534, "New York": 8336817, "Los Angeles": 3822238, "Chicago": 2665039, "Houston": 1304379, "Phoenix": 1644409, "Philadelphia": 1567258, "San Antonio": 2302878, "San Diego": 1472530, "Dallas": 1299544, "San Jose": 1381162, "Austin": 974447, "Jacksonville": 971319, "Fort Worth": 956709, "Columbus": 907971, "Indianapolis": 880621, "Charlotte": 897720, "San Francisco": 971233, "Seattle": 749256, "Denver": 713252, "Washington": 678972, "Nashville": 683622, "Oklahoma City": 694800, "El Paso": 694553, "Boston": 650706, "Portland": 635067, "Las Vegas": 656274, "Detroit": 620376, "Memphis": 633104, "Louisville": 628594, "Baltimore": 620961, "Milwaukee": 620251, "Albuquerque": 677122, "Tucson": 564559, "Fresno": 677102, "Sacramento": 808418, "Kansas City": 697738, "Mesa": 504258, "Atlanta": 499127, "Omaha": 508901, "Colorado Springs": 483956, "Raleigh": 476587, "Miami": 449514, "Virginia Beach": 455369, "Oakland": 530763, "Minneapolis": 563332, "Tulsa": 547239, "Arlington": 398654, "New Orleans": 562503, "Wichita": 402263, "Cleveland": 900000, "Tampa": 449514, "Orlando": 316081}
 DEMO_CITIES = [("Las Vegas", "NV"), ("Austin", "TX"), ("Seattle", "WA"), ("Denver", "CO"), ("Nashville", "TN"), ("Columbus", "OH"), ("Detroit", "MI"), ("San Diego", "CA"), ("Charlotte", "NC"), ("Portland", "OR"), ("Memphis", "TN"), ("Louisville", "KY"), ("Baltimore", "MD"), ("Milwaukee", "WI"), ("Albuquerque", "NM"), ("Tucson", "AZ"), ("Fresno", "CA"), ("Sacramento", "CA"), ("Kansas City", "MO"), ("Mesa", "AZ"), ("Atlanta", "GA"), ("Omaha", "NE"), ("Colorado Springs", "CO"), ("Raleigh", "NC"), ("Miami", "FL"), ("Minneapolis", "MN"), ("Tulsa", "OK"), ("Arlington", "TX"), ("Tampa", "FL"), ("New Orleans", "LA"), ("Wichita", "KS"), ("Cleveland", "OH"), ("Virginia Beach", "VA"), ("Oakland", "CA"), ("Indianapolis", "IN"), ("Jacksonville", "FL"), ("Fort Worth", "TX"), ("Boston", "MA"), ("El Paso", "TX"), ("Oklahoma City", "OK"), ("Boise", "ID"), ("Richmond", "VA"), ("Spokane", "WA"), ("Tacoma", "WA"), ("Aurora", "CO"), ("Anaheim", "CA"), ("Bakersfield", "CA"), ("Riverside", "CA"), ("Stockton", "CA"), ("Corpus Christi", "TX"), ("Lexington", "KY"), ("Henderson", "NV"), ("Saint Paul", "MN"), ("Anchorage", "AK"), ("Plano", "TX"), ("Lincoln", "NE"), ("Buffalo", "NY"), ("Fort Wayne", "IN"), ("Jersey City", "NJ"), ("Chula Vista", "CA"), ("Orlando", "FL"), ("St. Louis", "MO"), ("Madison", "WI"), ("Durham", "NC"), ("Lubbock", "TX"), ("Winston-Salem", "NC"), ("Garland", "TX"), ("Glendale", "AZ"), ("Hialeah", "FL"), ("Scottsdale", "AZ"), ("Irving", "TX"), ("Fremont", "CA"), ("Baton Rouge", "LA"), ("Birmingham", "AL"), ("Rochester", "NY"), ("Des Moines", "IA"), ("Montgomery", "AL"), ("Modesto", "CA"), ("Fayetteville", "NC"), ("Shreveport", "LA"), ("Akron", "OH"), ("Grand Rapids", "MI"), ("Huntington Beach", "CA"), ("Little Rock", "AR")]
@@ -661,91 +704,30 @@ def forward_geocode(address_str):
     except Exception: pass
     return None, None
 
-def normalize_state_abbr(state_value):
-    state_value = (state_value or "").strip()
-    if not state_value:
-        return None
-    if len(state_value) == 2:
-        return state_value.upper()
-    return US_STATES_ABBR.get(state_value.title())
-
-
-def strip_trailing_state_from_place(name, selected_state=None):
-    name = (name or "").strip()
-    if not name:
-        return ""
-
-    state_tokens = set(STATE_FIPS.keys()) | {s.lower() for s in US_STATES_ABBR.keys()}
-    if selected_state:
-        sel = normalize_state_abbr(selected_state)
-        if sel:
-            state_tokens.add(sel.lower())
-            for full_name, abbr in US_STATES_ABBR.items():
-                if abbr == sel:
-                    state_tokens.add(full_name.lower())
-                    break
-
-    # Handle forms like "Gilmer County, GA" or "Gilmer County, Georgia"
-    parts = [p.strip() for p in name.split(',') if p.strip()]
-    if len(parts) >= 2 and parts[-1].lower() in state_tokens:
-        name = ', '.join(parts[:-1]).strip()
-
-    # Handle forms like "Gilmer County GA" or "Gilmer County Georgia"
-    lowered = name.lower().strip()
-    for token in sorted(state_tokens, key=len, reverse=True):
-        if lowered.endswith(' ' + token):
-            name = name[:-(len(token) + 1)].strip()
-            lowered = name.lower().strip()
-            break
-
-    return name
-
-
-def normalize_place_name(name, selected_state=None):
-    name = strip_trailing_state_from_place(name, selected_state=selected_state)
-    name = (name or "").lower().strip()
-    name = re.sub(r"[.,]", "", name)
-    name = re.sub(r"\s+", " ", name)
-    return name
-
-
-def normalize_county_name(name, selected_state=None):
-    name = normalize_place_name(name, selected_state=selected_state)
-    name = re.sub(r"\s+county$", "", name)
-    name = re.sub(r"\s+co$", "", name)
-    return name.strip()
-
-
-def looks_like_county(name, selected_state=None):
-    raw = strip_trailing_state_from_place(name, selected_state=selected_state)
-    cleaned = normalize_place_name(raw)
-    return cleaned.endswith(" county") or cleaned.endswith(" co")
-
-
 @st.cache_data
 def fetch_county_boundary_local(state_abbr, county_name_input):
-    search_name = normalize_county_name(county_name_input, selected_state=state_abbr)
-
     state_abbr = normalize_state_abbr(state_abbr)
+    search_name = normalize_county_name(county_name_input)
+
     state_fips = STATE_FIPS.get(state_abbr)
-    if not state_fips:
+    if not state_fips or not search_name:
         return False, None
 
-    app_dir = os.path.dirname(os.path.abspath(__file__))
-    local_file = os.path.join(app_dir, "counties_lite.parquet")
+    local_file = os.path.join(APP_DIR, "counties_lite.parquet")
     if not os.path.exists(local_file):
         st.error(f"Missing {local_file}! Please ensure it is uploaded to your repository.")
         return False, None
 
     try:
         gdf = gpd.read_parquet(local_file).copy()
-        gdf["NAME_CLEAN"] = gdf["NAME"].astype(str).str.lower().str.strip()
+        gdf["STATEFP"] = gdf["STATEFP"].astype(str).str.zfill(2)
+        gdf["NAME_CLEAN"] = gdf["NAME"].astype(str).map(normalize_county_name)
 
         match = gdf[(gdf["STATEFP"] == state_fips) & (gdf["NAME_CLEAN"] == search_name)]
 
         if not match.empty:
             match = match.copy()
-            match["NAME"] = match["NAME"] + " County"
+            match["NAME"] = match["NAME"].astype(str).str.replace(r'\s+County$', '', regex=True) + " County"
             return True, match[["NAME", "geometry"]]
     except Exception as e:
         st.error(f"Error reading local database: {e}")
@@ -779,15 +761,15 @@ def fetch_census_population(state_fips, place_name, is_county=False):
             data = json.loads(response.read().decode('utf-8'))
             for row in data[1:]:
                 place_full = row[1].lower().split(',')[0].strip()
-                candidate_name = normalize_county_name(place_full) if is_county else normalize_place_name(place_full)
-                if candidate_name == search_name or candidate_name.startswith(search_name + " "):
+                candidate = normalize_county_name(place_full) if is_county else normalize_place_name(place_full)
+                if candidate == search_name:
                     return int(row[0])
     except Exception:
         pass
     return None
 
-SHAPEFILE_DIR = "jurisdiction_data"
-if not os.path.exists(SHAPEFILE_DIR): os.makedirs(SHAPEFILE_DIR)
+SHAPEFILE_DIR = os.path.join(APP_DIR, "jurisdiction_data")
+os.makedirs(SHAPEFILE_DIR, exist_ok=True)
 
 @st.cache_data
 def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
@@ -1738,21 +1720,31 @@ if not st.session_state['csvs_ready']:
         total_estimated_pop = 0
 
         for i, loc in enumerate(active_targets):
-            c_name = loc['city'].strip()
+            raw_name = str(loc['city']).strip()
+            c_name = raw_name
             s_name = normalize_state_abbr(loc['state']) or loc['state']
-            is_county = looks_like_county(c_name, selected_state=s_name)
-            
+            state_fips = STATE_FIPS.get(s_name)
+            is_county = looks_like_county(c_name)
+
             prog.progress(10 + int((i / len(active_targets)) * 20),
                           text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
-            
+
+            success, temp_gdf = False, None
             if is_county:
                 success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
-            else:
-                success, temp_gdf = fetch_tiger_city_shapefile(STATE_FIPS[s_name], normalize_place_name(c_name, selected_state=s_name).title(), SHAPEFILE_DIR)
-                
+
+            if not success and state_fips and not is_county:
+                county_guess_success, county_guess_gdf = fetch_county_boundary_local(s_name, c_name)
+                if county_guess_success:
+                    success, temp_gdf = county_guess_success, county_guess_gdf
+                    is_county = True
+
+            if not success and state_fips and not is_county:
+                success, temp_gdf = fetch_tiger_city_shapefile(state_fips, c_name, SHAPEFILE_DIR)
+
             if success:
                 all_gdfs.append(temp_gdf)
-                pop = fetch_census_population(STATE_FIPS[s_name], c_name, is_county=is_county)
+                pop = fetch_census_population(state_fips, c_name, is_county=is_county)
                 if pop:
                     total_estimated_pop += pop
                     st.toast(f"✅ {c_name} population verified: {pop:,}")

@@ -5,7 +5,7 @@ import numpy as np
 import plotly.graph_objects as go
 from shapely.geometry import Point, Polygon, MultiPolygon, box, shape
 from shapely.ops import unary_union
-import os, itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib
+import os, itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib, uuid
 from concurrent.futures import ThreadPoolExecutor
 import pulp
 import urllib.request

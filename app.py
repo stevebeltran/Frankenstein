@@ -2507,7 +2507,7 @@ if st.session_state['csvs_ready']:
                             d_address   = get_address_from_latlon(d_lat, d_lon)
                             gmaps_url   = f"https://www.google.com/maps/search/?api=1&query={d_lat},{d_lon}"
 
-cols[j].markdown(f"""
+    cols[j].markdown(f"""
 <div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color}; border-left:1px solid {card_border}; border-right:1px solid {card_border}; border-bottom:1px solid {card_border}; border-radius:4px; padding:12px; margin-bottom:12px; cursor:default; height:330px; display:flex; flex-direction:column;">
 <div style="font-weight:700; font-size:0.73rem; color:{card_title}; margin-bottom:2px;">{short_name}</div>
 <div style="font-size:0.58rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">{d_type} · Phase #{d_step}</div>

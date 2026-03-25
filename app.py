@@ -841,26 +841,64 @@ if not os.path.exists(SHAPEFILE_DIR): os.makedirs(SHAPEFILE_DIR)
 
 @st.cache_data
 def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
-    url = f"https://www2.census.gov/geo/tiger/TIGER2023/PLACE/tl_2023_{state_fips}_place.zip"
+    # Check if we already downloaded and cached this state's places file
+    temp_dir = os.path.join(output_dir, f"temp_tiger_{state_fips}")
+    cached_shp = os.path.join(temp_dir, f"tl_2023_{state_fips}_place.shp")
+    gdf = None
+
+    if os.path.exists(cached_shp):
+        try:
+            gdf = gpd.read_file(cached_shp)
+        except Exception:
+            gdf = None
+
+    if gdf is None:
+        # Download from Census TIGER — try 2023 then 2022 as fallback
+        for year in ["2023", "2022"]:
+            url = f"https://www2.census.gov/geo/tiger/TIGER{year}/PLACE/tl_{year}_{state_fips}_place.zip"
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"})
+                with urllib.request.urlopen(req, timeout=45) as resp:
+                    zip_data = resp.read()
+                zip_file = zipfile.ZipFile(io.BytesIO(zip_data))
+                os.makedirs(temp_dir, exist_ok=True)
+                zip_file.extractall(temp_dir)
+                shp_files = glob.glob(os.path.join(temp_dir, "*.shp"))
+                if shp_files:
+                    gdf = gpd.read_file(shp_files[0])
+                    break
+            except Exception:
+                continue
+
+    if gdf is None:
+        return False, None
+
     try:
-        req = urllib.request.urlopen(url, timeout=20)
-        zip_file = zipfile.ZipFile(io.BytesIO(req.read()))
-        temp_dir = os.path.join(output_dir, f"temp_tiger_{state_fips}")
-        os.makedirs(temp_dir, exist_ok=True)
-        zip_file.extractall(temp_dir)
-        shp_path = glob.glob(os.path.join(temp_dir, "*.shp"))[0]
-        gdf = gpd.read_file(shp_path)
         search_name = city_name.lower().strip()
         exact_mask = gdf['NAME'].str.lower().str.strip() == search_name
-        if exact_mask.any(): city_gdf = gdf[exact_mask]
-        else: city_gdf = gdf[gdf['NAME'].str.lower().str.contains(search_name, case=False, na=False)]
-        if not city_gdf.empty:
-            city_gdf = city_gdf.dissolve(by='NAME').reset_index()
-            save_path = os.path.join(output_dir, f"{city_name.replace(' ', '_')}_{state_fips}.shp")
-            city_gdf.to_file(save_path)
-            return True, city_gdf
-    except Exception as e: return False, None
-    return False, None
+        if exact_mask.any():
+            city_gdf = gdf[exact_mask].copy()
+        else:
+            # Partial match — prefer the longest name match to avoid tiny place with same substring
+            partial = gdf[gdf['NAME'].str.lower().str.contains(search_name, case=False, na=False)].copy()
+            if partial.empty:
+                return False, None
+            # Pick the row whose NAME most closely matches (shortest extra chars)
+            partial['_diff'] = partial['NAME'].str.len() - len(search_name)
+            city_gdf = partial.sort_values('_diff').head(1)
+
+        if city_gdf.empty:
+            return False, None
+
+        city_gdf = city_gdf.dissolve(by='NAME').reset_index()
+        if city_gdf.crs is None:
+            city_gdf = city_gdf.set_crs(epsg=4269)
+        city_gdf = city_gdf.to_crs(epsg=4326)
+        save_path = os.path.join(output_dir, f"{city_name.replace(' ', '_')}_{state_fips}.shp")
+        city_gdf.to_file(save_path)
+        return True, city_gdf
+    except Exception:
+        return False, None
 
 def generate_mock_faa_grid(minx, miny, maxx, maxy):
     features = []
@@ -1756,25 +1794,26 @@ if not st.session_state['csvs_ready']:
                         detected_state_for_boundary = st.session_state.get('active_state', '')
                         if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
                             boundary_found = False
-                            # Try as a county first (append "County" and check parquet)
-                            for county_try in [detected_city_for_boundary + " County", detected_city_for_boundary]:
-                                b_success, b_gdf = fetch_county_boundary_local(detected_state_for_boundary, county_try)
-                                if b_success and b_gdf is not None:
-                                    try:
-                                        safe_n = detected_city_for_boundary.replace(" ", "_").replace("/", "_")
-                                        b_gdf.to_file(os.path.join(SHAPEFILE_DIR, f"{safe_n}_{detected_state_for_boundary}.shp"))
-                                        boundary_found = True
-                                    except Exception:
-                                        pass
-                                    break
-                            # If not a county, try as a TIGER city/place
+                            # Try TIGER city/place FIRST — CAD data is always for a city, not a county
+                            b_success, b_gdf = fetch_tiger_city_shapefile(
+                                STATE_FIPS[detected_state_for_boundary],
+                                detected_city_for_boundary,
+                                SHAPEFILE_DIR
+                            )
+                            if b_success and b_gdf is not None:
+                                boundary_found = True
+                            # Only fall back to county parquet if TIGER city lookup failed
                             if not boundary_found:
-                                b_success, b_gdf = fetch_tiger_city_shapefile(
-                                    STATE_FIPS[detected_state_for_boundary],
-                                    detected_city_for_boundary,
-                                    SHAPEFILE_DIR
-                                )
-                                # fetch_tiger_city_shapefile already saves to SHAPEFILE_DIR on success
+                                for county_try in [detected_city_for_boundary, detected_city_for_boundary + " County"]:
+                                    b_success, b_gdf = fetch_county_boundary_local(detected_state_for_boundary, county_try)
+                                    if b_success and b_gdf is not None:
+                                        try:
+                                            safe_n = detected_city_for_boundary.replace(" ", "_").replace("/", "_")
+                                            b_gdf.to_file(os.path.join(SHAPEFILE_DIR, f"{safe_n}_{detected_state_for_boundary}.shp"))
+                                            boundary_found = True
+                                        except Exception:
+                                            pass
+                                        break
 
                     st.session_state['csvs_ready'] = True
                     st.rerun()

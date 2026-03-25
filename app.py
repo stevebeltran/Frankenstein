@@ -29,7 +29,11 @@ defaults = {
     'dfr_rate': 25, 'deflect_rate': 30, 'total_original_calls': 0,
     'onboarding_done': False, 'trigger_sim': False, 'city_count': 1,
     'brinc_user': 'steven.beltran',
-    'pd_chief_name': '', 'pd_dept_name': '', 'pd_dept_email': '', 'pd_dept_phone': ''
+    'pd_chief_name': '', 'pd_dept_name': '', 'pd_dept_email': '', 'pd_dept_phone': '',
+    'session_start': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    'session_id': str(uuid.uuid4())[:8],
+    'data_source': 'unknown',   # 'cad_upload' | 'simulation' | 'demo' | 'brinc_file'
+    'map_build_logged': False,  # prevent duplicate map-build rows per session
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -38,52 +42,155 @@ for k, v in defaults.items():
 if 'target_cities' not in st.session_state:
     st.session_state['target_cities'] = [{"city": st.session_state.get('active_city', 'Victoria'), "state": st.session_state.get('active_state', 'TX')}]
 
+def _build_details_html(details):
+    """Shared HTML block for deployment details used in email notifications."""
+    if not details: return ""
+    drone_list = "".join([
+        f"<li><b>{d['name']}</b> ({d['type']}) @ {d['lat']:.4f}, {d['lon']:.4f}</li>"
+        for d in details.get('active_drones', [])
+    ])
+    pop   = details.get('population', 0)
+    calls = details.get('total_calls', 0)
+    daily = details.get('daily_calls', 0)
+    area  = details.get('area_sq_mi', 0)
+    be    = details.get('break_even', 'N/A')
+    src   = details.get('data_source', '—')
+    sid   = details.get('session_id', '—')
+    stime = details.get('session_start', '—')
+    dur   = details.get('session_duration_min', '—')
+    pd_c  = details.get('pd_chief', '—')
+    pd_d  = details.get('pd_dept', '—')
+    avg_t = details.get('avg_response_min', 0)
+    time_saved = details.get('avg_time_saved_min', 0)
+    area_cov = details.get('area_covered_pct', 0)
+    return f"""
+    <div style="margin-top:20px; padding-top:20px; border-top:1px solid #f0f0f0;">
+        <h4 style="color:#555; margin-bottom:10px;">Session Info</h4>
+        <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:15px;">
+            <tr><td style="padding:4px; color:#888; width:50%;">Session ID</td><td style="padding:4px;">{sid}</td></tr>
+            <tr><td style="padding:4px; color:#888;">Session Start</td><td style="padding:4px;">{stime}</td></tr>
+            <tr><td style="padding:4px; color:#888;">Session Duration</td><td style="padding:4px;">{dur} min</td></tr>
+            <tr><td style="padding:4px; color:#888;">Data Source</td><td style="padding:4px;">{src}</td></tr>
+        </table>
+        <h4 style="color:#555; margin-bottom:10px;">Jurisdiction</h4>
+        <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:15px;">
+            <tr><td style="padding:4px; color:#888; width:50%;">Population</td><td style="padding:4px;">{pop:,}</td></tr>
+            <tr><td style="padding:4px; color:#888;">Total Annual Calls</td><td style="padding:4px;">{calls:,}</td></tr>
+            <tr><td style="padding:4px; color:#888;">Daily Calls</td><td style="padding:4px;">{daily:,}</td></tr>
+            <tr><td style="padding:4px; color:#888;">Coverage Area</td><td style="padding:4px;">{area:,} sq mi</td></tr>
+        </table>
+        <h4 style="color:#555; margin-bottom:10px;">Deployment Settings</h4>
+        <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:15px;">
+            <tr><td style="padding:4px; color:#888; width:50%;">Strategy</td><td style="padding:4px;">{details.get('opt_strategy', '')}</td></tr>
+            <tr><td style="padding:4px; color:#888;">Incremental Build</td><td style="padding:4px;">{details.get('incremental_build', False)}</td></tr>
+            <tr><td style="padding:4px; color:#888;">Allow Overlap</td><td style="padding:4px;">{details.get('allow_redundancy', False)}</td></tr>
+            <tr><td style="padding:4px; color:#888;">DFR Dispatch Rate</td><td style="padding:4px;">{details.get('dfr_rate', 0)}%</td></tr>
+            <tr><td style="padding:4px; color:#888;">Deflection Rate</td><td style="padding:4px;">{details.get('deflect_rate', 0)}%</td></tr>
+            <tr><td style="padding:4px; color:#888;">Total CapEx</td><td style="padding:4px;">${details.get('fleet_capex', 0):,.0f}</td></tr>
+            <tr><td style="padding:4px; color:#888;">Annual Savings</td><td style="padding:4px;">${details.get('annual_savings', 0):,.0f}</td></tr>
+            <tr><td style="padding:4px; color:#888;">Break-Even</td><td style="padding:4px;">{be}</td></tr>
+            <tr><td style="padding:4px; color:#888;">Avg Response Time</td><td style="padding:4px;">{avg_t:.1f} min</td></tr>
+            <tr><td style="padding:4px; color:#888;">Time Saved vs Patrol</td><td style="padding:4px;">{time_saved:.1f} min</td></tr>
+            <tr><td style="padding:4px; color:#888;">Geographic Coverage</td><td style="padding:4px;">{area_cov:.1f}%</td></tr>
+        </table>
+        <h4 style="color:#555; margin-bottom:10px;">Police Dept Contact</h4>
+        <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:15px;">
+            <tr><td style="padding:4px; color:#888; width:50%;">Signatory</td><td style="padding:4px;">{pd_c}</td></tr>
+            <tr><td style="padding:4px; color:#888;">Department</td><td style="padding:4px;">{pd_d}</td></tr>
+        </table>
+        <h4 style="color:#555; margin-bottom:10px;">Active Drones Placed</h4>
+        <ul style="font-size:12px; color:#444; padding-left:20px;">{drone_list}</ul>
+    </div>
+    """
+
+def _build_sheets_row(city, state, event_type, k_resp, k_guard, coverage, name, email, details=None):
+    """Build the flat list of values for a Google Sheets row — single source of truth."""
+    d = details or {}
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    session_start = d.get('session_start', now)
+    dur = d.get('session_duration_min', '')
+    try:
+        if dur == '':
+            start_dt = datetime.datetime.strptime(session_start, "%Y-%m-%d %H:%M:%S")
+            dur = round((datetime.datetime.now() - start_dt).total_seconds() / 60, 1)
+    except Exception:
+        dur = ''
+    return [
+        # ── Identity ────────────────────────────────────────────────────────
+        now,                                    # A: Timestamp
+        d.get('session_id', ''),               # B: Session ID
+        session_start,                          # C: Session Start
+        dur,                                    # D: Session Duration (min)
+        d.get('data_source', ''),              # E: Data Source
+        # ── Who ─────────────────────────────────────────────────────────────
+        name,                                   # F: BRINC Rep Name
+        email,                                  # G: BRINC Rep Email
+        d.get('pd_chief', ''),                 # H: PD Chief / Signatory
+        d.get('pd_dept', ''),                  # I: Department Name
+        d.get('pd_dept_email', ''),            # J: Department Email
+        d.get('pd_dept_phone', ''),            # K: Department Phone
+        # ── Where ───────────────────────────────────────────────────────────
+        city,                                   # L: City
+        state,                                  # M: State
+        d.get('population', ''),               # N: Population
+        d.get('area_sq_mi', ''),               # O: Area (sq mi)
+        # ── Calls ───────────────────────────────────────────────────────────
+        d.get('total_calls', ''),              # P: Total Annual Calls
+        d.get('daily_calls', ''),              # Q: Daily Calls
+        # ── Fleet ───────────────────────────────────────────────────────────
+        event_type,                             # R: Event Type
+        k_resp,                                 # S: Responders
+        k_guard,                                # T: Guardians
+        round(coverage, 1) if coverage else '', # U: Call Coverage %
+        d.get('area_covered_pct', ''),         # V: Area Coverage %
+        d.get('avg_response_min', ''),         # W: Avg Response (min)
+        d.get('avg_time_saved_min', ''),       # X: Time Saved vs Patrol (min)
+        # ── Financials ──────────────────────────────────────────────────────
+        d.get('fleet_capex', ''),              # Y: Fleet CapEx
+        d.get('annual_savings', ''),           # Z: Annual Savings
+        d.get('break_even', ''),               # AA: Break-Even
+        # ── Settings ────────────────────────────────────────────────────────
+        d.get('opt_strategy', ''),             # AB: Opt Strategy
+        d.get('dfr_rate', ''),                 # AC: DFR Rate %
+        d.get('deflect_rate', ''),             # AD: Deflection Rate %
+        d.get('incremental_build', ''),        # AE: Incremental Build
+        d.get('allow_redundancy', ''),         # AF: Allow Overlap
+        # ── Drones detail (JSON) ─────────────────────────────────────────────
+        json.dumps([{"name": dr.get("name"), "type": dr.get("type"),
+                     "lat": dr.get("lat"), "lon": dr.get("lon"),
+                     "avg_time_min": dr.get("avg_time_min"),
+                     "faa_ceiling": dr.get("faa_ceiling"),
+                     "annual_savings": dr.get("annual_savings")}
+                    for dr in d.get('active_drones', [])]),  # AG: Drone JSON
+    ]
+
 def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email, details=None):
     try:
         gmail_address  = st.secrets.get("GMAIL_ADDRESS", "")
         app_password   = st.secrets.get("GMAIL_APP_PASSWORD", "")
         notify_address = st.secrets.get("NOTIFY_EMAIL", gmail_address)
         if not gmail_address or not app_password: return
-        emoji = {"HTML": "📄", "KML": "🌏", "BRINC": "💾"}.get(file_type, "📥")
-        subject = f"{emoji} BRINC Download — {file_type} — {city}, {state}"
-        
-        details_html = ""
-        if details:
-            drone_list = "".join([f"<li><b>{d['name']}</b> ({d['type']}) @ {d['lat']:.4f}, {d['lon']:.4f}</li>" for d in details.get('active_drones', [])])
-            details_html = f"""
-            <div style="margin-top:20px; padding-top:20px; border-top:1px solid #f0f0f0;">
-                <h4 style="color:#555; margin-bottom:10px;">Deployment Settings & Toggles</h4>
-                <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:15px;">
-                    <tr><td style="padding:4px; color:#888; width:50%;">Strategy</td><td style="padding:4px;">{details.get('opt_strategy', '')}</td></tr>
-                    <tr><td style="padding:4px; color:#888;">Incremental Build</td><td style="padding:4px;">{details.get('incremental_build', False)}</td></tr>
-                    <tr><td style="padding:4px; color:#888;">Allow Overlap</td><td style="padding:4px;">{details.get('allow_redundancy', False)}</td></tr>
-                    <tr><td style="padding:4px; color:#888;">DFR Dispatch Rate</td><td style="padding:4px;">{details.get('dfr_rate', 0)}%</td></tr>
-                    <tr><td style="padding:4px; color:#888;">Deflection Rate</td><td style="padding:4px;">{details.get('deflect_rate', 0)}%</td></tr>
-                    <tr><td style="padding:4px; color:#888;">Total CapEx</td><td style="padding:4px;">${details.get('fleet_capex', 0):,.0f}</td></tr>
-                    <tr><td style="padding:4px; color:#888;">Annual Savings</td><td style="padding:4px;">${details.get('annual_savings', 0):,.0f}</td></tr>
-                </table>
-                <h4 style="color:#555; margin-bottom:10px;">Active Drones Placed</h4>
-                <ul style="font-size:12px; color:#444; padding-left:20px;">
-                    {drone_list}
-                </ul>
-            </div>
-            """
-
+        emoji = {"HTML": "📄", "KML": "🌏", "BRINC": "💾", "MAP_BUILD": "🗺️"}.get(file_type, "📥")
+        subject = f"{emoji} BRINC {file_type.replace('_',' ').title()} — {city}, {state}"
+        details_html = _build_details_html(details)
+        d = details or {}
+        pop  = d.get('population', 0)
         body = f"""
         <html><body style="font-family:Arial,sans-serif;color:#333;padding:20px;">
-        <div style="max-width:500px;margin:0 auto;border:1px solid #ddd;border-radius:8px;overflow:hidden;">
+        <div style="max-width:560px;margin:0 auto;border:1px solid #ddd;border-radius:8px;overflow:hidden;">
             <div style="background:#000;padding:16px 20px;border-bottom:3px solid #00D2FF;">
                 <span style="color:#00D2FF;font-size:18px;font-weight:900;letter-spacing:2px;">BRINC</span>
-                <span style="color:#888;font-size:12px;margin-left:8px;">Download Notification</span>
+                <span style="color:#888;font-size:12px;margin-left:8px;">{file_type.replace('_',' ').title()} Notification</span>
             </div>
             <div style="padding:20px;">
                 <table style="width:100%;border-collapse:collapse;font-size:14px;">
-                    <tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:8px 4px;color:#888;width:40%;">File Type</td><td style="padding:8px 4px;font-weight:bold;">{emoji} {file_type}</td></tr>
+                    <tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:8px 4px;color:#888;width:40%;">Event</td><td style="padding:8px 4px;font-weight:bold;">{emoji} {file_type.replace('_',' ').title()}</td></tr>
                     <tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:8px 4px;color:#888;">Jurisdiction</td><td style="padding:8px 4px;font-weight:bold;">{city}, {state}</td></tr>
+                    <tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:8px 4px;color:#888;">Population</td><td style="padding:8px 4px;">{pop:,}</td></tr>
                     <tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:8px 4px;color:#888;">Fleet</td><td style="padding:8px 4px;">{k_resp} Responder · {k_guard} Guardian</td></tr>
                     <tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:8px 4px;color:#888;">Call Coverage</td><td style="padding:8px 4px;">{coverage:.1f}%</td></tr>
-                    <tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:8px 4px;color:#888;">User Name</td><td style="padding:8px 4px;">{name if name else '—'}</td></tr>
-                    <tr><td style="padding:8px 4px;color:#888;">User Email</td><td style="padding:8px 4px;">{f'<a href="mailto:{email}">{email}</a>' if email else '—'}</td></tr>
+                    <tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:8px 4px;color:#888;">BRINC Rep</td><td style="padding:8px 4px;">{name if name else '—'}</td></tr>
+                    <tr><td style="padding:8px 4px;color:#888;">Rep Email</td><td style="padding:8px 4px;">{f'<a href="mailto:{email}">{email}</a>' if email else '—'}</td></tr>
                 </table>
                 {details_html}
                 <div style="margin-top:16px;font-size:11px;color:#bbb;">{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} UTC</div>
@@ -108,8 +215,8 @@ def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, emai
         creds = Credentials.from_service_account_info(dict(creds_dict), scopes=scopes)
         client = gspread.authorize(creds)
         sheet = client.open_by_key(sheet_id).sheet1
-        details_json_str = json.dumps(details) if details else ""
-        sheet.append_row([datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), city, state, file_type, k_resp, k_guard, round(coverage, 1), name, email, details_json_str])
+        row = _build_sheets_row(city, state, file_type, k_resp, k_guard, coverage, name, email, details)
+        sheet.append_row(row)
     except: pass
 
 # --- GLOBAL CONFIGURATION ---
@@ -1699,6 +1806,8 @@ if not st.session_state['csvs_ready']:
                             if 'lon' in df_s.columns: df_s['lon'] = pd.to_numeric(df_s['lon'], errors='coerce')
                             st.session_state['df_stations'] = df_s
                             
+                        st.session_state['data_source'] = 'brinc_file'
+                        st.session_state['map_build_logged'] = False
                         st.session_state['csvs_ready'] = True
                         st.toast("✅ Deployment restored successfully!")
                         st.rerun()
@@ -1887,6 +1996,8 @@ if not st.session_state['csvs_ready']:
                                 except Exception:
                                     pass
 
+                    st.session_state['data_source'] = 'cad_upload'
+                    st.session_state['map_build_logged'] = False
                     st.session_state['csvs_ready'] = True
                     st.rerun()
 
@@ -2132,6 +2243,8 @@ if not st.session_state['csvs_ready']:
 
         prog.progress(100, text="✅ Ready — built for the communities they protect and serve.")
         st.session_state['inferred_daily_calls_override'] = int(annual_cfs / 365)
+        st.session_state['data_source'] = 'simulation'
+        st.session_state['map_build_logged'] = False
         st.session_state['csvs_ready'] = True
         st.rerun()
 
@@ -2143,6 +2256,56 @@ if st.session_state['csvs_ready']:
 
     df_calls = st.session_state['df_calls'].copy()
     df_stations_all = st.session_state['df_stations'].copy()
+
+    # ── MAP BUILD EVENT: log to sheets once per session ──────────────────────
+    if not st.session_state.get('map_build_logged', False):
+        try:
+            _map_city  = st.session_state.get('active_city', '')
+            _map_state = st.session_state.get('active_state', '')
+            _brinc_raw = st.session_state.get('brinc_user', 'steven.beltran').strip()
+            if not _brinc_raw: _brinc_raw = 'steven.beltran'
+            _map_name  = " ".join([w.capitalize() for w in _brinc_raw.split('.')])
+            _map_email = f"{_brinc_raw}@brincdrones.com"
+            _map_pop   = st.session_state.get('estimated_pop', 0)
+            _map_calls = st.session_state.get('total_original_calls', 0)
+            _map_daily = max(1, int(_map_calls / 365))
+            _session_start = st.session_state.get('session_start', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            try:
+                _start_dt = datetime.datetime.strptime(_session_start, '%Y-%m-%d %H:%M:%S')
+                _dur_min  = round((datetime.datetime.now() - _start_dt).total_seconds() / 60, 1)
+            except Exception:
+                _dur_min = ''
+            _map_details = {
+                'session_id':       st.session_state.get('session_id', ''),
+                'session_start':    _session_start,
+                'session_duration_min': _dur_min,
+                'data_source':      st.session_state.get('data_source', 'unknown'),
+                'population':       _map_pop,
+                'total_calls':      _map_calls,
+                'daily_calls':      _map_daily,
+                'area_sq_mi':       0,
+                'fleet_capex':      0,
+                'annual_savings':   0,
+                'break_even':       'N/A',
+                'opt_strategy':     '',
+                'dfr_rate':         st.session_state.get('dfr_rate', 0),
+                'deflect_rate':     st.session_state.get('deflect_rate', 0),
+                'incremental_build': False,
+                'allow_redundancy': False,
+                'avg_response_min': 0,
+                'avg_time_saved_min': 0,
+                'area_covered_pct': 0,
+                'pd_chief':         st.session_state.get('pd_chief_name', ''),
+                'pd_dept':          st.session_state.get('pd_dept_name', ''),
+                'pd_dept_email':    st.session_state.get('pd_dept_email', ''),
+                'pd_dept_phone':    st.session_state.get('pd_dept_phone', ''),
+                'active_drones':    [],
+            }
+            _log_to_sheets(_map_city, _map_state, 'MAP_BUILD', 0, 0, 0.0,
+                           _map_name, _map_email, _map_details)
+            st.session_state['map_build_logged'] = True
+        except Exception:
+            pass
 
     with st.spinner(get_jurisdiction_message()):
         master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR)
@@ -3148,15 +3311,49 @@ if st.session_state['csvs_ready']:
         current_time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         safe_city = prop_city.replace(" ","_").replace("/","_")
 
+        _session_start = st.session_state.get('session_start', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        try:
+            _start_dt = datetime.datetime.strptime(_session_start, '%Y-%m-%d %H:%M:%S')
+            _dur_min  = round((datetime.datetime.now() - _start_dt).total_seconds() / 60, 1)
+        except Exception:
+            _dur_min = ''
         export_details = {
-            "opt_strategy": opt_strategy,
-            "incremental_build": incremental_build,
-            "allow_redundancy": allow_redundancy,
-            "dfr_rate": int(dfr_dispatch_rate*100),
-            "deflect_rate": int(deflection_rate*100),
-            "fleet_capex": fleet_capex,
-            "annual_savings": annual_savings,
-            "active_drones": [{"name": d['name'], "type": d['type'], "lat": d['lat'], "lon": d['lon']} for d in active_drones]
+            # Session
+            "session_id":            st.session_state.get('session_id', ''),
+            "session_start":         _session_start,
+            "session_duration_min":  _dur_min,
+            "data_source":           st.session_state.get('data_source', 'unknown'),
+            # Jurisdiction
+            "population":            pop_metric,
+            "total_calls":           st.session_state.get('total_original_calls', 0),
+            "daily_calls":           max(1, int(st.session_state.get('total_original_calls', 0) / 365)),
+            "area_sq_mi":            area_sq_mi_est,
+            # Financials
+            "opt_strategy":          opt_strategy,
+            "incremental_build":     incremental_build,
+            "allow_redundancy":      allow_redundancy,
+            "dfr_rate":              int(dfr_dispatch_rate*100),
+            "deflect_rate":          int(deflection_rate*100),
+            "fleet_capex":           fleet_capex,
+            "annual_savings":        annual_savings,
+            "break_even":            break_even_text,
+            # Operational
+            "avg_response_min":      round(avg_resp_time, 2),
+            "avg_time_saved_min":    round(avg_time_saved, 2),
+            "area_covered_pct":      round(area_covered_perc, 1),
+            # PD Contact
+            "pd_chief":              st.session_state.get('pd_chief_name', ''),
+            "pd_dept":               st.session_state.get('pd_dept_name', ''),
+            "pd_dept_email":         st.session_state.get('pd_dept_email', ''),
+            "pd_dept_phone":         st.session_state.get('pd_dept_phone', ''),
+            # Drones
+            "active_drones": [{
+                "name": d['name'], "type": d['type'],
+                "lat": d['lat'],   "lon": d['lon'],
+                "avg_time_min":    d.get('avg_time_min', 0),
+                "faa_ceiling":     d.get('faa_ceiling', ''),
+                "annual_savings":  d.get('annual_savings', 0),
+            } for d in active_drones],
         }
 
         export_dict = {

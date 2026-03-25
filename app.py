@@ -748,7 +748,13 @@ def aggressive_parse_calls(uploaded_files):
         except: continue
         
     if not all_calls_list: return pd.DataFrame()
-    return pd.concat(all_calls_list, ignore_index=True).dropna(subset=['lat', 'lon'])
+    # Only keep frames that actually have lat/lon columns — Excel sheets
+    # without coordinate data should not crash the concat
+    valid = [df for df in all_calls_list if 'lat' in df.columns and 'lon' in df.columns]
+    if not valid: return pd.DataFrame()
+    combined = pd.concat(valid, ignore_index=True)
+    # Safe dropna — columns guaranteed to exist now
+    return combined.dropna(subset=['lat', 'lon'])
 
 def _make_random_stations(df_calls, n=40):
     """Last-resort fallback: scatter synthetic stations across the call bounding box."""

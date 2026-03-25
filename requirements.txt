@@ -10,3 +10,6 @@ pyproj
 gspread
 google-auth
 pyarrow
+openpyxl
+xlrd
+pyxlsb

@@ -1697,7 +1697,19 @@ if not st.session_state['csvs_ready']:
                     success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
                     if success:
                         is_county = True  # treat downstream population logic correctly
-                
+
+            # County boundaries come from the parquet, not from TIGER, so they are
+            # never written to SHAPEFILE_DIR. find_relevant_jurisdictions() only scans
+            # that directory, so without this save it always falls back to
+            # "Auto-Generated Boundary". Save any successfully loaded county GDF now.
+            if success and is_county and temp_gdf is not None:
+                try:
+                    safe_name = c_name.replace(" ", "_").replace("/", "_")
+                    county_shp_path = os.path.join(SHAPEFILE_DIR, f"{safe_name}_{s_name}.shp")
+                    temp_gdf.to_file(county_shp_path)
+                except Exception:
+                    pass  # If save fails, fall back gracefully
+
             if success:
                 all_gdfs.append(temp_gdf)
                 pop = fetch_census_population(STATE_FIPS[s_name], c_name, is_county=is_county)

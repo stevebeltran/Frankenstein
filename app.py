@@ -20,7 +20,6 @@ from google.oauth2.service_account import Credentials
 # --- PAGE CONFIG & INITIALIZE SESSION STATE ---
 st.set_page_config(page_title="BRINC COS Drone Optimizer", layout="wide", initial_sidebar_state="expanded")
 
-# This MUST run before any st.session_state checks to prevent KeyError
 defaults = {
     'csvs_ready': False, 'df_calls': None, 'df_stations': None,
     'active_city': "Orlando", 'active_state': "FL", 'estimated_pop': 316081,
@@ -180,7 +179,7 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
         records.append({
             'd': dt.strftime('%Y-%m-%d'),
             'h': dt.hour,
-            'dow': dt.dayofweek, 
+            'dow': dt.dayofweek,
             'p': p_val
         })
         
@@ -322,10 +321,12 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
                     if(!mMax[m] || daily[r.d] > mMax[m]) mMax[m] = daily[r.d];
                 }});
 
+                // Peak Hour
                 let peakHr = hourly.indexOf(Math.max(...hourly));
                 if(total === 0) peakHr = 0;
                 document.getElementById('kpi-peak-val').innerText = peakHr + ':00';
 
+                // Shifts
                 let shiftHtml = "";
                 [8, 10, 12].forEach(win => {{
                     let bestV = 0, bestS = 0;
@@ -355,6 +356,7 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
                 }});
                 document.getElementById('shift-container').innerHTML = shiftHtml;
 
+                // DOW
                 let maxDow = Math.max(...dowCounts, 1);
                 let dowHtml = "";
                 for(let i=0; i<7; i++) {{
@@ -368,12 +370,14 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
                 }}
                 document.getElementById('dow-container').innerHTML = dowHtml;
 
+                // Month Headers
                 document.querySelectorAll('[id^="month-total-"]').forEach(el => {{
                     let m = el.id.replace('month-total-','');
                     let cnt = mTotal[m] || 0;
                     el.innerText = cnt.toLocaleString() + ' calls';
                 }});
 
+                // Calendar Cells
                 document.querySelectorAll('.day-cell').forEach(cell => {{
                     if(!cell.hasAttribute('data-date')) return;
                     let d = cell.getAttribute('data-date');
@@ -645,7 +649,6 @@ def fetch_county_boundary_local(state_abbr, county_name_input):
         return False, None
                 
     try:
-        import geopandas as gpd
         gdf = gpd.read_parquet(local_file)
         match = gdf[(gdf['STATEFP'] == state_fips) & (gdf['NAME'].str.lower() == search_name)]
         if not match.empty:
@@ -654,6 +657,7 @@ def fetch_county_boundary_local(state_abbr, county_name_input):
     except Exception as e:
         st.error(f"Error reading local database: {e}")
         pass
+        
     return False, None
 
 @st.cache_data
@@ -1161,149 +1165,36 @@ if not st.session_state['csvs_ready']:
 
     st.markdown(f"""
     <style>
-    @keyframes pulseGlow {{
-        0%, 100% {{ opacity: 0.55; }}
-        50%       {{ opacity: 1.0; }}
-    }}
-    @keyframes fadeUp {{
-        from {{ opacity:0; transform:translateY(14px); }}
-        to   {{ opacity:1; transform:translateY(0); }}
-    }}
-    .brinc-hero {{
-        position: relative;
-        text-align: center;
-        padding: 52px 24px 40px;
-        margin-bottom: 36px;
-        border-radius: 12px;
-        background: radial-gradient(ellipse at 50% 0%,
-            rgba(0,210,255,0.13) 0%, rgba(0,0,0,0) 68%);
-        border-bottom: 1px solid rgba(0,210,255,0.15);
-        overflow: hidden;
-        animation: fadeUp 0.5s ease both;
-    }}
-    .brinc-hero::before {{
-        content: '';
-        position: absolute; inset: 0;
-        background:
-            repeating-linear-gradient(0deg,
-                transparent, transparent 39px,
-                rgba(0,210,255,0.025) 39px,
-                rgba(0,210,255,0.025) 40px),
-            repeating-linear-gradient(90deg,
-                transparent, transparent 79px,
-                rgba(0,210,255,0.025) 79px,
-                rgba(0,210,255,0.025) 80px);
-        pointer-events: none;
-    }}
-    .brinc-eyebrow {{
-        font-family: 'IBM Plex Mono', monospace;
-        font-size: 0.62rem;
-        font-weight: 700;
-        letter-spacing: 4px;
-        color: {accent_color};
-        text-transform: uppercase;
-        opacity: 0.7;
-        margin-bottom: 12px;
-    }}
-    .brinc-h1 {{
-        font-family: 'Manrope', sans-serif;
-        font-size: clamp(2rem, 4vw, 3rem);
-        font-weight: 900;
-        color: #ffffff;
-        letter-spacing: -0.5px;
-        line-height: 1.08;
-        margin-bottom: 12px;
-    }}
-    .brinc-h1 em {{
-        font-style: normal;
-        color: {accent_color};
-    }}
-    .brinc-tagline {{
-        font-size: 0.88rem;
-        color: #666;
-        max-width: 500px;
-        margin: 0 auto 22px;
-        line-height: 1.65;
-    }}
-    .brinc-badges {{
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: 8px;
-        margin-top: 4px;
-    }}
-    .brinc-badge {{
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        background: rgba(0,210,255,0.07);
-        border: 1px solid rgba(0,210,255,0.2);
-        border-radius: 100px;
-        padding: 4px 13px;
-        font-size: 0.64rem;
-        font-weight: 700;
-        color: {accent_color};
-        letter-spacing: 0.8px;
-        text-transform: uppercase;
-    }}
-    .brinc-badge.pulse {{
-        animation: pulseGlow 3s ease-in-out infinite;
-    }}
-    .path-card {{
-        background: #080808;
-        border: 1px solid #1c1c1c;
-        border-radius: 10px;
-        padding: 22px 18px 16px;
-        position: relative;
-        overflow: hidden;
-        transition: border-color 0.2s ease, box-shadow 0.2s ease;
-    }}
-    .path-card::after {{
-        content: '';
-        position: absolute;
-        top: 0; left: 0; right: 0;
-        height: 3px;
-        background: var(--accent);
-        border-radius: 10px 10px 0 0;
-    }}
-    .path-card:hover {{
-        border-color: rgba(255,255,255,0.12);
-        box-shadow: 0 0 28px rgba(0,210,255,0.05);
-    }}
-    .pc-icon  {{ font-size: 1.5rem; display:block; margin-bottom:9px; }}
-    .pc-tag   {{ font-size:0.55rem; font-weight:800; letter-spacing:2.5px;
-                 text-transform:uppercase; color:var(--accent); margin-bottom:5px; }}
-    .pc-title {{ font-size:1rem; font-weight:800; color:#fff;
-                 line-height:1.25; margin-bottom:7px; }}
-    .pc-desc  {{ font-size:0.7rem; color:#555; line-height:1.6; margin-bottom:0; }}
-    .field-footnote {{
-        font-size: 0.63rem; color: #3a3a3a; line-height: 1.75;
-        margin-top: 10px; border-top: 1px solid #141414;
-        padding-top: 10px;
-    }}
-    .demo-cities {{
-        font-size: 0.65rem; color: #444; line-height: 1.9;
-        margin-top: 10px;
-    }}
+    @keyframes pulseGlow {{ 0%, 100% {{ opacity: 0.55; }} 50% {{ opacity: 1.0; }} }}
+    @keyframes fadeUp {{ from {{ opacity:0; transform:translateY(14px); }} to {{ opacity:1; transform:translateY(0); }} }}
+    .brinc-hero {{ position: relative; text-align: center; padding: 52px 24px 40px; margin-bottom: 36px; border-radius: 12px; background: radial-gradient(ellipse at 50% 0%, rgba(0,210,255,0.13) 0%, rgba(0,0,0,0) 68%); border-bottom: 1px solid rgba(0,210,255,0.15); overflow: hidden; animation: fadeUp 0.5s ease both; }}
+    .brinc-hero::before {{ content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(0,210,255,0.025) 39px, rgba(0,210,255,0.025) 40px), repeating-linear-gradient(90deg, transparent, transparent 79px, rgba(0,210,255,0.025) 79px, rgba(0,210,255,0.025) 80px); pointer-events: none; }}
+    .brinc-eyebrow {{ font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 700; letter-spacing: 4px; color: {accent_color}; text-transform: uppercase; opacity: 0.7; margin-bottom: 12px; }}
+    .brinc-h1 {{ font-family: 'Manrope', sans-serif; font-size: clamp(2rem, 4vw, 3rem); font-weight: 900; color: #ffffff; letter-spacing: -0.5px; line-height: 1.08; margin-bottom: 12px; }}
+    .brinc-h1 em {{ font-style: normal; color: {accent_color}; }}
+    .brinc-tagline {{ font-size: 0.88rem; color: #666; max-width: 500px; margin: 0 auto 22px; line-height: 1.65; }}
+    .brinc-badges {{ display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }}
+    .brinc-badge {{ display: inline-flex; align-items: center; gap: 6px; background: rgba(0,210,255,0.07); border: 1px solid rgba(0,210,255,0.2); border-radius: 100px; padding: 4px 13px; font-size: 0.64rem; font-weight: 700; color: {accent_color}; letter-spacing: 0.8px; text-transform: uppercase; }}
+    .brinc-badge.pulse {{ animation: pulseGlow 3s ease-in-out infinite; }}
+    .path-card {{ background: #080808; border: 1px solid #1c1c1c; border-radius: 10px; padding: 22px 18px 16px; position: relative; overflow: hidden; transition: border-color 0.2s ease, box-shadow 0.2s ease; }}
+    .path-card::after {{ content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent); border-radius: 10px 10px 0 0; }}
+    .path-card:hover {{ border-color: rgba(255,255,255,0.12); box-shadow: 0 0 28px rgba(0,210,255,0.05); }}
+    .pc-icon {{ font-size: 1.5rem; display:block; margin-bottom:9px; }}
+    .pc-tag {{ font-size:0.55rem; font-weight:800; letter-spacing:2.5px; text-transform:uppercase; color:var(--accent); margin-bottom:5px; }}
+    .pc-title {{ font-size:1rem; font-weight:800; color:#fff; line-height:1.25; margin-bottom:7px; }}
+    .pc-desc {{ font-size:0.7rem; color:#555; line-height:1.6; margin-bottom:0; }}
+    .field-footnote {{ font-size: 0.63rem; color: #3a3a3a; line-height: 1.75; margin-top: 10px; border-top: 1px solid #141414; padding-top: 10px; }}
+    .demo-cities {{ font-size: 0.65rem; color: #444; line-height: 1.9; margin-top: 10px; }}
     .demo-cities b {{ color: #555; }}
-    .demo-check {{
-        font-size: 0.63rem; color: #333; line-height: 1.8;
-        margin-top: 12px; border-top: 1px solid #141414;
-        padding-top: 10px;
-    }}
+    .demo-check {{ font-size: 0.63rem; color: #333; line-height: 1.8; margin-top: 12px; border-top: 1px solid #141414; padding-top: 10px; }}
     .demo-check span {{ color: {accent_color}; margin-right: 5px; }}
     </style>
 
     <div class="brinc-hero">
         {hero_logo_html}
         <div class="brinc-eyebrow">BRINC Drones · DFR Platform</div>
-        <div class="brinc-h1">
-            Coverage. Operations.<br><em>Savings.</em>
-        </div>
-        <div class="brinc-tagline">
-            Optimize drone-as-first-responder deployments for any US jurisdiction.
-            Model coverage, forecast ROI, and generate grant-ready proposals in minutes.
-        </div>
+        <div class="brinc-h1">Coverage. Operations.<br><em>Savings.</em></div>
+        <div class="brinc-tagline">Optimize drone-as-first-responder deployments for any US jurisdiction. Model coverage, forecast ROI, and generate grant-ready proposals in minutes.</div>
         <div class="brinc-badges">
             <div class="brinc-badge pulse">🛰 3D Swarm Simulation</div>
             <div class="brinc-badge">🗺 Census Boundaries</div>
@@ -1332,37 +1223,21 @@ if not st.session_state['csvs_ready']:
             c1, c2 = st.columns([3, 1])
             c_val = st.session_state['target_cities'][i]['city'] if i < len(st.session_state['target_cities']) else ""
             s_val = st.session_state['target_cities'][i]['state'] if i < len(st.session_state['target_cities']) else "FL"
-            c_name = c1.text_input(
-                f"City or County {i+1}", value=c_val, key=f"c_{i}",
-                placeholder="e.g. Orlando OR Orange County",
-                help="Official municipality or county name."
-            )
+            c_name = c1.text_input("City or County " + str(i+1), value=c_val, key=f"c_{i}", placeholder="e.g. Orlando OR Orange County")
             state_idx = list(STATE_FIPS.keys()).index(s_val) if s_val in STATE_FIPS else 8
-            s_name = c2.selectbox(
-                f"State {i+1}", list(STATE_FIPS.keys()), index=state_idx,
-                key=f"s_{i}",
-                label_visibility="collapsed" if i > 0 else "visible"
-            )
-            if i < len(st.session_state['target_cities']):
-                st.session_state['target_cities'][i] = {"city": c_name, "state": s_name}
-            else:
-                st.session_state['target_cities'].append({"city": c_name, "state": s_name})
+            s_name = c2.selectbox("State " + str(i+1), list(STATE_FIPS.keys()), index=state_idx, key=f"s_{i}", label_visibility="collapsed" if i > 0 else "visible")
+            if i < len(st.session_state['target_cities']): st.session_state['target_cities'][i] = {"city": c_name, "state": s_name}
+            else: st.session_state['target_cities'].append({"city": c_name, "state": s_name})
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-        st.file_uploader(
-            "Optional: Custom stations (CSV)",
-            type=['csv'],
-            key="sim_station_uploader",
-            help="Include 'lat'/'lon' OR 'address' columns. Max ~20 locations for auto-geocoding."
-        )
+        st.file_uploader("Optional: Custom stations (CSV)", type=['csv'], key="sim_station_uploader")
 
         col_add, col_run = st.columns([1, 1])
         if st.session_state.city_count < 10:
             if col_add.button("＋ City", use_container_width=True, key="add_city_btn"):
                 st.session_state.city_count += 1
                 st.rerun()
-        submit_demo = col_run.button("▶ Run", use_container_width=True, key="run_sim_btn",
-                                     help="Fetch boundaries and launch the simulation.")
+        submit_demo = col_run.button("▶ Run", use_container_width=True, key="run_sim_btn")
 
     with path_upload_col:
         st.markdown(f"""
@@ -1370,22 +1245,13 @@ if not st.session_state['csvs_ready']:
             <span class="pc-icon">📂</span>
             <div class="pc-tag">Path 02</div>
             <div class="pc-title">Upload CAD<br>or .brinc Save</div>
-            <div class="pc-desc">
-                Drop <b>any</b> CAD export CSV — no renaming needed.
-                Or, drop a previously saved <b>.brinc</b> file to instantly restore your deployment.
-            </div>
+            <div class="pc-desc">Drop <b>any</b> CAD export CSV — no renaming needed. Or, drop a previously saved <b>.brinc</b> file to instantly restore your deployment.</div>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-        uploaded_files = st.file_uploader(
-            "Drop your CAD export (+ optional stations CSV)",
-            accept_multiple_files=True,
-            type=['csv', 'brinc', 'json', 'txt'],
-            label_visibility="collapsed",
-            help="One file = raw CAD export. Two files = calls + stations. OR drop a .brinc file to restore a previous session."
-        )
+        uploaded_files = st.file_uploader("Drop your CAD export", accept_multiple_files=True, type=['csv', 'brinc', 'json', 'txt'], label_visibility="collapsed")
 
         st.markdown("""
         <div class="field-footnote">
@@ -1411,8 +1277,7 @@ if not st.session_state['csvs_ready']:
                         if 'k_resp' in peek and 'calls_data' in peek:
                             brinc_file = f
                             break
-                    except:
-                        pass
+                    except: pass
 
             if brinc_file:
                 with st.spinner("💾 Restoring saved deployment..."):
@@ -1455,21 +1320,15 @@ if not st.session_state['csvs_ready']:
                 station_file = None
 
                 for f in f_list:
-                    if _looks_like_stations(f.name):
-                        station_file = f
-                    else:
-                        call_files.append(f)
+                    if _looks_like_stations(f.name): station_file = f
+                    else: call_files.append(f)
                 
                 if len(f_list) == 2 and not station_file:
                     f0, f1 = f_list
                     f0.seek(0); sz0 = len(f0.read()); f0.seek(0)
                     f1.seek(0); sz1 = len(f1.read()); f1.seek(0)
-                    if sz0 >= sz1:
-                        call_files = [f0]
-                        station_file = f1
-                    else:
-                        call_files = [f1]
-                        station_file = f0
+                    if sz0 >= sz1: call_files = [f0]; station_file = f1
+                    else: call_files = [f1]; station_file = f0
 
                 if call_files:
                     with st.spinner("🔍 Detecting column types in CAD export…"):
@@ -1503,8 +1362,7 @@ if not st.session_state['csvs_ready']:
                                 else:
                                     raise ValueError("Could not find lat/lon columns.")
 
-                                if 'name' not in df_s.columns: 
-                                    df_s['name'] = [f"Site {i+1}" for i in range(len(df_s))]
+                                if 'name' not in df_s.columns: df_s['name'] = [f"Site {i+1}" for i in range(len(df_s))]
                                 else:
                                     df_s['name'] = df_s['name'].fillna('').astype(str).str.strip()
                                     df_s['name'] = df_s['name'].replace(r'(?i)^(null|<null>|nan|none)$', '', regex=True)
@@ -1513,12 +1371,8 @@ if not st.session_state['csvs_ready']:
                                 counts = {}
                                 new_names = []
                                 for n in df_s['name']:
-                                    if n in counts:
-                                        counts[n] += 1
-                                        new_names.append(f"{n} ({counts[n]})")
-                                    else:
-                                        counts[n] = 0
-                                        new_names.append(n)
+                                    if n in counts: counts[n] += 1; new_names.append(f"{n} ({counts[n]})")
+                                    else: counts[n] = 0; new_names.append(n)
                                 df_s['name'] = new_names
 
                                 if 'type' not in df_s.columns: df_s['type'] = 'Police'
@@ -1527,18 +1381,15 @@ if not st.session_state['csvs_ready']:
                             except Exception as e:
                                 df_s, osm_note = None, f"Failed: {e}"
                         if df_s is None or df_s.empty:
-                            st.error(f"❌ Stations file error: {osm_note}")
-                            st.stop()
+                            st.error(f"❌ Stations file error: {osm_note}"); st.stop()
                     else:
                         with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools…"):
                             df_s, osm_note = generate_stations_from_calls(df_c)
                         if df_s is None:
-                            st.error(f"❌ Could not auto-generate stations: {osm_note}")
-                            st.stop()
+                            st.error(f"❌ Could not auto-generate stations: {osm_note}"); st.stop()
                         st.toast(f"✅ {osm_note}")
 
-                    if len(df_s) > 100:
-                        df_s = df_s.sample(100, random_state=42).reset_index(drop=True)
+                    if len(df_s) > 100: df_s = df_s.sample(100, random_state=42).reset_index(drop=True)
 
                     lat_min, lat_max = df_s['lat'].min(), df_s['lat'].max()
                     lon_min, lon_max = df_s['lon'].min(), df_s['lon'].max()
@@ -1547,17 +1398,14 @@ if not st.session_state['csvs_ready']:
                         (df_c['lon'] >= lon_min - 0.5) & (df_c['lon'] <= lon_max + 0.5)
                     ].reset_index(drop=True)
 
-                    st.session_state['df_calls']             = df_c
-                    st.session_state['df_stations']          = df_s
+                    st.session_state['df_calls']    = df_c
+                    st.session_state['df_stations'] = df_s
 
                     with st.spinner(get_jurisdiction_message()):
-                        detected_state_full, detected_city = reverse_geocode_state(
-                            df_c['lat'].iloc[0], df_c['lon'].iloc[0]
-                        )
+                        detected_state_full, detected_city = reverse_geocode_state(df_c['lat'].iloc[0], df_c['lon'].iloc[0])
                         if detected_state_full and detected_state_full in US_STATES_ABBR:
                             st.session_state['active_state'] = US_STATES_ABBR[detected_state_full]
-                            if detected_city and detected_city != 'Unknown City':
-                                st.session_state['active_city'] = detected_city
+                            if detected_city and detected_city != 'Unknown City': st.session_state['active_city'] = detected_city
                             st.toast(f"📍 Detected: {st.session_state['active_city']}, {st.session_state['active_state']}")
                     st.session_state['csvs_ready'] = True
                     st.rerun()
@@ -1590,10 +1438,7 @@ if not st.session_state['csvs_ready']:
 
         city_chips = "  ·  ".join([f"{c}" for c, _ in DEMO_CITIES[:12]]) + "  · and more…"
         st.markdown(f"""
-        <div class="demo-cities">
-            <b>Available Cities</b><br>
-            {city_chips}
-        </div>
+        <div class="demo-cities"><b>Available Cities</b><br>{city_chips}</div>
         <div class="demo-check">
             <span>✓</span>Real Census boundaries<br>
             <span>✓</span>Clustered 911 simulation<br>
@@ -1730,15 +1575,10 @@ if not st.session_state['csvs_ready']:
                             s_lat, s_lon = forward_geocode(f"{addr_str}, {active_targets[0]['city']}, {active_targets[0]['state']}")
                         if s_lat is None:
                             st.toast(f"⚠️ Could not geocode: {addr_str}")
-                        time.sleep(1)
+                        time.sleep(1) 
                         
                     if s_lat and s_lon:
-                        parsed_stations.append({
-                            'name': s_name,
-                            'lat': s_lat,
-                            'lon': s_lon,
-                            'type': s_type
-                        })
+                        parsed_stations.append({'name': s_name, 'lat': s_lat, 'lon': s_lon, 'type': s_type})
                         
                 if parsed_stations:
                     st.session_state['df_stations'] = pd.DataFrame(parsed_stations)
@@ -1751,7 +1591,6 @@ if not st.session_state['csvs_ready']:
         if not custom_stations_used:
             prog.progress(80, text="🌐 Querying OpenStreetMap for real police, fire & schools…")
             df_s, osm_note = generate_stations_from_calls(st.session_state['df_calls'])
-            
             if df_s is not None and not df_s.empty:
                 st.session_state['df_stations'] = df_s
                 st.toast(f"✅ {osm_note}")
@@ -1784,26 +1623,12 @@ if st.session_state['csvs_ready']:
         master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR)
 
     if master_gdf is None or master_gdf.empty:
-        active_c = st.session_state.get('active_city', '')
-        active_s = st.session_state.get('active_state', '')
-        
-        if "county" in active_c.lower():
-            success, c_gdf = fetch_county_boundary_local(active_s, active_c)
-            if success:
-                master_gdf = c_gdf.copy()
-                name_col = next((c for c in ['NAME', 'NAMELSAD'] if c in master_gdf.columns), master_gdf.columns[0])
-                master_gdf['DISPLAY_NAME'] = master_gdf[name_col]
-                if not master_gdf['DISPLAY_NAME'].iloc[0].lower().endswith('county'):
-                    master_gdf['DISPLAY_NAME'] = master_gdf['DISPLAY_NAME'] + " County"
-                master_gdf['data_count'] = len(df_calls)
-
-        if master_gdf is None or master_gdf.empty:
-            min_lon, min_lat = df_calls['lon'].min(), df_calls['lat'].min()
-            max_lon, max_lat = df_calls['lon'].max(), df_calls['lat'].max()
-            lon_pad = (max_lon - min_lon) * 0.1
-            lat_pad = (max_lat - min_lat) * 0.1
-            poly = box(min_lon-lon_pad, min_lat-lat_pad, max_lon+lon_pad, max_lat+lat_pad)
-            master_gdf = gpd.GeoDataFrame({'DISPLAY_NAME':['Auto-Generated Boundary'],'data_count':[len(df_calls)]}, geometry=[poly], crs="EPSG:4326")
+        min_lon, min_lat = df_calls['lon'].min(), df_calls['lat'].min()
+        max_lon, max_lat = df_calls['lon'].max(), df_calls['lat'].max()
+        lon_pad = (max_lon - min_lon) * 0.1
+        lat_pad = (max_lat - min_lat) * 0.1
+        poly = box(min_lon-lon_pad, min_lat-lat_pad, max_lon+lon_pad, max_lat+lat_pad)
+        master_gdf = gpd.GeoDataFrame({'DISPLAY_NAME':['Auto-Generated Boundary'],'data_count':[len(df_calls)]}, geometry=[poly], crs="EPSG:4326")
 
     logo_b64 = get_base64_of_bin_file("logo.png")
     if logo_b64:
@@ -1907,12 +1732,10 @@ if st.session_state['csvs_ready']:
         st.error(f"Geometry Error: {e}"); st.stop()
 
     # --- STRICT GEOGRAPHIC FILTERING FOR STATIONS ---
-    # Delete any OSM-generated station that accidentally falls outside the city limits
     if not df_stations_all.empty and city_m is not None:
         st_gdf = gpd.GeoDataFrame(df_stations_all, geometry=gpd.points_from_xy(df_stations_all.lon, df_stations_all.lat), crs="EPSG:4326")
         st_gdf_utm = st_gdf.to_crs(epsg=epsg_code)
         
-        # We add a tiny 150-meter buffer so we don't accidentally delete a real station sitting right on a border road
         mask = st_gdf_utm.within(city_m.buffer(150))
         df_stations_all = df_stations_all[mask].reset_index(drop=True)
         
@@ -1929,16 +1752,14 @@ if st.session_state['csvs_ready']:
     max_resp_calc = min(n, int(math.ceil(area_sq_mi / (math.pi * (r_resp_est**2)))) + 5)
     max_guard_calc = min(n, int(math.ceil(area_sq_mi / (math.pi * (r_guard_est**2)))) + 5)
 
-    # Respect the exact default settings requested
     val_r = min(st.session_state.get('k_resp', 2), max_resp_calc)
     val_g = min(st.session_state.get('k_guard', 0), max_guard_calc)
 
-    # Restored both independent Count sliders and Range sliders
     k_responder = st.sidebar.slider("🚁 Responder Count", 0, max(1, max_resp_calc), val_r, help="Short-range tactical drones (2-3mi radius).")
-    k_guardian  = st.sidebar.slider("🦅 Guardian Count", 0, max(1, max_guard_calc), val_g, help="Long-range heavy-lift drones (up to 8mi radius).")
+    k_guardian  = st.sidebar.slider("🦅 Guardian Range (mi) [⚡ 5mi Rapid]", 1, 8, int(st.session_state.get('r_guard', 8)), help="The 5-mile rapid response focus zone will automatically be highlighted inside the maximum perimeter.")
     
-    resp_radius_mi  = st.sidebar.slider("🚁 Responder Range (mi)", 2.0, 3.0, float(st.session_state.get('r_resp', 2.0)), step=0.5)
-    guard_radius_mi = st.sidebar.slider("🦅 Guardian Range (mi) [⚡ 5mi Rapid]", 1, 8, int(st.session_state.get('r_guard', 8)), help="The 5-mile rapid response focus zone will automatically be highlighted inside the maximum perimeter.")
+    resp_radius_mi  = st.sidebar.slider("🚁 Responder Range (mi)", 2.0, 3.0, st.session_state.get('r_resp', 2.0), step=0.5)
+    guard_radius_mi = st.sidebar.slider("🦅 Guardian Range (mi)", 1, 8, int(st.session_state.get('r_guard', 8)))
 
     st.session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
 
@@ -1965,10 +1786,8 @@ if st.session_state['csvs_ready']:
         fallback = series.index[-1]
         return int(df_curve.loc[idx_99 if idx_99 is not None else fallback, 'Drones'])
 
-    with st.spinner(get_faa_message()):
-        faa_geojson = load_faa_parquet(minx, miny, maxx, maxy)
-    with st.spinner(get_airfield_message()):
-        airfields = fetch_airfields(minx, miny, maxx, maxy)
+    with st.spinner(get_faa_message()): faa_geojson = load_faa_parquet(minx, miny, maxx, maxy)
+    with st.spinner(get_airfield_message()): airfields = fetch_airfields(minx, miny, maxx, maxy)
 
     st.sidebar.markdown('<div class="sidebar-section-header">③ Budget & Export</div>', unsafe_allow_html=True)
 
@@ -2108,7 +1927,7 @@ if st.session_state['csvs_ready']:
     active_color_map = {}
     c_idx = 0
     for idx, d_type in ordered_deployments_raw:
-        key = f"{idx}_{d_type}" 
+        key = f"{idx}_{d_type}"
         if key not in active_color_map:
             active_color_map[key] = STATION_COLORS[c_idx % len(STATION_COLORS)]
             c_idx += 1
@@ -2280,8 +2099,7 @@ if st.session_state['csvs_ready']:
             min_date = pd.to_datetime(df_calls['date']).min().strftime('%b %Y')
             max_date = pd.to_datetime(df_calls['date']).max().strftime('%b %Y')
             date_range_str = f"{min_date} – {max_date}" if min_date != max_date else min_date
-        except:
-            pass
+        except: pass
 
     avg_resp_time = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
 
@@ -2380,8 +2198,7 @@ if st.session_state['csvs_ready']:
             
             fig.add_trace(go.Scattermapbox(
                 lat=list(clats)+[None,d['lat']], lon=list(clons)+[None,d['lon']],
-                mode='lines+markers',
-                opacity=outer_opac,
+                mode='lines+markers', opacity=outer_opac,
                 marker=dict(size=[0]*len(clats)+[0,20], color=d['color']),
                 line=dict(color=d['color'], width=outer_width),
                 fill='toself', fillcolor='rgba(0,0,0,0)', name=lbl, hoverinfo='name'))
@@ -2389,16 +2206,11 @@ if st.session_state['csvs_ready']:
             if is_extended_guardian:
                 f_lats, f_lons = get_circle_coords(d['lat'], d['lon'], r_mi=5.0)
                 fig.add_trace(go.Scattermapbox(
-                    lat=list(f_lats), lon=list(f_lons),
-                    mode='lines',
-                    line=dict(color=d['color'], width=4.5),
-                    opacity=1.0,
-                    fill='toself',
+                    lat=list(f_lats), lon=list(f_lons), mode='lines',
+                    line=dict(color=d['color'], width=4.5), opacity=1.0, fill='toself',
                     fillcolor=f"rgba({int(d['color'][1:3],16)},{int(d['color'][3:5],16)},{int(d['color'][5:7],16)},0.12)",
-                    name=f"Rapid Response 5mi · {d['name'].split(',')[0]}",
-                    hoverinfo='text',
-                    text=f"⚡ Rapid Response Focus Zone — 5mi<br>{d['name'].split(',')[0]}",
-                    showlegend=False
+                    name=f"Rapid Response 5mi · {d['name'].split(',')[0]}", hoverinfo='text',
+                    text=f"⚡ Rapid Response Focus Zone — 5mi<br>{d['name'].split(',')[0]}", showlegend=False
                 ))
 
             if simulate_traffic:
@@ -2507,7 +2319,7 @@ if st.session_state['csvs_ready']:
                             d_address   = get_address_from_latlon(d_lat, d_lon)
                             gmaps_url   = f"https://www.google.com/maps/search/?api=1&query={d_lat},{d_lon}"
 
-    cols[j].markdown(f"""
+                            cols[j].markdown(f"""
 <div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color}; border-left:1px solid {card_border}; border-right:1px solid {card_border}; border-bottom:1px solid {card_border}; border-radius:4px; padding:12px; margin-bottom:12px; cursor:default; height:330px; display:flex; flex-direction:column;">
 <div style="font-weight:700; font-size:0.73rem; color:{card_title}; margin-bottom:2px;">{short_name}</div>
 <div style="font-size:0.58rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">{d_type} · Phase #{d_step}</div>
@@ -2540,7 +2352,7 @@ if st.session_state['csvs_ready']:
 </div>
 </div>
 """, unsafe_allow_html=True)
-    
+
     # ── 3D SWARM SIMULATION ───────────────────────────────────────────
     if fleet_capex > 0:
         st.markdown("---")
@@ -2574,12 +2386,9 @@ if st.session_state['csvs_ready']:
                 monthly_for_drone = int(frac * calls_per_day * 30 * dfr_dispatch_rate)
                 pool = sim_assignments[d_idx]
 
-                if not pool:
-                    sim_calls = []
-                elif monthly_for_drone > len(pool):
-                    sim_calls = random.choices(pool, k=monthly_for_drone)
-                else:
-                    sim_calls = random.sample(pool, monthly_for_drone)
+                if not pool: sim_calls = []
+                elif monthly_for_drone > len(pool): sim_calls = random.choices(pool, k=monthly_for_drone)
+                else: sim_calls = random.sample(pool, monthly_for_drone)
 
                 total_sim_flights += len(sim_calls)
                 for ci in sim_calls:
@@ -2600,14 +2409,7 @@ if st.session_state['csvs_ready']:
                     mx3 = lon0 + 0.65*(lon1-lon0);  my3 = lat0 + 0.65*(lat1-lat0)
                     mx4 = lon0 + 0.85*(lon1-lon0);  my4 = lat0 + 0.85*(lat1-lat0)
                     flights_json.append({
-                        "path": [
-                            [lon0, lat0, 0],
-                            [mx1,  my1,  arc_h*0.75],
-                            [mx2,  my2,  arc_h],
-                            [mx3,  my3,  arc_h],
-                            [mx4,  my4,  arc_h*0.75],
-                            [lon1, lat1, 0]
-                        ],
+                        "path": [[lon0, lat0, 0], [mx1, my1, arc_h*0.75], [mx2, my2, arc_h], [mx3, my3, arc_h], [mx4, my4, arc_h*0.75], [lon1, lat1, 0]],
                         "timestamps": [t0, t1, t2, t3, t4, t5],
                         "color": rgb
                     })
@@ -2723,6 +2525,29 @@ if st.session_state['csvs_ready']:
         analytics_html_block = generate_command_center_html(df_calls, total_orig_calls=st.session_state.get('total_original_calls', total_calls))
         components.html(analytics_html_block, height=1600, scrolling=False)
 
+    # ── PUBLIC BUILDING OPPORTUNITIES ──
+    st.markdown("---")
+    st.markdown(f"<h3 style='color:{text_main};'>🏢 Public Building Opportunities</h3>", unsafe_allow_html=True)
+    st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Complete directory of candidate launch locations (Police, Fire, EMS, Schools, etc.) loaded into the simulation environment.</div>", unsafe_allow_html=True)
+    
+    show_buildings = st.toggle("📋 Show Full Station Directory", value=False)
+    if show_buildings:
+        disp_df = df_stations_all.copy()
+        disp_df['Location'] = ["https://www.google.com/maps/search/?api=1&query=" + str(r['lat']) + "," + str(r['lon']) for _, r in disp_df.iterrows()]
+        
+        st.dataframe(
+            disp_df[['name', 'type', 'lat', 'lon', 'Location']],
+            column_config={
+                "name": "Facility Name",
+                "type": "Type",
+                "lat": st.column_config.NumberColumn("Latitude", format="%.5f"),
+                "lon": st.column_config.NumberColumn("Longitude", format="%.5f"),
+                "Location": st.column_config.LinkColumn("Google Maps", display_text="📍 View on Map")
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+
     # ── EXPORT BUTTONS ──
     if fleet_capex > 0:
         st.sidebar.markdown("---")
@@ -2762,6 +2587,10 @@ if st.session_state['csvs_ready']:
             "faa_geojson": faa_geojson
         }
 
+        avg_resp_time  = sum(d['avg_time_min'] for d in active_drones)/len(active_drones) if active_drones else 0.0
+        avg_ground_speed = CONFIG["DEFAULT_TRAFFIC_SPEED"] * (1 - traffic_level/100)
+        avg_time_saved = ((sum((d['radius_m']/1609.34*1.4/avg_ground_speed)*60 for d in active_drones)/len(active_drones)) - avg_resp_time) if active_drones and avg_ground_speed > 0 else 0.0
+
         fig_for_export = go.Figure()
         for d in active_drones:
             clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
@@ -2779,13 +2608,26 @@ if st.session_state['csvs_ready']:
         map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
         station_rows = "".join(f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>" for d in active_drones)
 
+        all_bldgs_rows = ""
+        for _, row in df_stations_all.iterrows():
+            gmaps_link = f"https://www.google.com/maps/search/?api=1&query={row['lat']},{row['lon']}"
+            all_bldgs_rows += f"<tr><td>{row['name']}</td><td>{row['type']}</td><td>{row['lat']:.5f}</td><td>{row['lon']:.5f}</td><td><a href='{gmaps_link}' target='_blank' style='color:#00D2FF; font-weight:bold; text-decoration:none;'>View Map ↗</a></td></tr>"
+
         logo_b64 = get_base64_of_bin_file("logo.png")
         logo_html_str = f'<img src="data:image/png;base64,{logo_b64}" style="height:32px;">' if logo_b64 else '<div style="font-size:24px;font-weight:900;letter-spacing:3px;color:#fff;">BRINC</div>'
 
         jurisdiction_list = ", ".join(selected_names) if selected_names else prop_city
+        all_station_types = df_stations_all['type'].dropna().unique().tolist() if 'type' in df_stations_all.columns else []
         police_dept_names = [d['name'] for d in active_drones if '[Police]' in d['name']]
         fire_dept_names   = [d['name'] for d in active_drones if '[Fire]' in d['name']]
         ems_dept_names    = [d['name'] for d in active_drones if '[EMS]' in d['name']]
+
+        police_stations = [d['name'] for d in active_drones if 'Police' in d.get('name','') or (
+            'type' in df_stations_all.columns and
+            'Police' in str(df_stations_all[df_stations_all['name'].str.contains(
+                d['name'].split(']')[-1].strip(), na=False, regex=False
+            )]['type'].values[:1])
+        )]
 
         dept_summary_parts = []
         if police_dept_names: dept_summary_parts.append(f"{len(police_dept_names)} Police station{'s' if len(police_dept_names)>1 else ''}")
@@ -2795,45 +2637,6 @@ if st.session_state['csvs_ready']:
         police_names_str = (", ".join([n.replace('[Police] ','') for n in police_dept_names[:6]]) + ("..." if len(police_dept_names)>6 else "")) if police_dept_names else "municipal facilities"
         total_fleet = actual_k_responder + actual_k_guardian
         area_sq_mi_est = int((maxx - minx) * (maxy - miny) * 3280)
-
-        # Generate specific calculations for the AI Sponsorship Pitch
-        avg_ground_speed = CONFIG["DEFAULT_TRAFFIC_SPEED"] * (1 - traffic_level/100)
-        avg_time_saved = ((sum((d['radius_m']/1609.34*1.4/avg_ground_speed)*60 for d in active_drones)/len(active_drones)) - avg_resp_time) if active_drones and avg_ground_speed > 0 else 0.0
-        time_saved_text = f"up to {avg_time_saved:.1f} minutes faster than a standard patrol car" if avg_time_saved > 0 else "faster than traditional ground transport"
-
-        immersive_sponsor_html = f"""
-        <h2>Community Sponsorship Pitch (AI Draft)</h2>
-        <div class="disclaimer"><strong>INSTRUCTIONS:</strong> Print this page or save as a PDF to present directly to local retail centers, malls, and large commercial businesses.</div>
-        <div style="border: 1px solid #ddd; border-radius: 12px; overflow: hidden; background: #fff; margin-bottom: 40px; box-shadow: 0 10px 30px rgba(0,0,0,0.05);">
-            <div style="background: #000; padding: 30px; text-align: center; border-bottom: 4px solid #00D2FF;">
-                {logo_html_str}
-                <h2 style="color: #fff; border-bottom: none; margin: 15px 0 5px 0; padding: 0;">Community Security Partnership</h2>
-                <div style="color: #00D2FF; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; font-size: 13px;">Drone as a First Responder (DFR) Initiative</div>
-            </div>
-            <div style="padding: 40px 50px; font-family: 'Times New Roman', serif; font-size: 16px; color: #222; line-height: 1.6;">
-                <p><strong>To:</strong> [Business Owner / General Manager]<br>
-                <strong>From:</strong> [Chief of Police / Command Staff Name], {jurisdiction_list} Police Department<br>
-                <strong>Date:</strong> {datetime.datetime.now().strftime("%B %d, %Y")}<br>
-                <strong>Subject:</strong> Next-Generation Loss Prevention & Security for [Business Name]</p>
-                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                <p>Dear [Business Owner / General Manager],</p>
-                <p>Retail shrink, organized property crime, and safety incidents cost US businesses over $112 billion annually. Traditional security measures and ground-based patrols are increasingly constrained by traffic congestion and distance. To combat this, the {jurisdiction_list} Police Department is taking a revolutionary step to protect our local commercial partners by launching a <strong>Drone as a First Responder (DFR)</strong> program powered by BRINC Drones.</p>
-                <div style="background: #f8f9fa; border-left: 4px solid #00D2FF; padding: 20px; margin: 25px 0; font-family: 'Manrope', sans-serif;">
-                    <h4 style="margin-top: 0; color: #111; font-size: 16px;">Data-Driven Impact for Your Business</h4>
-                    <ul style="margin-bottom: 0; padding-left: 20px; line-height: 1.6; font-size: 14px; color: #444;">
-                        <li style="margin-bottom: 10px;"><strong>Ultra-Fast Response:</strong> Our geographic models project a <strong>{avg_resp_time:.1f}-minute</strong> arrival time to your property—arriving <strong>{time_saved_text}</strong>.</li>
-                        <li style="margin-bottom: 10px;"><strong>Loss Prevention & Deterrence:</strong> Immediate aerial overwatch drastically increases apprehension rates and acts as a highly visible deterrent to organized retail crime and vehicle break-ins.</li>
-                        <li><strong>Risk & Liability Reduction:</strong> High-definition aerial streaming allows our officers to assess threats in real-time before arriving on your property, de-escalating situations and minimizing liability.</li>
-                    </ul>
-                </div>
-                <p>We are deploying a dedicated fleet of {total_fleet} BRINC systems ({actual_k_responder} Responders and {actual_k_guardian} Guardians) to cover our commercial corridors. The capital expenditure for this cutting-edge network is <strong>${fleet_capex:,.0f}</strong>. To accelerate deployment without passing the full cost to taxpayers, we are offering exclusive founding sponsorships to forward-thinking community leaders like you.</p>
-                <p>By contributing a tax-deductible sponsorship to this program, you are making a direct, quantifiable investment in the safety and profitability of your business. We would welcome the opportunity to schedule a brief meeting to show you a live simulation of exactly how our new DFR fleet will secure your property.</p>
-                <p>Sincerely,</p>
-                <p style="margin-bottom: 0;"><strong>[Chief of Police / Command Staff Name]</strong><br>
-                {jurisdiction_list} Police Department</p>
-            </div>
-        </div>
-        """
 
         analytics_html_export = generate_command_center_html(df_calls, total_orig_calls=st.session_state.get('total_original_calls', total_calls), export_mode=True)
 
@@ -2921,7 +2724,12 @@ if st.session_state['csvs_ready']:
               <a href="https://www.transportation.gov/grants" target="_blank">DOT RAISE</a> — Regional infrastructure and safety
             </p>
 
-            {immersive_sponsor_html}
+            <h2>Candidate Infrastructure Directory</h2>
+            <p>The following public buildings and facilities were evaluated as potential deployment locations during this optimization simulation:</p>
+            <table style="font-size: 12px; margin-bottom: 40px;">
+                <tr><th>Facility Name</th><th>Type</th><th>Latitude</th><th>Longitude</th><th>Location</th></tr>
+                {all_bldgs_rows}
+            </table>
             
             <div style="margin-top: 50px; font-family:'Manrope', Arial, sans-serif !important;">
                 <div style="border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">

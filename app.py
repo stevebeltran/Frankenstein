@@ -3366,10 +3366,6 @@ if st.session_state['csvs_ready']:
             "faa_geojson": faa_geojson
         }
 
-        avg_resp_time  = sum(d['avg_time_min'] for d in active_drones)/len(active_drones) if active_drones else 0.0
-        avg_ground_speed = CONFIG["DEFAULT_TRAFFIC_SPEED"] * (1 - traffic_level/100)
-        avg_time_saved = ((sum((d['radius_m']/1609.34*1.4/avg_ground_speed)*60 for d in active_drones)/len(active_drones)) - avg_resp_time) if active_drones and avg_ground_speed > 0 else 0.0
-
         fig_for_export = go.Figure()
         for d in active_drones:
             clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
@@ -3415,8 +3411,6 @@ if st.session_state['csvs_ready']:
         dept_summary = ", ".join(dept_summary_parts) if dept_summary_parts else f"{len(active_drones)} municipal stations"
         police_names_str = (", ".join([n.replace('[Police] ','') for n in police_dept_names[:6]]) + ("..." if len(police_dept_names)>6 else "")) if police_dept_names else "municipal facilities"
         total_fleet = actual_k_responder + actual_k_guardian
-        area_sq_mi_est = int((maxx - minx) * (maxy - miny) * 3280)
-
         analytics_html_export = generate_command_center_html(df_calls, total_orig_calls=st.session_state.get('total_original_calls', total_calls), export_mode=True)
 
         export_html = f"""<html><head><title>BRINC DFR Proposal — {prop_city}</title>

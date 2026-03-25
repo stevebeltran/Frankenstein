@@ -670,28 +670,61 @@ def normalize_state_abbr(state_value):
     return US_STATES_ABBR.get(state_value.title())
 
 
-def normalize_place_name(name):
+def strip_trailing_state_from_place(name, selected_state=None):
+    name = (name or "").strip()
+    if not name:
+        return ""
+
+    state_tokens = set(STATE_FIPS.keys()) | {s.lower() for s in US_STATES_ABBR.keys()}
+    if selected_state:
+        sel = normalize_state_abbr(selected_state)
+        if sel:
+            state_tokens.add(sel.lower())
+            for full_name, abbr in US_STATES_ABBR.items():
+                if abbr == sel:
+                    state_tokens.add(full_name.lower())
+                    break
+
+    # Handle forms like "Gilmer County, GA" or "Gilmer County, Georgia"
+    parts = [p.strip() for p in name.split(',') if p.strip()]
+    if len(parts) >= 2 and parts[-1].lower() in state_tokens:
+        name = ', '.join(parts[:-1]).strip()
+
+    # Handle forms like "Gilmer County GA" or "Gilmer County Georgia"
+    lowered = name.lower().strip()
+    for token in sorted(state_tokens, key=len, reverse=True):
+        if lowered.endswith(' ' + token):
+            name = name[:-(len(token) + 1)].strip()
+            lowered = name.lower().strip()
+            break
+
+    return name
+
+
+def normalize_place_name(name, selected_state=None):
+    name = strip_trailing_state_from_place(name, selected_state=selected_state)
     name = (name or "").lower().strip()
     name = re.sub(r"[.,]", "", name)
     name = re.sub(r"\s+", " ", name)
     return name
 
 
-def normalize_county_name(name):
-    name = normalize_place_name(name)
+def normalize_county_name(name, selected_state=None):
+    name = normalize_place_name(name, selected_state=selected_state)
     name = re.sub(r"\s+county$", "", name)
     name = re.sub(r"\s+co$", "", name)
     return name.strip()
 
 
-def looks_like_county(name):
-    cleaned = normalize_place_name(name)
+def looks_like_county(name, selected_state=None):
+    raw = strip_trailing_state_from_place(name, selected_state=selected_state)
+    cleaned = normalize_place_name(raw)
     return cleaned.endswith(" county") or cleaned.endswith(" co")
 
 
 @st.cache_data
 def fetch_county_boundary_local(state_abbr, county_name_input):
-    search_name = normalize_county_name(county_name_input)
+    search_name = normalize_county_name(county_name_input, selected_state=state_abbr)
 
     state_abbr = normalize_state_abbr(state_abbr)
     state_fips = STATE_FIPS.get(state_abbr)
@@ -1707,7 +1740,7 @@ if not st.session_state['csvs_ready']:
         for i, loc in enumerate(active_targets):
             c_name = loc['city'].strip()
             s_name = normalize_state_abbr(loc['state']) or loc['state']
-            is_county = looks_like_county(c_name)
+            is_county = looks_like_county(c_name, selected_state=s_name)
             
             prog.progress(10 + int((i / len(active_targets)) * 20),
                           text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
@@ -1715,7 +1748,7 @@ if not st.session_state['csvs_ready']:
             if is_county:
                 success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
             else:
-                success, temp_gdf = fetch_tiger_city_shapefile(STATE_FIPS[s_name], normalize_place_name(c_name).title(), SHAPEFILE_DIR)
+                success, temp_gdf = fetch_tiger_city_shapefile(STATE_FIPS[s_name], normalize_place_name(c_name, selected_state=s_name).title(), SHAPEFILE_DIR)
                 
             if success:
                 all_gdfs.append(temp_gdf)

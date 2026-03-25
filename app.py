@@ -661,39 +661,62 @@ def forward_geocode(address_str):
     except Exception: pass
     return None, None
 
+def normalize_state_abbr(state_value):
+    state_value = (state_value or "").strip()
+    if not state_value:
+        return None
+    if len(state_value) == 2:
+        return state_value.upper()
+    return US_STATES_ABBR.get(state_value.title())
+
+
+def normalize_place_name(name):
+    name = (name or "").lower().strip()
+    name = re.sub(r"[.,]", "", name)
+    name = re.sub(r"\s+", " ", name)
+    return name
+
+
+def normalize_county_name(name):
+    name = normalize_place_name(name)
+    name = re.sub(r"\s+county$", "", name)
+    name = re.sub(r"\s+co$", "", name)
+    return name.strip()
+
+
+def looks_like_county(name):
+    cleaned = normalize_place_name(name)
+    return cleaned.endswith(" county") or cleaned.endswith(" co")
+
+
 @st.cache_data
 def fetch_county_boundary_local(state_abbr, county_name_input):
-    # 1. Clean the input
-    search_name = county_name_input.lower().strip()
-    if search_name.endswith(" county"):
-        search_name = search_name.replace(" county", "").strip()
-        
+    search_name = normalize_county_name(county_name_input)
+
+    state_abbr = normalize_state_abbr(state_abbr)
     state_fips = STATE_FIPS.get(state_abbr)
-    if not state_fips: return False, None
-    
-    # 2. Look for our new ultra-compressed parquet file
-    local_file = "counties_lite.parquet"
+    if not state_fips:
+        return False, None
+
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    local_file = os.path.join(app_dir, "counties_lite.parquet")
     if not os.path.exists(local_file):
         st.error(f"Missing {local_file}! Please ensure it is uploaded to your repository.")
         return False, None
-                
-    # 3. Read directly from the Parquet file instantly
+
     try:
-        # Geopandas reads Parquet files in milliseconds!
-        gdf = gpd.read_parquet(local_file)
-        
-        # Filter for the exact State FIPS code and County Name
-        match = gdf[(gdf['STATEFP'] == state_fips) & (gdf['NAME'].str.lower() == search_name)]
-        
+        gdf = gpd.read_parquet(local_file).copy()
+        gdf["NAME_CLEAN"] = gdf["NAME"].astype(str).str.lower().str.strip()
+
+        match = gdf[(gdf["STATEFP"] == state_fips) & (gdf["NAME_CLEAN"] == search_name)]
+
         if not match.empty:
-            # Put the word "County" back on for the UI displays
             match = match.copy()
-            match['NAME'] = match['NAME'] + " County"
-            return True, match[['NAME', 'geometry']]
+            match["NAME"] = match["NAME"] + " County"
+            return True, match[["NAME", "geometry"]]
     except Exception as e:
         st.error(f"Error reading local database: {e}")
-        pass
-        
+
     return False, None
 
 @st.cache_data
@@ -713,17 +736,21 @@ def reverse_geocode_state(lat, lon):
 def fetch_census_population(state_fips, place_name, is_county=False):
     if is_county:
         url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=county:*&in=state:{state_fips}"
+        search_name = normalize_county_name(place_name)
     else:
         url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=place:*&in=state:{state_fips}"
+        search_name = normalize_place_name(place_name)
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=10) as response:
             data = json.loads(response.read().decode('utf-8'))
-            search_name = place_name.lower().strip()
             for row in data[1:]:
                 place_full = row[1].lower().split(',')[0].strip()
-                if place_full == search_name or place_full.startswith(search_name + " "): return int(row[0])
-    except Exception: pass
+                candidate_name = normalize_county_name(place_full) if is_county else normalize_place_name(place_full)
+                if candidate_name == search_name or candidate_name.startswith(search_name + " "):
+                    return int(row[0])
+    except Exception:
+        pass
     return None
 
 SHAPEFILE_DIR = "jurisdiction_data"
@@ -1679,8 +1706,8 @@ if not st.session_state['csvs_ready']:
 
         for i, loc in enumerate(active_targets):
             c_name = loc['city'].strip()
-            s_name = loc['state']
-            is_county = c_name.lower().endswith(" county")
+            s_name = normalize_state_abbr(loc['state']) or loc['state']
+            is_county = looks_like_county(c_name)
             
             prog.progress(10 + int((i / len(active_targets)) * 20),
                           text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
@@ -1688,7 +1715,7 @@ if not st.session_state['csvs_ready']:
             if is_county:
                 success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
             else:
-                success, temp_gdf = fetch_tiger_city_shapefile(STATE_FIPS[s_name], c_name, SHAPEFILE_DIR)
+                success, temp_gdf = fetch_tiger_city_shapefile(STATE_FIPS[s_name], normalize_place_name(c_name).title(), SHAPEFILE_DIR)
                 
             if success:
                 all_gdfs.append(temp_gdf)

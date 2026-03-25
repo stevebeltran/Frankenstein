@@ -2579,18 +2579,32 @@ if st.session_state['csvs_ready']:
                             d_address   = get_address_from_latlon(d_lat, d_lon)
                             gmaps_url   = f"https://www.google.com/maps/search/?api=1&query={d_lat},{d_lon}"
 
+                            # Patrol time capacity line — shown when daily flights are high
+                            # BRINC Responder max patrol time = 11.6 hours/day
+                            MAX_PATROL_HOURS = 11.6
+                            MAX_PATROL_MINS  = MAX_PATROL_HOURS * 60  # 696 minutes
+                            total_daily_flights = d_flights + d_shared
+                            patrol_time_line = ""
+                            if total_daily_flights > 0 and d_savings > 0:
+                                mins_per_flight = MAX_PATROL_MINS / total_daily_flights
+                                # Show the line whenever flights are substantial enough to matter
+                                if total_daily_flights >= 5 or mins_per_flight < 60:
+                                    patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= 30 else "#00D2FF"
+                                    patrol_time_line = f'<div style="border-top:1px dashed rgba(255,255,255,0.15); margin-top:5px; padding-top:5px; font-size:0.58rem; color:{text_muted};">{total_daily_flights:.1f} flights ÷ {MAX_PATROL_HOURS}hr max = <span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight</span></div>'
+
                             cols[j].markdown(f"""
-<div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color}; border-left:1px solid {card_border}; border-right:1px solid {card_border}; border-bottom:1px solid {card_border}; border-radius:4px; padding:12px; margin-bottom:12px; cursor:default; min-height:350px; height:100%; display:flex; flex-direction:column; overflow:hidden;">
-<div style="font-weight:700; font-size:0.73rem; color:{card_title}; margin-bottom:2px;">{short_name}</div>
-<div style="font-size:0.58rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">{d_type} · Phase #{d_step}</div>
+<div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color}; border-left:1px solid {card_border}; border-right:1px solid {card_border}; border-bottom:1px solid {card_border}; border-radius:4px; padding:12px; margin-bottom:12px; cursor:default; height:360px; min-height:360px; max-height:360px; display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box;">
+<div style="font-weight:700; font-size:0.73rem; color:{card_title}; margin-bottom:2px; height:2.2em; overflow:hidden; line-height:1.1em;">{short_name}</div>
+<div style="font-size:0.58rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; white-space:nowrap;">{d_type} · Phase #{d_step}</div>
 <div style="font-size:0.62rem; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
 <a href="{gmaps_url}" target="_blank" title="Open in Google Maps" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
 </div>
-<div style="background:rgba(0,210,255,0.07); border-radius:4px; padding:8px; text-align:center; margin-bottom:8px;">
+<div style="background:rgba(0,210,255,0.07); border-radius:4px; padding:8px; text-align:center; margin-bottom:8px; flex-shrink:0;">
 <div style="font-size:0.6rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
 <div style="font-size:1.25rem; font-weight:900; color:{accent_color};">${d_savings:,.0f}</div>
+{patrol_time_line}
 </div>
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem; flex-grow:1;">
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem; flex-grow:1; align-content:start;">
 <div style="color:{text_muted};">Net Flights/day</div>
 <div style="text-align:right; font-weight:700; color:{accent_color};">{d_flights:.1f}</div>
 <div style="color:{text_muted};">Shared Flights/day</div>
@@ -2604,7 +2618,7 @@ if st.session_state['csvs_ready']:
 <div style="color:{text_muted};">Nearest Airfield</div>
 <div style="text-align:right; font-weight:700; color:{card_title}; font-size:0.55rem;">{d_airport}</div>
 </div>
-<div style="border-top:1px dashed {card_border}; margin-top:8px; padding-top:6px; display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem;">
+<div style="border-top:1px dashed {card_border}; margin-top:auto; padding-top:6px; display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem; flex-shrink:0;">
 <div style="color:{text_muted};">CapEx</div>
 <div style="text-align:right; font-weight:700; color:{card_title};">${d_cost:,.0f}</div>
 <div style="color:{text_muted};">ROI</div>
@@ -2788,25 +2802,7 @@ if st.session_state['csvs_ready']:
     # ── PUBLIC BUILDING OPPORTUNITIES ──
     st.markdown("---")
     st.markdown(f"<h3 style='color:{text_main};'>🏢 Public Building Opportunities</h3>", unsafe_allow_html=True)
-    st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Complete directory of candidate launch locations (Police, Fire, EMS, Schools, etc.) loaded into the simulation environment.</div>", unsafe_allow_html=True)
-    
-    show_buildings = st.toggle("📋 Show Full Station Directory", value=False)
-    if show_buildings:
-        disp_df = df_stations_all.copy()
-        disp_df['Location'] = ["https://www.google.com/maps/search/?api=1&query=" + str(r['lat']) + "," + str(r['lon']) for _, r in disp_df.iterrows()]
-        
-        st.dataframe(
-            disp_df[['name', 'type', 'lat', 'lon', 'Location']],
-            column_config={
-                "name": "Facility Name",
-                "type": "Type",
-                "lat": st.column_config.NumberColumn("Latitude", format="%.5f"),
-                "lon": st.column_config.NumberColumn("Longitude", format="%.5f"),
-                "Location": st.column_config.LinkColumn("Google Maps", display_text="📍 View on Map")
-            },
-            hide_index=True,
-            use_container_width=True
-        )
+    st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Candidate launch locations (Police, Fire, EMS, Schools, etc.) are shown on the map above. The full directory with coordinates is included in the exported HTML proposal.</div>", unsafe_allow_html=True)
 
     # ── EXPORT BUTTONS ──
     if fleet_capex > 0:
@@ -2990,6 +2986,66 @@ if st.session_state['csvs_ready']:
                 <tr><th>Facility Name</th><th>Type</th><th>Latitude</th><th>Longitude</th><th>Location</th></tr>
                 {all_bldgs_rows}
             </table>
+
+            <div style="page-break-before: always;"></div>
+            <h2 style="color:#1a1a2e; border-bottom: 3px solid #00D2FF;">📬 Community Business Partnership — Request for Support</h2>
+            <div style="background:#f0f8ff; border-left:5px solid #00D2FF; padding:20px 25px; border-radius:0 8px 8px 0; margin-bottom:25px; font-size:14px; color:#333;">
+                <strong>To: Local Business Community of {prop_city}, {prop_state}</strong><br>
+                <strong>Re: Drone as a First Responder Program — Community Investment Opportunity</strong><br>
+                <strong>Date:</strong> {datetime.datetime.now().strftime("%B %d, %Y")}
+            </div>
+            <p>Dear {prop_city} Business Owner,</p>
+            <p>On behalf of the public safety community of <strong>{prop_city}, {prop_state}</strong>, we are reaching out to local businesses to join a groundbreaking initiative that directly protects your investment, your employees, and your customers. Our city is proposing the deployment of a <strong>BRINC Drones Drone as a First Responder (DFR)</strong> network — an advanced aerial response system that puts a camera and tactical awareness on scene in under two minutes, before any ground unit can arrive.</p>
+
+            <h3 style="color:#1a1a2e; margin-top:30px;">Why Businesses Like Yours Should Care</h3>
+            <p>Property crimes cost American businesses billions each year. In <strong>{prop_city}</strong> and surrounding communities, the impact is felt directly in higher insurance premiums, inventory losses, property repairs, and the intangible cost of a less safe commercial environment. Consider the local data context:</p>
+            <table style="margin-bottom:20px;">
+                <tr><th>Crime Category</th><th>National Avg Cost per Incident</th><th>Business Impact</th></tr>
+                <tr><td><strong>Retail Theft / Shoplifting</strong></td><td>$559 per incident (NRF)</td><td>Inventory loss, employee safety risk, insurance premiums</td></tr>
+                <tr><td><strong>Vandalism / Property Damage</strong></td><td>$1,000–$5,000 per incident</td><td>Repair costs, business downtime, deterred customers</td></tr>
+                <tr><td><strong>Commercial Burglary</strong></td><td>$3,000–$8,500 per incident</td><td>Equipment/cash loss, security upgrades, psychological toll</td></tr>
+                <tr><td><strong>Robbery / Armed Incidents</strong></td><td>$8,000+ per incident</td><td>Worker's comp, legal liability, staff turnover</td></tr>
+                <tr><td><strong>Trespass / Loitering</strong></td><td>$200–$1,500 per incident</td><td>Customer deterrence, staff distraction, facility wear</td></tr>
+            </table>
+            <p>A DFR program acts as a <strong>force multiplier</strong> for law enforcement — drone units arrive on scene an average of <strong>{avg_resp_time:.1f} minutes</strong> after dispatch, capturing real-time aerial video that dramatically improves the probability of apprehension and conviction. Deterrence effects from visible drone patrols have been shown in peer-reviewed studies to reduce commercial property crime by 15–30% in covered zones.</p>
+
+            <h3 style="color:#1a1a2e; margin-top:30px;">The Investment We're Requesting</h3>
+            <p>The total capital cost for deploying the full DFR network across <strong>{jurisdiction_list}</strong> is <strong>${fleet_capex:,.0f}</strong>. We are seeking contributions from the local business community to offset a portion of this cost and accelerate deployment. Any amount helps — and contributions will be recognized publicly through the program.</p>
+            <table style="margin-bottom:20px;">
+                <tr><th>Sponsorship Tier</th><th>Contribution</th><th>Recognition</th></tr>
+                <tr><td>🥇 <strong>Founding Sponsor</strong></td><td>$25,000+</td><td>Named drone unit, press release, plaque at station, annual briefing</td></tr>
+                <tr><td>🥈 <strong>Community Champion</strong></td><td>$10,000–$24,999</td><td>Logo on program materials, certificate of recognition, annual update</td></tr>
+                <tr><td>🥉 <strong>Neighborhood Partner</strong></td><td>$2,500–$9,999</td><td>Listed on program website, certificate, public acknowledgment</td></tr>
+                <tr><td>🤝 <strong>Business Supporter</strong></td><td>$500–$2,499</td><td>Listed on donor roll, formal thank-you letter</td></tr>
+                <tr><td>💙 <strong>Community Contributor</strong></td><td>Any amount</td><td>Recognized in annual program report</td></tr>
+            </table>
+
+            <h3 style="color:#1a1a2e; margin-top:30px;">Program Performance Metrics</h3>
+            <table style="margin-bottom:20px;">
+                <tr><th>Metric</th><th>Projected Value</th></tr>
+                <tr><td>911 Calls Covered by Drone Network</td><td><strong>{calls_covered_perc:.1f}%</strong></td></tr>
+                <tr><td>Average Drone Response Time</td><td><strong>{avg_resp_time:.1f} minutes</strong></td></tr>
+                <tr><td>Time Saved vs. Ground Patrol</td><td><strong>{avg_time_saved:.1f} minutes faster</strong></td></tr>
+                <tr><td>Annual Cost Savings to Taxpayers</td><td><strong>${annual_savings:,.0f}</strong></td></tr>
+                <tr><td>Program Break-Even</td><td><strong>{break_even_text}</strong></td></tr>
+                <tr><td>Cost per Drone Response</td><td><strong>${CONFIG['DRONE_COST_PER_CALL']} vs. ${CONFIG['OFFICER_COST_PER_CALL']} (patrol)</strong></td></tr>
+                <tr><td>Deployment Coverage Area</td><td><strong>{area_sq_mi_est:,} sq mi</strong> across {jurisdiction_list}</td></tr>
+                <tr><td>Population Protected</td><td><strong>{pop_metric:,} residents</strong></td></tr>
+            </table>
+
+            <p>For every dollar invested in this program, the community receives an estimated <strong>${round(annual_savings / max(fleet_capex, 1) * 10, 1):.1f}x return</strong> in operational savings and crime cost avoidance over a 10-year horizon — before accounting for reduced insurance claims, higher foot traffic in safer commercial districts, and improved employee retention in a safer work environment.</p>
+
+            <p>To make a contribution or learn more about sponsorship opportunities, please contact:</p>
+            <div style="background:#f8f9fa; border:1px solid #eee; border-radius:8px; padding:20px; margin:20px 0;">
+                <strong>{prop_name}</strong><br>
+                BRINC Drones — DFR Program Coordinator<br>
+                📧 <a href="mailto:{prop_email}">{prop_email}</a><br>
+                🌐 <a href="https://brincdrones.com" target="_blank">brincdrones.com</a><br>
+                📞 +1 (855) 950-0226
+            </div>
+            <p>Together, we can build a safer, more prosperous {prop_city}. Thank you for your consideration and for your commitment to this community.</p>
+            <p>Respectfully,</p>
+            <p><strong>{prop_name}</strong><br>BRINC Drones, Inc. | Drone as a First Responder Program</p>
             
             <div style="margin-top: 50px; font-family:'Manrope', Arial, sans-serif !important;">
                 <div style="border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">

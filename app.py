@@ -1750,6 +1750,32 @@ if not st.session_state['csvs_ready']:
                                     st.toast(f"📍 Detected: {st.session_state['active_city']}, {st.session_state['active_state']}")
                             except Exception:
                                 pass
+                        # ── BOUNDARY LOOKUP: fetch & save shapefile NOW so
+                        # find_relevant_jurisdictions() can use it on the map page ──
+                        detected_city_for_boundary = st.session_state.get('active_city', '')
+                        detected_state_for_boundary = st.session_state.get('active_state', '')
+                        if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
+                            boundary_found = False
+                            # Try as a county first (append "County" and check parquet)
+                            for county_try in [detected_city_for_boundary + " County", detected_city_for_boundary]:
+                                b_success, b_gdf = fetch_county_boundary_local(detected_state_for_boundary, county_try)
+                                if b_success and b_gdf is not None:
+                                    try:
+                                        safe_n = detected_city_for_boundary.replace(" ", "_").replace("/", "_")
+                                        b_gdf.to_file(os.path.join(SHAPEFILE_DIR, f"{safe_n}_{detected_state_for_boundary}.shp"))
+                                        boundary_found = True
+                                    except Exception:
+                                        pass
+                                    break
+                            # If not a county, try as a TIGER city/place
+                            if not boundary_found:
+                                b_success, b_gdf = fetch_tiger_city_shapefile(
+                                    STATE_FIPS[detected_state_for_boundary],
+                                    detected_city_for_boundary,
+                                    SHAPEFILE_DIR
+                                )
+                                # fetch_tiger_city_shapefile already saves to SHAPEFILE_DIR on success
+
                     st.session_state['csvs_ready'] = True
                     st.rerun()
 
@@ -2003,6 +2029,33 @@ if st.session_state['csvs_ready']:
         master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR)
 
     if master_gdf is None or master_gdf.empty:
+        # ── Fallback 1: load any saved shapefile directly (spatial join may have
+        #    failed if coordinate conversion was imperfect, but the shapefile exists) ──
+        shp_files = glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp"))
+        if shp_files:
+            try:
+                # Pick the shapefile whose name best matches active_city
+                active_city_key = st.session_state.get('active_city', '').replace(' ', '_').lower()
+                best = None
+                for sf in shp_files:
+                    if active_city_key and active_city_key in os.path.basename(sf).lower():
+                        best = sf
+                        break
+                if best is None:
+                    best = shp_files[0]  # just use the first one
+                fallback_gdf = gpd.read_file(best)
+                if fallback_gdf.crs is None:
+                    fallback_gdf = fallback_gdf.set_crs(epsg=4269)
+                fallback_gdf = fallback_gdf.to_crs(epsg=4326)
+                name_col = next((c for c in ['NAME', 'DISTRICT', 'NAMELSAD'] if c in fallback_gdf.columns), fallback_gdf.columns[0])
+                fallback_gdf['DISPLAY_NAME'] = fallback_gdf[name_col].astype(str)
+                fallback_gdf['data_count'] = len(df_calls)
+                master_gdf = fallback_gdf[['DISPLAY_NAME', 'data_count', 'geometry']]
+            except Exception:
+                master_gdf = None
+
+    if master_gdf is None or master_gdf.empty:
+        # ── Fallback 2: bounding box around call points ──
         min_lon, min_lat = df_calls['lon'].min(), df_calls['lat'].min()
         max_lon, max_lat = df_calls['lon'].max(), df_calls['lat'].max()
         lon_pad = (max_lon - min_lon) * 0.1

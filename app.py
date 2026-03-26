@@ -3402,13 +3402,57 @@ if st.session_state['csvs_ready']:
 
     strat_expander = st.sidebar.expander("⚙️ Deployment Strategy", expanded=False)
     with strat_expander:
-        incremental_build = st.toggle("Phased Rollout", value=True)
-        allow_redundancy  = st.toggle("Allow Coverage Overlap", value=True)
+        incremental_build = st.toggle("Phased Rollout", value=True,
+            help="Place drones one at a time in priority order. Disable to find the global optimum in a single pass.")
+
+        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:8px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Deployment Mode</div>", unsafe_allow_html=True)
+        deployment_mode = st.radio(
+            "Deployment Mode", 
+            ("Complement — push apart", "Independent — each maximises own area", "Shared — allow full overlap"),
+            index=st.session_state.get('deployment_mode_idx', 1),
+            label_visibility="collapsed",
+            help=(
+                "Complement: Responders fill gaps left by Guardians — no wasted overlap. "
+                "Independent: each fleet optimises on its own objective; overlap allowed but not forced. "
+                "Shared: both fleets optimise together against the same call set — hotspot stacking."
+            )
+        )
+        _mode_map = {"Complement — push apart": 0, "Independent — each maximises own area": 1, "Shared — allow full overlap": 2}
+        st.session_state['deployment_mode_idx'] = _mode_map.get(deployment_mode, 1)
+
+        # Derived flags used by the optimizer
+        allow_redundancy  = (deployment_mode != "Complement — push apart")
+        complement_mode   = (deployment_mode == "Complement — push apart")
+        shared_mode       = (deployment_mode == "Shared — allow full overlap")
+
+        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Guardian Objective</div>", unsafe_allow_html=True)
+        guard_strategy_raw = st.radio(
+            "Guardian Objective",
+            ("Call Coverage", "Land Coverage"),
+            index=st.session_state.get('guard_strat_idx', 1),
+            horizontal=True,
+            label_visibility="collapsed",
+            help="What the Guardian optimizer maximises. Land Coverage = wide area patrol. Call Coverage = respond to highest-volume locations."
+        )
+        st.session_state['guard_strat_idx'] = 0 if guard_strategy_raw == "Call Coverage" else 1
+        guard_strategy = "Maximize Call Coverage" if guard_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
+
+        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Responder Objective</div>", unsafe_allow_html=True)
+        resp_strategy_raw = st.radio(
+            "Responder Objective",
+            ("Call Coverage", "Land Coverage"),
+            index=st.session_state.get('resp_strat_idx', 0),
+            horizontal=True,
+            label_visibility="collapsed",
+            help="What the Responder optimizer maximises. Call Coverage = densest incident areas. Land Coverage = broadest geographic reach."
+        )
+        st.session_state['resp_strat_idx'] = 0 if resp_strategy_raw == "Call Coverage" else 1
+        resp_strategy = "Maximize Call Coverage" if resp_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
+
+    # Keep opt_strategy for any code that still references it (used in export/logs)
+    opt_strategy = guard_strategy  # primary strategy label for reporting
 
     st.sidebar.markdown('<div class="sidebar-section-header">② Optimize Fleet</div>', unsafe_allow_html=True)
-
-    opt_strategy_raw = st.sidebar.radio("Optimization Goal", ("Call Coverage", "Land Coverage"), horizontal=True)
-    opt_strategy = "Maximize Call Coverage" if opt_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
 
     minx, miny, maxx, maxy = active_gdf.to_crs(epsg=4326).total_bounds
     center_lon = (minx + maxx) / 2
@@ -3614,7 +3658,7 @@ if st.session_state['csvs_ready']:
     best_combo = None
 
     _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
-    opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{opt_strategy}_{allow_redundancy}_{incremental_build}_{bounds_hash}_{_pins_key}"
+    opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{guard_strategy}_{resp_strategy}_{deployment_mode}_{incremental_build}_{bounds_hash}_{_pins_key}"
 
     if k_responder + k_guardian > n:
         st.error("⚠️ Over-Deployment: Total drones exceed available stations.")
@@ -3627,75 +3671,96 @@ if st.session_state['csvs_ready']:
         best_combo = None
     else:
         if st.session_state.get('_opt_cache_key') != opt_cache_key:
-            if opt_strategy == "Maximize Call Coverage":
-                stage_bar = st.empty()
-                stage_bar.info("🧠 Optimizing coverage — because smarter deployment means safer streets…")
-                r_best, g_best, chrono_r, chrono_g = solve_mclp(
-                    resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g,
-                    k_responder, k_guardian, allow_redundancy, incremental=incremental_build,
-                    forced_r=locked_r_pins, forced_g=locked_g_pins
-                )
-                best_combo = (tuple(r_best), tuple(g_best))
-                stage_bar.empty()
-                st.toast("✅ Optimization complete — your officers just got powerful new backup!", icon="✅")
-            else:
-                def evaluate_combo(rg_combo):
-                    r_combo, g_combo = rg_combo
-                    if allow_redundancy:
-                        score_area = (unary_union([station_metadata[i]['clipped_2m'] for i in r_combo]).area if r_combo else 0.0) + \
-                                     (unary_union([station_metadata[i]['clipped_guard'] for i in g_combo]).area if g_combo else 0.0)
-                    else:
-                        geos = [station_metadata[i]['clipped_2m'] for i in r_combo] + [station_metadata[i]['clipped_guard'] for i in g_combo]
-                        score_area = unary_union(geos).area if geos else 0.0
-                    cov_r = resp_matrix[list(r_combo)].any(axis=0) if r_combo else np.zeros(total_calls, bool)
-                    cov_g = guard_matrix[list(g_combo)].any(axis=0) if g_combo else np.zeros(total_calls, bool)
-                    score_calls = np.logical_or(cov_r, cov_g).sum() if total_calls > 0 else 0
-                    score_cent  = sum(station_metadata[i]['centrality'] for i in list(r_combo)+list(g_combo))
-                    return (score_area, score_calls, score_cent, rg_combo)
+            stage_bar = st.empty()
 
-                stage_bar = st.empty()
-                stage_bar.info("🗺️ Maximizing land coverage — no neighborhood left behind…")
-                if incremental_build:
-                    # Seed greedy search with any manually pinned stations
-                    locked_r = tuple(sorted(set(locked_r_pins)))
-                    locked_g = tuple(sorted(set(locked_g_pins)))
-                    chrono_r = list(locked_r_pins)
-                    chrono_g = list(locked_g_pins)
-                    for _ in range(k_guardian - len(locked_g_pins)):
-                        best_pick = max(
-                            [s for s in range(n) if s not in locked_g and (allow_redundancy or s not in locked_r)],
-                            key=lambda s: evaluate_combo((locked_r, tuple(sorted(list(locked_g)+[s])))),
-                            default=None
-                        )
-                        if best_pick is not None:
-                            locked_g = tuple(sorted(list(locked_g)+[best_pick]))
-                            chrono_g.append(best_pick)
-                    for _ in range(k_responder - len(locked_r_pins)):
-                        best_pick = max(
-                            [s for s in range(n) if s not in locked_r and (allow_redundancy or s not in locked_g)],
-                            key=lambda s: evaluate_combo((tuple(sorted(list(locked_r)+[s])), locked_g)),
-                            default=None
-                        )
-                        if best_pick is not None:
-                            locked_r = tuple(sorted(list(locked_r)+[best_pick]))
-                            chrono_r.append(best_pick)
-                    best_combo = (locked_r, locked_g)
+            # ── HELPER: greedy area-coverage for one fleet ───────────────────
+            def _greedy_area(matrix, geo_list, k, forced, exclude_set):
+                """Greedily pick k stations maximising unary_union area,
+                starting from forced pins and skipping exclude_set."""
+                chosen = list(forced)
+                chrono  = list(forced)
+                current_union = unary_union([geo_list[i] for i in chosen]) if chosen else None
+                for _ in range(k - len(forced)):
+                    best_s, best_gain = -1, -1.0
+                    for s in range(len(geo_list)):
+                        if s in chosen or s in exclude_set:
+                            continue
+                        g = geo_list[s]
+                        new_area = current_union.union(g).area if current_union else g.area
+                        gain = new_area - (current_union.area if current_union else 0)
+                        if gain > best_gain:
+                            best_gain, best_s = gain, s
+                    if best_s != -1:
+                        chosen.append(best_s)
+                        chrono.append(best_s)
+                        g = geo_list[best_s]
+                        current_union = current_union.union(g) if current_union else g
+                return chosen, chrono
+
+            # ── PASS 1: Optimise Guardians independently ─────────────────────
+            stage_bar.info("🦅 Optimising Guardian fleet…")
+            if k_guardian > 0:
+                if guard_strategy == "Maximize Call Coverage":
+                    g_best, _, chrono_g, _ = solve_mclp(
+                        resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g,
+                        0, k_guardian, True, incremental=incremental_build,
+                        forced_r=[], forced_g=locked_g_pins
+                    )
                 else:
-                    total_possible = math.comb(n, k_responder) * (math.comb(n-k_responder, k_guardian) if n >= k_responder else 1)
-                    if total_possible > 3000:
-                        combos = list(set(
-                            (tuple(sorted(c[:k_responder])), tuple(sorted(c[k_responder:])))
-                            for c in [np.random.choice(range(n), k_responder+k_guardian, replace=False) for _ in range(3000)]
-                        ))
-                    else:
-                        combos = [(r_c, g_c) for r_c in itertools.combinations(range(n), k_responder)
-                                  for g_c in (itertools.combinations([x for x in range(n) if x not in r_c], k_guardian) if k_guardian > 0 else [()])]
-                    with ThreadPoolExecutor() as ex:
-                        results = list(ex.map(evaluate_combo, combos))
-                    best_combo = max(results, key=lambda x: x[:3])[3]
-                    chrono_r, chrono_g = list(best_combo[0]), list(best_combo[1])
-                stage_bar.empty()
-                st.toast("✅ Coverage optimized — every corner of the city now has aerial support!", icon="✅")
+                    g_best, chrono_g = _greedy_area(
+                        guard_matrix,
+                        [station_metadata[i]['clipped_guard'] for i in range(n)],
+                        k_guardian, locked_g_pins, set()
+                    )
+                g_best = list(g_best)
+            else:
+                g_best, chrono_g = [], []
+
+            # ── PASS 2: Optimise Responders around Guardian result ────────────
+            stage_bar.info("🚁 Optimising Responder fleet…")
+            if k_responder > 0:
+                # In complement mode, mask out calls already covered by Guardians
+                # so Responders fill the gaps rather than stacking on the same calls.
+                if complement_mode and g_best and total_calls > 0:
+                    guard_covered = guard_matrix[g_best].any(axis=0)
+                    # Build a reduced matrix: zero out already-covered calls for Responders
+                    resp_matrix_eff = resp_matrix.copy()
+                    resp_matrix_eff[:, guard_covered] = False
+                    dist_matrix_r_eff = dist_matrix_r.copy()
+                else:
+                    resp_matrix_eff    = resp_matrix
+                    dist_matrix_r_eff  = dist_matrix_r
+
+                # In complement mode, Responders also can't reuse Guardian stations
+                _excl = set(g_best) if not allow_redundancy else set()
+
+                if resp_strategy == "Maximize Call Coverage":
+                    r_best, _, chrono_r, _ = solve_mclp(
+                        resp_matrix_eff, guard_matrix, dist_matrix_r_eff, dist_matrix_g,
+                        k_responder, 0, allow_redundancy, incremental=incremental_build,
+                        forced_r=locked_r_pins, forced_g=[]
+                    )
+                    # Filter out Guardian stations if complement mode
+                    if complement_mode:
+                        r_best = [s for s in r_best if s not in set(g_best)]
+                        # Pad back to k_responder if exclusion removed some
+                        if len(r_best) < k_responder:
+                            remaining = [s for s in range(n)
+                                         if s not in r_best and s not in set(g_best)]
+                            r_best += remaining[:k_responder - len(r_best)]
+                else:
+                    _excl_resp = set(g_best) if complement_mode else set()
+                    r_best, chrono_r = _greedy_area(
+                        resp_matrix_eff,
+                        [station_metadata[i]['clipped_2m'] for i in range(n)],
+                        k_responder, locked_r_pins, _excl_resp
+                    )
+            else:
+                r_best, chrono_r = [], []
+
+            best_combo = (tuple(r_best), tuple(g_best))
+            stage_bar.empty()
+            st.toast("✅ Independent optimisation complete!", icon="✅")
 
             st.session_state['_opt_cache_key']  = opt_cache_key
             st.session_state['_opt_best_combo'] = best_combo
@@ -3717,7 +3782,12 @@ if st.session_state['csvs_ready']:
             active_resp_idx, active_guard_idx = [], []
 
     # ── METRICS ───────────────────────────────────────────────────────
+    # ── SPLIT METRICS: Guardian and Responder computed independently ─────────
     area_covered_perc = overlap_perc = calls_covered_perc = 0.0
+    guard_calls_perc  = guard_area_perc  = 0.0
+    resp_calls_perc   = resp_area_perc   = 0.0
+    cov_r = np.zeros(total_calls, bool) if total_calls > 0 else np.zeros(0, bool)
+    cov_g = np.zeros(total_calls, bool) if total_calls > 0 else np.zeros(0, bool)
 
     ordered_deployments_raw = []
     for idx in chrono_g:
@@ -3732,26 +3802,44 @@ if st.session_state['csvs_ready']:
     active_color_map = {}
     c_idx = 0
     for idx, d_type in ordered_deployments_raw:
-        key = f"{idx}_{d_type}" # Using strictly unique index instead of name
+        key = f"{idx}_{d_type}"
         if key not in active_color_map:
             active_color_map[key] = STATION_COLORS[c_idx % len(STATION_COLORS)]
             c_idx += 1
 
-    active_geos = [station_metadata[i]['clipped_2m'] for i in active_resp_idx] + \
-                  [station_metadata[i]['clipped_guard'] for i in active_guard_idx]
+    guard_geos = [station_metadata[i]['clipped_guard'] for i in active_guard_idx]
+    resp_geos  = [station_metadata[i]['clipped_2m']    for i in active_resp_idx]
+    active_geos = resp_geos + guard_geos
 
-    if active_geos and not city_m.is_empty:
-        area_covered_perc = (unary_union(active_geos).area / city_m.area) * 100
-    if active_geos and total_calls > 0:
-        cov_r = resp_matrix[active_resp_idx].any(axis=0) if active_resp_idx else np.zeros(total_calls, bool)
-        cov_g = guard_matrix[active_guard_idx].any(axis=0) if active_guard_idx else np.zeros(total_calls, bool)
-        calls_covered_perc = (np.logical_or(cov_r, cov_g).sum() / total_calls) * 100
+    city_area = city_m.area if (city_m and not city_m.is_empty) else 1.0
+
+    # Guardian-only metrics
+    if guard_geos:
+        guard_area_perc = (unary_union(guard_geos).area / city_area) * 100
+    if active_guard_idx and total_calls > 0:
+        cov_g = guard_matrix[active_guard_idx].any(axis=0)
+        guard_calls_perc = cov_g.sum() / total_calls * 100
+
+    # Responder-only metrics
+    if resp_geos:
+        resp_area_perc = (unary_union(resp_geos).area / city_area) * 100
+    if active_resp_idx and total_calls > 0:
+        cov_r = resp_matrix[active_resp_idx].any(axis=0)
+        resp_calls_perc = cov_r.sum() / total_calls * 100
+
+    # Combined metrics
     if active_geos:
+        area_covered_perc = (unary_union(active_geos).area / city_area) * 100
+    if total_calls > 0:
+        calls_covered_perc = (np.logical_or(cov_r, cov_g).sum() / total_calls) * 100
+    if len(active_geos) >= 2:
         inters = [active_geos[i].intersection(active_geos[j])
-                  for i in range(len(active_geos)) for j in range(i+1, len(active_geos))
-                  if not active_geos[i].intersection(active_geos[j]).is_empty]
-        if inters and not city_m.is_empty:
-            overlap_perc = (unary_union(inters).area / city_m.area) * 100
+                  for i in range(len(active_geos))
+                  for j in range(i+1, len(active_geos))
+                  if not active_geos[i].is_empty and not active_geos[j].is_empty
+                  and active_geos[i].intersects(active_geos[j])]
+        if inters:
+            overlap_perc = (unary_union(inters).area / city_area) * 100
 
     # ── BUDGET CALCULATIONS ───────────────────────────────────────────
     actual_k_responder = len(active_resp_names)
@@ -3952,30 +4040,51 @@ if st.session_state['csvs_ready']:
     else:
         resp_content = f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{avg_resp_time:.1f}m</div>'
 
-    # 2. THE STREAMLINED OPERATIONAL KPI BAR (FLATTENED TO PREVENT MARKDOWN ERRORS)
+    # 2. SPLIT KPI BAR — Guardian row + Responder row + combined summary
+    def _kpi_cell(label, value, color=accent_color, border=True):
+        br = f"border-right: 1px solid #222; padding-right: 10px;" if border else ""
+        return (
+            f'<div style="{br} text-align: center;">'
+            f'<div style="font-size: 0.68rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom:2px;">{label}</div>'
+            f'<div style="font-size: 1.9rem; font-weight: 800; color: {color}; font-family: \'IBM Plex Mono\', monospace;">{value}</div>'
+            f'</div>'
+        )
+
+    _GUARD_COL = "#FFD700"   # gold for Guardian
+    _RESP_COL  = "#00D2FF"   # cyan for Responder
+    _COMB_COL  = "#39FF14"   # green for combined
+
     kpi_html = (
-        f'<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); background: {card_bg}; border: 1px solid {card_border}; border-radius: 8px; padding: 20px; margin-bottom: 15px; gap: 10px;">'
-        f'<div style="border-right: 1px solid #222; padding-right: 10px; text-align: center;">'
-        f'<div style="font-size: 0.75rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px;">Total Incidents</div>'
-        f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{call_str}</div>'
-        f'</div>'
-        f'<div style="border-right: 1px solid #222; padding-right: 10px; text-align: center;">'
-        f'<div style="font-size: 0.75rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px;">Call Coverage</div>'
-        f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{calls_covered_perc:.1f}%</div>'
-        f'</div>'
-        f'<div style="border-right: 1px solid #222; padding-right: 10px; text-align: center;">'
-        f'<div style="font-size: 0.75rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px;">Land Covered</div>'
-        f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{area_covered_perc:.1f}%</div>'
-        f'</div>'
-        f'<div style="border-right: 1px solid #222; padding-right: 10px; text-align: center;">'
-        f'<div style="font-size: 0.75rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px;">Overlap</div>'
-        f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{overlap_perc:.1f}%</div>'
-        f'</div>'
-        f'<div style="text-align: center;">'
-        f'<div style="font-size: 0.75rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px;">Est. Avg Response</div>'
-        f'{resp_content}'
-        f'</div>'
-        f'</div>'
+        # ── Row 1: summary totals ──────────────────────────────────────────
+        f'<div style="background:{card_bg}; border:1px solid {card_border}; border-radius:8px; padding:16px 20px; margin-bottom:8px;">'
+        f'<div style="font-size:0.65rem; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Fleet Summary</div>'
+        f'<div style="display:grid; grid-template-columns:repeat(5,1fr); gap:8px;">'
+        + _kpi_cell("Total Incidents", call_str)
+        + _kpi_cell("Combined Coverage", f"{calls_covered_perc:.1f}%", _COMB_COL)
+        + _kpi_cell("Land Covered", f"{area_covered_perc:.1f}%", _COMB_COL)
+        + _kpi_cell("Zone Overlap", f"{overlap_perc:.1f}%", text_muted)
+        + _kpi_cell("Avg Response", f"{avg_resp_time:.1f}m", accent_color, border=False)
+        + f'</div></div>'
+
+        # ── Row 2: Guardian-specific metrics ──────────────────────────────
+        + f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">'
+
+        + f'<div style="background:{card_bg}; border:1px solid #3a3000; border-top:3px solid {_GUARD_COL}; border-radius:8px; padding:14px 16px;">'
+        + f'<div style="font-size:0.65rem; color:{_GUARD_COL}; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; font-weight:700;">🦅 Guardian Fleet — {actual_k_guardian} unit{"s" if actual_k_guardian!=1 else ""} · {guard_strategy_raw}</div>'
+        + f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">'
+        + _kpi_cell("Call Coverage", f"{guard_calls_perc:.1f}%", _GUARD_COL)
+        + _kpi_cell("Area Coverage", f"{guard_area_perc:.1f}%", _GUARD_COL, border=False)
+        + f'</div></div>'
+
+        # ── Row 3: Responder-specific metrics ─────────────────────────────
+        + f'<div style="background:{card_bg}; border:1px solid #003a3a; border-top:3px solid {_RESP_COL}; border-radius:8px; padding:14px 16px;">'
+        + f'<div style="font-size:0.65rem; color:{_RESP_COL}; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; font-weight:700;">🚁 Responder Fleet — {actual_k_responder} unit{"s" if actual_k_responder!=1 else ""} · {resp_strategy_raw}</div>'
+        + f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">'
+        + _kpi_cell("Call Coverage", f"{resp_calls_perc:.1f}%", _RESP_COL)
+        + _kpi_cell("Area Coverage", f"{resp_area_perc:.1f}%", _RESP_COL, border=False)
+        + f'</div></div>'
+
+        + f'</div>'
     )
     
     st.markdown(kpi_html, unsafe_allow_html=True)
@@ -4178,55 +4287,79 @@ if st.session_state['csvs_ready']:
             st.info("Run optimization to generate coverage curve.")
 
     with _ring_col:
-        # Dynamic ring: each slice = one active drone, sized by calls it handles
+        # Split ring: outer ring = Guardians (gold), inner ring = Responders (cyan)
         if active_drones and total_calls > 0:
-            _ring_labels, _ring_values, _ring_colors, _ring_text = [], [], [], []
-            _uncovered = total_calls
-            for d in active_drones:
-                _marginal = int(d.get('marginal_perc', 0) * total_calls)
-                if _marginal > 0:
-                    _short = d['name'].split(',')[0][:22]
-                    _ring_labels.append(_short)
-                    _ring_values.append(_marginal)
-                    _ring_colors.append(d['color'])
-                    _ring_text.append(f"{_marginal:,} calls<br>{d['type'][:4]}")
-                    _uncovered -= _marginal
-            if _uncovered > 0:
-                _ring_labels.append("Uncovered")
-                _ring_values.append(max(0, _uncovered))
-                _ring_colors.append("#222222")
-                _ring_text.append(f"{max(0,_uncovered):,} calls<br>not reached")
+            _g_drones = [d for d in active_drones if d['type'] == 'GUARDIAN']
+            _r_drones = [d for d in active_drones if d['type'] == 'RESPONDER']
 
-            fig_ring = go.Figure(go.Pie(
-                labels=_ring_labels,
-                values=_ring_values,
-                hole=0.58,
-                marker=dict(colors=_ring_colors, line=dict(color='#000', width=1.5)),
-                textinfo='none',
-                hovertemplate='<b>%{label}</b><br>%{value:,} calls (%{percent})<extra></extra>',
-                sort=False,
-            ))
-            # Centre annotation: total covered calls
-            _covered_cnt = sum(int(d.get('marginal_perc',0)*total_calls) for d in active_drones)
-            _cov_pct = round(_covered_cnt / total_calls * 100, 1) if total_calls else 0
-            fig_ring.update_layout(
-                annotations=[dict(
-                    text=f"<b>{_cov_pct}%</b><br><span style='font-size:10px'>covered</span>",
-                    x=0.5, y=0.5, font_size=16, showarrow=False,
-                    font=dict(color=text_main)
-                )],
-                showlegend=True,
-                legend=dict(
-                    orientation='v', x=1.02, y=0.5,
-                    font=dict(size=9, color=text_muted),
-                    bgcolor='rgba(0,0,0,0)',
-                ),
-                margin=dict(l=0, r=0, t=10, b=10),
-                height=320,
-                paper_bgcolor='rgba(0,0,0,0)',
-                hoverlabel=dict(bgcolor=card_bg, font_size=12, font_color=text_main),
-            )
-            st.plotly_chart(fig_ring, use_container_width=True, config={'displayModeBar':False})
+            def _build_ring_data(drones, fleet_cov_mask):
+                """Build labels/values/colors for one fleet's ring slices."""
+                labels, values, colors = [], [], []
+                remaining = int(fleet_cov_mask.sum()) if fleet_cov_mask is not None else 0
+                for d in drones:
+                    _m = int(d.get('marginal_perc', 0) * total_calls)
+                    if _m > 0:
+                        labels.append(d['name'].split(',')[0][:18])
+                        values.append(_m)
+                        colors.append(d['color'])
+                        remaining = max(0, remaining - _m)
+                return labels, values, colors
+
+            _g_labels, _g_vals, _g_cols = _build_ring_data(_g_drones, cov_g)
+            _r_labels, _r_vals, _r_cols = _build_ring_data(_r_drones, cov_r)
+
+            # Uncovered slice for combined view
+            _combined_covered = int(np.logical_or(cov_r, cov_g).sum()) if total_calls > 0 else 0
+            _uncovered = max(0, total_calls - _combined_covered)
+
+            # Build a single donut: Guardian slices (gold ring) + Responder slices (cyan ring)
+            # separated by a small "uncovered" gap
+            all_labels = _g_labels + _r_labels + (["Uncovered"] if _uncovered > 0 else [])
+            all_values = _g_vals   + _r_vals   + ([_uncovered] if _uncovered > 0 else [])
+            all_colors = _g_cols   + _r_cols   + (["#1a1a1a"] if _uncovered > 0 else [])
+
+            if all_values:
+                fig_ring = go.Figure(go.Pie(
+                    labels=all_labels,
+                    values=all_values,
+                    hole=0.58,
+                    marker=dict(colors=all_colors, line=dict(color='#000', width=1.5)),
+                    textinfo='none',
+                    hovertemplate='<b>%{label}</b><br>%{value:,} calls (%{percent})<extra></extra>',
+                    sort=False,
+                ))
+                _cov_pct = round(_combined_covered / total_calls * 100, 1)
+                _mode_short = "▶◀" if complement_mode else "↔" if shared_mode else "⊕"
+                fig_ring.update_layout(
+                    annotations=[dict(
+                        text=f"<b>{_cov_pct}%</b><br><span style='font-size:9px'>{_mode_short} combined</span>",
+                        x=0.5, y=0.5, font_size=15, showarrow=False,
+                        font=dict(color=text_main)
+                    )],
+                    showlegend=True,
+                    legend=dict(
+                        orientation='v', x=1.02, y=0.5,
+                        font=dict(size=9, color=text_muted),
+                        bgcolor='rgba(0,0,0,0)',
+                        groupclick='toggleitem',
+                    ),
+                    margin=dict(l=0, r=0, t=10, b=10),
+                    height=320,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    hoverlabel=dict(bgcolor=card_bg, font_size=12, font_color=text_main),
+                )
+                st.plotly_chart(fig_ring, use_container_width=True, config={'displayModeBar':False})
+
+                # Mode legend below the ring
+                _mode_label = {
+                    "Complement — push apart": "▶◀ Complement — Responders fill Guardian gaps",
+                    "Independent — each maximises own area": "⊕ Independent — each fleet optimised separately",
+                    "Shared — allow full overlap": "↔ Shared — both fleets maximise same call set",
+                }.get(deployment_mode, "")
+                st.markdown(
+                    f"<div style='font-size:0.65rem; color:{text_muted}; text-align:center; margin-top:-8px;'>{_mode_label}</div>",
+                    unsafe_allow_html=True
+                )
         else:
             st.markdown(
                 f"<div style='color:{text_muted}; font-size:0.8rem; padding:40px 0; text-align:center;'>Deploy drones to see call distribution ring.</div>",

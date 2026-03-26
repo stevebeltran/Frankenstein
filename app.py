@@ -42,6 +42,12 @@ for k, v in defaults.items():
 if 'target_cities' not in st.session_state:
     st.session_state['target_cities'] = [{"city": st.session_state.get('active_city', 'Victoria'), "state": st.session_state.get('active_state', 'TX')}]
 
+
+SIMULATOR_DISCLAIMER_SHORT = (
+    "Simulation output only. Coverage, station placement, response time, and ROI figures are model estimates based on uploaded data and configuration settings. "
+    "They are not guarantees of real-world performance, legal compliance, FAA approval, procurement outcome, or financial results."
+)
+
 def _build_details_html(details):
     """Shared HTML block for deployment details used in email notifications."""
     if not details: return ""

@@ -3649,6 +3649,17 @@ if st.session_state['csvs_ready']:
             )
             st.stop()
 
+    # ── Inject custom stations (bypass boundary clip & type filter) ──────────
+    _custom_st = st.session_state.get('custom_stations', pd.DataFrame())
+    if not _custom_st.empty:
+        # Apply the same type-prefix rename the filter block uses, so pin lookups match
+        _cst_renamed = _custom_st.copy()
+        _cst_renamed['name'] = "[" + _cst_renamed['type'].astype(str) + "] " + _cst_renamed['name'].astype(str)
+        # Drop columns that might not exist in df_stations_all to avoid concat issues
+        _keep_cols = [c for c in _cst_renamed.columns if c in list(df_stations_all.columns) + ['name','lat','lon','type','custom']]
+        _cst_renamed = _cst_renamed[_keep_cols]
+        df_stations_all = pd.concat([df_stations_all, _cst_renamed], ignore_index=True)
+
     n = len(df_stations_all)
 
     # Dynamic Sliders based on Area Size
@@ -3738,38 +3749,42 @@ if st.session_state['csvs_ready']:
                         _geo_lon = float(_coords["x"])
                         _matched_addr = _matches[0].get("matchedAddress", _addr_to_geocode)
                         _label = _custom_label.strip() or _matched_addr
+                        # The type-prefix rename later produces "[Type] label"
+                        # Store both original and prefixed name so pin lookup works
+                        _prefixed_label = f"[{_custom_type}] {_label}"
                         _new_row = pd.DataFrame([{
-                            "name":   _label,
+                            "name":   _label,          # original, pre-prefix
                             "lat":    _geo_lat,
                             "lon":    _geo_lon,
                             "type":   _custom_type,
-                            "custom": True,   # flag so we can identify & remove later
+                            "custom": True,
                         }])
-                        _existing = st.session_state.get('df_stations', pd.DataFrame())
-                        st.session_state['df_stations'] = pd.concat(
-                            [_existing, _new_row], ignore_index=True
-                        ) if not _existing.empty else _new_row
+                        # Store in dedicated 'custom_stations' key so boundary clip
+                        # and type filter can't drop them
+                        _cst = st.session_state.get('custom_stations', pd.DataFrame())
+                        st.session_state['custom_stations'] = pd.concat(
+                            [_cst, _new_row], ignore_index=True
+                        ) if not _cst.empty else _new_row
 
-                        # Auto-pin as Guardian or Responder based on type selection
-                        # Guardian types = wide-area patrol assets; Responder = tactical
+                        # Auto-pin using the prefixed name (what the station will be
+                        # called after the type-prefix rename runs)
                         _guard_types = {"Police", "Government", "Fire"}
                         if _custom_type in _guard_types:
                             _pg = list(st.session_state.get('pinned_guard_names', []))
-                            if _label not in _pg:
-                                _pg.append(_label)
+                            if _prefixed_label not in _pg:
+                                _pg.append(_prefixed_label)
                             st.session_state['pinned_guard_names'] = _pg
-                            # Bump Guardian slider if needed
                             if st.session_state.get('k_guard', 0) < len(_pg):
                                 st.session_state['k_guard'] = len(_pg)
-                            _pin_note = "🦅 Auto-pinned as Guardian."
+                            _pin_note = f"🦅 Auto-pinned as Guardian — will appear as '{_prefixed_label}'."
                         else:
                             _pr = list(st.session_state.get('pinned_resp_names', []))
-                            if _label not in _pr:
-                                _pr.append(_label)
+                            if _prefixed_label not in _pr:
+                                _pr.append(_prefixed_label)
                             st.session_state['pinned_resp_names'] = _pr
                             if st.session_state.get('k_resp', 0) < len(_pr):
                                 st.session_state['k_resp'] = len(_pr)
-                            _pin_note = "🚁 Auto-pinned as Responder."
+                            _pin_note = f"🚁 Auto-pinned as Responder — will appear as '{_prefixed_label}'."
 
                         st.success(f"✅ Added & locked: **{_label}** ({_geo_lat:.4f}, {_geo_lon:.4f})\n{_pin_note}")
                         st.caption(f"Matched address: {_matched_addr}")
@@ -3786,32 +3801,41 @@ if st.session_state['csvs_ready']:
             else:
                 st.warning("Enter an address first.")
 
-        # Show custom stations added this session (detected via 'custom' flag column)
-        _df_st = st.session_state.get('df_stations', pd.DataFrame())
-        if not _df_st.empty and 'custom' in _df_st.columns:
-            _custom_added = _df_st[_df_st['custom'] == True]['name'].tolist()
+        # Show custom stations added this session
+        _cst_display = st.session_state.get('custom_stations', pd.DataFrame())
+        if not _cst_display.empty:
+            _custom_added = _cst_display['name'].tolist()
         else:
             _custom_added = []
         if _custom_added:
             st.markdown(f"<div style='font-size:0.65rem; color:{text_muted}; margin-top:6px;'>"
                         f"Pinned this session:</div>", unsafe_allow_html=True)
+            _pg_set = set(st.session_state.get('pinned_guard_names', []))
+            _pr_set = set(st.session_state.get('pinned_resp_names', []))
+            _cst_disp = st.session_state.get('custom_stations', pd.DataFrame())
             for _cn in _custom_added[:8]:
-                _is_g = _cn in st.session_state.get('pinned_guard_names', [])
+                # Check both original and prefixed name
+                _cst_row = _cst_disp[_cst_disp['name'] == _cn].iloc[0] if not _cst_disp.empty and (_cst_disp['name'] == _cn).any() else None
+                _pfx = f"[{_cst_row['type']}] {_cn}" if _cst_row is not None else _cn
+                _is_g = _pfx in _pg_set or _cn in _pg_set
                 _badge = "🦅" if _is_g else "🚁"
-                st.markdown(f"<div style='font-size:0.65rem; color:{'#FFD700' if _is_g else '#00D2FF'}; "
-                            f"padding:1px 0;'>{_badge} {_cn}</div>", unsafe_allow_html=True)
+                _color = "#FFD700" if _is_g else "#00D2FF"
+                st.markdown(f"<div style='font-size:0.65rem; color:{_color}; padding:1px 0;'>{_badge} {_pfx}</div>",
+                            unsafe_allow_html=True)
             if st.button("🗑 Remove all custom stations", key="remove_custom",
                          use_container_width=True):
-                _orig = st.session_state.get('df_stations', pd.DataFrame())
-                if not _orig.empty and 'custom' in _orig.columns:
-                    _kept = _orig[_orig['custom'] != True].reset_index(drop=True)
-                    st.session_state['df_stations'] = _kept
-                    # Un-pin any custom station names
-                    _cnames = set(_custom_added)
-                    st.session_state['pinned_guard_names'] = [
-                        x for x in st.session_state.get('pinned_guard_names', []) if x not in _cnames]
-                    st.session_state['pinned_resp_names']  = [
-                        x for x in st.session_state.get('pinned_resp_names',  []) if x not in _cnames]
+                _cst_to_rm = st.session_state.get('custom_stations', pd.DataFrame())
+                # Build set of both original and prefixed names to un-pin
+                _rm_names = set()
+                if not _cst_to_rm.empty:
+                    for _, _row in _cst_to_rm.iterrows():
+                        _rm_names.add(str(_row['name']))
+                        _rm_names.add(f"[{_row['type']}] {_row['name']}")
+                st.session_state['custom_stations'] = pd.DataFrame()
+                st.session_state['pinned_guard_names'] = [
+                    x for x in st.session_state.get('pinned_guard_names', []) if x not in _rm_names]
+                st.session_state['pinned_resp_names']  = [
+                    x for x in st.session_state.get('pinned_resp_names',  []) if x not in _rm_names]
                 if '_opt_cache_key' in st.session_state:
                     del st.session_state['_opt_cache_key']
                 st.rerun()

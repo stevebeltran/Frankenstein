@@ -320,13 +320,23 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
 
     dt_obj = None
     if 'date' in df_ana.columns:
-        if 'time' in df_ana.columns:
-            dt_obj = pd.to_datetime(
-                df_ana['date'].astype(str).fillna('') + ' ' + df_ana['time'].astype(str).fillna(''),
-                errors='coerce'
-            )
+        _date_str = df_ana['date'].astype(str).fillna('')
+        _time_str = df_ana['time'].astype(str).fillna('') if 'time' in df_ana.columns else ''
+        if isinstance(_time_str, str):
+            _combined = _date_str
         else:
-            dt_obj = pd.to_datetime(df_ana['date'], errors='coerce')
+            _combined = _date_str + ' ' + _time_str
+        # Try ISO format first (what our parser stores), then fall back
+        for _fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d']:
+            try:
+                _trial = pd.to_datetime(_combined, format=_fmt, errors='coerce')
+                if _trial.notna().sum() > len(df_ana) * 0.5:
+                    dt_obj = _trial
+                    break
+            except Exception:
+                continue
+        if dt_obj is None or dt_obj.dropna().empty:
+            dt_obj = pd.to_datetime(_combined, errors='coerce')
 
     if dt_obj is None or dt_obj.dropna().empty:
         dt_candidates = [
@@ -4321,27 +4331,15 @@ if st.session_state['csvs_ready']:
     st.markdown(f"<h3 style='color:{text_main};'>📊 CAD Ingestion Analytics</h3>", unsafe_allow_html=True)
     st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Temporal patterns derived from your uploaded CAD data — hourly volumes, day-of-week distribution, optimal DFR shift windows, and a higher-contrast 5-band call-volume calendar.</div>", unsafe_allow_html=True)
 
-    show_cad_analytics = st.toggle("📈 Show Data Analytics Heatmaps", value=False)
-    
-    if show_cad_analytics:
-        st.markdown(f"<h4 style='color:{text_main}; margin-top:10px; margin-bottom:6px;'>Incident Data Analysis</h4>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:12px;'>"
-            f"Interactive temporal analysis from your uploaded CAD data — total incident counts, day-of-week patterns, optimized shift windows, and a call-volume deployment calendar styled after your Command Center reference."
-            f"</div>",
-            unsafe_allow_html=True
-        )
-        analytics_html_block = generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls))
-        components.html(analytics_html_block, height=1725, scrolling=False)
+    _analytics_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
+    analytics_html_block = generate_command_center_html(
+        _analytics_df,
+        total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls)
+    )
+    components.html(analytics_html_block, height=1725, scrolling=False)
 
-        if _has_real_calls and df_calls is not None and not df_calls.empty:
-            st.markdown(
-                f"<div style='font-size:0.82rem; color:{text_muted}; margin-top:8px; margin-bottom:12px;'>"
-                f"Detailed CAD breakdowns below use the full uploaded dataset for priority mix, top call types, and hotspot concentration."
-                f"</div>",
-                unsafe_allow_html=True
-            )
-            _build_cad_charts(df_calls_full if df_calls_full is not None else df_calls, text_main, text_muted, card_bg, card_border, accent_color)
+    if _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
+        _build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
 
     # ── EXPORT BUTTONS ──
     if fleet_capex > 0:
@@ -4441,8 +4439,10 @@ if st.session_state['csvs_ready']:
             "k_resp": k_responder, "k_guard": k_guardian,
             "r_resp": resp_radius_mi, "r_guard": guard_radius_mi,
             "dfr_rate": int(dfr_dispatch_rate*100), "deflect_rate": int(deflection_rate*100),
-            "calls_data": json.loads((st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None else st.session_state.get('df_calls')).replace({np.nan:None}).to_json(orient='records')) if (st.session_state.get('df_calls_full') is not None or st.session_state.get('df_calls') is not None) else None,
-            "stations_data": json.loads(st.session_state['df_stations'].replace({np.nan:None}).to_json(orient='records')) if st.session_state.get('df_stations') is not None else None,
+            "calls_data": _safe_df_to_records(
+                st.session_state.get('df_calls_full') or st.session_state.get('df_calls')
+            ),
+            "stations_data": _safe_df_to_records(st.session_state.get('df_stations')),
             "faa_geojson": faa_geojson
         }
 

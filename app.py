@@ -3724,10 +3724,19 @@ if st.session_state['csvs_ready']:
         _custom_type  = st.selectbox("Type", _type_opts, index=_type_idx,
                                       key="custom_station_type")
 
+        # Explicit drone role selector — user decides, no auto-guessing
+        if 'cs_role_buf' not in st.session_state: st.session_state['cs_role_buf'] = "🦅 Lock as Guardian"
+        _role_opts = ["🦅 Lock as Guardian", "🚁 Lock as Responder"]
+        _role_idx  = _role_opts.index(st.session_state['cs_role_buf']) if st.session_state['cs_role_buf'] in _role_opts else 0
+        _custom_role = st.radio("Pin as", _role_opts, index=_role_idx,
+                                horizontal=True, key="custom_station_role",
+                                help="Choose which fleet this station will be locked into.")
+
         # Sync buffer keys from live widget values each run
         st.session_state['cs_addr_buf']  = _custom_addr
         st.session_state['cs_label_buf'] = _custom_label
         st.session_state['cs_type_buf']  = _custom_type
+        st.session_state['cs_role_buf']  = _custom_role
 
         if st.button("📍 Geocode & Add Station", use_container_width=True, key="geocode_btn"):
             _addr_to_geocode = _custom_addr.strip()
@@ -3766,29 +3775,34 @@ if st.session_state['csvs_ready']:
                             [_cst, _new_row], ignore_index=True
                         ) if not _cst.empty else _new_row
 
-                        # Auto-pin using the prefixed name (what the station will be
-                        # called after the type-prefix rename runs)
-                        _guard_types = {"Police", "Government", "Fire"}
-                        if _custom_type in _guard_types:
+                        # Pin using the user's explicit role choice
+                        if _custom_role == "🦅 Lock as Guardian":
                             _pg = list(st.session_state.get('pinned_guard_names', []))
                             if _prefixed_label not in _pg:
                                 _pg.append(_prefixed_label)
+                            # Remove from responder list if it was there
+                            st.session_state['pinned_resp_names'] = [
+                                x for x in st.session_state.get('pinned_resp_names', [])
+                                if x != _prefixed_label]
                             st.session_state['pinned_guard_names'] = _pg
                             if st.session_state.get('k_guard', 0) < len(_pg):
                                 st.session_state['k_guard'] = len(_pg)
-                            _pin_note = f"🦅 Auto-pinned as Guardian — will appear as '{_prefixed_label}'."
+                            _pin_note = f"🦅 Pinned as Guardian."
                         else:
                             _pr = list(st.session_state.get('pinned_resp_names', []))
                             if _prefixed_label not in _pr:
                                 _pr.append(_prefixed_label)
+                            st.session_state['pinned_guard_names'] = [
+                                x for x in st.session_state.get('pinned_guard_names', [])
+                                if x != _prefixed_label]
                             st.session_state['pinned_resp_names'] = _pr
                             if st.session_state.get('k_resp', 0) < len(_pr):
                                 st.session_state['k_resp'] = len(_pr)
-                            _pin_note = f"🚁 Auto-pinned as Responder — will appear as '{_prefixed_label}'."
+                            _pin_note = f"🚁 Pinned as Responder."
 
                         st.success(f"✅ Added & locked: **{_label}** ({_geo_lat:.4f}, {_geo_lon:.4f})\n{_pin_note}")
                         st.caption(f"Matched address: {_matched_addr}")
-                        # Clear buffers
+                        # Clear buffers (role intentionally kept so user can add more of same type)
                         st.session_state['cs_addr_buf']  = ""
                         st.session_state['cs_label_buf'] = ""
                         if '_opt_cache_key' in st.session_state:
@@ -4550,40 +4564,68 @@ if st.session_state['csvs_ready']:
         _n_rows = _math.ceil(len(active_drones) / _n_cols)
         for _row_idx in range(_n_rows):
             _row_drones = active_drones[_row_idx * _n_cols : (_row_idx + 1) * _n_cols]
-            # Pad to full width so columns align with cards above
             _row_cols = st.columns(_n_cols)
             for _slot, _d in enumerate(_row_drones):
                 _ci    = _row_idx * _n_cols + _slot
                 _dname = _d['name']
-                _dtype = _d['type']
                 _is_pg = _dname in _saved_gnames
                 _is_pr = _dname in _saved_rnames
+                _is_pinned = _is_pg or _is_pr
                 with _row_cols[_slot]:
-                    if _dtype == 'GUARDIAN':
-                        if _is_pg:
-                            if st.button("🔒 Unpin Guardian", key=f"unpin_g_{_ci}",
+                    if _is_pinned:
+                        # Show which role it's locked as, with a switch option
+                        _cur_role = "🦅 Guardian" if _is_pg else "🚁 Responder"
+                        _switch_label = "🚁 Switch to Resp" if _is_pg else "🦅 Switch to Guard"
+                        _unpin_label  = "✕ Unpin"
+                        _bc1, _bc2 = st.columns([3, 2])
+                        with _bc1:
+                            if st.button(_switch_label, key=f"switch_{_ci}",
+                                         use_container_width=True):
+                                if _is_pg:
+                                    # Switch Guardian → Responder
+                                    st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
+                                    _pr = list(st.session_state.get('pinned_resp_names', []))
+                                    if _dname not in _pr: _pr.append(_dname)
+                                    st.session_state['pinned_resp_names'] = _pr
+                                    if st.session_state.get('k_resp', 0) < len(_pr):
+                                        st.session_state['k_resp'] = len(_pr)
+                                else:
+                                    # Switch Responder → Guardian
+                                    st.session_state['pinned_resp_names'] = [x for x in _saved_rnames if x != _dname]
+                                    _pg = list(st.session_state.get('pinned_guard_names', []))
+                                    if _dname not in _pg: _pg.append(_dname)
+                                    st.session_state['pinned_guard_names'] = _pg
+                                    if st.session_state.get('k_guard', 0) < len(_pg):
+                                        st.session_state['k_guard'] = len(_pg)
+                                st.rerun()
+                        with _bc2:
+                            if st.button(_unpin_label, key=f"unpin_{_ci}",
                                          use_container_width=True, type="primary"):
                                 st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
-                                st.rerun()
-                        else:
-                            if st.button("🦅 Lock as Guardian", key=f"pin_g_{_ci}",
-                                         use_container_width=True):
-                                _saved_gnames.append(_dname)
-                                st.session_state['pinned_guard_names'] = _saved_gnames
                                 st.session_state['pinned_resp_names']  = [x for x in _saved_rnames if x != _dname]
                                 st.rerun()
                     else:
-                        if _is_pr:
-                            if st.button("🔒 Unpin Responder", key=f"unpin_r_{_ci}",
-                                         use_container_width=True, type="primary"):
-                                st.session_state['pinned_resp_names'] = [x for x in _saved_rnames if x != _dname]
-                                st.rerun()
-                        else:
-                            if st.button("🚁 Lock as Responder", key=f"pin_r_{_ci}",
+                        # Not pinned — show both lock options side by side
+                        _ba, _bb = st.columns(2)
+                        with _ba:
+                            if st.button("🦅 lock as guard", key=f"pin_g_{_ci}",
                                          use_container_width=True):
-                                _saved_rnames.append(_dname)
-                                st.session_state['pinned_resp_names']  = _saved_rnames
+                                _pg = list(st.session_state.get('pinned_guard_names', []))
+                                if _dname not in _pg: _pg.append(_dname)
+                                st.session_state['pinned_guard_names'] = _pg
+                                st.session_state['pinned_resp_names']  = [x for x in _saved_rnames if x != _dname]
+                                if st.session_state.get('k_guard', 0) < len(_pg):
+                                    st.session_state['k_guard'] = len(_pg)
+                                st.rerun()
+                        with _bb:
+                            if st.button("🚁 lock as resp", key=f"pin_r_{_ci}",
+                                         use_container_width=True):
+                                _pr = list(st.session_state.get('pinned_resp_names', []))
+                                if _dname not in _pr: _pr.append(_dname)
+                                st.session_state['pinned_resp_names']  = _pr
                                 st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
+                                if st.session_state.get('k_resp', 0) < len(_pr):
+                                    st.session_state['k_resp'] = len(_pr)
                                 st.rerun()
     else:
         st.markdown(

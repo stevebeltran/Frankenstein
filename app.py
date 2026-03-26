@@ -406,6 +406,7 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
         
         <script>
             const rawData = {json.dumps(records)};
+            const totalOrigCalls = {int(total_orig_calls) if total_orig_calls else len(records)};
             let currentShift = 8;
             let currentPri = 'ALL';
             window.dateHourly = {{}};
@@ -420,6 +421,7 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
                 }}
 
                 let total = filtered.length;
+                if(currentPri === 'ALL') {{ total = totalOrigCalls; }}
                 document.getElementById('kpi-total-val').innerHTML = total.toLocaleString();
 
                 let hourly = new Array(24).fill(0);
@@ -2862,6 +2864,8 @@ if st.session_state['csvs_ready']:
     else:
         df_calls_full = df_calls_full.copy()
     df_stations_all = st.session_state['df_stations'].copy()
+    full_total_calls = int(st.session_state.get('total_original_calls', len(df_calls_full) if df_calls_full is not None else len(df_calls)) or 0)
+    full_daily_calls = max(1, int(full_total_calls / 365)) if full_total_calls else 1
 
     # ── MAP BUILD EVENT: log to sheets once per session ──────────────────────
     if not st.session_state.get('map_build_logged', False):
@@ -3172,8 +3176,10 @@ if st.session_state['csvs_ready']:
     # We use the strat_expander we defined earlier in the sidebar to inject the sliders
     with strat_expander:
         st.markdown("---")
-        inferred_daily = st.session_state.get('inferred_daily_calls_override', max(1, int(total_calls/365)))
+        inferred_daily = st.session_state.get('inferred_daily_calls_override', full_daily_calls)
+        inferred_daily = max(1, int(inferred_daily))
         calls_per_day = st.slider("Total Daily Calls (citywide)", 1, max(100, inferred_daily*3), inferred_daily)
+        st.caption(f"Derived from the full uploaded CAD total ({full_total_calls:,} incidents), not the optimization sample.")
 
         st.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>DFR Dispatch Rate (%)</div>", unsafe_allow_html=True)
         st.markdown(f"<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>What % of in-range calls will the drone be sent to?</div>", unsafe_allow_html=True)
@@ -3470,17 +3476,17 @@ if st.session_state['csvs_ready']:
     else:
         gain_val = None
 
-    orig_calls = int(st.session_state.get('total_original_calls', len(df_calls_full) if df_calls_full is not None else total_calls) or total_calls)
+    orig_calls = int(st.session_state.get('total_original_calls', full_total_calls or (len(df_calls_full) if df_calls_full is not None else total_calls)) or total_calls)
     modeled_calls = int(st.session_state.get('total_modeled_calls', total_calls) or total_calls)
     displayed_points = len(display_calls) if display_calls is not None else 0
     call_str = f"{orig_calls:,}"
 
     # Calculate Date Range of CAD data (if available)
     date_range_str = "Simulated / Unknown"
-    if 'date' in df_calls.columns:
+    if 'date' in df_calls_full.columns:
         try:
-            min_date = pd.to_datetime(df_calls['date']).min().strftime('%b %Y')
-            max_date = pd.to_datetime(df_calls['date']).max().strftime('%b %Y')
+            min_date = pd.to_datetime(df_calls_full['date']).min().strftime('%b %Y')
+            max_date = pd.to_datetime(df_calls_full['date']).max().strftime('%b %Y')
             date_range_str = f"{min_date} – {max_date}" if min_date != max_date else min_date
         except:
             pass
@@ -3557,7 +3563,13 @@ if st.session_state['csvs_ready']:
         map_note = f"Map renders all {displayed_points:,} incident points."
     else:
         map_note = ""
-    st.markdown(f"<div style='font-size:0.65rem;color:gray;margin-top:-10px;margin-bottom:12px;text-align:right;'>{model_note}{(' ' + map_note) if map_note else ''}</div>", unsafe_allow_html=True)
+    full_daily_note = f"Citywide daily-call estimates are based on the full uploaded CAD total of {orig_calls:,} incidents." if orig_calls else ""
+    note_bits = [model_note]
+    if map_note:
+        note_bits.append(map_note)
+    if full_daily_note:
+        note_bits.append(full_daily_note)
+    st.markdown(f"<div style='font-size:0.65rem;color:gray;margin-top:-10px;margin-bottom:12px;text-align:right;'>{' '.join(note_bits)}</div>", unsafe_allow_html=True)
 
     map_col, stats_col = st.columns([4.2, 1.8])
 
@@ -3806,7 +3818,7 @@ if st.session_state['csvs_ready']:
             f"</div>",
             unsafe_allow_html=True
         )
-        _build_cad_charts(df_calls, text_main, text_muted, card_bg, card_border, accent_color)
+        _build_cad_charts(df_calls_full if df_calls_full is not None else df_calls, text_main, text_muted, card_bg, card_border, accent_color)
 
     # ── 3D SWARM SIMULATION ───────────────────────────────────────────
     if fleet_capex > 0:
@@ -3977,7 +3989,7 @@ if st.session_state['csvs_ready']:
     show_cad_analytics = st.toggle("📈 Show Data Analytics Heatmaps", value=False)
     
     if show_cad_analytics:
-        analytics_html_block = generate_command_center_html(df_calls, total_orig_calls=st.session_state.get('total_original_calls', total_calls))
+        analytics_html_block = generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls))
         components.html(analytics_html_block, height=1600, scrolling=False)
 
     # ── EXPORT BUTTONS ──
@@ -4022,8 +4034,8 @@ if st.session_state['csvs_ready']:
         avg_resp_time    = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
         avg_ground_speed = CONFIG["DEFAULT_TRAFFIC_SPEED"] * (1 - traffic_level / 100)
         avg_time_saved   = ((sum((d['radius_m']/1609.34*1.4/avg_ground_speed)*60 for d in active_drones) / len(active_drones)) - avg_resp_time) if active_drones and avg_ground_speed > 0 else 0.0
-        _calls_lons = df_calls['lon'].dropna()
-        _calls_lats = df_calls['lat'].dropna()
+        _calls_lons = (df_calls_full if df_calls_full is not None else df_calls)['lon'].dropna()
+        _calls_lats = (df_calls_full if df_calls_full is not None else df_calls)['lat'].dropna()
         minx = float(_calls_lons.min()) if len(_calls_lons) else 0
         maxx = float(_calls_lons.max()) if len(_calls_lons) else 0
         miny = float(_calls_lats.min()) if len(_calls_lats) else 0
@@ -4078,7 +4090,7 @@ if st.session_state['csvs_ready']:
             "k_resp": k_responder, "k_guard": k_guardian,
             "r_resp": resp_radius_mi, "r_guard": guard_radius_mi,
             "dfr_rate": int(dfr_dispatch_rate*100), "deflect_rate": int(deflection_rate*100),
-            "calls_data": json.loads(st.session_state['df_calls'].replace({np.nan:None}).to_json(orient='records')) if st.session_state.get('df_calls') is not None else None,
+            "calls_data": json.loads((st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None else st.session_state.get('df_calls')).replace({np.nan:None}).to_json(orient='records')) if (st.session_state.get('df_calls_full') is not None or st.session_state.get('df_calls') is not None) else None,
             "stations_data": json.loads(st.session_state['df_stations'].replace({np.nan:None}).to_json(orient='records')) if st.session_state.get('df_stations') is not None else None,
             "faa_geojson": faa_geojson
         }
@@ -4128,8 +4140,8 @@ if st.session_state['csvs_ready']:
         dept_summary = ", ".join(dept_summary_parts) if dept_summary_parts else f"{len(active_drones)} municipal stations"
         police_names_str = (", ".join([n.replace('[Police] ','') for n in police_dept_names[:6]]) + ("..." if len(police_dept_names)>6 else "")) if police_dept_names else "municipal facilities"
         total_fleet = actual_k_responder + actual_k_guardian
-        analytics_html_export = generate_command_center_html(df_calls, total_orig_calls=st.session_state.get('total_original_calls', total_calls), export_mode=True)
-        cad_charts_html_export = _build_cad_charts_html(df_calls)
+        analytics_html_export = generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls), export_mode=True)
+        cad_charts_html_export = _build_cad_charts_html(df_calls_full if df_calls_full is not None else df_calls)
 
         export_html = f"""<html><head><title>BRINC DFR Proposal — {prop_city}</title>
         <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">

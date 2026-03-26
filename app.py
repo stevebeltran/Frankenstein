@@ -3662,38 +3662,6 @@ if st.session_state['csvs_ready']:
 
         _station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
 
-        # ── SCORED STATION TABLE ──────────────────────────────────────────
-        # Pre-compute per-station scores from already-available matrices so the
-        # user can make an informed choice without running the full optimizer first.
-        if not df_stations_all.empty and station_metadata and total_calls > 0:
-            _rows = []
-            for _si, _sm in enumerate(station_metadata):
-                _g_calls  = int(guard_matrix[_si].sum())
-                _r_calls  = int(resp_matrix[_si].sum())
-                _g_pct    = round(_g_calls / total_calls * 100, 1)
-                _r_pct    = round(_r_calls / total_calls * 100, 1)
-                _cent     = round(_sm.get('centrality', 0) * 100, 0)
-                _rows.append({
-                    'Station':      _sm['name'],
-                    'As Guard %':   _g_pct,
-                    'As Resp %':    _r_pct,
-                    'Centrality':   int(_cent),
-                })
-            _pin_df = pd.DataFrame(_rows).sort_values('As Guard %', ascending=False)
-
-            # Show top-20 sorted; user can see scores before pinning
-            st.dataframe(
-                _pin_df.head(20).rename(columns={
-                    'Station': 'Station',
-                    'As Guard %': '🦅 Guard%',
-                    'As Resp %':  '🚁 Resp%',
-                    'Centrality': 'Central',
-                }).set_index('Station'),
-                use_container_width=True,
-                height=180,
-            )
-            st.caption("Guard%: call coverage as Guardian range  ·  Resp%: as Responder range  ·  Central: proximity to city centre")
-
         pinned_guard_names = st.multiselect(
             "🦅 Pin as Guardian",
             options=_station_names,
@@ -3737,6 +3705,28 @@ if st.session_state['csvs_ready']:
         max_stations=100
     )
     prog2.empty()
+
+    # ── SCORED STATION TABLE (injected into pin_expander after precompute) ────
+    # station_metadata, resp_matrix, guard_matrix, total_calls now available.
+    with pin_expander:
+        if station_metadata and total_calls > 0:
+            _rows = []
+            for _si, _sm in enumerate(station_metadata):
+                _g_calls = int(guard_matrix[_si].sum())
+                _r_calls = int(resp_matrix[_si].sum())
+                _rows.append({
+                    'Station':    _sm['name'],
+                    '🦅 Guard%': round(_g_calls / total_calls * 100, 1),
+                    '🚁 Resp%':  round(_r_calls / total_calls * 100, 1),
+                    'Central':    int(round(_sm.get('centrality', 0) * 100)),
+                })
+            _pin_df = pd.DataFrame(_rows).sort_values('🦅 Guard%', ascending=False)
+            st.dataframe(
+                _pin_df.head(25).set_index('Station'),
+                use_container_width=True,
+                height=200,
+            )
+            st.caption("Guard%: coverage at Guardian range · Resp%: at Responder range · Central: proximity to city centre (100=centre)")
 
     def get_max_drones(col_name):
         series = df_curve[col_name].dropna()

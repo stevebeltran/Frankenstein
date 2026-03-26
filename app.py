@@ -349,12 +349,39 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
             'dispatch datetime', 'event time', 'event datetime'
         ]:
             if cand in col_map:
-                trial = pd.to_datetime(df_ana[col_map[cand]], errors='coerce')
-                if trial.dropna().shape[0] > 0:
-                    dt_obj = trial
+                _col_real = col_map[cand]
+                _fmt_try = ['%m/%d/%Y %I:%M %p','%m/%d/%Y %H:%M:%S','%Y-%m-%d %H:%M:%S',
+                            '%Y-%m-%dT%H:%M:%S','%m/%d/%Y %H:%M','%Y-%m-%d %H:%M']
+                for _fmt in _fmt_try:
+                    try:
+                        trial = pd.to_datetime(df_ana[_col_real], format=_fmt, errors='coerce')
+                        if trial.notna().sum() > 0:
+                            dt_obj = trial
+                            break
+                    except Exception:
+                        continue
+                if dt_obj is not None and dt_obj.dropna().shape[0] > 0:
                     break
+                # Last resort: dateutil inference
+                if dt_obj is None or dt_obj.dropna().empty:
+                    trial = pd.to_datetime(df_ana[_col_real], errors='coerce')
+                    if trial.dropna().shape[0] > 0:
+                        dt_obj = trial
+                        break
 
-    if dt_obj is None:
+    # Universal scan: try every object column as a datetime source
+    if dt_obj is None or dt_obj.dropna().empty:
+        for _col in df_ana.select_dtypes(include='object').columns:
+            try:
+                _samp = df_ana[_col].dropna().head(20)
+                _trial = pd.to_datetime(_samp, errors='coerce')
+                if _trial.notna().sum() >= 10 and _trial.dt.year.between(2000, 2035).mean() > 0.8:
+                    dt_obj = pd.to_datetime(df_ana[_col], errors='coerce')
+                    break
+            except Exception:
+                continue
+
+    if dt_obj is None or dt_obj.dropna().empty:
         return "<div style='color:gray; padding:20px;'>Analytics unavailable. Missing date/time fields.</div>"
 
     df_ana['dt_obj'] = dt_obj
@@ -957,7 +984,7 @@ def aggressive_parse_calls(uploaded_files):
                     if _col in (t_found or []):
                         continue
                     try:
-                        _test = pd.to_datetime(raw_df[_col].dropna().head(50), errors='coerce', infer_datetime_format=True)
+                        _test = pd.to_datetime(raw_df[_col].dropna().head(50), errors='coerce')
                         _valid = _test.dropna()
                         if len(_valid) >= 10 and _valid.dt.year.between(2000, 2035).mean() > 0.8:
                             d_found = [_col]
@@ -966,11 +993,42 @@ def aggressive_parse_calls(uploaded_files):
                         continue
 
             if d_found:
+                # Build the raw string series to parse — combine date+time cols if separate
                 if t_found and d_found[0] != t_found[0]:
-                    dt_series = pd.to_datetime(raw_df[d_found[0]] + ' ' + raw_df[t_found[0]], errors='coerce')
+                    _raw_dt_str = raw_df[d_found[0]].fillna('') + ' ' + raw_df[t_found[0]].fillna('')
                 else:
-                    dt_series = pd.to_datetime(raw_df[d_found[0]], errors='coerce')
-                
+                    _raw_dt_str = raw_df[d_found[0]]
+
+                # Try explicit common formats first (orders of magnitude faster than
+                # dateutil fallback on large files, and avoids NaT on ghost rows).
+                # Format detection: sample the first non-null value.
+                _sample_vals = _raw_dt_str.dropna().str.strip()
+                _sample_vals = _sample_vals[_sample_vals != ''].head(5)
+                _fmt_candidates = [
+                    '%m/%d/%Y %I:%M %p',   # 2/14/2025 6:03 PM  (Mobile AL)
+                    '%m/%d/%Y %H:%M:%S',   # 2/14/2025 18:03:00
+                    '%m/%d/%Y %H:%M',      # 2/14/2025 18:03
+                    '%Y-%m-%d %H:%M:%S',   # 2025-02-14 18:03:00
+                    '%Y-%m-%dT%H:%M:%S',   # ISO 8601
+                    '%Y-%m-%d %H:%M',      # 2025-02-14 18:03
+                    '%Y/%m/%d %H:%M:%S',
+                    '%d/%m/%Y %H:%M:%S',
+                    '%m-%d-%Y %H:%M:%S',
+                ]
+                dt_series = None
+                if not _sample_vals.empty:
+                    for _fmt in _fmt_candidates:
+                        try:
+                            _trial = pd.to_datetime(_sample_vals.iloc[0], format=_fmt, errors='raise')
+                            # Format matched — apply to full series
+                            dt_series = pd.to_datetime(_raw_dt_str, format=_fmt, errors='coerce')
+                            break
+                        except Exception:
+                            continue
+                if dt_series is None:
+                    # Final fallback: let pandas infer (slow but handles edge cases)
+                    dt_series = pd.to_datetime(_raw_dt_str, errors='coerce')
+
                 res['date'] = dt_series.dt.strftime('%Y-%m-%d')
                 res['time'] = dt_series.dt.strftime('%H:%M:%S')
 

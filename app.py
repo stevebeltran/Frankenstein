@@ -4541,52 +4541,50 @@ if st.session_state['csvs_ready']:
             unsafe_allow_html=True
         )
 
-        # ── Interactive pin/unpin buttons aligned under each card ─────────
+        # ── Interactive pin/unpin buttons — one row of buttons per row of cards ──
         _saved_gnames = list(st.session_state.get('pinned_guard_names', []))
         _saved_rnames = list(st.session_state.get('pinned_resp_names',  []))
-        _station_names_set = set(df_stations_all['name'].tolist()) if not df_stations_all.empty else set()
 
-        _btn_cols = st.columns(_n_cols)
-        for _ci, _d in enumerate(active_drones):
-            _dname  = _d['name']
-            _dtype  = _d['type']
-            _col    = _btn_cols[_ci % _n_cols]
-            _is_pg  = _dname in _saved_gnames
-            _is_pr  = _dname in _saved_rnames
-            with _col:
-                if _dtype == 'GUARDIAN':
-                    if _is_pg:
-                        if st.button(f"🔒 Unpin Guardian", key=f"unpin_g_{_ci}",
-                                     use_container_width=True, type="primary"):
-                            _saved_gnames = [x for x in _saved_gnames if x != _dname]
-                            st.session_state['pinned_guard_names'] = _saved_gnames
-                            st.rerun()
-                    else:
-                        if st.button(f"🦅 Lock as Guardian", key=f"pin_g_{_ci}",
-                                     use_container_width=True):
-                            if _dname not in _saved_gnames:
+        # Chunk drones into rows matching the card grid, render a button row per chunk
+        import math as _math
+        _n_rows = _math.ceil(len(active_drones) / _n_cols)
+        for _row_idx in range(_n_rows):
+            _row_drones = active_drones[_row_idx * _n_cols : (_row_idx + 1) * _n_cols]
+            # Pad to full width so columns align with cards above
+            _row_cols = st.columns(_n_cols)
+            for _slot, _d in enumerate(_row_drones):
+                _ci    = _row_idx * _n_cols + _slot
+                _dname = _d['name']
+                _dtype = _d['type']
+                _is_pg = _dname in _saved_gnames
+                _is_pr = _dname in _saved_rnames
+                with _row_cols[_slot]:
+                    if _dtype == 'GUARDIAN':
+                        if _is_pg:
+                            if st.button("🔒 Unpin Guardian", key=f"unpin_g_{_ci}",
+                                         use_container_width=True, type="primary"):
+                                st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
+                                st.rerun()
+                        else:
+                            if st.button("🦅 Lock as Guardian", key=f"pin_g_{_ci}",
+                                         use_container_width=True):
                                 _saved_gnames.append(_dname)
-                                # Remove from responder pins if there
-                                _saved_rnames = [x for x in _saved_rnames if x != _dname]
-                            st.session_state['pinned_guard_names'] = _saved_gnames
-                            st.session_state['pinned_resp_names']  = _saved_rnames
-                            st.rerun()
-                else:  # RESPONDER
-                    if _is_pr:
-                        if st.button(f"🔒 Unpin Responder", key=f"unpin_r_{_ci}",
-                                     use_container_width=True, type="primary"):
-                            _saved_rnames = [x for x in _saved_rnames if x != _dname]
-                            st.session_state['pinned_resp_names'] = _saved_rnames
-                            st.rerun()
+                                st.session_state['pinned_guard_names'] = _saved_gnames
+                                st.session_state['pinned_resp_names']  = [x for x in _saved_rnames if x != _dname]
+                                st.rerun()
                     else:
-                        if st.button(f"🚁 Lock as Responder", key=f"pin_r_{_ci}",
-                                     use_container_width=True):
-                            if _dname not in _saved_rnames:
+                        if _is_pr:
+                            if st.button("🔒 Unpin Responder", key=f"unpin_r_{_ci}",
+                                         use_container_width=True, type="primary"):
+                                st.session_state['pinned_resp_names'] = [x for x in _saved_rnames if x != _dname]
+                                st.rerun()
+                        else:
+                            if st.button("🚁 Lock as Responder", key=f"pin_r_{_ci}",
+                                         use_container_width=True):
                                 _saved_rnames.append(_dname)
-                                _saved_gnames = [x for x in _saved_gnames if x != _dname]
-                            st.session_state['pinned_guard_names'] = _saved_gnames
-                            st.session_state['pinned_resp_names']  = _saved_rnames
-                            st.rerun()
+                                st.session_state['pinned_resp_names']  = _saved_rnames
+                                st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
+                                st.rerun()
     else:
         st.markdown(
             f"""

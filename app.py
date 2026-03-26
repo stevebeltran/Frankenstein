@@ -3672,46 +3672,20 @@ if st.session_state['csvs_ready']:
     st.session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
 
     # ── MANUAL STATION PINS ───────────────────────────────────────────────────
-    pin_expander = st.sidebar.expander("📍 Station Pins", expanded=False)
-
-    # Pinning now happens via buttons on the unit economics cards.
-    # This expander shows current state and allows clearing.
+    # ── Sync pinned station lists (expander removed — pinning via card buttons) ──
     _station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
     _saved_g = [s for s in st.session_state.get('pinned_guard_names', []) if s in _station_names]
     _saved_r = [s for s in st.session_state.get('pinned_resp_names',  []) if s in _station_names]
-    # Sync back in case stale names were filtered out
     st.session_state['pinned_guard_names'] = _saved_g
     st.session_state['pinned_resp_names']  = _saved_r
     pinned_guard_names = _saved_g
     pinned_resp_names  = _saved_r
 
-    with pin_expander:
-        if pinned_guard_names or pinned_resp_names:
-            for _pn in pinned_guard_names:
-                st.markdown(f"<div style='font-size:0.68rem; color:#FFD700; padding:2px 0;'>🦅 {_pn}</div>",
-                            unsafe_allow_html=True)
-            for _pn in pinned_resp_names:
-                st.markdown(f"<div style='font-size:0.68rem; color:#00D2FF; padding:2px 0;'>🚁 {_pn}</div>",
-                            unsafe_allow_html=True)
-            _ng = max(0, k_guardian  - len(pinned_guard_names))
-            _nr = max(0, k_responder - len(pinned_resp_names))
-            if _ng + _nr > 0:
-                st.caption(f"Optimizer fills remaining {_ng}G + {_nr}R slots automatically.")
-            if st.button("✕ Clear all pins", use_container_width=True, key="clear_pins"):
-                st.session_state['pinned_guard_names'] = []
-                st.session_state['pinned_resp_names']  = []
-                st.rerun()
-        else:
-            st.markdown(
-                f"<div style='font-size:0.7rem; color:{text_muted};'>"
-                "Use the <b>Lock</b> buttons on the unit cards below the map to pin stations.</div>",
-                unsafe_allow_html=True
-            )
-
-        if len(pinned_guard_names) > k_guardian:
-            st.warning(f"⚠️ Raise Guardian Count to at least {len(pinned_guard_names)}.")
-        if len(pinned_resp_names) > k_responder:
-            st.warning(f"⚠️ Raise Responder Count to at least {len(pinned_resp_names)}.")
+    # Warn in sidebar if pin count exceeds slider
+    if len(pinned_guard_names) > k_guardian:
+        st.sidebar.warning(f"⚠️ Raise Guardian Count ≥ {len(pinned_guard_names)} to use all Guardian pins.")
+    if len(pinned_resp_names) > k_responder:
+        st.sidebar.warning(f"⚠️ Raise Responder Count ≥ {len(pinned_resp_names)} to use all Responder pins.")
 
     # ── ADD CUSTOM STATION BY ADDRESS ─────────────────────────────────────────
     add_expander = st.sidebar.expander("➕ Add Custom Station", expanded=False)
@@ -3765,50 +3739,79 @@ if st.session_state['csvs_ready']:
                         _matched_addr = _matches[0].get("matchedAddress", _addr_to_geocode)
                         _label = _custom_label.strip() or _matched_addr
                         _new_row = pd.DataFrame([{
-                            "name": _label,
-                            "lat": _geo_lat,
-                            "lon": _geo_lon,
-                            "type": _custom_type
+                            "name":   _label,
+                            "lat":    _geo_lat,
+                            "lon":    _geo_lon,
+                            "type":   _custom_type,
+                            "custom": True,   # flag so we can identify & remove later
                         }])
                         _existing = st.session_state.get('df_stations', pd.DataFrame())
                         st.session_state['df_stations'] = pd.concat(
                             [_existing, _new_row], ignore_index=True
                         ) if not _existing.empty else _new_row
-                        st.success(f"✅ Added: {_label} ({_geo_lat:.4f}, {_geo_lon:.4f})")
-                        st.caption(f"Matched: {_matched_addr}")
-                        # Clear buffers (not widget keys) — safe to modify before rerun
+
+                        # Auto-pin as Guardian or Responder based on type selection
+                        # Guardian types = wide-area patrol assets; Responder = tactical
+                        _guard_types = {"Police", "Government", "Fire"}
+                        if _custom_type in _guard_types:
+                            _pg = list(st.session_state.get('pinned_guard_names', []))
+                            if _label not in _pg:
+                                _pg.append(_label)
+                            st.session_state['pinned_guard_names'] = _pg
+                            # Bump Guardian slider if needed
+                            if st.session_state.get('k_guard', 0) < len(_pg):
+                                st.session_state['k_guard'] = len(_pg)
+                            _pin_note = "🦅 Auto-pinned as Guardian."
+                        else:
+                            _pr = list(st.session_state.get('pinned_resp_names', []))
+                            if _label not in _pr:
+                                _pr.append(_label)
+                            st.session_state['pinned_resp_names'] = _pr
+                            if st.session_state.get('k_resp', 0) < len(_pr):
+                                st.session_state['k_resp'] = len(_pr)
+                            _pin_note = "🚁 Auto-pinned as Responder."
+
+                        st.success(f"✅ Added & locked: **{_label}** ({_geo_lat:.4f}, {_geo_lon:.4f})\n{_pin_note}")
+                        st.caption(f"Matched address: {_matched_addr}")
+                        # Clear buffers
                         st.session_state['cs_addr_buf']  = ""
                         st.session_state['cs_label_buf'] = ""
                         if '_opt_cache_key' in st.session_state:
                             del st.session_state['_opt_cache_key']
                         st.rerun()
                     else:
-                        st.warning("⚠️ Address not found. Try adding city and state (e.g. '123 Main St, Mobile AL').")
+                        st.warning("⚠️ Address not found. Try including city and state — e.g. '123 Main St, Mobile AL'.")
                 except Exception as _ge:
                     st.error(f"Geocoding failed: {_ge}")
             else:
                 st.warning("Enter an address first.")
 
-        # Show any custom stations added this session
-        _custom_added = [
-            r['name'] for _, r in st.session_state.get('df_stations', pd.DataFrame()).iterrows()
-            if r.get('type') not in ['Police', 'Fire', 'School', 'Government', 'Hospital',
-                                      'Library', 'Park', 'Recreation', 'Shopping', 'Transit',
-                                      'Utility', 'Emergency', 'Medical']
-        ] if not st.session_state.get('df_stations', pd.DataFrame()).empty else []
+        # Show custom stations added this session (detected via 'custom' flag column)
+        _df_st = st.session_state.get('df_stations', pd.DataFrame())
+        if not _df_st.empty and 'custom' in _df_st.columns:
+            _custom_added = _df_st[_df_st['custom'] == True]['name'].tolist()
+        else:
+            _custom_added = []
         if _custom_added:
-            st.caption(f"Custom this session: {', '.join(_custom_added[:5])}")
+            st.markdown(f"<div style='font-size:0.65rem; color:{text_muted}; margin-top:6px;'>"
+                        f"Pinned this session:</div>", unsafe_allow_html=True)
+            for _cn in _custom_added[:8]:
+                _is_g = _cn in st.session_state.get('pinned_guard_names', [])
+                _badge = "🦅" if _is_g else "🚁"
+                st.markdown(f"<div style='font-size:0.65rem; color:{'#FFD700' if _is_g else '#00D2FF'}; "
+                            f"padding:1px 0;'>{_badge} {_cn}</div>", unsafe_allow_html=True)
             if st.button("🗑 Remove all custom stations", key="remove_custom",
                          use_container_width=True):
-                # Keep only original station types
                 _orig = st.session_state.get('df_stations', pd.DataFrame())
-                if not _orig.empty and 'type' in _orig.columns:
-                    _known_types = {'Police','Fire','School','Government','Hospital',
-                                    'Library','Park','Recreation','Shopping','Transit',
-                                    'Utility','Emergency','Medical'}
-                    st.session_state['df_stations'] = _orig[
-                        _orig['type'].astype(str).isin(_known_types)
-                    ].reset_index(drop=True)
+                if not _orig.empty and 'custom' in _orig.columns:
+                    _kept = _orig[_orig['custom'] != True].reset_index(drop=True)
+                    st.session_state['df_stations'] = _kept
+                    # Un-pin any custom station names
+                    _cnames = set(_custom_added)
+                    st.session_state['pinned_guard_names'] = [
+                        x for x in st.session_state.get('pinned_guard_names', []) if x not in _cnames]
+                    st.session_state['pinned_resp_names']  = [
+                        x for x in st.session_state.get('pinned_resp_names',  []) if x not in _cnames]
                 if '_opt_cache_key' in st.session_state:
                     del st.session_state['_opt_cache_key']
                 st.rerun()
@@ -3834,27 +3837,7 @@ if st.session_state['csvs_ready']:
     )
     prog2.empty()
 
-    # ── SCORED STATION TABLE (injected into pin_expander after precompute) ────
-    # station_metadata, resp_matrix, guard_matrix, total_calls now available.
-    with pin_expander:
-        if station_metadata and total_calls > 0:
-            _rows = []
-            for _si, _sm in enumerate(station_metadata):
-                _g_calls = int(guard_matrix[_si].sum())
-                _r_calls = int(resp_matrix[_si].sum())
-                _rows.append({
-                    'Station':    _sm['name'],
-                    '🦅 Guard%': round(_g_calls / total_calls * 100, 1),
-                    '🚁 Resp%':  round(_r_calls / total_calls * 100, 1),
-                    'Central':    int(round(_sm.get('centrality', 0) * 100)),
-                })
-            _pin_df = pd.DataFrame(_rows).sort_values('🦅 Guard%', ascending=False)
-            st.dataframe(
-                _pin_df.head(25).set_index('Station'),
-                use_container_width=True,
-                height=200,
-            )
-            st.caption("Guard%: coverage at Guardian range · Resp%: at Responder range · Central: proximity to city centre (100=centre)")
+    # (Scored station table removed — station scores shown in Add Custom Station expander)
 
     def get_max_drones(col_name):
         series = df_curve[col_name].dropna()

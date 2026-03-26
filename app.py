@@ -4885,194 +4885,423 @@ if st.session_state['csvs_ready']:
 
         prepared_for_city = st.session_state.get('active_city', prop_city) or prop_city
         prepared_by_name = prop_name
-        export_html = f"""<html><head><title>BRINC DFR Proposal — {prop_city}</title>
-        <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
-        <style>
-        body {{ font-family: 'Manrope', Arial, sans-serif; color: #1e1e24; margin: 0; padding: 40px; background: #f4f6f9; }}
-        .page {{ max-width: 1000px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.08); overflow: hidden; }}
-        .header {{ background: #06060a; color: #fff; padding: 40px 50px; border-bottom: 4px solid #00D2FF; display: flex; justify-content: space-between; align-items: center; }}
-        .header h1 {{ margin: 0; font-size: 28px; font-weight: 800; letter-spacing: 0.5px; }}
-        .header-sub {{ font-size: 14px; color: #aaa; margin-top: 8px; font-family: monospace; letter-spacing: 1px; }}
-        .content {{ padding: 40px 50px; }}
-        h2 {{ color: #111; font-size: 22px; font-weight: 800; margin-top: 40px; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #eee; }}
-        .kpi-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 40px; }}
-        .kpi-card {{ border: 1px solid #eaeaea; border-radius: 10px; padding: 25px; background: #fafafa; }}
-        .kpi-card h3 {{ margin: 0 0 20px 0; font-size: 16px; color: #444; text-transform: uppercase; letter-spacing: 1px; }}
-        .kpi-row {{ display: flex; justify-content: space-between; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #eee; }}
-        .kpi-row:last-child {{ margin-bottom: 0; padding-bottom: 0; border-bottom: none; }}
-        .kpi-lbl {{ font-size: 13px; color: #666; font-weight: 600; }}
-        .kpi-val {{ font-size: 20px; font-weight: 800; color: #00D2FF; font-family: monospace; }}
-        table {{ width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 30px; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.03); }}
-        th, td {{ padding: 14px 15px; text-align: left; border-bottom: 1px solid #eee; }}
-        th {{ background: #f8f9fa; font-weight: 800; text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px; color: #555; }}
-        .map-container {{ border: 1px solid #eee; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }}
-        .disclaimer {{ background: #fff8e6; border-left: 4px solid #F0B429; padding: 15px 20px; font-size: 13px; color: #856404; border-radius: 0 8px 8px 0; margin-bottom: 25px; }}
-        p {{ line-height: 1.8; color: #444; font-size: 15px; margin-bottom: 15px; }}
-        .footer {{ background: #06060a; color: #888; padding: 40px 50px; text-align: center; font-size: 13px; }}
-        .footer a {{ color: #00D2FF; text-decoration: none; font-weight: 600; }}
-        </style>
-        </head><body><div class="page">
-        <div class="header">
-            <div>{logo_html_str}</div>
-            <div style="text-align:right;">
-                <h1>DFR Executive Summary</h1>
-                <div class="header-sub">{prop_city}, {prop_state} | Pop: {pop_metric:,}</div>
-                <div class="header-sub" style="color:#00D2FF;">Prepared for {prepared_for_city} by {prepared_by_name} · BRINC Drones</div>
-            </div>
-        </div>
-        <div class="content">
-            <div class="hero-note"><strong>Prepared for {prepared_for_city}</strong> by <strong>{prepared_by_name}</strong> · BRINC Drones. This executive summary includes the enhanced CAD ingestion analytics and export narrative styling used in the custom HTML document.</div>
-            <div class="kpi-grid">
-                <div class="kpi-card">
-                    <h3>Financial Impact</h3>
-                    <div class="kpi-row"><span class="kpi-lbl">Fleet CapEx</span><span class="kpi-val">${fleet_capex:,.0f}</span></div>
-                    <div class="kpi-row"><span class="kpi-lbl">Annual Savings Capacity</span><span class="kpi-val">${annual_savings:,.0f}</span></div>
-                    <div class="kpi-row"><span class="kpi-lbl">Break-Even</span><span class="kpi-val" style="color:#F0B429;">{break_even_text}</span></div>
-                </div>
-                <div class="kpi-card">
-                    <h3>Operational Impact</h3>
-                    <div class="kpi-row"><span class="kpi-lbl">911 Call Coverage</span><span class="kpi-val">{calls_covered_perc:.1f}%</span></div>
-                    <div class="kpi-row"><span class="kpi-lbl">Avg Response Time</span><span class="kpi-val">{avg_resp_time:.1f} min</span></div>
-                    <div class="kpi-row"><span class="kpi-lbl">Time Saved vs Patrol</span><span class="kpi-val" style="color:#2ecc71;">{avg_time_saved:.1f} min</span></div>
-                </div>
-            </div>
+        export_html = f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BRINC DFR Proposal — {prop_city}, {prop_state}</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
+:root{{
+  --black:#000000;--white:#ffffff;--cyan:#00D2FF;--gold:#FFD700;
+  --ink:#0a0a0f;--surface:#f7f8fa;--border:#e4e6ea;
+  --text:#111118;--muted:#6b7280;--light:#f0f2f6;
+  --resp:#00D2FF;--guard:#FFD700;--green:#22c55e;--amber:#f59e0b;
+}}
+html{{scroll-behavior:smooth}}
+body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text);line-height:1.6;display:flex;min-height:100vh}}
 
-            <h2>Proposed Fleet</h2>
-            <table>
-                <tr><th>Type</th><th>Qty</th><th>Range</th><th>Unit Cost</th></tr>
-                <tr><td>BRINC Responder</td><td>{actual_k_responder}</td><td>{resp_radius_mi} mi</td><td>${CONFIG['RESPONDER_COST']:,}</td></tr>
-                <tr><td>BRINC Guardian</td><td>{actual_k_guardian}</td><td>{guard_radius_mi} mi</td><td>${CONFIG['GUARDIAN_COST']:,}</td></tr>
-            </table>
+/* ── LEFT SIDEBAR INDEX ──────────────────────────────────────── */
+.doc-sidebar{{
+  position:fixed;top:0;left:0;width:220px;height:100vh;
+  background:var(--ink);overflow-y:auto;z-index:100;
+  display:flex;flex-direction:column;
+  border-right:1px solid #1a1a2a;
+}}
+.sidebar-logo{{
+  padding:28px 24px 20px;
+  border-bottom:1px solid #1a1a2a;
+}}
+.sidebar-logo img{{height:28px;filter:brightness(0) invert(1);display:block}}
+.sidebar-logo .brand{{font-size:22px;font-weight:900;letter-spacing:3px;color:#fff}}
+.sidebar-city{{
+  padding:16px 24px;
+  border-bottom:1px solid #1a1a2a;
+}}
+.sidebar-city .city-name{{font-size:13px;font-weight:700;color:#fff;letter-spacing:0.3px}}
+.sidebar-city .city-sub{{font-size:11px;color:#666;margin-top:2px}}
+.sidebar-nav{{padding:20px 0;flex:1}}
+.sidebar-nav a{{
+  display:flex;align-items:center;gap:10px;
+  padding:9px 24px;font-size:12px;font-weight:500;
+  color:#888;text-decoration:none;
+  border-left:2px solid transparent;
+  transition:all 0.15s;
+}}
+.sidebar-nav a:hover,.sidebar-nav a.active{{
+  color:#fff;background:rgba(0,210,255,0.06);
+  border-left-color:var(--cyan);
+}}
+.sidebar-nav .nav-num{{
+  font-size:10px;font-weight:700;color:#333;
+  width:18px;text-align:center;flex-shrink:0;
+}}
+.sidebar-nav a:hover .nav-num,.sidebar-nav a.active .nav-num{{color:var(--cyan)}}
+.sidebar-footer{{
+  padding:20px 24px;border-top:1px solid #1a1a2a;
+  font-size:10px;color:#444;line-height:1.6;
+}}
+.sidebar-footer a{{color:#555;text-decoration:none}}
 
-            <h2>Coverage Map</h2>
-            <div class="map-container">{map_html_str}</div>
+/* ── MAIN CONTENT ────────────────────────────────────────────── */
+.doc-main{{margin-left:220px;flex:1;min-width:0}}
 
-            <h2>Incident Data Analysis</h2>
-            <div style="margin-bottom:18px; color:#546574; font-size:14px;">Enhanced CAD ingestion analytics and deployment-calendar visuals from the custom HTML document are embedded below for {prepared_for_city}.</div>
-            {cad_charts_html_export}
+/* ── PAGE SECTIONS (each prints as independent page) ─────────── */
+.doc-section{{
+  background:#fff;
+  border-bottom:6px solid var(--surface);
+  padding:52px 60px;
+  position:relative;
+}}
+.doc-section:first-child{{padding-top:64px}}
 
-            <h2>Deployment Locations</h2>
-            <table>
-                <tr><th>Station</th><th>Type</th><th>Avg Response</th><th>FAA Ceiling</th><th>CapEx</th></tr>
-                {station_rows}
-            </table>
+/* Section header bar */
+.section-eyebrow{{
+  display:flex;align-items:center;gap:10px;
+  margin-bottom:32px;
+}}
+.section-eyebrow .pg-num{{
+  font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;
+  color:var(--cyan);border:1px solid rgba(0,210,255,0.3);
+  padding:3px 10px;border-radius:100px;font-family:'IBM Plex Mono',monospace;
+}}
+.section-eyebrow .pg-title{{
+  font-size:10px;font-weight:600;letter-spacing:2px;text-transform:uppercase;
+  color:var(--muted);
+}}
 
-            <h2>Grant Narrative (AI Draft)</h2>
-            <div class="disclaimer"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission. All financial projections, coverage statistics, and operational estimates are produced by a simulation tool based on user-provided inputs &mdash; they are not a guarantee of performance, legal recommendation, or binding commitment of any kind.</div>
-            <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — {prepared_for_city}</p>
-            <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully submits this application requesting funding to establish a BRINC Drones-powered Drone as a First Responder (DFR) program. This initiative will deploy a fleet of {total_fleet} purpose-built BRINC Drones aerial systems — comprising {actual_k_responder} BRINC Responder and {actual_k_guardian} BRINC Guardian units — across {dept_summary} serving a combined population of {pop_metric:,} residents across approximately {area_sq_mi_est:,} square miles in {prop_city}, {prop_state}.</p>
-            <p><strong>Statement of Need:</strong> The {jurisdiction_list} currently serves a population of {pop_metric:,} residents and responds to an estimated {st.session_state.get('total_original_calls', total_calls):,} calls for service annually. Ground-based patrol response times are constrained by traffic, geography, and unit availability. This proposal addresses a critical public safety gap: the need for immediate aerial situational awareness that arrives before ground units, enabling smarter, safer, and faster emergency response. BRINC Drones, the world leader in purpose-built DFR technology, provides the only fully integrated hardware, software, and operational support platform purpose-designed for law enforcement DFR deployment.</p>
-            <p><strong>Geographic Scope & Participating Agencies:</strong> The proposed DFR network covers the jurisdictions of <strong>{jurisdiction_list}</strong> ({prop_state}). Drone stations will be hosted at {dept_summary}, including facilities operated by: <em>{police_names_str}</em>. The deployment area encompasses an estimated {area_sq_mi_est:,} square miles of mixed urban and suburban terrain, with BRINC Drones units positioned to achieve {calls_covered_perc:.1f}% coverage of historical incident locations and {area_covered_perc:.1f}% geographic area coverage.</p>
-            <p><strong>Program Design:</strong> The proposed fleet consists of {actual_k_responder} <strong>BRINC Responder</strong> units (short-range tactical response, {resp_radius_mi}-mile operational radius) and {actual_k_guardian} <strong>BRINC Guardian</strong> units (long-range heavy-lift, {guard_radius_mi}-mile operational radius). All deployment sites have been pre-screened against FAA LAANC UAS Facility Maps. The BRINC Drones platform provides automated launch-on-dispatch, live-streaming HD/thermal video to dispatch and responding officers, and full chain-of-custody flight logging. Average aerial response time under this configuration is projected at <strong>{avg_resp_time:.1f} minutes</strong> — approximately <strong>{avg_time_saved:.1f} minutes faster</strong> than current vehicular patrol response for equivalent distances.</p>
-            <p><strong>Fiscal Impact & Return on Investment:</strong> Total program capital expenditure is <strong>${fleet_capex:,.0f}</strong>. Based on a {int(dfr_dispatch_rate*100)}% DFR dispatch rate and {int(deflection_rate*100)}% call resolution rate, the program is projected to generate <strong>${annual_savings:,.0f} in annual operational savings</strong> through reduced officer dispatch on drone-resolved incidents, reaching full cost recovery in <strong>{break_even_text.lower()}</strong>. At ${CONFIG["DRONE_COST_PER_CALL"]}/drone response versus ${CONFIG["OFFICER_COST_PER_CALL"]}/officer dispatch, the BRINC Drones platform delivers a demonstrated cost-per-response reduction of over {int((1 - CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}%.</p>
-            <p><strong>About BRINC Drones:</strong> BRINC Drones, Inc. is the global leader in purpose-built Drone as a First Responder technology, with deployments across hundreds of law enforcement agencies in the United States. BRINC Drones designs, manufactures, and supports the only DFR platform built from the ground up for public safety — including the BRINC Responder for rapid tactical response and the BRINC Guardian for extended-range operations. BRINC provides full agency onboarding, FAA coordination support, pilot training, and ongoing operational guidance. Learn more at <a href="https://brincdrones.com" target="_blank">brincdrones.com</a>.</p>
-            
-            <p style="background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #eee;"><strong>Potential Grant Funding Sources:</strong><br>
-              <a href="https://bja.ojp.gov/program/jag/overview" target="_blank">DOJ Byrne JAG</a> — UAS and technology procurement eligible <br>
-              <a href="https://www.fema.gov/grants/preparedness/homeland-security" target="_blank">FEMA HSGP</a> — CapEx offset for tactical deployments <br>
-              <a href="https://cops.usdoj.gov/grants" target="_blank">DOJ COPS Office</a> — Law enforcement technology grants <br>
-              <a href="https://www.transportation.gov/grants" target="_blank">DOT RAISE</a> — Regional infrastructure and safety
-            </p>
+/* ── COVER PAGE ──────────────────────────────────────────────── */
+.cover-page{{
+  background:var(--ink);color:#fff;min-height:100vh;
+  display:flex;flex-direction:column;justify-content:space-between;
+  padding:60px;position:relative;overflow:hidden;
+}}
+.cover-page::before{{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse 80% 60% at 70% 30%,rgba(0,210,255,0.08) 0%,transparent 70%);
+  pointer-events:none;
+}}
+.cover-logo{{margin-bottom:auto}}
+.cover-logo img{{height:36px;filter:brightness(0) invert(1)}}
+.cover-logo .brand{{font-size:28px;font-weight:900;letter-spacing:4px;color:#fff}}
+.cover-headline{{margin:60px 0 40px}}
+.cover-tag{{
+  font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;
+  color:var(--cyan);margin-bottom:20px;
+}}
+.cover-headline h1{{
+  font-size:52px;font-weight:900;line-height:1.05;letter-spacing:-1px;
+  color:#fff;margin-bottom:16px;
+}}
+.cover-headline h1 span{{color:var(--cyan)}}
+.cover-headline p{{font-size:16px;color:#888;max-width:480px;line-height:1.7}}
+.cover-meta{{
+  display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;
+  background:#1a1a2a;border:1px solid #1a1a2a;border-radius:10px;overflow:hidden;
+}}
+.cover-meta-cell{{
+  background:var(--ink);padding:20px 24px;
+}}
+.cover-meta-cell .label{{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#555;margin-bottom:6px}}
+.cover-meta-cell .value{{font-size:15px;font-weight:700;color:#fff}}
+.cover-meta-cell .value.accent{{color:var(--cyan)}}
+.cover-meta-cell .value.gold{{color:var(--gold)}}
+.cover-bottom{{margin-top:40px;font-size:12px;color:#444;border-top:1px solid #1a1a2a;padding-top:24px;display:flex;justify-content:space-between}}
 
-            <h2>Candidate Infrastructure Directory</h2>
-            <p>The following public buildings and facilities were evaluated as potential deployment locations during this optimization simulation:</p>
-            <table style="font-size: 12px; margin-bottom: 40px;">
-                <tr><th>Facility Name</th><th>Type</th><th>Latitude</th><th>Longitude</th><th>Location</th></tr>
-                {all_bldgs_rows}
-            </table>
+/* ── METRICS SECTION ─────────────────────────────────────────── */
+.metrics-hero{{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:1px;
+  background:var(--border);border-radius:12px;overflow:hidden;
+  margin-bottom:40px;box-shadow:0 1px 3px rgba(0,0,0,0.04);
+}}
+.metric-cell{{
+  background:#fff;padding:28px 24px;text-align:center;
+}}
+.metric-cell .m-label{{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}}
+.metric-cell .m-value{{font-size:36px;font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1;color:var(--text)}}
+.metric-cell .m-value.cyan{{color:var(--cyan)}}
+.metric-cell .m-value.gold{{color:var(--gold)}}
+.metric-cell .m-value.green{{color:var(--green)}}
+.metric-cell .m-sub{{font-size:11px;color:var(--muted);margin-top:6px}}
 
-            <div style="page-break-before: always;"></div>
-            <h2 style="color:#1a1a2e; border-bottom: 3px solid #00D2FF;">📬 Community Business Partnership — Request for Support</h2>
-            <div style="background:#f0f8ff; border-left:5px solid #00D2FF; padding:20px 25px; border-radius:0 8px 8px 0; margin-bottom:25px; font-size:14px; color:#333;">
-                <strong>To: Local Business Community of {prop_city}, {prop_state}</strong><br>
-                <strong>Re: Drone as a First Responder Program — Community Investment Opportunity</strong><br>
-                <strong>Date:</strong> {datetime.datetime.now().strftime("%B %d, %Y")}
-            </div>
-            <p>Dear {prop_city} Business Owner,</p>
-            <p>On behalf of the public safety community of <strong>{prop_city}, {prop_state}</strong>, we are reaching out to local businesses to join a groundbreaking initiative that directly protects your investment, your employees, and your customers. Our city is proposing the deployment of a <strong>BRINC Drones Drone as a First Responder (DFR)</strong> network — an advanced aerial response system that puts a camera and tactical awareness on scene in under two minutes, before any ground unit can arrive.</p>
+/* Fleet split row */
+.fleet-split{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:32px}}
+.fleet-card{{border-radius:10px;padding:24px;position:relative;overflow:hidden}}
+.fleet-card.guardian{{background:#0a0800;border:1px solid #2a2400;color:#fff}}
+.fleet-card.responder{{background:#00111a;border:1px solid #002a3a;color:#fff}}
+.fleet-card .fc-icon{{font-size:28px;margin-bottom:12px}}
+.fleet-card .fc-type{{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px}}
+.fleet-card.guardian .fc-type{{color:var(--gold)}}
+.fleet-card.responder .fc-type{{color:var(--resp)}}
+.fleet-card .fc-val{{font-size:32px;font-weight:900;font-family:'IBM Plex Mono',monospace;color:#fff}}
+.fleet-card .fc-sub{{font-size:12px;color:#888;margin-top:4px}}
+.fleet-card .fc-row{{display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)}}
+.fleet-card .fc-row:last-child{{border-bottom:none}}
+.fleet-card .fc-row .k{{color:#666}}.fleet-card .fc-row .v{{font-weight:600;color:#ccc}}
 
-            <h3 style="color:#1a1a2e; margin-top:30px;">Why Businesses Like Yours Should Care</h3>
-            <p>Property crimes cost American businesses billions each year. In <strong>{prop_city}</strong> and surrounding communities, the impact is felt directly in higher insurance premiums, inventory losses, property repairs, and the intangible cost of a less safe commercial environment. Consider the local data context:</p>
-            <table style="margin-bottom:20px;">
-                <tr><th>Crime Category</th><th>National Avg Cost per Incident</th><th>Business Impact</th></tr>
-                <tr><td><strong>Retail Theft / Shoplifting</strong></td><td>$559 per incident (NRF)</td><td>Inventory loss, employee safety risk, insurance premiums</td></tr>
-                <tr><td><strong>Vandalism / Property Damage</strong></td><td>$1,000–$5,000 per incident</td><td>Repair costs, business downtime, deterred customers</td></tr>
-                <tr><td><strong>Commercial Burglary</strong></td><td>$3,000–$8,500 per incident</td><td>Equipment/cash loss, security upgrades, psychological toll</td></tr>
-                <tr><td><strong>Robbery / Armed Incidents</strong></td><td>$8,000+ per incident</td><td>Worker's comp, legal liability, staff turnover</td></tr>
-                <tr><td><strong>Trespass / Loitering</strong></td><td>$200–$1,500 per incident</td><td>Customer deterrence, staff distraction, facility wear</td></tr>
-            </table>
-            <p>A DFR program acts as a <strong>force multiplier</strong> for law enforcement — drone units arrive on scene an average of <strong>{avg_resp_time:.1f} minutes</strong> after dispatch, capturing real-time aerial video that dramatically improves the probability of apprehension and conviction. Deterrence effects from visible drone patrols have been shown in peer-reviewed studies to reduce commercial property crime by 15–30% in covered zones.</p>
+/* ── SECTION HEADINGS ────────────────────────────────────────── */
+.sh{{
+  font-size:22px;font-weight:800;color:var(--text);
+  margin-bottom:20px;padding-bottom:12px;
+  border-bottom:2px solid var(--border);
+  display:flex;align-items:center;gap:10px;
+}}
+.sh .sh-accent{{color:var(--cyan)}}
 
-            <h3 style="color:#1a1a2e; margin-top:30px;">The Investment We're Requesting</h3>
-            <p>The total capital cost for deploying the full DFR network across <strong>{jurisdiction_list}</strong> is <strong>${fleet_capex:,.0f}</strong>. We are seeking contributions from the local business community to offset a portion of this cost and accelerate deployment. Any amount helps — and contributions will be recognized publicly through the program.</p>
-            <table style="margin-bottom:20px;">
-                <tr><th>Sponsorship Tier</th><th>Contribution</th><th>Recognition</th></tr>
-                <tr><td>🥇 <strong>Founding Sponsor</strong></td><td>$25,000+</td><td>Named drone unit, press release, plaque at station, annual briefing</td></tr>
-                <tr><td>🥈 <strong>Community Champion</strong></td><td>$10,000–$24,999</td><td>Logo on program materials, certificate of recognition, annual update</td></tr>
-                <tr><td>🥉 <strong>Neighborhood Partner</strong></td><td>$2,500–$9,999</td><td>Listed on program website, certificate, public acknowledgment</td></tr>
-                <tr><td>🤝 <strong>Business Supporter</strong></td><td>$500–$2,499</td><td>Listed on donor roll, formal thank-you letter</td></tr>
-                <tr><td>💙 <strong>Community Contributor</strong></td><td>Any amount</td><td>Recognized in annual program report</td></tr>
-            </table>
+/* ── TABLES ──────────────────────────────────────────────────── */
+table{{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:28px}}
+thead tr{{background:var(--ink);color:#fff}}
+thead th{{padding:12px 16px;text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase}}
+tbody tr:nth-child(even){{background:#fafbfc}}
+tbody tr:hover{{background:#f0f8ff}}
+td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
+.tag-resp{{background:rgba(0,210,255,0.1);color:#0066aa;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}}
+.tag-guard{{background:rgba(255,215,0,0.15);color:#8a6a00;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}}
 
-            <h3 style="color:#1a1a2e; margin-top:30px;">Program Performance Metrics</h3>
-            <table style="margin-bottom:20px;">
-                <tr><th>Metric</th><th>Projected Value</th></tr>
-                <tr><td>911 Calls Covered by Drone Network</td><td><strong>{calls_covered_perc:.1f}%</strong></td></tr>
-                <tr><td>Average Drone Response Time</td><td><strong>{avg_resp_time:.1f} minutes</strong></td></tr>
-                <tr><td>Time Saved vs. Ground Patrol</td><td><strong>{avg_time_saved:.1f} minutes faster</strong></td></tr>
-                <tr><td>Annual Cost Savings to Taxpayers</td><td><strong>${annual_savings:,.0f}</strong></td></tr>
-                <tr><td>Program Break-Even</td><td><strong>{break_even_text}</strong></td></tr>
-                <tr><td>Cost per Drone Response</td><td><strong>${CONFIG['DRONE_COST_PER_CALL']} vs. ${CONFIG['OFFICER_COST_PER_CALL']} (patrol)</strong></td></tr>
-                <tr><td>Deployment Coverage Area</td><td><strong>{area_sq_mi_est:,} sq mi</strong> across {jurisdiction_list}</td></tr>
-                <tr><td>Population Protected</td><td><strong>{pop_metric:,} residents</strong></td></tr>
-            </table>
+/* ── MAP ─────────────────────────────────────────────────────── */
+.map-wrap{{border-radius:12px;overflow:hidden;border:1px solid var(--border);box-shadow:0 4px 20px rgba(0,0,0,0.06);margin-bottom:32px}}
 
-            <p>For every dollar invested in this program, the community receives an estimated <strong>${round(annual_savings / max(fleet_capex, 1) * 10, 1):.1f}x return</strong> in operational savings and crime cost avoidance over a 10-year horizon — before accounting for reduced insurance claims, higher foot traffic in safer commercial districts, and improved employee retention in a safer work environment.</p>
+/* ── DISCLAIMER ──────────────────────────────────────────────── */
+.disc{{background:#fffbeb;border-left:4px solid var(--amber);padding:16px 20px;border-radius:0 8px 8px 0;font-size:12px;color:#7a5a00;margin-bottom:24px}}
 
-            <p>To make a contribution or learn more about sponsorship opportunities, please contact:</p>
-            <div style="background:#f8f9fa; border:1px solid #eee; border-radius:8px; padding:20px; margin:20px 0;">
-                <strong>{pd_chief}</strong><br>
-                {pd_dept}<br>
-                {pd_email_html}{pd_phone_html}
-            </div>
-            <p>Together, we can build a safer, more prosperous {prop_city}. Thank you for your consideration and for your commitment to this community.</p>
-            <p>Respectfully,</p>
-            <p><strong>{pd_chief}</strong><br>{pd_dept}</p>
-            
-            <div style="margin-top: 50px; font-family:'Manrope', Arial, sans-serif !important;">
-                <div style="border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
-                    [ANALYTICS_HTML_EXPORT]
-                </div>
-            </div>
-        </div>
-        <div style="background:#fff8e6; border:1px solid #F0B429; border-radius:8px; padding:20px 25px; margin:40px 50px 0 50px; font-size:12px; color:#6b5000; line-height:1.7;">
-            <strong style="font-size:13px;">&#9888; DISCLAIMER &mdash; SIMULATION TOOL</strong><br>
-            This document was generated by the BRINC Drones Coverage Optimization Simulator. All coverage percentages,
-            response time projections, financial figures (including CapEx, annual savings, and break-even estimates),
-            population statistics, and operational metrics are <strong>model estimates calculated from user-provided
-            inputs and publicly available data</strong>. They are intended for planning and discussion purposes only.
-            Actual performance, costs, and outcomes will vary based on real-world conditions including terrain,
-            infrastructure, staffing, regulatory requirements, weather, and other factors.
-            <strong>This output does not constitute a legal recommendation, binding proposal, contract, or guarantee
-            of any product, service, or financial outcome.</strong> BRINC Drones, Inc. makes no representations or
-            warranties regarding the accuracy or completeness of these estimates. All deployments are subject to
-            individual agency requirements, FAA authorization, local ordinances, and formal procurement processes.
-        </div>
-        <div class="footer">
-            <div class="footer-logo">BRINC</div>
-            <div style="font-weight:bold; font-size:15px; margin-bottom:8px; color:#fff;">BRINC Drones, Inc.</div>
-            <div style="margin-bottom:15px;">Leading the world in purpose-built Drone as a First Responder technology.</div>
-            <div style="margin-bottom:10px; color:#aaa;">Prepared for {prepared_for_city} by {prepared_by_name} | <a href="mailto:{prop_email}">{prop_email}</a></div>
-            <div style="margin-bottom:15px;">
-                <a href="https://brincdrones.com" target="_blank">brincdrones.com</a> | <a href="mailto:sales@brincdrones.com">sales@brincdrones.com</a> | +1 (855) 950-0226
-            </div>
-            <div style="color:#555;">
-                <a href="https://www.linkedin.com/company/brincdrones" target="_blank">LinkedIn</a>  • 
-                <a href="https://twitter.com/brincdrones" target="_blank">Twitter / X</a>  • 
-                <a href="https://www.youtube.com/c/brincdrones" target="_blank">YouTube</a>
-            </div>
-        </div>
-        </div></body></html>"""
+/* ── FOOTER ──────────────────────────────────────────────────── */
+.doc-footer{{background:var(--ink);color:#555;padding:36px 60px;font-size:11px;display:flex;justify-content:space-between;align-items:center;gap:20px}}
+.doc-footer a{{color:#666;text-decoration:none}}
+.doc-footer .brand-mark{{font-size:16px;font-weight:900;letter-spacing:3px;color:#fff;flex-shrink:0}}
+
+/* ── PRINT ───────────────────────────────────────────────────── */
+@media print{{
+  .doc-sidebar{{display:none}}
+  .doc-main{{margin-left:0}}
+  .doc-section,.cover-page{{
+    page-break-after:always;
+    page-break-inside:avoid;
+    break-after:page;
+    border-bottom:none;
+    min-height:0;
+  }}
+  .doc-section:last-child,.cover-page:last-child{{page-break-after:auto;break-after:auto}}
+  body{{background:#fff}}
+}}
+</style>
+</head>
+<body>
+
+<!-- ── SIDEBAR INDEX ─────────────────────────────────────────── -->
+<nav class="doc-sidebar">
+  <div class="sidebar-logo">
+    {"<img src='data:image/png;base64," + logo_b64 + "' alt='BRINC'>" if logo_b64 else '<div class="brand">BRINC</div>'}
+  </div>
+  <div class="sidebar-city">
+    <div class="city-name">{prop_city}, {prop_state}</div>
+    <div class="city-sub">DFR Deployment Proposal</div>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="#cover"><span class="nav-num">00</span>Cover</a>
+    <a href="#executive"><span class="nav-num">01</span>Executive Summary</a>
+    <a href="#fleet"><span class="nav-num">02</span>Fleet &amp; Coverage</a>
+    <a href="#map"><span class="nav-num">03</span>Coverage Map</a>
+    <a href="#incident-data"><span class="nav-num">04</span>Incident Analysis</a>
+    <a href="#deployment"><span class="nav-num">05</span>Deployment Locations</a>
+    <a href="#grant"><span class="nav-num">06</span>Grant Narrative</a>
+    <a href="#infrastructure"><span class="nav-num">07</span>Infrastructure Directory</a>
+    <a href="#community"><span class="nav-num">08</span>Community Partnership</a>
+    <a href="#analytics"><span class="nav-num">09</span>Analytics Dashboard</a>
+  </nav>
+  <div class="sidebar-footer">
+    Prepared {datetime.datetime.now().strftime("%b %d, %Y")}<br>
+    {prop_name}<br>
+    <a href="mailto:{prop_email}">{prop_email}</a>
+  </div>
+</nav>
+
+<main class="doc-main">
+
+<!-- ── 00: COVER ─────────────────────────────────────────────── -->
+<section class="cover-page" id="cover">
+  <div class="cover-logo">
+    {"<img src='data:image/png;base64," + logo_b64 + "' alt='BRINC'>" if logo_b64 else '<div class="brand">BRINC</div>'}
+  </div>
+  <div class="cover-headline">
+    <div class="cover-tag">Drone as a First Responder · Deployment Proposal</div>
+    <h1>Protecting <span>{prop_city}</span>,<br>{prop_state}</h1>
+    <p>A data-driven deployment plan for {actual_k_responder + actual_k_guardian} BRINC aerial units covering {calls_covered_perc:.1f}% of incidents across {prop_city}.</p>
+  </div>
+  <div class="cover-meta">
+    <div class="cover-meta-cell"><div class="label">Fleet CapEx</div><div class="value accent">${fleet_capex:,.0f}</div></div>
+    <div class="cover-meta-cell"><div class="label">Annual Savings</div><div class="value gold">${annual_savings:,.0f}</div></div>
+    <div class="cover-meta-cell"><div class="label">Break-Even</div><div class="value">{break_even_text}</div></div>
+    <div class="cover-meta-cell"><div class="label">Call Coverage</div><div class="value accent">{calls_covered_perc:.1f}%</div></div>
+    <div class="cover-meta-cell"><div class="label">Avg Response</div><div class="value">{avg_resp_time:.1f} min</div></div>
+    <div class="cover-meta-cell"><div class="label">Time Saved</div><div class="value gold">{avg_time_saved:.1f} min</div></div>
+  </div>
+  <div class="cover-bottom">
+    <span>Prepared for <strong style="color:#fff">{prepared_for_city}</strong> by <strong style="color:#fff">{prepared_by_name}</strong></span>
+    <span>{datetime.datetime.now().strftime("%B %d, %Y")}</span>
+  </div>
+</section>
+
+<!-- ── 01: EXECUTIVE SUMMARY ──────────────────────────────────── -->
+<section class="doc-section" id="executive">
+  <div class="section-eyebrow"><span class="pg-num">01</span><span class="pg-title">Executive Summary</span></div>
+  <div class="metrics-hero">
+    <div class="metric-cell"><div class="m-label">Fleet Capital Expenditure</div><div class="m-value cyan">${fleet_capex:,.0f}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
+    <div class="metric-cell"><div class="m-label">Annual Savings Capacity</div><div class="m-value gold">${annual_savings:,.0f}</div><div class="m-sub">At {int(dfr_dispatch_rate*100)}% dispatch · {int(deflection_rate*100)}% resolution</div></div>
+    <div class="metric-cell"><div class="m-label">Program Break-Even</div><div class="m-value">{break_even_text}</div><div class="m-sub">Full cost recovery timeline</div></div>
+    <div class="metric-cell"><div class="m-label">911 Call Coverage</div><div class="m-value cyan">{calls_covered_perc:.1f}%</div><div class="m-sub">of {st.session_state.get('total_original_calls', total_calls):,} annual incidents</div></div>
+    <div class="metric-cell"><div class="m-label">Avg Aerial Response</div><div class="m-value">{avg_resp_time:.1f} min</div><div class="m-sub">vs. ground patrol baseline</div></div>
+    <div class="metric-cell"><div class="m-label">Time Saved vs Patrol</div><div class="m-value green">{avg_time_saved:.1f} min</div><div class="m-sub">per incident, on average</div></div>
+  </div>
+  <p style="font-size:15px;color:#444;line-height:1.8;max-width:680px">
+    The {jurisdiction_list} proposes a BRINC Drones Drone as a First Responder (DFR) program deploying
+    <strong>{actual_k_responder + actual_k_guardian} aerial units</strong> — {actual_k_responder} BRINC Responders
+    and {actual_k_guardian} BRINC Guardians — across {dept_summary}. The system is projected to cover
+    <strong>{calls_covered_perc:.1f}% of historical incidents</strong>, reach scenes
+    <strong>{avg_time_saved:.1f} minutes faster</strong> than ground patrol, and deliver
+    <strong>${annual_savings:,.0f} in annual operational savings</strong> with a break-even horizon of {break_even_text.lower()}.
+  </p>
+</section>
+
+<!-- ── 02: FLEET & COVERAGE ───────────────────────────────────── -->
+<section class="doc-section" id="fleet">
+  <div class="section-eyebrow"><span class="pg-num">02</span><span class="pg-title">Fleet &amp; Coverage</span></div>
+  <div class="fleet-split">
+    <div class="fleet-card guardian">
+      <div class="fc-icon">🦅</div>
+      <div class="fc-type">BRINC Guardian</div>
+      <div class="fc-val">{actual_k_guardian} Unit{"s" if actual_k_guardian != 1 else ""}</div>
+      <div class="fc-sub">{guard_radius_mi}-mile operational radius · {guard_strategy_raw}</div>
+      <div style="margin-top:16px">
+        <div class="fc-row"><span class="k">Unit CapEx</span><span class="v">${CONFIG['GUARDIAN_COST']:,}</span></div>
+        <div class="fc-row"><span class="k">Call Coverage</span><span class="v">{guard_calls_perc:.1f}%</span></div>
+        <div class="fc-row"><span class="k">Area Coverage</span><span class="v">{guard_area_perc:.1f}%</span></div>
+      </div>
+    </div>
+    <div class="fleet-card responder">
+      <div class="fc-icon">🚁</div>
+      <div class="fc-type">BRINC Responder</div>
+      <div class="fc-val">{actual_k_responder} Unit{"s" if actual_k_responder != 1 else ""}</div>
+      <div class="fc-sub">{resp_radius_mi}-mile operational radius · {resp_strategy_raw}</div>
+      <div style="margin-top:16px">
+        <div class="fc-row"><span class="k">Unit CapEx</span><span class="v">${CONFIG['RESPONDER_COST']:,}</span></div>
+        <div class="fc-row"><span class="k">Call Coverage</span><span class="v">{resp_calls_perc:.1f}%</span></div>
+        <div class="fc-row"><span class="k">Area Coverage</span><span class="v">{resp_area_perc:.1f}%</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── 03: COVERAGE MAP ───────────────────────────────────────── -->
+<section class="doc-section" id="map">
+  <div class="section-eyebrow"><span class="pg-num">03</span><span class="pg-title">Coverage Map</span></div>
+  <div class="map-wrap">{map_html_str}</div>
+</section>
+
+<!-- ── 04: INCIDENT ANALYSIS ─────────────────────────────────── -->
+<section class="doc-section" id="incident-data">
+  <div class="section-eyebrow"><span class="pg-num">04</span><span class="pg-title">Incident Data Analysis</span></div>
+  {cad_charts_html_export}
+</section>
+
+<!-- ── 05: DEPLOYMENT LOCATIONS ──────────────────────────────── -->
+<section class="doc-section" id="deployment">
+  <div class="section-eyebrow"><span class="pg-num">05</span><span class="pg-title">Deployment Locations</span></div>
+  <table>
+    <thead><tr><th>Station</th><th>Type</th><th>Avg Response</th><th>FAA Ceiling</th><th>CapEx</th></tr></thead>
+    <tbody>{station_rows}</tbody>
+  </table>
+</section>
+
+<!-- ── 06: GRANT NARRATIVE ───────────────────────────────────── -->
+<section class="doc-section" id="grant">
+  <div class="section-eyebrow"><span class="pg-num">06</span><span class="pg-title">Grant Narrative</span></div>
+  <div class="disc"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed and fact-checked before submission.</div>
+  <p><strong>Project Title:</strong> BRINC Drones DFR Program — {prepared_for_city}</p>
+  <p><strong>Executive Summary:</strong> The {jurisdiction_list} requests funding to deploy {actual_k_responder + actual_k_guardian} BRINC aerial units across {dept_summary} serving {pop_metric:,} residents. The program will cover {calls_covered_perc:.1f}% of historical incidents at an average response of {avg_resp_time:.1f} minutes — {avg_time_saved:.1f} minutes faster than ground patrol — with projected annual savings of ${annual_savings:,.0f} and break-even in {break_even_text.lower()}.</p>
+  <p><strong>Statement of Need:</strong> {jurisdiction_list} responds to an estimated {st.session_state.get('total_original_calls', total_calls):,} calls annually. Ground response times are constrained by traffic and unit availability. BRINC Drones provides the only fully integrated DFR platform purpose-designed for law enforcement, enabling aerial situational awareness before ground units arrive.</p>
+  <p><strong>Geographic Scope:</strong> The DFR network covers <strong>{jurisdiction_list}</strong> ({prop_state}), hosted at {dept_summary} — including <em>{police_names_str}</em> — across an estimated {area_sq_mi_est:,} square miles with {calls_covered_perc:.1f}% incident coverage and {area_covered_perc:.1f}% geographic coverage.</p>
+  <p><strong>Program Design:</strong> {actual_k_responder} BRINC Responders ({resp_radius_mi}-mi radius) and {actual_k_guardian} BRINC Guardians ({guard_radius_mi}-mi radius). All sites pre-screened against FAA LAANC maps. Average response: <strong>{avg_resp_time:.1f} min</strong> — <strong>{avg_time_saved:.1f} min faster</strong> than patrol.</p>
+  <p><strong>Fiscal Impact:</strong> CapEx <strong>${fleet_capex:,.0f}</strong>. At {int(dfr_dispatch_rate*100)}% dispatch / {int(deflection_rate*100)}% resolution: <strong>${annual_savings:,.0f}/yr savings</strong>, break-even <strong>{break_even_text.lower()}</strong>. Cost per drone response: ${CONFIG["DRONE_COST_PER_CALL"]} vs ${CONFIG["OFFICER_COST_PER_CALL"]} patrol — {int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}% reduction.</p>
+  <p style="background:#f8f9fa;padding:15px;border-radius:8px;border:1px solid #eee;font-size:13px">
+    <strong>Grant Sources:</strong>
+    <a href="https://bja.ojp.gov/program/jag/overview">DOJ Byrne JAG</a> —
+    <a href="https://www.fema.gov/grants/preparedness/homeland-security">FEMA HSGP</a> —
+    <a href="https://cops.usdoj.gov/grants">DOJ COPS</a> —
+    <a href="https://www.transportation.gov/grants">DOT RAISE</a>
+  </p>
+</section>
+
+<!-- ── 07: INFRASTRUCTURE DIRECTORY ──────────────────────────── -->
+<section class="doc-section" id="infrastructure">
+  <div class="section-eyebrow"><span class="pg-num">07</span><span class="pg-title">Infrastructure Directory</span></div>
+  <p style="color:var(--muted);font-size:13px;margin-bottom:20px">All public facilities evaluated as candidate deployment locations during optimization.</p>
+  <table style="font-size:12px">
+    <thead><tr><th>Facility</th><th>Type</th><th>Latitude</th><th>Longitude</th><th>Map</th></tr></thead>
+    <tbody>{all_bldgs_rows}</tbody>
+  </table>
+</section>
+
+<!-- ── 08: COMMUNITY PARTNERSHIP ─────────────────────────────── -->
+<section class="doc-section" id="community">
+  <div class="section-eyebrow"><span class="pg-num">08</span><span class="pg-title">Community Business Partnership</span></div>
+  <div style="background:#f0f8ff;border-left:4px solid var(--cyan);padding:18px 22px;border-radius:0 8px 8px 0;margin-bottom:24px;font-size:13px;color:#333">
+    <strong>To:</strong> Local Business Community of {prop_city}, {prop_state}<br>
+    <strong>Re:</strong> DFR Program — Community Investment Opportunity<br>
+    <strong>Date:</strong> {datetime.datetime.now().strftime("%B %d, %Y")}
+  </div>
+  <p>Dear {prop_city} Business Owner,</p>
+  <p>We invite local businesses to join a groundbreaking public safety initiative that directly protects your investment, employees, and customers. The proposed BRINC Drones DFR network deploys aerial units that arrive on scene in under two minutes — before any ground unit — capturing real-time video and enabling faster apprehension.</p>
+  <table style="margin-bottom:20px">
+    <thead><tr><th>Sponsorship Tier</th><th>Contribution</th><th>Recognition</th></tr></thead>
+    <tbody>
+      <tr><td><strong>🥇 Founding Sponsor</strong></td><td>$25,000+</td><td>Named drone unit, press release, annual briefing</td></tr>
+      <tr><td><strong>🥈 Community Champion</strong></td><td>$10,000–$24,999</td><td>Program materials logo, certificate</td></tr>
+      <tr><td><strong>🥉 Neighborhood Partner</strong></td><td>$2,500–$9,999</td><td>Program website listing</td></tr>
+      <tr><td><strong>🤝 Business Supporter</strong></td><td>$500–$2,499</td><td>Donor roll listing</td></tr>
+    </tbody>
+  </table>
+  <div style="background:#f8f9fa;border:1px solid #eee;border-radius:8px;padding:20px;margin:20px 0;font-size:13px">
+    <strong>{pd_chief}</strong><br>{pd_dept}<br>{pd_email_html}{pd_phone_html}
+  </div>
+  <p>Respectfully,</p>
+  <p><strong>{pd_chief}</strong><br>{pd_dept}</p>
+</section>
+
+<!-- ── 09: ANALYTICS DASHBOARD ───────────────────────────────── -->
+<section class="doc-section" id="analytics">
+  <div class="section-eyebrow"><span class="pg-num">09</span><span class="pg-title">Analytics Dashboard</span></div>
+  [ANALYTICS_HTML_EXPORT]
+</section>
+
+<!-- ── DISCLAIMER ─────────────────────────────────────────────── -->
+<div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:20px 60px;margin:0;font-size:11px;color:#7a5a00;line-height:1.7">
+  <strong>&#9888; SIMULATION TOOL DISCLAIMER</strong> — All figures are model estimates based on user inputs and publicly available data. Not a legal recommendation, binding proposal, contract, or guarantee. Deployments require FAA authorization and formal procurement.
+</div>
+
+<!-- ── FOOTER ─────────────────────────────────────────────────── -->
+<footer class="doc-footer">
+  <span class="brand-mark">BRINC</span>
+  <span>{"<img src='data:image/png;base64," + logo_b64 + "' style='height:20px;filter:brightness(0) invert(0.5)'>" if logo_b64 else ""} BRINC Drones, Inc. · <a href="https://brincdrones.com">brincdrones.com</a> · <a href="mailto:sales@brincdrones.com">sales@brincdrones.com</a> · +1 (855) 950-0226</span>
+  <span>Prepared by {prop_name} · <a href="mailto:{prop_email}">{prop_email}</a></span>
+</footer>
+
+</main>
+<script>
+// Highlight active nav link on scroll
+const sections=document.querySelectorAll('section[id],div[id="analytics"]');
+const links=document.querySelectorAll('.sidebar-nav a');
+const obs=new IntersectionObserver(entries=>{{
+  entries.forEach(e=>{{
+    if(e.isIntersecting){{
+      links.forEach(l=>l.classList.remove('active'));
+      const a=document.querySelector('.sidebar-nav a[href="#'+e.target.id+'"]');
+      if(a)a.classList.add('active');
+    }}
+  }})
+}},{{threshold:0.3}});
+sections.forEach(s=>obs.observe(s));
+</script>
+</body></html>"""
 
         export_html = export_html.replace("[ANALYTICS_HTML_EXPORT]", analytics_html_export)
 

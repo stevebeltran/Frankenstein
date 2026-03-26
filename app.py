@@ -675,7 +675,7 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
 def aggressive_parse_calls(uploaded_files):
     all_calls_list = []
     CV = {
-        'date': ['received date','incident date','call date','call creation date','calldatetime','call datetime','calltime','timestamp','date','datetime','dispatch date','time received','incdate','date_rept','date_occu'],
+        'date': ['received date','incident date','call date','call creation date','calldatetime','call datetime','calltime','timestamp','date','datetime','dispatch date','time received','incdate','date_rept','date_occu','createdtime','created_time','receivedtime','received_time','eventtime','event_time','incidenttime','incident_time','reportedtime','reported_time','entrytime','entry_time','time_central','time_stamp','created'],
         'time': ['call creation time','call time','dispatch time','received time','time', 'hour', 'hour_rept','hour_occu'],
         'priority': ['call priority', 'priority level', 'priority', 'pri', 'urgency'],
         'lat': ['latitude','lat','y coord','ycoord','ycoor','addressy','geoy','y_coord','map_y',
@@ -948,7 +948,23 @@ def aggressive_parse_calls(uploaded_files):
 
             d_found = [c for c in raw_df.columns if any(s in c for s in CV['date'])]
             t_found = [c for c in raw_df.columns if any(s in c for s in CV['time'])]
-            
+
+            # Fallback: if no date column found by name hint, scan all string columns
+            # for any that successfully parse as datetime (catches columns like
+            # 'createdtime_central', 'call_ts', 'event_dttm', etc.)
+            if not d_found:
+                for _col in raw_df.columns:
+                    if _col in (t_found or []):
+                        continue
+                    try:
+                        _test = pd.to_datetime(raw_df[_col].dropna().head(50), errors='coerce', infer_datetime_format=True)
+                        _valid = _test.dropna()
+                        if len(_valid) >= 10 and _valid.dt.year.between(2000, 2035).mean() > 0.8:
+                            d_found = [_col]
+                            break
+                    except Exception:
+                        continue
+
             if d_found:
                 if t_found and d_found[0] != t_found[0]:
                     dt_series = pd.to_datetime(raw_df[d_found[0]] + ' ' + raw_df[t_found[0]], errors='coerce')
@@ -3938,9 +3954,50 @@ if st.session_state['csvs_ready']:
 
         st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
-    with st.expander('Coverage Curve', expanded=False):
-        st.markdown(f"<div style='font-size:0.8rem; color:{text_muted}; margin-bottom:8px;'>Use this to see how added drones improve coverage and where returns start to flatten.</div>", unsafe_allow_html=True)
+    # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────
+    st.markdown("---")
+    st.markdown(f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:10px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>",
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        """<style>
+        .unit-card { transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; }
+        .unit-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,210,255,0.12); }
+        </style>""",
+        unsafe_allow_html=True
+    )
+    if active_drones:
+        st.markdown(
+            _build_unit_cards_html(
+                active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color,
+                columns_per_row=4 if len(active_drones) >= 4 else (2 if len(active_drones) > 1 else 1)
+            ),
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown(
+            f"""
+            <div style="background:{card_bg}; border:1px dashed {card_border}; border-radius:6px; padding:22px; text-align:center; margin-top:8px;">
+                <div style="font-size:2rem; margin-bottom:8px;">🚁</div>
+                <div style="font-weight:700; color:{text_main}; margin-bottom:6px;">No drones deployed yet</div>
+                <div style="font-size:0.8rem; color:{text_muted};">
+                    Use the <b>Responder / Guardian Count</b> sliders in the sidebar to deploy drones and see per-unit economics here.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
+    # ── COVERAGE CURVE + STATION RING CHART (side by side, directly below cards) ──
+    st.markdown("---")
+    st.markdown(f"<h4 style='border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Coverage Curve</h4>", unsafe_allow_html=True)
+    st.markdown(f"<div style='font-size:0.8rem; color:{text_muted}; margin-bottom:8px;'>How added drones improve coverage — and where returns flatten.</div>", unsafe_allow_html=True)
+
+    _curve_col, _ring_col = st.columns([3, 2], gap="medium")
+
+    with _curve_col:
         if not df_curve.empty:
             fig_curve = go.Figure()
             for col, color, dash in [('Responder (Calls)',accent_color,'solid'),('Guardian (Calls)','#FFD700','solid'),
@@ -3964,49 +4021,69 @@ if st.session_state['csvs_ready']:
                            tickvals=[0,20,40,60,80,90,100], range=[0,105]),
                 legend=dict(orientation="h",yanchor="bottom",y=1.02,xanchor="right",x=1,
                             font=dict(size=9,color=text_muted)),
-                margin=dict(l=10,r=10,t=20,b=10), height=260,
+                margin=dict(l=10,r=10,t=20,b=10), height=320,
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                 hoverlabel=dict(bgcolor=card_bg, font_size=13, font_color=text_main, bordercolor=accent_color)
             )
             st.plotly_chart(fig_curve, use_container_width=True, config={'displayModeBar':False})
+        else:
+            st.info("Run optimization to generate coverage curve.")
 
-        if show_cards:
-            st.markdown("---")
-            st.markdown(f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>", unsafe_allow_html=True)
+    with _ring_col:
+        # Dynamic ring: each slice = one active drone, sized by calls it handles
+        if active_drones and total_calls > 0:
+            _ring_labels, _ring_values, _ring_colors, _ring_text = [], [], [], []
+            _uncovered = total_calls
+            for d in active_drones:
+                _marginal = int(d.get('marginal_perc', 0) * total_calls)
+                if _marginal > 0:
+                    _short = d['name'].split(',')[0][:22]
+                    _ring_labels.append(_short)
+                    _ring_values.append(_marginal)
+                    _ring_colors.append(d['color'])
+                    _ring_text.append(f"{_marginal:,} calls<br>{d['type'][:4]}")
+                    _uncovered -= _marginal
+            if _uncovered > 0:
+                _ring_labels.append("Uncovered")
+                _ring_values.append(max(0, _uncovered))
+                _ring_colors.append("#222222")
+                _ring_text.append(f"{max(0,_uncovered):,} calls<br>not reached")
+
+            fig_ring = go.Figure(go.Pie(
+                labels=_ring_labels,
+                values=_ring_values,
+                hole=0.58,
+                marker=dict(colors=_ring_colors, line=dict(color='#000', width=1.5)),
+                textinfo='none',
+                hovertemplate='<b>%{label}</b><br>%{value:,} calls (%{percent})<extra></extra>',
+                sort=False,
+            ))
+            # Centre annotation: total covered calls
+            _covered_cnt = sum(int(d.get('marginal_perc',0)*total_calls) for d in active_drones)
+            _cov_pct = round(_covered_cnt / total_calls * 100, 1) if total_calls else 0
+            fig_ring.update_layout(
+                annotations=[dict(
+                    text=f"<b>{_cov_pct}%</b><br><span style='font-size:10px'>covered</span>",
+                    x=0.5, y=0.5, font_size=16, showarrow=False,
+                    font=dict(color=text_main)
+                )],
+                showlegend=True,
+                legend=dict(
+                    orientation='v', x=1.02, y=0.5,
+                    font=dict(size=9, color=text_muted),
+                    bgcolor='rgba(0,0,0,0)',
+                ),
+                margin=dict(l=0, r=0, t=10, b=10),
+                height=320,
+                paper_bgcolor='rgba(0,0,0,0)',
+                hoverlabel=dict(bgcolor=card_bg, font_size=12, font_color=text_main),
+            )
+            st.plotly_chart(fig_ring, use_container_width=True, config={'displayModeBar':False})
+        else:
             st.markdown(
-                f"<div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:10px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>",
+                f"<div style='color:{text_muted}; font-size:0.8rem; padding:40px 0; text-align:center;'>Deploy drones to see call distribution ring.</div>",
                 unsafe_allow_html=True
             )
-            st.markdown(
-                """
-                <style>
-                .unit-card { transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; }
-                .unit-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,210,255,0.12); }
-                </style>
-                """,
-                unsafe_allow_html=True
-            )
-            if active_drones:
-                st.markdown(
-                    _build_unit_cards_html(
-                        active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color,
-                        columns_per_row=4 if len(active_drones) >= 4 else (2 if len(active_drones) > 1 else 1)
-                    ),
-                    unsafe_allow_html=True
-                )
-            else:
-                st.markdown(
-                    f"""
-                    <div style="background:{card_bg}; border:1px dashed {card_border}; border-radius:6px; padding:22px; text-align:center; margin-top:8px;">
-                        <div style="font-size:2rem; margin-bottom:8px;">🚁</div>
-                        <div style="font-weight:700; color:{text_main}; margin-bottom:6px;">No drones deployed yet</div>
-                        <div style="font-size:0.8rem; color:{text_muted};">
-                            Use the <b>Responder / Guardian Count</b> sliders in the <b>Optimize Fleet</b> sidebar section to generate unit economics cards directly beneath the map.
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
 
 
     # Resolve real incident datetime coverage for labels on the stations page
@@ -4582,4 +4659,3 @@ if st.session_state['csvs_ready']:
                 _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                                "KML", k_responder, k_guardian, calls_covered_perc,
                                prop_name, prop_email, details=export_details)
-                

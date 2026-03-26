@@ -628,7 +628,43 @@ def aggressive_parse_calls(uploaded_files):
                     engine = 'xlrd'
                 elif fname.endswith('.xlsb'):
                     engine = 'pyxlsb'
-                raw_df = pd.read_excel(io.BytesIO(raw_bytes), engine=engine, dtype=str)
+                # Streaming Excel read — handles files with thousands of empty ghost columns
+                # (e.g. exports with 16k "ColumnN" placeholder columns) without OOM
+                try:
+                    import openpyxl as _oxl
+                    _wb = _oxl.load_workbook(io.BytesIO(raw_bytes), read_only=True, data_only=True)
+                    # Pick the sheet that actually has two rows of data
+                    _sheet_name = _wb.sheetnames[0]
+                    for _sn in _wb.sheetnames:
+                        _ws_peek = _wb[_sn]
+                        _peek = []
+                        for _pr in _ws_peek.iter_rows(max_row=2, values_only=True):
+                            _peek.append(_pr)
+                        if len(_peek) >= 2 and any(v is not None for v in (_peek[1] or [])):
+                            _sheet_name = _sn
+                            break
+                    # Stream rows, keeping only real (non-ghost) columns
+                    _ws = _wb[_sheet_name]
+                    _row_iter = _ws.iter_rows(values_only=True)
+                    _headers_raw = next(_row_iter)
+                    _real_idx = [i for i, h in enumerate(_headers_raw)
+                                 if h is not None and not (str(h).startswith('Column') and str(h)[6:].isdigit())]
+                    if not _real_idx:
+                        _real_idx = list(range(min(50, len(_headers_raw))))
+                    _real_headers = [str(_headers_raw[i]).lower().strip() for i in _real_idx]
+                    _rows_data = []
+                    for _row in _row_iter:
+                        _rows_data.append([_row[i] if i < len(_row) else None for i in _real_idx])
+                    _wb.close()
+                    raw_df = pd.DataFrame(_rows_data, columns=_real_headers).astype(str)
+                    raw_df.replace('None', pd.NA, inplace=True)
+                except Exception as _xe:
+                    # Fallback to standard read (may be slow on huge files)
+                    raw_df = pd.read_excel(io.BytesIO(raw_bytes), engine=engine, dtype=str)
+                    raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
+
+
+
                 raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
             else:
                 # ── CSV / TXT path ────────────────────────────────────────────

@@ -2900,6 +2900,7 @@ if st.session_state['csvs_ready']:
         st.sidebar.info("👈 Set Responder/Guardian counts above to calculate budget impact.")
 
     # ── BUILD DRONE OBJECTS ───────────────────────────────────────────
+    # ── BUILD DRONE OBJECTS ───────────────────────────────────────────
     active_drones = []
     cumulative_mask = np.zeros(total_calls, dtype=bool) if total_calls > 0 else None
     step = 1
@@ -2912,6 +2913,7 @@ if st.session_state['csvs_ready']:
             cov_array = guard_matrix[idx]; cost = CONFIG["GUARDIAN_COST"]
             speed_mph = CONFIG["GUARDIAN_SPEED"]; avg_dist = station_metadata[idx]['avg_dist_g']
             radius_m  = guard_radius_mi * 1609.34
+        
         map_color    = active_color_map[f"{idx}_{d_type}"]
         avg_time_min = (avg_dist / speed_mph) * 60
         d_lat = station_metadata[idx]['lat']; d_lon = station_metadata[idx]['lon']
@@ -2933,20 +2935,23 @@ if st.session_state['csvs_ready']:
             marginal_historic = np.sum(marginal_mask)
             d['assigned_indices'] = np.where(marginal_mask)[0]
             cumulative_mask  = cumulative_mask | cov_array
+            
             d['marginal_perc'] = marginal_historic / total_calls
             marginal_daily   = calls_per_day * d['marginal_perc']
             d['marginal_flights']   = marginal_daily * dfr_dispatch_rate
             d['marginal_deflected'] = d['marginal_flights'] * deflection_rate
+            
             all_cov = np.vstack([resp_matrix[i] for i in active_resp_idx] + [guard_matrix[i] for i in active_guard_idx]) if (active_resp_idx or active_guard_idx) else np.zeros((1, total_calls), dtype=bool)
             shared_mask = d['cov_array'] & (all_cov.sum(axis=0) > 1)
+            
             d['shared_flights']  = (np.sum(shared_mask) / total_calls) * calls_per_day * dfr_dispatch_rate
-            d['monthly_savings'] = (CONFIG["OFFICER_COST_PER_CALL"] - CONFIG
             d['monthly_savings'] = (CONFIG["OFFICER_COST_PER_CALL"] - CONFIG["DRONE_COST_PER_CALL"]) * d['marginal_deflected'] * 30.4
             d['annual_savings']  = d['monthly_savings'] * 12
             d['be_text'] = f"{d['cost']/d['monthly_savings']:.1f} MO" if d['monthly_savings'] > 0 else "N/A"
         else:
             d.update({'assigned_indices':[],'annual_savings':0,'marginal_flights':0,
                       'marginal_deflected':0,'shared_flights':0,'be_text':"N/A"})
+            
         active_drones.append(d)
         step += 1
 

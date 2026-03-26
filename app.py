@@ -3971,53 +3971,42 @@ if st.session_state['csvs_ready']:
             st.plotly_chart(fig_curve, use_container_width=True, config={'displayModeBar':False})
 
         if show_cards:
-    st.markdown("---")
-    st.markdown(
-        f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>",
-        unsafe_allow_html=True
-    )
-    st.markdown(
-        f"<div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:10px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        """
-        <style>
-        .unit-card { transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; }
-        .unit-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,210,255,0.12); }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-
-    if active_drones:
-        st.markdown(
-            _build_unit_cards_html(
-                active_drones,
-                text_main,
-                text_muted,
-                card_bg,
-                card_border,
-                card_title,
-                accent_color,
-                columns_per_row=4 if len(active_drones) >= 4 else (2 if len(active_drones) > 1 else 1)
-            ),
-            unsafe_allow_html=True
-        )
-    else:
-        st.markdown(
-            f"""
-            <div style="background:{card_bg}; border:1px dashed {card_border}; border-radius:6px; padding:22px; text-align:center; margin-top:8px;">
-                <div style="font-size:2rem; margin-bottom:8px;">🚁</div>
-                <div style="font-weight:700; color:{text_main}; margin-bottom:6px;">No drones deployed yet</div>
-                <div style="font-size:0.8rem; color:{text_muted};">
-                    Use the <b>Responder / Guardian Count</b> sliders to generate unit economics cards.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+            st.markdown("---")
+            st.markdown(f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:10px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>",
+                unsafe_allow_html=True
+            )
+            st.markdown(
+                """
+                <style>
+                .unit-card { transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; }
+                .unit-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,210,255,0.12); }
+                </style>
+                """,
+                unsafe_allow_html=True
+            )
+            if active_drones:
+                st.markdown(
+                    _build_unit_cards_html(
+                        active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color,
+                        columns_per_row=4 if len(active_drones) >= 4 else (2 if len(active_drones) > 1 else 1)
+                    ),
+                    unsafe_allow_html=True
+                )
+            else:
+                st.markdown(
+                    f"""
+                    <div style="background:{card_bg}; border:1px dashed {card_border}; border-radius:6px; padding:22px; text-align:center; margin-top:8px;">
+                        <div style="font-size:2rem; margin-bottom:8px;">🚁</div>
+                        <div style="font-weight:700; color:{text_main}; margin-bottom:6px;">No drones deployed yet</div>
+                        <div style="font-size:0.8rem; color:{text_muted};">
+                            Use the <b>Responder / Guardian Count</b> sliders in the <b>Optimize Fleet</b> sidebar section to generate unit economics cards directly beneath the map.
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
 
 
     # Resolve real incident datetime coverage for labels on the stations page
@@ -4593,3 +4582,4 @@ if st.session_state['csvs_ready']:
                 _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                                "KML", k_responder, k_guardian, calls_covered_perc,
                                prop_name, prop_email, details=export_details)
+                

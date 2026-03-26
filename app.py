@@ -3751,12 +3751,16 @@ if st.session_state['csvs_ready']:
 
     # Calculate Date Range of CAD data (if available)
     date_range_str = "Simulated / Unknown"
-    if 'date' in df_calls_full.columns:
+    _date_src_df = df_calls_full if df_calls_full is not None else df_calls
+    _label_dt = _detect_datetime_series_for_labels(_date_src_df)
+    if _label_dt is not None:
         try:
-            min_date = pd.to_datetime(df_calls_full['date']).min().strftime('%b %Y')
-            max_date = pd.to_datetime(df_calls_full['date']).max().strftime('%b %Y')
-            date_range_str = f"{min_date} – {max_date}" if min_date != max_date else min_date
-        except:
+            _label_dt = pd.to_datetime(_label_dt, errors='coerce').dropna()
+            if not _label_dt.empty:
+                min_date = _label_dt.min().strftime('%b %Y')
+                max_date = _label_dt.max().strftime('%b %Y')
+                date_range_str = f"{min_date} – {max_date}" if min_date != max_date else min_date
+        except Exception:
             pass
 
     avg_resp_time = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
@@ -4355,6 +4359,8 @@ if st.session_state['csvs_ready']:
         analytics_html_export = generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls), export_mode=True)
         cad_charts_html_export = _build_cad_charts_html(df_calls_full if df_calls_full is not None else df_calls)
 
+        prepared_for_city = st.session_state.get('active_city', prop_city) or prop_city
+        prepared_by_name = prop_name
         export_html = f"""<html><head><title>BRINC DFR Proposal — {prop_city}</title>
         <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
         <style>
@@ -4385,12 +4391,13 @@ if st.session_state['csvs_ready']:
         <div class="header">
             <div>{logo_html_str}</div>
             <div style="text-align:right;">
-                <h1>DFR Deployment Proposal</h1>
+                <h1>DFR Executive Summary</h1>
                 <div class="header-sub">{prop_city}, {prop_state} | Pop: {pop_metric:,}</div>
-                <div class="header-sub" style="color:#00D2FF;">Prepared by: {prop_name}</div>
+                <div class="header-sub" style="color:#00D2FF;">Prepared for {prepared_for_city} by {prepared_by_name} · BRINC Drones</div>
             </div>
         </div>
         <div class="content">
+            <div class="hero-note"><strong>Prepared for {prepared_for_city}</strong> by <strong>{prepared_by_name}</strong> · BRINC Drones. This executive summary includes the enhanced CAD ingestion analytics and export narrative styling used in the custom HTML document.</div>
             <div class="kpi-grid">
                 <div class="kpi-card">
                     <h3>Financial Impact</h3>
@@ -4416,6 +4423,8 @@ if st.session_state['csvs_ready']:
             <h2>Coverage Map</h2>
             <div class="map-container">{map_html_str}</div>
 
+            <h2>Incident Data Analysis</h2>
+            <div style="margin-bottom:18px; color:#546574; font-size:14px;">Enhanced CAD ingestion analytics and deployment-calendar visuals from the custom HTML document are embedded below for {prepared_for_city}.</div>
             {cad_charts_html_export}
 
             <h2>Deployment Locations</h2>
@@ -4426,7 +4435,7 @@ if st.session_state['csvs_ready']:
 
             <h2>Grant Narrative (AI Draft)</h2>
             <div class="disclaimer"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission. All financial projections, coverage statistics, and operational estimates are produced by a simulation tool based on user-provided inputs &mdash; they are not a guarantee of performance, legal recommendation, or binding commitment of any kind.</div>
-            <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — {jurisdiction_list}</p>
+            <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — {prepared_for_city}</p>
             <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully submits this application requesting funding to establish a BRINC Drones-powered Drone as a First Responder (DFR) program. This initiative will deploy a fleet of {total_fleet} purpose-built BRINC Drones aerial systems — comprising {actual_k_responder} BRINC Responder and {actual_k_guardian} BRINC Guardian units — across {dept_summary} serving a combined population of {pop_metric:,} residents across approximately {area_sq_mi_est:,} square miles in {prop_city}, {prop_state}.</p>
             <p><strong>Statement of Need:</strong> The {jurisdiction_list} currently serves a population of {pop_metric:,} residents and responds to an estimated {st.session_state.get('total_original_calls', total_calls):,} calls for service annually. Ground-based patrol response times are constrained by traffic, geography, and unit availability. This proposal addresses a critical public safety gap: the need for immediate aerial situational awareness that arrives before ground units, enabling smarter, safer, and faster emergency response. BRINC Drones, the world leader in purpose-built DFR technology, provides the only fully integrated hardware, software, and operational support platform purpose-designed for law enforcement DFR deployment.</p>
             <p><strong>Geographic Scope & Participating Agencies:</strong> The proposed DFR network covers the jurisdictions of <strong>{jurisdiction_list}</strong> ({prop_state}). Drone stations will be hosted at {dept_summary}, including facilities operated by: <em>{police_names_str}</em>. The deployment area encompasses an estimated {area_sq_mi_est:,} square miles of mixed urban and suburban terrain, with BRINC Drones units positioned to achieve {calls_covered_perc:.1f}% coverage of historical incident locations and {area_covered_perc:.1f}% geographic area coverage.</p>
@@ -4529,7 +4538,7 @@ if st.session_state['csvs_ready']:
             <div class="footer-logo">BRINC</div>
             <div style="font-weight:bold; font-size:15px; margin-bottom:8px; color:#fff;">BRINC Drones, Inc.</div>
             <div style="margin-bottom:15px;">Leading the world in purpose-built Drone as a First Responder technology.</div>
-            <div style="margin-bottom:10px; color:#aaa;">Prepared by: {prop_name} | <a href="mailto:{prop_email}">{prop_email}</a></div>
+            <div style="margin-bottom:10px; color:#aaa;">Prepared for {prepared_for_city} by {prepared_by_name} | <a href="mailto:{prop_email}">{prop_email}</a></div>
             <div style="margin-bottom:15px;">
                 <a href="https://brincdrones.com" target="_blank">brincdrones.com</a> | <a href="mailto:sales@brincdrones.com">sales@brincdrones.com</a> | +1 (855) 950-0226
             </div>

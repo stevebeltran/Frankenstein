@@ -734,6 +734,18 @@ def aggressive_parse_calls(uploaded_files):
             else:
                 res['priority'] = 3
             
+            # ── Event type description — carried through for CAD analytics charts ──
+            _desc_hints = ['desc','type','nature','offense','calltype','call_type','event_type',
+                           'eventtype','calldesc','incident_type','agencyeventtype']
+            _desc_found = [c for c in raw_df.columns
+                           if any(h in c for h in _desc_hints)
+                           and c not in (p_found[:1] if p_found else [])]
+            if _desc_found:
+                # Pick the column with the most unique text values (most descriptive)
+                _best_desc = max(_desc_found, key=lambda c: raw_df[c].dropna().nunique())
+                if raw_df[_best_desc].dropna().nunique() > 2:
+                    res['call_type_desc'] = raw_df[_best_desc].astype(str).str.strip()
+
             d_found = [c for c in raw_df.columns if any(s in c for s in CV['date'])]
             t_found = [c for c in raw_df.columns if any(s in c for s in CV['time'])]
             
@@ -846,42 +858,58 @@ def aggressive_parse_calls(uploaded_files):
     combined = pd.concat(valid, ignore_index=True)
     # Safe dropna — columns guaranteed to exist now
     combined = combined.dropna(subset=['lat', 'lon'])
-    # ── K-MEANS SPATIAL PRE-CLUSTERING ────────────────────────────────────────
-    # For large datasets (>15k calls) collapse to weighted cluster centroids so
-    # the optimizer runs on ~500 representative points instead of raw rows.
-    # This gives a ~30-100x speedup with <2% accuracy loss on coverage scoring.
+    # ── SPATIAL DOWNSAMPLING FOR LARGE DATASETS ──────────────────────────────
+    # For datasets >15k rows, use k-means to collapse calls into ~500 weighted
+    # centroids. Each centroid is replicated proportionally to its cluster size
+    # (capped at 200 reps) so dense hotspots stay dominant in coverage scoring.
+    # Falls back to stratified random sample if sklearn is unavailable.
     _CLUSTER_THRESHOLD = 15_000
-    _MAX_CLUSTERS      = 500
+    _TARGET_POINTS     = 500
     if len(combined) > _CLUSTER_THRESHOLD:
         try:
             from sklearn.cluster import MiniBatchKMeans
             coords = combined[['lat','lon']].values
-            n_clusters = min(_MAX_CLUSTERS, len(combined) // 30)
-            km = MiniBatchKMeans(n_clusters=n_clusters, random_state=42, batch_size=2048, n_init=3)
+            n_clusters = min(_TARGET_POINTS, max(50, len(combined) // 30))
+            km = MiniBatchKMeans(
+                n_clusters=n_clusters, random_state=42,
+                batch_size=4096, n_init=3, max_iter=100
+            )
             labels = km.fit_predict(coords)
             rows = []
+            total_calls = len(combined)
             for cl in range(n_clusters):
                 mask_cl = labels == cl
                 sub = combined[mask_cl]
-                if sub.empty: continue
+                if sub.empty:
+                    continue
+                cluster_size = int(mask_cl.sum())
+                # Scale reps: hotspot with 5% of calls → 25 reps, tiny cluster → 1 rep
+                # This keeps relative density correct without blowing up the dataframe
+                reps = max(1, min(200, round(cluster_size / total_calls * n_clusters * 10)))
                 row = {
-                    'lat': sub['lat'].mean(),
-                    'lon': sub['lon'].mean(),
-                    'priority': sub['priority'].mode()[0] if 'priority' in sub.columns else 3,
-                    '_cluster_weight': int(mask_cl.sum()),
+                    'lat': float(sub['lat'].mean()),
+                    'lon': float(sub['lon'].mean()),
+                    'priority': int(sub['priority'].mode()[0]) if 'priority' in sub.columns else 3,
+                    '_cluster_weight': cluster_size,
+                    '_cluster_reps': reps,
                 }
-                for col in ['date','time','_csv_city']:
+                for col in ['date', 'time', '_csv_city', 'call_type_desc']:
                     if col in sub.columns:
                         row[col] = sub[col].iloc[0]
                 rows.append(row)
-            clustered = pd.DataFrame(rows)
-            # Expand back by repeating each centroid row by its weight so that
-            # coverage scoring naturally weights dense clusters more heavily.
-            combined = clustered.loc[clustered.index.repeat(
-                clustered['_cluster_weight'].clip(upper=30)
-            )].reset_index(drop=True)
-        except Exception as _ke:
-            pass  # fall through silently — use raw data
+            if rows:
+                clustered = pd.DataFrame(rows)
+                combined = clustered.loc[
+                    clustered.index.repeat(clustered['_cluster_reps'])
+                ].drop(columns=['_cluster_reps'], errors='ignore').reset_index(drop=True)
+        except ImportError:
+            # sklearn not installed — stratified random sample instead
+            combined = combined.sample(
+                n=min(_CLUSTER_THRESHOLD, len(combined)),
+                random_state=42
+            ).reset_index(drop=True)
+        except Exception:
+            pass  # use raw data
     return combined
 
 def _build_cad_charts_html(df_calls):
@@ -899,8 +927,8 @@ def _build_cad_charts_html(df_calls):
 
         # Top event types
         type_labels, type_vals = [], []
-        for _c in ['agencyeventtypecodedesc','eventdesc','calldesc','description','nature','call_type_desc']:
-            if _c in df_calls.columns:
+        for _c in ['call_type_desc','agencyeventtypecodedesc','eventdesc','calldesc','description','nature','event_desc']:
+            if _c in df_calls.columns and df_calls[_c].dropna().nunique() > 2:
                 tc = df_calls[_c].dropna().str.strip().value_counts().head(10)
                 type_labels = tc.index.tolist()
                 type_vals   = tc.values.tolist()
@@ -1075,8 +1103,8 @@ def _build_cad_charts(df_calls, text_main, text_muted, card_bg, card_border, acc
 
     # ── Chart 2: Top event types (horizontal bar) ─────────────────────────────
     desc_col = None
-    for _c in ['agencyeventtypecodedesc','eventdesc','calldesc','description','nature','call_type_desc','event_desc']:
-        if _c in df_calls.columns:
+    for _c in ['call_type_desc','agencyeventtypecodedesc','eventdesc','calldesc','description','nature','event_desc']:
+        if _c in df_calls.columns and df_calls[_c].dropna().nunique() > 2:
             desc_col = _c
             break
 

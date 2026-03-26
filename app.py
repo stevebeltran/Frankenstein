@@ -3722,34 +3722,48 @@ if st.session_state['csvs_ready']:
             "The Census geocoder resolves it to lat/lon. Custom stations persist for this session.</div>",
             unsafe_allow_html=True
         )
-        _custom_addr  = st.text_input("Address", placeholder="123 Main St, Mobile, AL",
+        # Use value= (not key=) so we can clear via session_state buffer without
+        # triggering the "cannot modify after instantiation" error.
+        if 'cs_addr_buf'  not in st.session_state: st.session_state['cs_addr_buf']  = ""
+        if 'cs_label_buf' not in st.session_state: st.session_state['cs_label_buf'] = ""
+        if 'cs_type_buf'  not in st.session_state: st.session_state['cs_type_buf']  = "Police"
+
+        _custom_addr  = st.text_input("Address", value=st.session_state['cs_addr_buf'],
+                                       placeholder="123 Main St, Mobile, AL",
                                        key="custom_station_addr")
-        _custom_label = st.text_input("Label (optional)", placeholder="Fire Station 7",
+        _custom_label = st.text_input("Label (optional)", value=st.session_state['cs_label_buf'],
+                                       placeholder="Fire Station 7",
                                        key="custom_station_label")
-        _custom_type  = st.selectbox("Type", ["Police", "Fire", "School", "Government",
-                                               "Hospital", "Library", "Other"],
+        _type_opts    = ["Police", "Fire", "School", "Government", "Hospital", "Library", "Other"]
+        _type_idx     = _type_opts.index(st.session_state['cs_type_buf']) if st.session_state['cs_type_buf'] in _type_opts else 0
+        _custom_type  = st.selectbox("Type", _type_opts, index=_type_idx,
                                       key="custom_station_type")
 
+        # Sync buffer keys from live widget values each run
+        st.session_state['cs_addr_buf']  = _custom_addr
+        st.session_state['cs_label_buf'] = _custom_label
+        st.session_state['cs_type_buf']  = _custom_type
+
         if st.button("📍 Geocode & Add Station", use_container_width=True, key="geocode_btn"):
-            if _custom_addr.strip():
+            _addr_to_geocode = _custom_addr.strip()
+            if _addr_to_geocode:
                 try:
                     import urllib.request, urllib.parse, json as _json
                     _params = urllib.parse.urlencode({
-                        "address": _custom_addr.strip(),
+                        "address": _addr_to_geocode,
                         "benchmark": "2020",
                         "format": "json"
                     })
                     _url = f"https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?{_params}"
-                    with urllib.request.urlopen(_url, timeout=6) as _resp:
+                    with urllib.request.urlopen(_url, timeout=8) as _resp:
                         _data = _json.loads(_resp.read().decode())
                     _matches = _data.get("result", {}).get("addressMatches", [])
                     if _matches:
                         _coords = _matches[0]["coordinates"]
                         _geo_lat = float(_coords["y"])
                         _geo_lon = float(_coords["x"])
-                        _matched_addr = _matches[0].get("matchedAddress", _custom_addr)
+                        _matched_addr = _matches[0].get("matchedAddress", _addr_to_geocode)
                         _label = _custom_label.strip() or _matched_addr
-                        # Append to session station list
                         _new_row = pd.DataFrame([{
                             "name": _label,
                             "lat": _geo_lat,
@@ -3757,23 +3771,19 @@ if st.session_state['csvs_ready']:
                             "type": _custom_type
                         }])
                         _existing = st.session_state.get('df_stations', pd.DataFrame())
-                        if not _existing.empty:
-                            st.session_state['df_stations'] = pd.concat(
-                                [_existing, _new_row], ignore_index=True
-                            )
-                        else:
-                            st.session_state['df_stations'] = _new_row
+                        st.session_state['df_stations'] = pd.concat(
+                            [_existing, _new_row], ignore_index=True
+                        ) if not _existing.empty else _new_row
                         st.success(f"✅ Added: {_label} ({_geo_lat:.4f}, {_geo_lon:.4f})")
                         st.caption(f"Matched: {_matched_addr}")
-                        # Clear inputs
-                        st.session_state['custom_station_addr']  = ""
-                        st.session_state['custom_station_label'] = ""
-                        # Force cache invalidation so the new station appears
+                        # Clear buffers (not widget keys) — safe to modify before rerun
+                        st.session_state['cs_addr_buf']  = ""
+                        st.session_state['cs_label_buf'] = ""
                         if '_opt_cache_key' in st.session_state:
                             del st.session_state['_opt_cache_key']
                         st.rerun()
                     else:
-                        st.warning("⚠️ Address not found. Try adding city and state.")
+                        st.warning("⚠️ Address not found. Try adding city and state (e.g. '123 Main St, Mobile AL').")
                 except Exception as _ge:
                     st.error(f"Geocoding failed: {_ge}")
             else:

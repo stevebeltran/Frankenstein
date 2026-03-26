@@ -13,3 +13,4 @@ pyarrow
 openpyxl
 xlrd
 pyxlsb
+scikit-learn

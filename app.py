@@ -228,7 +228,22 @@ def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, emai
     except: pass
 
 # --- GLOBAL CONFIGURATION ---
-CONFIG = {"RESPONDER_COST": 80000, "GUARDIAN_COST": 160000, "RESPONDER_RANGE_MI": 2.0, "OFFICER_COST_PER_CALL": 82, "DRONE_COST_PER_CALL": 6, "DEFAULT_TRAFFIC_SPEED": 35.0, "RESPONDER_SPEED": 42.0, "GUARDIAN_SPEED": 60.0}
+CONFIG = {
+    "RESPONDER_COST": 80000, "GUARDIAN_COST": 160000, "RESPONDER_RANGE_MI": 2.0,
+    "OFFICER_COST_PER_CALL": 82, "DRONE_COST_PER_CALL": 6,
+    "DEFAULT_TRAFFIC_SPEED": 35.0, "RESPONDER_SPEED": 42.0, "GUARDIAN_SPEED": 60.0,
+    # Guardian duty cycle: 60 min flight + 3 min charge = 63 min cycle
+    # Daily airtime = (24*60) / 63 * 60 = 1371.4 min = 22.86 hrs
+    "GUARDIAN_FLIGHT_MIN":  60,   # flight minutes per cycle
+    "GUARDIAN_CHARGE_MIN":   3,   # charge minutes per cycle
+    # Responder duty cycle: patrol unit, ~11.6 hr shift equivalent
+    "RESPONDER_PATROL_HOURS": 11.6,
+}
+# Derived: compute Guardian daily airtime from duty cycle
+CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] = (
+    (24 * 60) / (CONFIG["GUARDIAN_FLIGHT_MIN"] + CONFIG["GUARDIAN_CHARGE_MIN"])
+) * CONFIG["GUARDIAN_FLIGHT_MIN"]
+CONFIG["GUARDIAN_PATROL_HOURS"] = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] / 60
 STATE_FIPS = {"AL": "01", "AK": "02", "AZ": "04", "AR": "05", "CA": "06", "CO": "08", "CT": "09", "DE": "10", "FL": "12", "GA": "13", "HI": "15", "ID": "16", "IL": "17", "IN": "18", "IA": "19", "KS": "20", "KY": "21", "LA": "22", "ME": "23", "MD": "24", "MA": "25", "MI": "26", "MN": "27", "MS": "28", "MO": "29", "MT": "30", "NE": "31", "NV": "32", "NH": "33", "NJ": "34", "NM": "35", "NY": "36", "NC": "37", "ND": "38", "OH": "39", "OK": "40", "OR": "41", "PA": "42", "RI": "44", "SC": "45", "SD": "46", "TN": "47", "TX": "48", "UT": "49", "VT": "50", "VA": "51", "WA": "53", "WV": "54", "WI": "55", "WY": "56"}
 US_STATES_ABBR = {"Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA", "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL", "Indiana": "IN", "Iowa": "IA", "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA", "Maine": "ME", "Maryland": "MD", "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN", "Mississippi": "MS", "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV", "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK", "Oregon": "OR", "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD", "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT", "Virginia": "VA", "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY"}
 KNOWN_POPULATIONS = {"Victoria": 65534, "New York": 8336817, "Los Angeles": 3822238, "Chicago": 2665039, "Houston": 1304379, "Phoenix": 1644409, "Philadelphia": 1567258, "San Antonio": 2302878, "San Diego": 1472530, "Dallas": 1299544, "San Jose": 1381162, "Austin": 974447, "Jacksonville": 971319, "Fort Worth": 956709, "Columbus": 907971, "Indianapolis": 880621, "Charlotte": 897720, "San Francisco": 971233, "Seattle": 749256, "Denver": 713252, "Washington": 678972, "Nashville": 683622, "Oklahoma City": 694800, "El Paso": 694553, "Boston": 650706, "Portland": 635067, "Las Vegas": 656274, "Detroit": 620376, "Memphis": 633104, "Louisville": 628594, "Baltimore": 620961, "Milwaukee": 620251, "Albuquerque": 677122, "Tucson": 564559, "Fresno": 677102, "Sacramento": 808418, "Kansas City": 697738, "Mesa": 504258, "Atlanta": 499127, "Omaha": 508901, "Colorado Springs": 483956, "Raleigh": 476587, "Miami": 449514, "Virginia Beach": 455369, "Oakland": 530763, "Minneapolis": 563332, "Tulsa": 547239, "Arlington": 398654, "New Orleans": 562503, "Wichita": 402263, "Cleveland": 900000, "Tampa": 449514, "Orlando": 316081}
@@ -2004,8 +2019,13 @@ def format_3_lines(name_str):
 def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2):
     if not active_drones:
         return ""
-    MAX_PATROL_HOURS = 11.6
-    MAX_PATROL_MINS  = MAX_PATROL_HOURS * 60
+    # Per-type daily airtime budgets derived from CONFIG duty cycles:
+    #   Guardian: 60 min flight + 3 min charge → (24*60/63)*60 = 1371.4 min = 22.86 hr
+    #   Responder: patrol-unit model, 11.6 hr shift equivalent
+    _GUARDIAN_DAILY_MINS  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]   # ~1371.4
+    _GUARDIAN_DAILY_HOURS = CONFIG["GUARDIAN_PATROL_HOURS"]        # ~22.86
+    _RESPONDER_DAILY_MINS  = CONFIG["RESPONDER_PATROL_HOURS"] * 60 # 11.6 * 60 = 696
+    _RESPONDER_DAILY_HOURS = CONFIG["RESPONDER_PATROL_HOURS"]      # 11.6
     columns_per_row = max(1, int(columns_per_row))
 
     cards_html = []
@@ -2028,16 +2048,36 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_address   = get_address_from_latlon(d_lat, d_lon)
         gmaps_url   = f"https://www.google.com/maps/search/?api=1&query={d_lat},{d_lon}"
 
+        # Pick duty-cycle values for this drone type
+        is_guardian = (d_type == "GUARDIAN")
+        max_patrol_mins  = _GUARDIAN_DAILY_MINS  if is_guardian else _RESPONDER_DAILY_MINS
+        max_patrol_hours = _GUARDIAN_DAILY_HOURS if is_guardian else _RESPONDER_DAILY_HOURS
+
+        # Uptime tooltip: show the duty-cycle breakdown for Guardians
+        if is_guardian:
+            _g_fl  = CONFIG["GUARDIAN_FLIGHT_MIN"]
+            _g_ch  = CONFIG["GUARDIAN_CHARGE_MIN"]
+            _g_cyc = _g_fl + _g_ch
+            _cycles_per_day = (24 * 60) / _g_cyc
+            uptime_tooltip = (
+                f"{_g_fl}min flight + {_g_ch}min charge = {_g_cyc}min cycle · "
+                f"{_cycles_per_day:.1f} cycles/day · "
+                f"{max_patrol_hours:.2f}hr airtime"
+            )
+        else:
+            uptime_tooltip = f"{max_patrol_hours}hr patrol shift"
+
         total_daily_flights = d_flights + d_shared
         patrol_time_line = ""
         if total_daily_flights > 0 and d_savings > 0:
-            mins_per_flight = MAX_PATROL_MINS / total_daily_flights
+            mins_per_flight = max_patrol_mins / total_daily_flights
             if total_daily_flights >= 5 or mins_per_flight < 60:
                 patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= 30 else "#00D2FF"
                 patrol_time_line = (
                     f'<div style="border-top:1px dashed rgba(255,255,255,0.15); margin-top:5px; '
-                    f'padding-top:5px; font-size:0.58rem; color:{text_muted};">'
-                    f'{total_daily_flights:.1f} flights ÷ {MAX_PATROL_HOURS}hr max = '
+                    f'padding-top:5px; font-size:0.58rem; color:{text_muted};" '
+                    f'title="{uptime_tooltip}">'
+                    f'{total_daily_flights:.1f} flights ÷ {max_patrol_hours:.2f}hr max = '
                     f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight</span></div>'
                 )
 

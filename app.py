@@ -2081,6 +2081,18 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
                     f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight</span></div>'
                 )
 
+        # Pull concurrency values (safe defaults if not computed)
+        d_util       = d.get('utilization', 0)
+        d_blocked    = d.get('blocked_per_day', 0)
+        d_best       = d.get('best_case_annual', d_savings)
+        d_best_be    = d.get('best_be_text', d_be)
+        d_conc_mo    = d.get('concurrent_monthly', 0)
+        util_pct     = f"{d_util*100:.1f}%"
+        util_color   = "#dc3545" if d_util > 0.75 else "#F0B429" if d_util > 0.4 else "#2ecc71"
+        best_delta   = d_best - d_savings
+        best_delta_str = f"+${best_delta:,.0f}" if best_delta > 0 else "—"
+        show_best    = d_shared > 0.1 and best_delta > 0
+
         cards_html.append(f'''
 <div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color}; border-left:1px solid {card_border}; border-right:1px solid {card_border}; border-bottom:1px solid {card_border}; border-radius:4px; padding:12px; cursor:default; display:flex; flex-direction:column; box-sizing:border-box; min-height:100%;">
   <div style="font-weight:700; font-size:0.73rem; color:{card_title}; margin-bottom:2px; line-height:1.25em;">{short_name}</div>
@@ -2088,16 +2100,33 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   <div style="font-size:0.62rem; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
     <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
   </div>
-  <div style="background:rgba(0,210,255,0.07); border-radius:4px; padding:8px; text-align:center; margin-bottom:8px;">
+
+  <!-- Base value box -->
+  <div style="background:rgba(0,210,255,0.07); border-radius:4px 4px 0 0; padding:8px; text-align:center; {"margin-bottom:0;" if show_best else "margin-bottom:8px;"}">
     <div style="font-size:0.6rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
     <div style="font-size:1.25rem; font-weight:900; color:{accent_color};">${d_savings:,.0f}</div>
     {patrol_time_line}
   </div>
+
+  <!-- Best-case box (only shown when shared coverage exists) -->
+  {"" if not show_best else f'''
+  <div style="background:rgba(57,255,20,0.07); border:1px solid rgba(57,255,20,0.25); border-top:none; border-radius:0 0 4px 4px; padding:6px 8px; text-align:center; margin-bottom:8px;"
+       title="Best case assumes a second drone is always available to handle calls blocked by this drone's flight time. Concurrent value = shared-zone calls × utilization ({util_pct}) × resolution rate × cost delta.">
+    <div style="font-size:0.55rem; color:#39FF14; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:1px;">⚡ Best Case (concurrent coverage)</div>
+    <div style="display:flex; align-items:baseline; justify-content:center; gap:6px;">
+      <span style="font-size:1.1rem; font-weight:900; color:#39FF14;">${d_best:,.0f}</span>
+      <span style="font-size:0.62rem; color:#39FF14; opacity:0.8;">{best_delta_str}/yr</span>
+    </div>
+    <div style="font-size:0.55rem; color:#39FF14; opacity:0.65; margin-top:1px;">{d_blocked:.1f} blocked calls/day captured · ROI {d_best_be}</div>
+  </div>'''}
+
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem; flex:1;">
     <div style="color:{text_muted};">Net Flights/day</div>
     <div style="text-align:right; font-weight:700; color:{accent_color};">{d_flights:.1f}</div>
     <div style="color:{text_muted};">Shared Flights/day</div>
     <div style="text-align:right; font-weight:700; color:{card_title};">{d_shared:.1f}</div>
+    <div style="color:{text_muted};">Utilization</div>
+    <div style="text-align:right; font-weight:700; color:{util_color};">{util_pct}</div>
     <div style="color:{text_muted};">Resolved/day</div>
     <div style="text-align:right; font-weight:700; color:{card_title};">{d_deflected:.1f}</div>
     <div style="color:{text_muted};">Avg Response</div>
@@ -2110,7 +2139,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   <div style="border-top:1px dashed {card_border}; margin-top:8px; padding-top:6px; display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem;">
     <div style="color:{text_muted};">CapEx</div>
     <div style="text-align:right; font-weight:700; color:{card_title};">${d_cost:,.0f}</div>
-    <div style="color:{text_muted};">ROI</div>
+    <div style="color:{text_muted};">Base ROI</div>
     <div style="text-align:right; font-weight:800; color:{accent_color};">{d_be}</div>
   </div>
 </div>''')
@@ -3980,9 +4009,38 @@ if st.session_state['csvs_ready']:
             d['monthly_savings'] = (CONFIG["OFFICER_COST_PER_CALL"] - CONFIG["DRONE_COST_PER_CALL"]) * d['marginal_deflected'] * 30.4
             d['annual_savings']  = d['monthly_savings'] * 12
             d['be_text'] = f"{d['cost']/d['monthly_savings']:.1f} MO" if d['monthly_savings'] > 0 else "N/A"
+
+            # ── CONCURRENCY / BEST-CASE VALUE ────────────────────────────────
+            # How often is this drone already airborne when the next call arrives
+            # in its zone?  That probability = utilization rate.
+            # A second drone covering the shared zone can capture those blocked calls.
+            #
+            # Utilization = (total_daily_flights × avg_flight_min) / daily_budget_min
+            # Blocked calls/day = shared_zone_calls × utilization  (Erlang-B approx)
+            # Concurrent value  = blocked_calls × deflection_rate × cost_delta × 365
+            _is_guard     = (d_type == 'GUARDIAN')
+            _budget_min   = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] if _is_guard else (CONFIG["RESPONDER_PATROL_HOURS"] * 60)
+            _total_flights = d['marginal_flights'] + d['shared_flights']
+            _util = min(0.99, (_total_flights * avg_time_min) / max(1.0, _budget_min))
+            d['utilization'] = _util
+
+            # Calls in the shared zone this drone competes for
+            _shared_zone_calls = d['shared_flights'] / max(dfr_dispatch_rate, 0.01)
+            # Probability a call in the shared zone arrives while this drone is busy
+            _blocked_per_day = _shared_zone_calls * _util
+            _cost_delta = CONFIG["OFFICER_COST_PER_CALL"] - CONFIG["DRONE_COST_PER_CALL"]
+            _concurrent_monthly = _cost_delta * (_blocked_per_day * deflection_rate) * 30.4
+            d['concurrent_monthly'] = _concurrent_monthly
+            d['best_case_annual']   = d['annual_savings'] + (_concurrent_monthly * 12)
+            d['blocked_per_day']    = _blocked_per_day
+            # Best-case break-even uses the full concurrent value
+            _total_monthly = d['monthly_savings'] + _concurrent_monthly
+            d['best_be_text'] = f"{d['cost']/_total_monthly:.1f} MO" if _total_monthly > 0 else "N/A"
         else:
             d.update({'assigned_indices':[],'annual_savings':0,'marginal_flights':0,
-                      'marginal_deflected':0,'shared_flights':0,'be_text':"N/A"})
+                      'marginal_deflected':0,'shared_flights':0,'be_text':"N/A",
+                      'utilization':0,'concurrent_monthly':0,'best_case_annual':0,
+                      'blocked_per_day':0,'best_be_text':"N/A"})
         active_drones.append(d)
         step += 1
 

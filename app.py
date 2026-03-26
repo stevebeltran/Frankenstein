@@ -23,10 +23,10 @@ st.set_page_config(page_title="BRINC COS Drone Optimizer", layout="wide", initia
 
 # This MUST run before any st.session_state checks to prevent KeyError
 defaults = {
-    'csvs_ready': False, 'df_calls': None, 'df_stations': None,
+    'csvs_ready': False, 'df_calls': None, 'df_calls_full': None, 'df_stations': None,
     'active_city': "Victoria", 'active_state': "TX", 'estimated_pop': 65000,
     'k_resp': 2, 'k_guard': 0, 'r_resp': 2.0, 'r_guard': 8.0,
-    'dfr_rate': 25, 'deflect_rate': 30, 'total_original_calls': 0,
+    'dfr_rate': 25, 'deflect_rate': 30, 'total_original_calls': 0, 'total_modeled_calls': 0,
     'onboarding_done': False, 'trigger_sim': False, 'city_count': 1,
     'brinc_user': 'steven.beltran',
     'pd_chief_name': '', 'pd_dept_name': '', 'pd_dept_email': '', 'pd_dept_phone': '',
@@ -41,6 +41,12 @@ for k, v in defaults.items():
 
 if 'target_cities' not in st.session_state:
     st.session_state['target_cities'] = [{"city": st.session_state.get('active_city', 'Victoria'), "state": st.session_state.get('active_state', 'TX')}]
+
+
+SIMULATOR_DISCLAIMER_SHORT = (
+    "Simulation output only. Coverage, station placement, response time, and ROI figures are model estimates based on uploaded data and configuration settings. "
+    "They are not guarantees of real-world performance, legal compliance, FAA approval, procurement outcome, or financial results."
+)
 
 def _build_details_html(details):
     """Shared HTML block for deployment details used in email notifications."""
@@ -603,6 +609,56 @@ def aggressive_parse_calls(uploaded_files):
                 'x_wgs','lon_wgs','incident_lon','inc_lon','event_lon','x_coordinate','address_x','xlocation']
     }
 
+    def _infer_city_from_location_text(raw_df):
+        text_cols = [c for c in raw_df.columns if c in ['location', 'address', 'incident_location', 'addr', 'street']]
+        if not text_cols:
+            return None
+
+        s = raw_df[text_cols[0]].dropna().astype(str).str.upper().str.strip()
+        if s.empty:
+            return None
+
+        s = s.str.replace(r':.*$', '', regex=True)
+        s = s.str.replace(r'CNTY', 'COUNTY', regex=True)
+        s = s.str.replace(r'[^A-Z0-9 /-]', ' ', regex=True)
+        s = s.str.replace(r'\s+', ' ', regex=True).str.strip()
+
+        candidates = []
+        for val in s:
+            padded = f' {val} '
+            if ' MOBILE ' in padded:
+                candidates.append('Mobile')
+                continue
+
+            m = re.search(r'([A-Z]{3,}(?:\s+[A-Z]{3,}){0,2})$', val)
+            if m:
+                city = m.group(1).title()
+                if city not in {'County', 'City'}:
+                    candidates.append(city)
+
+        if not candidates:
+            return None
+
+        vc = pd.Series(candidates).value_counts()
+        return vc.index[0] if not vc.empty else None
+
+    def _infer_state_from_text(raw_df, inferred_city=None):
+        for col in ['state', 'state_name']:
+            if col in raw_df.columns:
+                top = raw_df[col].dropna().astype(str).str.strip().value_counts()
+                if not top.empty:
+                    state_val = top.index[0]
+                    state_up = str(state_val).upper()
+                    if state_up in STATE_FIPS:
+                        return state_up
+                    state_title = str(state_val).title()
+                    if state_title in US_STATES_ABBR:
+                        return US_STATES_ABBR[state_title]
+
+        if inferred_city == 'Mobile':
+            return 'AL'
+        return None
+
     def parse_priority(raw):
         s = str(raw).strip().upper()
         if not s or s == 'NAN': return None
@@ -839,13 +895,25 @@ def aggressive_parse_calls(uploaded_files):
                                 (res["lon"] > -170) & (res["lon"] < -60)
                             ]
 
-            # City column detection: store top city name on rows for location detection
-            for col in ["city", "city_name", "municipality"]:
+            # City/state detection: store top values on rows for location detection
+            top_city_name = None
+            for col in ["city", "city_name", "municipality", "jurisdiction"]:
                 if col in raw_df.columns:
-                    top_city = raw_df[col].dropna().str.strip().value_counts()
+                    top_city = raw_df[col].dropna().astype(str).str.strip().value_counts()
                     if not top_city.empty:
-                        res["_csv_city"] = top_city.index[0]
+                        top_city_name = str(top_city.index[0]).title()
+                        res["_csv_city"] = top_city_name
                         break
+
+            if "_csv_city" not in res.columns:
+                inferred_city = _infer_city_from_location_text(raw_df)
+                if inferred_city:
+                    top_city_name = inferred_city
+                    res["_csv_city"] = inferred_city
+
+            inferred_state = _infer_state_from_text(raw_df, top_city_name)
+            if inferred_state:
+                res["_csv_state"] = inferred_state
 
             all_calls_list.append(res)
         except: continue
@@ -858,58 +926,14 @@ def aggressive_parse_calls(uploaded_files):
     combined = pd.concat(valid, ignore_index=True)
     # Safe dropna — columns guaranteed to exist now
     combined = combined.dropna(subset=['lat', 'lon'])
-    # ── SPATIAL DOWNSAMPLING FOR LARGE DATASETS ──────────────────────────────
-    # For datasets >15k rows, use k-means to collapse calls into ~500 weighted
-    # centroids. Each centroid is replicated proportionally to its cluster size
-    # (capped at 200 reps) so dense hotspots stay dominant in coverage scoring.
-    # Falls back to stratified random sample if sklearn is unavailable.
-    _CLUSTER_THRESHOLD = 15_000
-    _TARGET_POINTS     = 500
-    if len(combined) > _CLUSTER_THRESHOLD:
-        try:
-            from sklearn.cluster import MiniBatchKMeans
-            coords = combined[['lat','lon']].values
-            n_clusters = min(_TARGET_POINTS, max(50, len(combined) // 30))
-            km = MiniBatchKMeans(
-                n_clusters=n_clusters, random_state=42,
-                batch_size=4096, n_init=3, max_iter=100
-            )
-            labels = km.fit_predict(coords)
-            rows = []
-            total_calls = len(combined)
-            for cl in range(n_clusters):
-                mask_cl = labels == cl
-                sub = combined[mask_cl]
-                if sub.empty:
-                    continue
-                cluster_size = int(mask_cl.sum())
-                # Scale reps: hotspot with 5% of calls → 25 reps, tiny cluster → 1 rep
-                # This keeps relative density correct without blowing up the dataframe
-                reps = max(1, min(200, round(cluster_size / total_calls * n_clusters * 10)))
-                row = {
-                    'lat': float(sub['lat'].mean()),
-                    'lon': float(sub['lon'].mean()),
-                    'priority': int(sub['priority'].mode()[0]) if 'priority' in sub.columns else 3,
-                    '_cluster_weight': cluster_size,
-                    '_cluster_reps': reps,
-                }
-                for col in ['date', 'time', '_csv_city', 'call_type_desc']:
-                    if col in sub.columns:
-                        row[col] = sub[col].iloc[0]
-                rows.append(row)
-            if rows:
-                clustered = pd.DataFrame(rows)
-                combined = clustered.loc[
-                    clustered.index.repeat(clustered['_cluster_reps'])
-                ].drop(columns=['_cluster_reps'], errors='ignore').reset_index(drop=True)
-        except ImportError:
-            # sklearn not installed — stratified random sample instead
-            combined = combined.sample(
-                n=min(_CLUSTER_THRESHOLD, len(combined)),
-                random_state=42
-            ).reset_index(drop=True)
-        except Exception:
-            pass  # use raw data
+    # IMPORTANT: keep the full parsed CAD dataset here.
+    #
+    # The optimizer is sampled later (after upload) for performance, but the
+    # parsed dataframe itself must preserve every incident so:
+    #   1) Total Incidents shows the true uploaded count
+    #   2) the stations map can render a much denser full-history call cloud
+    #   3) export/reporting math stays tied to the source file, not a k-means
+    #      surrogate created during parsing
     return combined
 
 def _build_cad_charts_html(df_calls):
@@ -1788,8 +1812,74 @@ def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir):
         return master_gdf[mask]
     return master_gdf
 
+@st.cache_data(show_spinner=False)
+def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, seed=42):
+    if df_calls_full is None or len(df_calls_full) == 0:
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+    df = df_calls_full.copy()
+    if 'lat' not in df.columns or 'lon' not in df.columns:
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+    df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
+    df['lon'] = pd.to_numeric(df['lon'], errors='coerce')
+    df = df.dropna(subset=['lat', 'lon']).reset_index(drop=True)
+    if df.empty:
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+    gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon, df.lat), crs="EPSG:4326")
+    try:
+        gdf_m = gdf.to_crs(epsg=int(epsg_code))
+        calls_in_city = gdf_m[gdf_m.within(_city_m)] if _city_m is not None else gdf_m
+    except Exception:
+        calls_in_city = gdf
+
+    if calls_in_city.empty:
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+    if len(calls_in_city) <= max_points:
+        return calls_in_city.to_crs(epsg=4326)
+
+    sampled = calls_in_city.copy()
+    minx, miny, maxx, maxy = sampled.total_bounds
+    span_x = max(maxx - minx, 1.0)
+    span_y = max(maxy - miny, 1.0)
+    target_cells = max(25, int(np.sqrt(max_points) * 0.7))
+    nx = max(25, min(120, target_cells))
+    ny = max(25, min(120, int(target_cells * (span_y / span_x))))
+
+    sampled['_gx'] = np.floor((sampled.geometry.x - minx) / span_x * nx).clip(0, nx - 1).astype(int)
+    sampled['_gy'] = np.floor((sampled.geometry.y - miny) / span_y * ny).clip(0, ny - 1).astype(int)
+    sampled['_cell'] = sampled['_gx'].astype(str) + '_' + sampled['_gy'].astype(str)
+
+    counts = sampled['_cell'].value_counts()
+    alloc = np.maximum(1, np.floor(counts / counts.sum() * max_points).astype(int))
+    shortfall = int(max_points - alloc.sum())
+    if shortfall > 0:
+        remainders = (counts / counts.sum() * max_points) - np.floor(counts / counts.sum() * max_points)
+        for cell in remainders.sort_values(ascending=False).index[:shortfall]:
+            alloc.loc[cell] += 1
+
+    parts = []
+    for cell, group in sampled.groupby('_cell', sort=False):
+        take = int(min(len(group), alloc.get(cell, 1)))
+        if take >= len(group):
+            parts.append(group)
+        elif take > 0:
+            parts.append(group.sample(take, random_state=seed))
+
+    if not parts:
+        display_calls = sampled.sample(max_points, random_state=seed)
+    else:
+        display_calls = pd.concat(parts, ignore_index=False)
+        if len(display_calls) > max_points:
+            display_calls = display_calls.sample(max_points, random_state=seed)
+
+    display_calls = display_calls.drop(columns=['_gx', '_gy', '_cell'], errors='ignore')
+    return display_calls.to_crs(epsg=4326)
+
 @st.cache_resource
-def precompute_spatial_data(df_calls, df_stations_all, _city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash):
+def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash):
     gdf_calls = gpd.GeoDataFrame(df_calls, geometry=gpd.points_from_xy(df_calls.lon, df_calls.lat), crs="EPSG:4326")
     gdf_calls_utm = gdf_calls.to_crs(epsg=int(epsg_code))
     try: calls_in_city = gdf_calls_utm[gdf_calls_utm.within(_city_m)]
@@ -1803,7 +1893,7 @@ def precompute_spatial_data(df_calls, df_stations_all, _city_m, epsg_code, resp_
     guard_matrix = np.zeros((n, total_calls), dtype=bool)
     dist_matrix_r = np.zeros((n, total_calls))
     dist_matrix_g = np.zeros((n, total_calls))
-    display_calls = calls_in_city.sample(min(5000, total_calls), random_state=42).to_crs(epsg=4326) if not calls_in_city.empty else gpd.GeoDataFrame()
+    display_calls = build_display_calls(df_calls_full if df_calls_full is not None else df_calls, _city_m, epsg_code, max_points=300000)
     max_dist = max(((row['lon']-center_lon)**2 + (row['lat']-center_lat)**2)**0.5 for _, row in df_stations_all.iterrows()) or 1.0
     if not calls_in_city.empty:
         calls_array = np.array(list(zip(calls_in_city.geometry.x, calls_in_city.geometry.y)))
@@ -2268,7 +2358,9 @@ if not st.session_state['csvs_ready']:
                             if 'lat' in df_c.columns: df_c['lat'] = pd.to_numeric(df_c['lat'], errors='coerce')
                             if 'lon' in df_c.columns: df_c['lon'] = pd.to_numeric(df_c['lon'], errors='coerce')
                             st.session_state['df_calls'] = df_c
+                            st.session_state['df_calls_full'] = df_c.copy()
                             st.session_state['total_original_calls'] = len(df_c)
+                            st.session_state['total_modeled_calls'] = len(df_c)
                         
                         if save_data.get('stations_data'):
                             df_s = pd.DataFrame(save_data['stations_data'])
@@ -2287,6 +2379,10 @@ if not st.session_state['csvs_ready']:
 
             else:
                 # --- 2. OTHERWISE, PROCESS AS NORMAL CSV CAD DATA ---
+                st.session_state['active_city'] = ""
+                st.session_state['active_state'] = ""
+                st.session_state['target_cities'] = []
+
                 f_list = list(uploaded_files)
                 call_files = []
                 station_file = None
@@ -2316,13 +2412,16 @@ if not st.session_state['csvs_ready']:
                         st.error("❌ Calls file error: Could not parse valid coordinates.")
                         st.stop()
 
-                    st.session_state['total_original_calls'] = len(df_c)
-                    
-                    if len(df_c) > 25000:
-                        df_c = df_c.sample(25000, random_state=42).reset_index(drop=True)
-                        st.toast("⚠️ Sampled to 25,000 calls for performance.")
+                    df_c_full = df_c.reset_index(drop=True).copy()
+                    st.session_state['total_original_calls'] = len(df_c_full)
+
+                    if len(df_c_full) > 25000:
+                        df_c = df_c_full.sample(25000, random_state=42).reset_index(drop=True)
+                        st.session_state['total_modeled_calls'] = len(df_c)
+                        st.toast(f"⚠️ Optimization modeled with {len(df_c):,} representative calls out of {len(df_c_full):,} total incidents.")
                     else:
-                        df_c = df_c.reset_index(drop=True)
+                        df_c = df_c_full.copy()
+                        st.session_state['total_modeled_calls'] = len(df_c)
 
                     if station_file is not None:
                         with st.spinner("🔍 Reading stations file…"):
@@ -2385,62 +2484,81 @@ if not st.session_state['csvs_ready']:
                     if len(df_s) > 100:
                         df_s = df_s.sample(100, random_state=42).reset_index(drop=True)
 
-                    lat_min, lat_max = df_s['lat'].min(), df_s['lat'].max()
-                    lon_min, lon_max = df_s['lon'].min(), df_s['lon'].max()
-                    df_c = df_c[
-                        (df_c['lat'] >= lat_min - 0.5) & (df_c['lat'] <= lat_max + 0.5) &
-                        (df_c['lon'] >= lon_min - 0.5) & (df_c['lon'] <= lon_max + 0.5)
-                    ].reset_index(drop=True)
-
-                    st.session_state['df_calls']             = df_c
-                    st.session_state['df_stations']          = df_s
+                    detected_city = None
+                    detected_state = None
 
                     with st.spinner(get_jurisdiction_message()):
-                        
-                        # --- REMOVE DEFAULT VICTORIA TO AVOID STICKING ON FAILURE ---
-                        st.session_state['active_city'] = "Uploaded Region"
-                        st.session_state['active_state'] = "US"
-                        st.session_state['target_cities'] = [{"city": "Uploaded Region", "state": "US"}]
-
-                        # Priority 1: use city name embedded in the CSV itself
-                        csv_city_detected = False
+                        # Priority 1: city/state extracted directly from the CAD export
                         if '_csv_city' in df_c.columns:
-                            csv_city_val = str(df_c['_csv_city'].iloc[0]).strip().title()
-                            if csv_city_val and csv_city_val.lower() not in ('nan', 'none', ''):
-                                # Forward-geocode to get the state abbreviation
-                                try:
-                                    geo_url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(csv_city_val)}&limit=1&countrycodes=us"
-                                    req_geo = urllib.request.Request(geo_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
-                                    with urllib.request.urlopen(req_geo, timeout=8) as resp_geo:
-                                        geo_result = json.loads(resp_geo.read().decode('utf-8'))
-                                    if geo_result:
-                                        display_name = geo_result[0].get('display_name', '')
-                                        # display_name format: "City, County, State, US"
-                                        parts = [p.strip() for p in display_name.split(',')]
-                                        state_full = parts[2] if len(parts) >= 3 else ''
-                                        if state_full in US_STATES_ABBR:
-                                            st.session_state['active_city']  = csv_city_val
-                                            st.session_state['active_state'] = US_STATES_ABBR[state_full]
-                                            st.session_state['target_cities'] = [{"city": csv_city_val, "state": US_STATES_ABBR[state_full]}]
-                                            st.toast(f"📍 Detected from data: {csv_city_val}, {US_STATES_ABBR[state_full]}")
-                                            csv_city_detected = True
-                                except Exception:
-                                    pass
+                            city_val = str(df_c['_csv_city'].iloc[0]).strip().title()
+                            if city_val and city_val.lower() not in ('nan', 'none', ''):
+                                detected_city = city_val
 
-                        # Priority 2: reverse-geocode a call coordinate
-                        if not csv_city_detected:
+                        if '_csv_state' in df_c.columns:
+                            state_val = str(df_c['_csv_state'].iloc[0]).strip().upper()
+                            if state_val in STATE_FIPS:
+                                detected_state = state_val
+                            elif state_val.title() in US_STATES_ABBR:
+                                detected_state = US_STATES_ABBR[state_val.title()]
+
+                        # If the export gives us a city but not a state, forward-geocode the city name.
+                        if detected_city and not detected_state:
                             try:
-                                detected_state_full, detected_city = reverse_geocode_state(
-                                    df_c['lat'].iloc[0], df_c['lon'].iloc[0]
-                                )
-                                if detected_state_full and detected_state_full in US_STATES_ABBR:
-                                    st.session_state['active_state'] = US_STATES_ABBR[detected_state_full]
-                                    if detected_city and detected_city != 'Unknown City':
-                                        st.session_state['active_city'] = detected_city
-                                        st.session_state['target_cities'] = [{"city": detected_city, "state": US_STATES_ABBR[detected_state_full]}]
-                                    st.toast(f"📍 Detected: {st.session_state['active_city']}, {st.session_state['active_state']}")
+                                geo_url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(detected_city)}&limit=1&countrycodes=us"
+                                req_geo = urllib.request.Request(geo_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+                                with urllib.request.urlopen(req_geo, timeout=8) as resp_geo:
+                                    geo_result = json.loads(resp_geo.read().decode('utf-8'))
+                                if geo_result:
+                                    display_name = geo_result[0].get('display_name', '')
+                                    parts = [p.strip() for p in display_name.split(',')]
+                                    state_full = parts[2] if len(parts) >= 3 else ''
+                                    if state_full in US_STATES_ABBR:
+                                        detected_state = US_STATES_ABBR[state_full]
                             except Exception:
                                 pass
+
+                        # Priority 2: reverse-geocode the centroid of the calls, not the first row.
+                        if not detected_city or not detected_state:
+                            try:
+                                cen_lat = float(df_c['lat'].median())
+                                cen_lon = float(df_c['lon'].median())
+                                detected_state_full, detected_city_rg = reverse_geocode_state(cen_lat, cen_lon)
+                                if detected_state_full and detected_state_full in US_STATES_ABBR:
+                                    if not detected_state:
+                                        detected_state = US_STATES_ABBR[detected_state_full]
+                                    if not detected_city and detected_city_rg and detected_city_rg != 'Unknown City':
+                                        detected_city = detected_city_rg
+                            except Exception:
+                                pass
+
+                        if detected_city and detected_state:
+                            st.session_state['active_city'] = detected_city
+                            st.session_state['active_state'] = detected_state
+                            st.session_state['target_cities'] = [{"city": detected_city, "state": detected_state}]
+                            st.toast(f"📍 Detected: {detected_city}, {detected_state}")
+
+                    # Only clip calls to the station bbox once we know the correct jurisdiction.
+                    if detected_city and detected_state:
+                        lat_min, lat_max = df_s['lat'].min(), df_s['lat'].max()
+                        lon_min, lon_max = df_s['lon'].min(), df_s['lon'].max()
+                        clip_mask_modeled = (
+                            (df_c['lat'] >= lat_min - 0.5) & (df_c['lat'] <= lat_max + 0.5) &
+                            (df_c['lon'] >= lon_min - 0.5) & (df_c['lon'] <= lon_max + 0.5)
+                        )
+                        df_c = df_c[clip_mask_modeled].reset_index(drop=True)
+                        clip_mask_full = (
+                            (df_c_full['lat'] >= lat_min - 0.5) & (df_c_full['lat'] <= lat_max + 0.5) &
+                            (df_c_full['lon'] >= lon_min - 0.5) & (df_c_full['lon'] <= lon_max + 0.5)
+                        )
+                        df_c_full = df_c_full[clip_mask_full].reset_index(drop=True)
+
+                    st.session_state['df_calls']             = df_c
+                    st.session_state['df_calls_full']        = df_c_full
+                    st.session_state['df_stations']          = df_s
+                    st.session_state['total_original_calls'] = len(df_c_full)
+                    st.session_state['total_modeled_calls']  = len(df_c)
+
+                    with st.spinner(get_jurisdiction_message()):
                         # ── BOUNDARY LOOKUP: fetch & save shapefile NOW so
                         # find_relevant_jurisdictions() can use it on the map page ──
                         detected_city_for_boundary = st.session_state.get('active_city', '')
@@ -2645,6 +2763,8 @@ if not st.session_state['csvs_ready']:
             'time':     [d.strftime('%H:%M:%S') for d in fake_dts]
         })
         st.session_state['df_calls'] = df_demo
+        st.session_state['df_calls_full'] = df_demo.copy()
+        st.session_state['total_modeled_calls'] = len(df_demo)
 
         # --- PROCESS OPTIONAL CUSTOM STATIONS ---
         custom_stations_used = False
@@ -2736,6 +2856,11 @@ if st.session_state['csvs_ready']:
     components.html("<script>window._brincHasData = true;</script>", height=0)
 
     df_calls = st.session_state['df_calls'].copy()
+    df_calls_full = st.session_state.get('df_calls_full')
+    if df_calls_full is None:
+        df_calls_full = df_calls.copy()
+    else:
+        df_calls_full = df_calls_full.copy()
     df_stations_all = st.session_state['df_stations'].copy()
 
     # ── MAP BUILD EVENT: log to sheets once per session ──────────────────────
@@ -2800,23 +2925,20 @@ if st.session_state['csvs_ready']:
                 # Pick the shapefile whose name best matches active_city
                 active_city_key = st.session_state.get('active_city', '').replace(' ', '_').lower()
                 best = None
-                # ONLY use this fallback if we actually found a name that isn't the generic default
-                if active_city_key and active_city_key not in ('custom_region', 'uploaded_region', 'unknown_city'):
-                    for sf in shp_files:
-                        if active_city_key in os.path.basename(sf).lower():
-                            best = sf
-                            break
-                if best is not None:
-                    fallback_gdf = gpd.read_file(best)
-                    if fallback_gdf.crs is None:
-                        fallback_gdf = fallback_gdf.set_crs(epsg=4269)
-                    fallback_gdf = fallback_gdf.to_crs(epsg=4326)
-                    name_col = next((c for c in ['NAME', 'DISTRICT', 'NAMELSAD'] if c in fallback_gdf.columns), fallback_gdf.columns[0])
-                    fallback_gdf['DISPLAY_NAME'] = fallback_gdf[name_col].astype(str)
-                    fallback_gdf['data_count'] = len(df_calls)
-                    master_gdf = fallback_gdf[['DISPLAY_NAME', 'data_count', 'geometry']]
-                else:
-                    master_gdf = None
+                for sf in shp_files:
+                    if active_city_key and active_city_key in os.path.basename(sf).lower():
+                        best = sf
+                        break
+                if best is None:
+                    best = shp_files[0]  # just use the first one
+                fallback_gdf = gpd.read_file(best)
+                if fallback_gdf.crs is None:
+                    fallback_gdf = fallback_gdf.set_crs(epsg=4269)
+                fallback_gdf = fallback_gdf.to_crs(epsg=4326)
+                name_col = next((c for c in ['NAME', 'DISTRICT', 'NAMELSAD'] if c in fallback_gdf.columns), fallback_gdf.columns[0])
+                fallback_gdf['DISPLAY_NAME'] = fallback_gdf[name_col].astype(str)
+                fallback_gdf['data_count'] = len(df_calls)
+                master_gdf = fallback_gdf[['DISPLAY_NAME', 'data_count', 'geometry']]
             except Exception:
                 master_gdf = None
 
@@ -3022,7 +3144,7 @@ if st.session_state['csvs_ready']:
     prog2 = st.sidebar.empty()
     prog2.caption(get_spatial_message())
     calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls = precompute_spatial_data(
-        df_calls, df_stations_all, city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash
+        df_calls, df_calls_full, df_stations_all, city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash
     )
     df_curve = compute_all_elbow_curves(
         total_calls, resp_matrix, guard_matrix,
@@ -3348,7 +3470,9 @@ if st.session_state['csvs_ready']:
     else:
         gain_val = None
 
-    orig_calls = st.session_state.get('total_original_calls', total_calls)
+    orig_calls = int(st.session_state.get('total_original_calls', len(df_calls_full) if df_calls_full is not None else total_calls) or total_calls)
+    modeled_calls = int(st.session_state.get('total_modeled_calls', total_calls) or total_calls)
+    displayed_points = len(display_calls) if display_calls is not None else 0
     call_str = f"{orig_calls:,}"
 
     # Calculate Date Range of CAD data (if available)
@@ -3423,7 +3547,17 @@ if st.session_state['csvs_ready']:
     )
     
     st.markdown(kpi_html, unsafe_allow_html=True)
-    st.markdown(f"<div style='font-size:0.65rem;color:gray;margin-top:-10px;margin-bottom:12px;text-align:right;'>(Optimization modeled via {total_calls:,} representative CAD samples)</div>", unsafe_allow_html=True)
+    if orig_calls != modeled_calls:
+        model_note = f"Optimization modeled via {modeled_calls:,} representative CAD samples from {orig_calls:,} total incidents."
+    else:
+        model_note = f"Optimization modeled via all {modeled_calls:,} available incidents."
+    if displayed_points and displayed_points < orig_calls:
+        map_note = f"Map renders {displayed_points:,} incident points using Plotly's WebGL-backed map layer for dense full-call visualization."
+    elif displayed_points:
+        map_note = f"Map renders all {displayed_points:,} incident points."
+    else:
+        map_note = ""
+    st.markdown(f"<div style='font-size:0.65rem;color:gray;margin-top:-10px;margin-bottom:12px;text-align:right;'>{model_note}{(' ' + map_note) if map_note else ''}</div>", unsafe_allow_html=True)
 
     map_col, stats_col = st.columns([4.2, 1.8])
 
@@ -3444,8 +3578,10 @@ if st.session_state['csvs_ready']:
                 showscale=False, name="Heatmap", hoverinfo='skip'))
 
         if not display_calls.empty:
+            point_size = 1 if len(display_calls) > 150000 else 2 if len(display_calls) > 50000 else 3 if len(display_calls) > 20000 else 4
+            point_opacity = 0.06 if len(display_calls) > 150000 else 0.10 if len(display_calls) > 50000 else 0.18 if len(display_calls) > 20000 else 0.28 if len(display_calls) > 10000 else 0.4
             fig.add_trace(go.Scattermapbox(lat=display_calls.geometry.y, lon=display_calls.geometry.x,
-                mode='markers', marker=dict(size=4, color=map_incident_color, opacity=0.4),
+                mode='markers', marker=dict(size=point_size, color=map_incident_color, opacity=point_opacity),
                 name="Incident Data", hoverinfo='skip'))
 
         if show_faa and faa_geojson:
@@ -3552,7 +3688,7 @@ if st.session_state['csvs_ready']:
         if show_cards:
             st.markdown(f"""
             <h4 style='margin-top:8px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>
-            <div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:8px;'>SIMULATOR DISCLAIMER: All outputs are model estimates based on user inputs.</div>
+            <div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:8px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>
             <style>
             .unit-card {{ transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; }}
             .unit-card:hover {{ transform: scale(1.02); box-shadow: 0 8px 20px rgba(0,210,255,0.12); }}

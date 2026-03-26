@@ -236,7 +236,8 @@ CONFIG = {
     # Daily airtime = (24*60) / 63 * 60 = 1371.4 min = 22.86 hrs
     "GUARDIAN_FLIGHT_MIN":  60,   # flight minutes per cycle
     "GUARDIAN_CHARGE_MIN":   3,   # charge minutes per cycle
-    # Responder duty cycle: patrol unit, ~11.6 hr shift equivalent
+    # Responder duty cycle: 30-min max flight per sortie, 11.6hr shift
+    "RESPONDER_FLIGHT_MIN":   30,    # max flight minutes per sortie
     "RESPONDER_PATROL_HOURS": 11.6,
 }
 # Derived: compute Guardian daily airtime from duty cycle
@@ -2069,17 +2070,23 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
         total_daily_flights = d_flights + d_shared
         patrol_time_line = ""
-        if total_daily_flights > 0 and d_savings > 0:
-            mins_per_flight = max_patrol_mins / total_daily_flights
-            if total_daily_flights >= 5 or mins_per_flight < 60:
-                patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= 30 else "#00D2FF"
-                patrol_time_line = (
-                    f'<div style="border-top:1px dashed rgba(255,255,255,0.15); margin-top:5px; '
-                    f'padding-top:5px; font-size:0.58rem; color:{text_muted};" '
-                    f'title="{uptime_tooltip}">'
-                    f'{total_daily_flights:.1f} flights ÷ {max_patrol_hours:.2f}hr max = '
-                    f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight</span></div>'
-                )
+        if total_daily_flights > 0:
+            # Raw calculation: patrol budget / flights = available min per flight
+            raw_mins_per_flight = max_patrol_mins / total_daily_flights
+            # Cap at drone's physical max flight time
+            max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
+            mins_per_flight = min(raw_mins_per_flight, max_single_flight)
+            capped = raw_mins_per_flight > max_single_flight
+            # Always show the line so low-volume Responders display correctly
+            patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= max_single_flight * 0.9 else "#00D2FF"
+            cap_note = f" (max {max_single_flight}min)" if capped else ""
+            patrol_time_line = (
+                f'<div style="border-top:1px dashed rgba(255,255,255,0.15); margin-top:5px; '
+                f'padding-top:5px; font-size:0.58rem; color:{text_muted};" '
+                f'title="{uptime_tooltip}">'
+                f'{total_daily_flights:.1f} flights ÷ {max_patrol_hours:.2f}hr max = '
+                f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight{cap_note}</span></div>'
+            )
 
         # Concurrency / value breakdown
         d_util         = d.get('utilization', 0)
@@ -2170,8 +2177,8 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     # Wrap in a style-scoped div to prevent Streamlit container from collapsing width
     return (
         '<style>'
-        '.unit-card-grid { display:grid; gap:10px; align-items:start; width:100%; box-sizing:border-box; }'
-        '.unit-card-grid > .unit-card { min-width:0; }'
+        '.unit-card-grid { display:grid; gap:10px; align-items:stretch; width:100%; box-sizing:border-box; }'
+        '.unit-card-grid > .unit-card { min-width:0; height:100%; }'
         '</style>'
         '<div class="unit-card-grid" style="grid-template-columns:repeat(' + str(columns_per_row) + ', minmax(0,1fr));">'
         + "".join(cards_html)
@@ -4753,9 +4760,11 @@ if st.session_state['csvs_ready']:
         _analytics_df,
         total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls)
     )
-    components.html(analytics_html_block, height=1725, scrolling=False)
+    components.html(analytics_html_block, height=1700, scrolling=False)
 
     if _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
+        # Collapse gap between components.html block and the plotly charts below
+        st.markdown("<div style='margin-top:-32px;'></div>", unsafe_allow_html=True)
         _build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
 
     # ── EXPORT BUTTONS — always visible in sidebar ──
@@ -5577,6 +5586,35 @@ sections.forEach(s=>obs.observe(s));
         st.sidebar.button("📄 Executive Summary (HTML)", disabled=True,
                           use_container_width=True,
                           help="Deploy at least one drone to generate the proposal document.")
+
+    # 2b. BRINC Tank — sidebar-free full mirror of the proposal page
+    _tank_disclaimer = (
+        "BRINC Tank is a presentation-mode HTML mirror of this deployment. "
+        "All data is simulation-based. Not a guarantee or binding proposal."
+    )
+    if fleet_capex > 0:
+        # Build a sidebar-free version: inject hide-sidebar CSS into export_html
+        _tank_html = export_html.replace(
+            "</style>",
+            ".doc-sidebar{display:none!important;}.doc-main{margin-left:0!important;}</style>",
+            1
+        ).replace(
+            "<title>",
+            "<title>BRINC Tank · "
+        )
+        if st.sidebar.download_button(
+            "⚡ BRINC Tank (Presentation Mode)",
+            data=_tank_html,
+            file_name=f"BrincTank_{_safe_city}_{_ts}.html",
+            mime="text/html",
+            use_container_width=True,
+            help="Full-screen presentation version — sidebar hidden, optimised for screen share and client demos."
+        ):
+            pass
+    else:
+        st.sidebar.button("⚡ BRINC Tank (Presentation Mode)", disabled=True,
+                          use_container_width=True,
+                          help="Deploy drones first to generate the BRINC Tank presentation file.")
 
     # 3. Google Earth KML — only when drones are placed
     if active_drones:

@@ -238,6 +238,7 @@ CONFIG = {
     "GUARDIAN_CHARGE_MIN":   3,   # charge minutes per cycle
     # Responder duty cycle: patrol unit, ~11.6 hr shift equivalent
     "RESPONDER_PATROL_HOURS": 11.6,
+    "RESPONDER_MAX_FLIGHT_MIN": 30,
 }
 # Derived: compute Guardian daily airtime from duty cycle
 CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] = (
@@ -436,7 +437,7 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
 
     # 3. Build the initial HTML shell (JS will populate the numbers)
     month_keys = sorted(list(set(r['d'][:7] for r in records)))
-    cal_html = "<div style='display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:15px; margin-top:20px;'>"
+    cal_html = "<div style='display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:15px; margin-top:10px;'>"
     
     for mk in month_keys[:12]:
         yr, mo = int(mk.split('-')[0]), int(mk.split('-')[1])
@@ -506,7 +507,7 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
             </div>
         </div>
         
-        <div style="display:grid; grid-template-columns: 3fr 2fr; gap:15px; margin-bottom:25px;">
+        <div style="display:grid; grid-template-columns: 3fr 2fr; gap:15px; margin-bottom:12px;">
             <div style="background:#06060a; border:1px solid #1a1a26; border-radius:6px; padding:15px;">
                 <div style="margin-bottom:12px; font-size:10px; color:#7777a0; text-transform:uppercase; letter-spacing:1px; font-weight:bold;">Optimized DFR Shift Windows</div>
                 <div id="shift-container"></div>
@@ -517,7 +518,7 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
             </div>
         </div>
         
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:5px; padding-top:15px; border-top:1px solid #1a1a26;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:5px; padding-top:8px; border-top:1px solid #1a1a26;">
             <div style="font-size:14px; font-weight:800; color:#fff; letter-spacing:1px; text-transform:uppercase;">DFR Deployment Calendar</div>
             <div style="display:flex; gap:12px; font-family:monospace; font-size:9px; color:#8d93b8; flex-wrap:wrap;">
                 <div style="display:flex; align-items:center; gap:5px;"><div style="width:9px; height:9px; background:#59B7FF; border:1px solid #1E5D91; border-radius:2px; box-shadow:0 0 6px rgba(89,183,255,0.18);"></div>VERY LOW</div>
@@ -2070,15 +2071,27 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         total_daily_flights = d_flights + d_shared
         patrol_time_line = ""
         if total_daily_flights > 0 and d_savings > 0:
-            mins_per_flight = max_patrol_mins / total_daily_flights
-            if total_daily_flights >= 5 or mins_per_flight < 60:
-                patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= 30 else "#00D2FF"
+            if is_guardian:
+                mins_per_flight = max_patrol_mins / total_daily_flights
+                if total_daily_flights >= 5 or mins_per_flight < 60:
+                    patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= 30 else "#00D2FF"
+                    patrol_time_line = (
+                        f'<div style="border-top:1px dashed rgba(255,255,255,0.15); margin-top:5px; '
+                        f'padding-top:5px; font-size:0.58rem; color:{text_muted};" '
+                        f'title="{uptime_tooltip}">'
+                        f'{total_daily_flights:.1f} flights ÷ {max_patrol_hours:.2f}hr max = '
+                        f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight</span></div>'
+                    )
+            else:
+                responder_max_flight = float(CONFIG.get("RESPONDER_MAX_FLIGHT_MIN", 30))
+                mins_per_flight = min(responder_max_flight, max_patrol_mins / total_daily_flights)
+                patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= 25 else "#00D2FF"
                 patrol_time_line = (
                     f'<div style="border-top:1px dashed rgba(255,255,255,0.15); margin-top:5px; '
                     f'padding-top:5px; font-size:0.58rem; color:{text_muted};" '
-                    f'title="{uptime_tooltip}">'
-                    f'{total_daily_flights:.1f} flights ÷ {max_patrol_hours:.2f}hr max = '
-                    f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight</span></div>'
+                    f'title="{uptime_tooltip} · capped at {responder_max_flight:.0f}min max flight time per sortie">'
+                    f'{total_daily_flights:.1f} flights/day · '
+                    f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min max/flight</span></div>'
                 )
 
         # Concurrency / value breakdown
@@ -4753,7 +4766,7 @@ if st.session_state['csvs_ready']:
         _analytics_df,
         total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls)
     )
-    components.html(analytics_html_block, height=1725, scrolling=False)
+    components.html(analytics_html_block, height=1540, scrolling=False)
 
     if _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
         _build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
@@ -5210,6 +5223,11 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 .crime-stat-row .csv.accent{{color:var(--gold)}}
 
 /* ── PRINT ───────────────────────────────────────────────────── */
+body.tank-view .doc-sidebar{{display:none}}
+body.tank-view .doc-main{{margin-left:0}}
+body.tank-view .doc-section,body.tank-view .cover-page{{max-width:1400px;margin:0 auto}}
+body.tank-view .doc-footer{{padding-left:60px;padding-right:60px}}
+
 @media print{{
   .doc-sidebar{{display:none}}
   .doc-main{{margin-left:0}}
@@ -5536,6 +5554,7 @@ sections.forEach(s=>obs.observe(s));
 </body></html>"""
 
         export_html = export_html.replace("[ANALYTICS_HTML_EXPORT]", analytics_html_export)
+        brinc_tank_html = export_html.replace("<body>", "<body class="tank-view">", 1)
 
     # ── Download buttons — always rendered so they're visible in the sidebar ──
     _safe_city   = _safe_city_base
@@ -5578,7 +5597,23 @@ sections.forEach(s=>obs.observe(s));
                           use_container_width=True,
                           help="Deploy at least one drone to generate the proposal document.")
 
-    # 3. Google Earth KML — only when drones are placed
+    # 3. brinc-tank HTML — main document only with the sidebar closed
+    if fleet_capex > 0:
+        if st.sidebar.download_button("🧱 brinc-tank", data=brinc_tank_html,
+                                      file_name=f"brinc-tank_{_safe_city}_{_ts}.html",
+                                      mime="text/html", use_container_width=True):
+            _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                          "HTML", k_responder, k_guardian, calls_covered_perc,
+                          prop_name, prop_email, details=export_details)
+            _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                           "HTML", k_responder, k_guardian, calls_covered_perc,
+                           prop_name, prop_email, details=export_details)
+    else:
+        st.sidebar.button("🧱 brinc-tank", disabled=True,
+                          use_container_width=True,
+                          help="Deploy at least one drone to generate the brinc-tank HTML view.")
+
+    # 4. Google Earth KML — only when drones are placed
     if active_drones:
         if st.sidebar.download_button("🌏 Google Earth Briefing File",
                                       data=generate_kml(active_gdf, active_drones, calls_in_city),

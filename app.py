@@ -3805,8 +3805,11 @@ if st.session_state['csvs_ready']:
                         # Clear buffers (role intentionally kept so user can add more of same type)
                         st.session_state['cs_addr_buf']  = ""
                         st.session_state['cs_label_buf'] = ""
-                        if '_opt_cache_key' in st.session_state:
-                            del st.session_state['_opt_cache_key']
+                        # Clear ALL optimizer caches so the new station
+                        # enters both the spatial precompute AND the LP solver
+                        for _ck in ['_opt_cache_key', '_opt_best_combo',
+                                    '_opt_chrono_r', '_opt_chrono_g']:
+                            st.session_state.pop(_ck, None)
                         st.rerun()
                     else:
                         st.warning("⚠️ Address not found. Try including city and state — e.g. '123 Main St, Mobile AL'.")
@@ -4547,42 +4550,39 @@ if st.session_state['csvs_ready']:
     )
     if active_drones:
         _n_cols = 4 if len(active_drones) >= 4 else (2 if len(active_drones) > 1 else 1)
-        st.markdown(
-            _build_unit_cards_html(
-                active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color,
-                columns_per_row=_n_cols
-            ),
-            unsafe_allow_html=True
-        )
-
-        # ── Interactive pin/unpin buttons — one row of buttons per row of cards ──
         _saved_gnames = list(st.session_state.get('pinned_guard_names', []))
         _saved_rnames = list(st.session_state.get('pinned_resp_names',  []))
 
-        # Chunk drones into rows matching the card grid, render a button row per chunk
+        # Render card HTML + lock buttons together inside st.columns so buttons
+        # are always directly below their card in the same Streamlit column.
         import math as _math
         _n_rows = _math.ceil(len(active_drones) / _n_cols)
         for _row_idx in range(_n_rows):
             _row_drones = active_drones[_row_idx * _n_cols : (_row_idx + 1) * _n_cols]
-            _row_cols = st.columns(_n_cols)
+            _row_cols   = st.columns(_n_cols)
             for _slot, _d in enumerate(_row_drones):
                 _ci    = _row_idx * _n_cols + _slot
                 _dname = _d['name']
+                _dtype = _d['type']
                 _is_pg = _dname in _saved_gnames
                 _is_pr = _dname in _saved_rnames
-                _is_pinned = _is_pg or _is_pr
                 with _row_cols[_slot]:
-                    if _is_pinned:
-                        # Show which role it's locked as, with a switch option
-                        _cur_role = "🦅 Guardian" if _is_pg else "🚁 Responder"
+                    # ── Card HTML ─────────────────────────────────────────────
+                    st.markdown(
+                        _build_unit_cards_html(
+                            [_d], text_main, text_muted, card_bg, card_border,
+                            card_title, accent_color, columns_per_row=1
+                        ),
+                        unsafe_allow_html=True
+                    )
+                    # ── Lock / Switch / Unpin buttons ─────────────────────────
+                    if _is_pg or _is_pr:
                         _switch_label = "🚁 Switch to Resp" if _is_pg else "🦅 Switch to Guard"
-                        _unpin_label  = "✕ Unpin"
                         _bc1, _bc2 = st.columns([3, 2])
                         with _bc1:
                             if st.button(_switch_label, key=f"switch_{_ci}",
                                          use_container_width=True):
                                 if _is_pg:
-                                    # Switch Guardian → Responder
                                     st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
                                     _pr = list(st.session_state.get('pinned_resp_names', []))
                                     if _dname not in _pr: _pr.append(_dname)
@@ -4590,7 +4590,6 @@ if st.session_state['csvs_ready']:
                                     if st.session_state.get('k_resp', 0) < len(_pr):
                                         st.session_state['k_resp'] = len(_pr)
                                 else:
-                                    # Switch Responder → Guardian
                                     st.session_state['pinned_resp_names'] = [x for x in _saved_rnames if x != _dname]
                                     _pg = list(st.session_state.get('pinned_guard_names', []))
                                     if _dname not in _pg: _pg.append(_dname)
@@ -4599,13 +4598,12 @@ if st.session_state['csvs_ready']:
                                         st.session_state['k_guard'] = len(_pg)
                                 st.rerun()
                         with _bc2:
-                            if st.button(_unpin_label, key=f"unpin_{_ci}",
+                            if st.button("✕ Unpin", key=f"unpin_{_ci}",
                                          use_container_width=True, type="primary"):
                                 st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
                                 st.session_state['pinned_resp_names']  = [x for x in _saved_rnames if x != _dname]
                                 st.rerun()
                     else:
-                        # Not pinned — show both lock options side by side
                         _ba, _bb = st.columns(2)
                         with _ba:
                             if st.button("🦅 lock as guard", key=f"pin_g_{_ci}",

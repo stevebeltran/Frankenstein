@@ -602,7 +602,7 @@ def aggressive_parse_calls(uploaded_files):
     CV = {
         'date': ['received date','incident date','call date','call creation date','calldatetime','call datetime','calltime','timestamp','date','datetime','dispatch date','time received','incdate','date_rept','date_occu'],
         'time': ['call creation time','call time','dispatch time','received time','time', 'hour', 'hour_rept','hour_occu'],
-        'priority': ['call priority', 'priority level', 'priority', 'pri', 'urgency', 'offense', 'event', 'type','incident type','call type','nature'],
+        'priority': ['call priority', 'priority level', 'priority', 'pri', 'urgency'],
         'lat': ['latitude','lat','y coord','ycoord','ycoor','addressy','geoy','y_coord','map_y',
                 'point_y','gps_lat','gps_latitude','ylat','coord_y','northing','y_wgs','lat_wgs',
                 'incident_lat','inc_lat','event_lat','y_coordinate','address_y','ylocation'],
@@ -780,16 +780,18 @@ def aggressive_parse_calls(uploaded_files):
                         best_lon_col = lon_candidates[0][0]
                         res['lon'] = pd.to_numeric(raw_df[best_lon_col], errors='coerce')
             
-            p_found = [c for c in raw_df.columns if any(s in c for s in CV['priority'])]
-            if p_found:
-                # If column has >10 unique non-null values it's a call-for-service ID, not a priority scale
-                _p_col = p_found[0]
-                _n_unique = raw_df[_p_col].dropna().nunique()
-                if _n_unique > 10:
-                    res['priority'] = 3  # neutral default
+            _p_col = _choose_priority_column(raw_df)
+            p_found = [_p_col] if _p_col else []
+            if _p_col:
+                parsed_priority = raw_df[_p_col].apply(parse_priority)
+                parsed_priority = pd.to_numeric(parsed_priority, errors='coerce')
+                parsed_priority = parsed_priority.where(parsed_priority.isin([1, 2, 3, 4, 5, 6, 7, 8, 9]))
+                if parsed_priority.dropna().empty:
+                    res['priority'] = 3
                 else:
-                    res['priority'] = raw_df[_p_col].apply(parse_priority)
+                    res['priority'] = parsed_priority.fillna(3).astype(int)
             else:
+                # No trustworthy priority field — keep the app usable with a neutral default
                 res['priority'] = 3
             
             # ── Event type description — carried through for CAD analytics charts ──
@@ -1199,15 +1201,39 @@ def _build_cad_charts(df_calls, text_main, text_muted, card_bg, card_border, acc
 
 
 
-def _make_random_stations(df_calls, n=40):
-    """Fallback station generator: uses k-means on call locations to find natural
-    density hotspots, then places one candidate station per cluster centroid.
-    Falls back to IQR-filtered random sample if sklearn is unavailable."""
-    lats = df_calls['lat'].dropna().values
-    lons = df_calls['lon'].dropna().values
+def _make_random_stations(df_calls, n=40, boundary_geom=None, epsg_code=None):
+    """Fallback station generator based on call-density hotspots.
+
+    If a city boundary is supplied, only incidents inside that boundary are used and
+    final station coordinates are snapped to the nearest in-boundary incident so every
+    suggested site remains inside the geographic area.
+    """
+    if df_calls is None or df_calls.empty:
+        return pd.DataFrame()
+
+    work = df_calls.copy()
+    work['lat'] = pd.to_numeric(work['lat'], errors='coerce')
+    work['lon'] = pd.to_numeric(work['lon'], errors='coerce')
+    work = work.dropna(subset=['lat', 'lon']).reset_index(drop=True)
+    if work.empty:
+        return pd.DataFrame()
+
+    if boundary_geom is not None and epsg_code is not None:
+        try:
+            work_gdf = gpd.GeoDataFrame(work, geometry=gpd.points_from_xy(work.lon, work.lat), crs="EPSG:4326").to_crs(epsg=int(epsg_code))
+            inside_mask = work_gdf.within(boundary_geom)
+            if inside_mask.any():
+                work = work.loc[inside_mask.values].reset_index(drop=True)
+        except Exception:
+            pass
+        if work.empty:
+            return pd.DataFrame()
+
+    lats = work['lat'].dropna().values
+    lons = work['lon'].dropna().values
     if len(lats) == 0:
         return pd.DataFrame()
-    # IQR filter to strip outlier coordinates (zeros, nulls encoded as 0, etc.)
+
     q1_la, q3_la = np.percentile(lats, 5), np.percentile(lats, 95)
     q1_lo, q3_lo = np.percentile(lons, 5), np.percentile(lons, 95)
     iqr_la, iqr_lo = q3_la - q1_la, q3_lo - q1_lo
@@ -1218,25 +1244,40 @@ def _make_random_stations(df_calls, n=40):
     if len(clean_lats) == 0:
         clean_lats, clean_lons = lats, lons
 
-    # Try k-means to spread stations across density hotspots
+    base_coords = np.column_stack([clean_lats, clean_lons])
+    if len(base_coords) == 0:
+        return pd.DataFrame()
+
     try:
         from sklearn.cluster import MiniBatchKMeans as _KM
-        coords = np.column_stack([clean_lats, clean_lons])
-        k = min(n, len(coords))
+        k = min(n, len(base_coords))
         km = _KM(n_clusters=k, random_state=42, batch_size=1024, n_init=3)
-        km.fit(coords)
-        station_lats = km.cluster_centers_[:, 0]
-        station_lons = km.cluster_centers_[:, 1]
+        km.fit(base_coords)
+        centroids = km.cluster_centers_
     except Exception:
         np.random.seed(42)
-        idx = np.random.choice(len(clean_lats), min(n, len(clean_lats)), replace=False)
-        station_lats = clean_lats[idx]
-        station_lons = clean_lons[idx]
+        idx = np.random.choice(len(base_coords), min(n, len(base_coords)), replace=False)
+        centroids = base_coords[idx]
+
+    # Snap every centroid to the nearest actual in-boundary call to guarantee the
+    # proposed station remains inside the jurisdiction geometry.
+    snapped = []
+    for cen_lat, cen_lon in centroids:
+        d2 = (base_coords[:, 0] - cen_lat) ** 2 + (base_coords[:, 1] - cen_lon) ** 2
+        nearest = base_coords[int(np.argmin(d2))]
+        snapped.append((float(nearest[0]), float(nearest[1])))
+
+    if not snapped:
+        return pd.DataFrame()
+
+    deduped = list(dict.fromkeys((round(lat, 6), round(lon, 6)) for lat, lon in snapped))
+    station_lats = np.array([lat for lat, _ in deduped])
+    station_lons = np.array([lon for _, lon in deduped])
 
     k_actual = len(station_lats)
-    types = (['Police'] * (k_actual // 2) +
-             ['Fire']   * (k_actual // 3) +
-             ['School'] * k_actual)[:k_actual]
+    types = (['Police'] * max(1, math.ceil(k_actual * 0.5)) +
+             ['Fire']   * max(1, math.ceil(k_actual * 0.3)) +
+             ['School'] * max(1, math.ceil(k_actual * 0.2)))[:k_actual]
     return pd.DataFrame({
         'name': [f"{types[i]} Station {i+1}" for i in range(k_actual)],
         'lat':  station_lats,
@@ -1719,6 +1760,87 @@ def format_3_lines(name_str):
         if len(parts) >= 3:
             return f"{parts[0].strip()},<br>{parts[1].strip()},<br>{','.join(parts[2:]).strip()}"
     return name_str
+
+def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2):
+    if not active_drones:
+        return ""
+    MAX_PATROL_HOURS = 11.6
+    MAX_PATROL_MINS  = MAX_PATROL_HOURS * 60
+    columns_per_row = max(1, int(columns_per_row))
+
+    cards_html = []
+    for d in active_drones:
+        short_name  = format_3_lines(d["name"])
+        d_color     = d["color"]
+        d_type      = d["type"]
+        d_step      = d["deploy_step"]
+        d_savings   = d["annual_savings"]
+        d_flights   = d["marginal_flights"]
+        d_shared    = d["shared_flights"]
+        d_deflected = d["marginal_deflected"]
+        d_time      = d["avg_time_min"]
+        d_faa       = d["faa_ceiling"]
+        d_airport   = d["nearest_airport"]
+        d_cost      = d["cost"]
+        d_be        = d["be_text"]
+        d_lat       = d["lat"]
+        d_lon       = d["lon"]
+        d_address   = get_address_from_latlon(d_lat, d_lon)
+        gmaps_url   = f"https://www.google.com/maps/search/?api=1&query={d_lat},{d_lon}"
+
+        total_daily_flights = d_flights + d_shared
+        patrol_time_line = ""
+        if total_daily_flights > 0 and d_savings > 0:
+            mins_per_flight = MAX_PATROL_MINS / total_daily_flights
+            if total_daily_flights >= 5 or mins_per_flight < 60:
+                patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= 30 else "#00D2FF"
+                patrol_time_line = (
+                    f'<div style="border-top:1px dashed rgba(255,255,255,0.15); margin-top:5px; '
+                    f'padding-top:5px; font-size:0.58rem; color:{text_muted};">'
+                    f'{total_daily_flights:.1f} flights ÷ {MAX_PATROL_HOURS}hr max = '
+                    f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight</span></div>'
+                )
+
+        cards_html.append(f'''
+<div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color}; border-left:1px solid {card_border}; border-right:1px solid {card_border}; border-bottom:1px solid {card_border}; border-radius:4px; padding:12px; cursor:default; display:flex; flex-direction:column; box-sizing:border-box; min-height:100%;">
+  <div style="font-weight:700; font-size:0.73rem; color:{card_title}; margin-bottom:2px; line-height:1.25em;">{short_name}</div>
+  <div style="font-size:0.58rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{d_type} · Phase #{d_step}</div>
+  <div style="font-size:0.62rem; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+    <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
+  </div>
+  <div style="background:rgba(0,210,255,0.07); border-radius:4px; padding:8px; text-align:center; margin-bottom:8px;">
+    <div style="font-size:0.6rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
+    <div style="font-size:1.25rem; font-weight:900; color:{accent_color};">${d_savings:,.0f}</div>
+    {patrol_time_line}
+  </div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem; flex:1;">
+    <div style="color:{text_muted};">Net Flights/day</div>
+    <div style="text-align:right; font-weight:700; color:{accent_color};">{d_flights:.1f}</div>
+    <div style="color:{text_muted};">Shared Flights/day</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_shared:.1f}</div>
+    <div style="color:{text_muted};">Resolved/day</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_deflected:.1f}</div>
+    <div style="color:{text_muted};">Avg Response</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_time:.1f} min</div>
+    <div style="color:{text_muted};">FAA Ceiling</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_faa}</div>
+    <div style="color:{text_muted};">Nearest Airfield</div>
+    <div style="text-align:right; font-weight:700; color:{card_title}; font-size:0.55rem; word-break:break-word;">{d_airport}</div>
+  </div>
+  <div style="border-top:1px dashed {card_border}; margin-top:8px; padding-top:6px; display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem;">
+    <div style="color:{text_muted};">CapEx</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">${d_cost:,.0f}</div>
+    <div style="color:{text_muted};">ROI</div>
+    <div style="text-align:right; font-weight:800; color:{accent_color};">{d_be}</div>
+  </div>
+</div>''')
+
+    return (
+        '<div style="display:grid; grid-template-columns:repeat(' + str(columns_per_row) + ', minmax(0,1fr)); '
+        'gap:12px; align-items:stretch; margin-bottom:12px;">' +
+        "".join(cards_html) +
+        '</div>'
+    )
 
 def to_kml_color(hex_str):
     h = hex_str.lstrip('#')
@@ -3002,8 +3124,9 @@ if st.session_state['csvs_ready']:
                     st.stop()
                 df_stations_all = df_stations_all[df_stations_all['type'].astype(str).isin(selected_types)].copy().reset_index(drop=True)
                 df_stations_all['name'] = "[" + df_stations_all['type'].astype(str) + "] " + df_stations_all['name'].astype(str)
-        if 'priority' in df_calls.columns:
-            all_priorities = sorted(df_calls['priority'].dropna().unique().tolist())
+        priority_source = df_calls_full if (df_calls_full is not None and 'priority' in df_calls_full.columns) else df_calls
+        if 'priority' in priority_source.columns:
+            all_priorities = sorted(pd.Series(priority_source['priority']).dropna().astype(int).unique().tolist())
             if all_priorities:
                 selected_priorities = st.multiselect("Incident Priority", options=all_priorities, default=all_priorities,
                                                      help="Filter which call priorities to include in coverage scoring.")
@@ -3011,6 +3134,8 @@ if st.session_state['csvs_ready']:
                     st.warning("Select at least one priority level.")
                     st.stop()
                 df_calls = df_calls[df_calls['priority'].isin(selected_priorities)].copy().reset_index(drop=True)
+                if df_calls_full is not None and 'priority' in df_calls_full.columns:
+                    df_calls_full = df_calls_full[df_calls_full['priority'].isin(selected_priorities)].copy().reset_index(drop=True)
 
     if len(df_stations_all) == 0:
         st.error("No stations match the selected filters."); st.stop()
@@ -3074,24 +3199,18 @@ if st.session_state['csvs_ready']:
                                    crs="EPSG:4326")
         st_gdf_utm = st_gdf.to_crs(epsg=epsg_code)
 
-        # Use a 500m buffer — generous enough to keep stations on border roads
-        # and to handle OSM geocoding offsets for small cities.
-        mask = st_gdf_utm.within(city_m.buffer(500))
+        # Keep candidate sites strictly inside the jurisdiction whenever possible.
+        mask = st_gdf_utm.within(city_m)
         df_inside = df_stations_all[mask].reset_index(drop=True)
 
         if df_inside.empty:
-            # OSM found no public buildings inside the boundary — common for small/rural
-            # cities with sparse OSM tagging (e.g. Victoria TX, small county seats).
-            # Strategy: skip the OSM spatial clip entirely and place stations directly
-            # at call-density hotspots. Call coordinates are ALREADY inside the city
-            # by definition, so no spatial clip is needed.
             st.info(
-                "ℹ️ No OSM public buildings found within the city boundary. "
-                "Using call-density station placement — stations are derived directly "
-                "from your incident data and are located inside the city limits."
+                "ℹ️ No OSM public buildings were found inside the jurisdiction boundary. "
+                "Using call-density station placement — stations are snapped to incident "
+                "locations that fall inside the city limits."
             )
             try:
-                df_stations_all = _make_random_stations(df_calls, n=60)
+                df_stations_all = _make_random_stations(df_calls, n=60, boundary_geom=city_m, epsg_code=epsg_code)
             except Exception:
                 df_stations_all = pd.DataFrame()
 
@@ -3113,6 +3232,15 @@ if st.session_state['csvs_ready']:
                     df_stations_all = pd.DataFrame()
         else:
             df_stations_all = df_inside
+
+        if not df_stations_all.empty:
+            try:
+                _final_st_gdf = gpd.GeoDataFrame(df_stations_all, geometry=gpd.points_from_xy(df_stations_all.lon, df_stations_all.lat), crs="EPSG:4326").to_crs(epsg=epsg_code)
+                _final_mask = _final_st_gdf.within(city_m)
+                if _final_mask.any():
+                    df_stations_all = df_stations_all[_final_mask].reset_index(drop=True)
+            except Exception:
+                pass
 
         if df_stations_all.empty:
             st.error(
@@ -3571,6 +3699,7 @@ if st.session_state['csvs_ready']:
         note_bits.append(full_daily_note)
     st.markdown(f"<div style='font-size:0.65rem;color:gray;margin-top:-10px;margin-bottom:12px;text-align:right;'>{' '.join(note_bits)}</div>", unsafe_allow_html=True)
 
+    cards_below_map = bool(show_cards and len(active_drones) > 2)
     map_col, stats_col = st.columns([4.2, 1.8])
 
     with map_col:
@@ -3697,7 +3826,7 @@ if st.session_state['csvs_ready']:
             )
             st.plotly_chart(fig_curve, use_container_width=True, config={'displayModeBar':False})
 
-        if show_cards:
+        if show_cards and not cards_below_map:
             st.markdown(f"""
             <h4 style='margin-top:8px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>
             <div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:8px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>
@@ -3718,107 +3847,26 @@ if st.session_state['csvs_ready']:
                 </div>
                 """, unsafe_allow_html=True)
             else:
-                # Build all card HTML at once so CSS grid can equalise heights natively.
-                # CSS grid with align-items:stretch is the only reliable cross-browser way
-                # to guarantee every card in a row is exactly the same height regardless
-                # of content — no JS, no fixed pixel heights needed.
-                MAX_PATROL_HOURS = 11.6
-                MAX_PATROL_MINS  = MAX_PATROL_HOURS * 60
+                st.markdown(_build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=1), unsafe_allow_html=True)
 
-                cards_html = []
-                for d in active_drones:
-                    short_name  = format_3_lines(d["name"])
-                    d_color     = d["color"]
-                    d_type      = d["type"]
-                    d_step      = d["deploy_step"]
-                    d_savings   = d["annual_savings"]
-                    d_flights   = d["marginal_flights"]
-                    d_shared    = d["shared_flights"]
-                    d_deflected = d["marginal_deflected"]
-                    d_time      = d["avg_time_min"]
-                    d_faa       = d["faa_ceiling"]
-                    d_airport   = d["nearest_airport"]
-                    d_cost      = d["cost"]
-                    d_be        = d["be_text"]
-                    d_lat       = d["lat"]
-                    d_lon       = d["lon"]
-                    d_address   = get_address_from_latlon(d_lat, d_lon)
-                    gmaps_url   = f"https://www.google.com/maps/search/?api=1&query={d_lat},{d_lon}"
+    if show_cards and cards_below_map:
+        st.markdown(f"""
+        <h4 style='margin-top:12px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>
+        <div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:8px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>
+        <style>
+        .unit-card {{ transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; }}
+        .unit-card:hover {{ transform: scale(1.02); box-shadow: 0 8px 20px rgba(0,210,255,0.12); }}
+        </style>
+        """, unsafe_allow_html=True)
+        st.caption("More than two drones selected — unit cards have been moved below the map for a wider, aligned layout.")
+        st.markdown(_build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2), unsafe_allow_html=True)
 
-                    total_daily_flights = d_flights + d_shared
-                    patrol_time_line = ""
-                    if total_daily_flights > 0 and d_savings > 0:
-                        mins_per_flight = MAX_PATROL_MINS / total_daily_flights
-                        if total_daily_flights >= 5 or mins_per_flight < 60:
-                            patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= 30 else "#00D2FF"
-                            patrol_time_line = (
-                                f'<div style="border-top:1px dashed rgba(255,255,255,0.15); margin-top:5px; ' +
-                                f'padding-top:5px; font-size:0.58rem; color:{text_muted};">' +
-                                f'{total_daily_flights:.1f} flights ÷ {MAX_PATROL_HOURS}hr max = ' +
-                                f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight</span></div>'
-                            )
-
-                    cards_html.append(f"""
-<div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color}; border-left:1px solid {card_border}; border-right:1px solid {card_border}; border-bottom:1px solid {card_border}; border-radius:4px; padding:12px; cursor:default; display:flex; flex-direction:column; box-sizing:border-box;">
-  <div style="font-weight:700; font-size:0.73rem; color:{card_title}; margin-bottom:2px; line-height:1.25em;">{short_name}</div>
-  <div style="font-size:0.58rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{d_type} · Phase #{d_step}</div>
-  <div style="font-size:0.62rem; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-    <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
-  </div>
-  <div style="background:rgba(0,210,255,0.07); border-radius:4px; padding:8px; text-align:center; margin-bottom:8px;">
-    <div style="font-size:0.6rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
-    <div style="font-size:1.25rem; font-weight:900; color:{accent_color};">${d_savings:,.0f}</div>
-    {patrol_time_line}
-  </div>
-  <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem; flex:1;">
-    <div style="color:{text_muted};">Net Flights/day</div>
-    <div style="text-align:right; font-weight:700; color:{accent_color};">{d_flights:.1f}</div>
-    <div style="color:{text_muted};">Shared Flights/day</div>
-    <div style="text-align:right; font-weight:700; color:{card_title};">{d_shared:.1f}</div>
-    <div style="color:{text_muted};">Resolved/day</div>
-    <div style="text-align:right; font-weight:700; color:{card_title};">{d_deflected:.1f}</div>
-    <div style="color:{text_muted};">Avg Response</div>
-    <div style="text-align:right; font-weight:700; color:{card_title};">{d_time:.1f} min</div>
-    <div style="color:{text_muted};">FAA Ceiling</div>
-    <div style="text-align:right; font-weight:700; color:{card_title};">{d_faa}</div>
-    <div style="color:{text_muted};">Nearest Airfield</div>
-    <div style="text-align:right; font-weight:700; color:{card_title}; font-size:0.55rem; word-break:break-word;">{d_airport}</div>
-  </div>
-  <div style="border-top:1px dashed {card_border}; margin-top:8px; padding-top:6px; display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem;">
-    <div style="color:{text_muted};">CapEx</div>
-    <div style="text-align:right; font-weight:700; color:{card_title};">${d_cost:,.0f}</div>
-    <div style="color:{text_muted};">ROI</div>
-    <div style="text-align:right; font-weight:800; color:{accent_color};">{d_be}</div>
-  </div>
-</div>""")
-
-                # Emit all cards in one markdown call inside a CSS grid.
-                # grid-template-columns: repeat(2, 1fr) gives 2 per row.
-                # align-items: stretch makes every cell the same height as the tallest.
-                all_cards_html = (
-                    f'<div style="display:grid; grid-template-columns:repeat(2,1fr); ' +
-                    f'gap:12px; align-items:stretch; margin-bottom:12px;">' +
-                    "".join(cards_html) +
-                    "</div>"
-                )
-                st.markdown(all_cards_html, unsafe_allow_html=True)
-
-    # ── CAD DATA CHARTS (bottom of station page) ─────────────────────────────
+    # ── CAD DATA CHARTS (moved into CAD Ingestion Analytics below) ───────────
     _cad_src = st.session_state.get('data_source', '')
     _has_real_calls = _cad_src in ('cad_upload', 'brinc_file') or (
         'df_calls' in st.session_state and st.session_state['df_calls'] is not None
         and len(st.session_state['df_calls']) > 100
     )
-    if _has_real_calls and df_calls is not None and not df_calls.empty:
-        st.markdown("---")
-        st.markdown(f"<h3 style='color:{text_main};'>📊 Incident Data Analysis</h3>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:12px;'>"
-            f"Summary analytics derived from your uploaded CAD data — use these to identify priority focus areas and hotspot cells."
-            f"</div>",
-            unsafe_allow_html=True
-        )
-        _build_cad_charts(df_calls_full if df_calls_full is not None else df_calls, text_main, text_muted, card_bg, card_border, accent_color)
 
     # ── 3D SWARM SIMULATION ───────────────────────────────────────────
     if fleet_capex > 0:
@@ -3991,6 +4039,16 @@ if st.session_state['csvs_ready']:
     if show_cad_analytics:
         analytics_html_block = generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls))
         components.html(analytics_html_block, height=1600, scrolling=False)
+
+        if _has_real_calls and df_calls is not None and not df_calls.empty:
+            st.markdown(f"<h4 style='color:{text_main}; margin-top:14px;'>Incident Data Analysis</h4>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:12px;'>"
+                f"Nested detailed CAD analytics from your uploaded data — priority mix, top call types, and hotspot concentration."
+                f"</div>",
+                unsafe_allow_html=True
+            )
+            _build_cad_charts(df_calls_full if df_calls_full is not None else df_calls, text_main, text_muted, card_bg, card_border, accent_color)
 
     # ── EXPORT BUTTONS ──
     if fleet_capex > 0:

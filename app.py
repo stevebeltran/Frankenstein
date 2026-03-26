@@ -21,6 +21,7 @@ import pyproj
 # --- PAGE CONFIG & INITIALIZE SESSION STATE ---
 st.set_page_config(page_title="BRINC COS Drone Optimizer", layout="wide", initial_sidebar_state="expanded")
 
+# This MUST run before any st.session_state checks to prevent KeyError
 defaults = {
     'csvs_ready': False, 'df_calls': None, 'df_calls_full': None, 'df_stations': None,
     'active_city': "Victoria", 'active_state': "TX", 'estimated_pop': 65000,
@@ -31,8 +32,8 @@ defaults = {
     'pd_chief_name': '', 'pd_dept_name': '', 'pd_dept_email': '', 'pd_dept_phone': '',
     'session_start': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
     'session_id': str(uuid.uuid4())[:8],
-    'data_source': 'unknown',
-    'map_build_logged': False,
+    'data_source': 'unknown',   # 'cad_upload' | 'simulation' | 'demo' | 'brinc_file'
+    'map_build_logged': False,  # prevent duplicate map-build rows per session
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -41,12 +42,16 @@ for k, v in defaults.items():
 if 'target_cities' not in st.session_state:
     st.session_state['target_cities'] = [{"city": st.session_state.get('active_city', 'Victoria'), "state": st.session_state.get('active_state', 'TX')}]
 
+
+GUARDIAN_FLIGHT_HOURS_PER_DAY = 23.5
+
 SIMULATOR_DISCLAIMER_SHORT = (
     "Simulation output only. Coverage, station placement, response time, and ROI figures are model estimates based on uploaded data and configuration settings. "
     "They are not guarantees of real-world performance, legal compliance, FAA approval, procurement outcome, or financial results."
 )
 
 def _build_details_html(details):
+    """Shared HTML block for deployment details used in email notifications."""
     if not details: return ""
     drone_list = "".join([
         f"<li><b>{d['name']}</b> ({d['type']}) @ {d['lat']:.4f}, {d['lon']:.4f}</li>"
@@ -107,6 +112,7 @@ def _build_details_html(details):
     """
 
 def _build_sheets_row(city, state, event_type, k_resp, k_guard, coverage, name, email, details=None):
+    """Build the flat list of values for a Google Sheets row — single source of truth."""
     d = details or {}
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     session_start = d.get('session_start', now)
@@ -118,14 +124,52 @@ def _build_sheets_row(city, state, event_type, k_resp, k_guard, coverage, name, 
     except Exception:
         dur = ''
     return [
-        now, d.get('session_id', ''), session_start, dur, d.get('data_source', ''),
-        name, email, d.get('pd_chief', ''), d.get('pd_dept', ''), d.get('pd_dept_email', ''), d.get('pd_dept_phone', ''),
-        city, state, d.get('population', ''), d.get('area_sq_mi', ''),
-        d.get('total_calls', ''), d.get('daily_calls', ''),
-        event_type, k_resp, k_guard, round(coverage, 1) if coverage else '', d.get('area_covered_pct', ''), d.get('avg_response_min', ''), d.get('avg_time_saved_min', ''),
-        d.get('fleet_capex', ''), d.get('annual_savings', ''), d.get('break_even', ''),
-        d.get('opt_strategy', ''), d.get('dfr_rate', ''), d.get('deflect_rate', ''), d.get('incremental_build', ''), d.get('allow_redundancy', ''),
-        json.dumps([{"name": dr.get("name"), "type": dr.get("type"), "lat": dr.get("lat"), "lon": dr.get("lon"), "avg_time_min": dr.get("avg_time_min"), "faa_ceiling": dr.get("faa_ceiling"), "annual_savings": dr.get("annual_savings")} for dr in d.get('active_drones', [])]),
+        # ── Identity ────────────────────────────────────────────────────────
+        now,                                    # A: Timestamp
+        d.get('session_id', ''),               # B: Session ID
+        session_start,                          # C: Session Start
+        dur,                                    # D: Session Duration (min)
+        d.get('data_source', ''),              # E: Data Source
+        # ── Who ─────────────────────────────────────────────────────────────
+        name,                                   # F: BRINC Rep Name
+        email,                                  # G: BRINC Rep Email
+        d.get('pd_chief', ''),                 # H: PD Chief / Signatory
+        d.get('pd_dept', ''),                  # I: Department Name
+        d.get('pd_dept_email', ''),            # J: Department Email
+        d.get('pd_dept_phone', ''),            # K: Department Phone
+        # ── Where ───────────────────────────────────────────────────────────
+        city,                                   # L: City
+        state,                                  # M: State
+        d.get('population', ''),               # N: Population
+        d.get('area_sq_mi', ''),               # O: Area (sq mi)
+        # ── Calls ───────────────────────────────────────────────────────────
+        d.get('total_calls', ''),              # P: Total Annual Calls
+        d.get('daily_calls', ''),              # Q: Daily Calls
+        # ── Fleet ───────────────────────────────────────────────────────────
+        event_type,                             # R: Event Type
+        k_resp,                                 # S: Responders
+        k_guard,                                # T: Guardians
+        round(coverage, 1) if coverage else '', # U: Call Coverage %
+        d.get('area_covered_pct', ''),         # V: Area Coverage %
+        d.get('avg_response_min', ''),         # W: Avg Response (min)
+        d.get('avg_time_saved_min', ''),       # X: Time Saved vs Patrol (min)
+        # ── Financials ──────────────────────────────────────────────────────
+        d.get('fleet_capex', ''),              # Y: Fleet CapEx
+        d.get('annual_savings', ''),           # Z: Annual Savings
+        d.get('break_even', ''),               # AA: Break-Even
+        # ── Settings ────────────────────────────────────────────────────────
+        d.get('opt_strategy', ''),             # AB: Opt Strategy
+        d.get('dfr_rate', ''),                 # AC: DFR Rate %
+        d.get('deflect_rate', ''),             # AD: Deflection Rate %
+        d.get('incremental_build', ''),        # AE: Incremental Build
+        d.get('allow_redundancy', ''),         # AF: Allow Overlap
+        # ── Drones detail (JSON) ─────────────────────────────────────────────
+        json.dumps([{"name": dr.get("name"), "type": dr.get("type"),
+                     "lat": dr.get("lat"), "lon": dr.get("lon"),
+                     "avg_time_min": dr.get("avg_time_min"),
+                     "faa_ceiling": dr.get("faa_ceiling"),
+                     "annual_savings": dr.get("annual_savings")}
+                    for dr in d.get('active_drones', [])]),  # AG: Drone JSON
     ]
 
 def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email, details=None):
@@ -184,7 +228,22 @@ def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, emai
     except: pass
 
 # --- GLOBAL CONFIGURATION ---
-CONFIG = {"RESPONDER_COST": 80000, "GUARDIAN_COST": 160000, "RESPONDER_RANGE_MI": 2.0, "OFFICER_COST_PER_CALL": 82, "DRONE_COST_PER_CALL": 6, "DEFAULT_TRAFFIC_SPEED": 35.0, "RESPONDER_SPEED": 42.0, "GUARDIAN_SPEED": 60.0}
+CONFIG = {
+    "RESPONDER_COST": 80000, "GUARDIAN_COST": 160000, "RESPONDER_RANGE_MI": 2.0,
+    "OFFICER_COST_PER_CALL": 82, "DRONE_COST_PER_CALL": 6,
+    "DEFAULT_TRAFFIC_SPEED": 35.0, "RESPONDER_SPEED": 42.0, "GUARDIAN_SPEED": 60.0,
+    # Guardian duty cycle: 60 min flight + 3 min charge = 63 min cycle
+    # Daily airtime = (24*60) / 63 * 60 = 1371.4 min = 22.86 hrs
+    "GUARDIAN_FLIGHT_MIN":  60,   # flight minutes per cycle
+    "GUARDIAN_CHARGE_MIN":   3,   # charge minutes per cycle
+    # Responder duty cycle: patrol unit, ~11.6 hr shift equivalent
+    "RESPONDER_PATROL_HOURS": 11.6,
+}
+# Derived: compute Guardian daily airtime from duty cycle
+CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] = (
+    (24 * 60) / (CONFIG["GUARDIAN_FLIGHT_MIN"] + CONFIG["GUARDIAN_CHARGE_MIN"])
+) * CONFIG["GUARDIAN_FLIGHT_MIN"]
+CONFIG["GUARDIAN_PATROL_HOURS"] = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] / 60
 STATE_FIPS = {"AL": "01", "AK": "02", "AZ": "04", "AR": "05", "CA": "06", "CO": "08", "CT": "09", "DE": "10", "FL": "12", "GA": "13", "HI": "15", "ID": "16", "IL": "17", "IN": "18", "IA": "19", "KS": "20", "KY": "21", "LA": "22", "ME": "23", "MD": "24", "MA": "25", "MI": "26", "MN": "27", "MS": "28", "MO": "29", "MT": "30", "NE": "31", "NV": "32", "NH": "33", "NJ": "34", "NM": "35", "NY": "36", "NC": "37", "ND": "38", "OH": "39", "OK": "40", "OR": "41", "PA": "42", "RI": "44", "SC": "45", "SD": "46", "TN": "47", "TX": "48", "UT": "49", "VT": "50", "VA": "51", "WA": "53", "WV": "54", "WI": "55", "WY": "56"}
 US_STATES_ABBR = {"Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA", "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL", "Indiana": "IN", "Iowa": "IA", "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA", "Maine": "ME", "Maryland": "MD", "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN", "Mississippi": "MS", "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV", "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK", "Oregon": "OR", "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD", "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT", "Virginia": "VA", "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY"}
 KNOWN_POPULATIONS = {"Victoria": 65534, "New York": 8336817, "Los Angeles": 3822238, "Chicago": 2665039, "Houston": 1304379, "Phoenix": 1644409, "Philadelphia": 1567258, "San Antonio": 2302878, "San Diego": 1472530, "Dallas": 1299544, "San Jose": 1381162, "Austin": 974447, "Jacksonville": 971319, "Fort Worth": 956709, "Columbus": 907971, "Indianapolis": 880621, "Charlotte": 897720, "San Francisco": 971233, "Seattle": 749256, "Denver": 713252, "Washington": 678972, "Nashville": 683622, "Oklahoma City": 694800, "El Paso": 694553, "Boston": 650706, "Portland": 635067, "Las Vegas": 656274, "Detroit": 620376, "Memphis": 633104, "Louisville": 628594, "Baltimore": 620961, "Milwaukee": 620251, "Albuquerque": 677122, "Tucson": 564559, "Fresno": 677102, "Sacramento": 808418, "Kansas City": 697738, "Mesa": 504258, "Atlanta": 499127, "Omaha": 508901, "Colorado Springs": 483956, "Raleigh": 476587, "Miami": 449514, "Virginia Beach": 455369, "Oakland": 530763, "Minneapolis": 563332, "Tulsa": 547239, "Arlington": 398654, "New Orleans": 562503, "Wichita": 402263, "Cleveland": 900000, "Tampa": 449514, "Orlando": 316081}
@@ -235,6 +294,7 @@ def get_base64_of_bin_file(bin_file):
 # ============================================================
 
 def _detect_datetime_series_for_labels(df):
+    """Return a best-effort parsed datetime series from common CAD field patterns."""
     if df is None or len(df) == 0:
         return None
     try:
@@ -262,12 +322,17 @@ def _detect_datetime_series_for_labels(df):
         return None
     return None
 
+
 def generate_command_center_html(df, total_orig_calls, export_mode=False):
+    """Generates the full Command Center visual suite with interactive Javascript filtering."""
     if df is None or df.empty:
         return "<div style='color:gray; padding:20px;'>Analytics unavailable. No incident records loaded.</div>"
+
     import calendar as _cal
     import json
+
     df_ana = df.copy()
+
     dt_obj = None
     if 'date' in df_ana.columns:
         _date_str = df_ana['date'].astype(str).fillna('')
@@ -276,6 +341,7 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
             _combined = _date_str
         else:
             _combined = _date_str + ' ' + _time_str
+        # Try ISO format first (what our parser stores), then fall back
         for _fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d']:
             try:
                 _trial = pd.to_datetime(_combined, format=_fmt, errors='coerce')
@@ -321,12 +387,14 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
                         continue
                 if dt_obj is not None and dt_obj.dropna().shape[0] > 0:
                     break
+                # Last resort: dateutil inference
                 if dt_obj is None or dt_obj.dropna().empty:
                     trial = pd.to_datetime(df_ana[_col_real], errors='coerce')
                     if trial.dropna().shape[0] > 0:
                         dt_obj = trial
                         break
 
+    # Universal scan: try every object column as a datetime source
     if dt_obj is None or dt_obj.dropna().empty:
         for _col in df_ana.select_dtypes(include='object').columns:
             try:
@@ -345,6 +413,7 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
     df_ana = df_ana.dropna(subset=['dt_obj'])
     if df_ana.empty: return "<div>No valid dates found in data.</div>"
 
+    # 1. Parse dates and build a lightweight records array for JavaScript
     records = []
     for _, r in df_ana.iterrows():
         dt = r['dt_obj']
@@ -353,16 +422,19 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
         records.append({
             'd': dt.strftime('%Y-%m-%d'),
             'h': dt.hour,
-            'dow': dt.dayofweek,
+            'dow': dt.dayofweek, # Mon=0, Sun=6
             'p': p_val
         })
         
+    # 2. Dynamically identify all priority types
     unique_pris = sorted(list(set(r['p'] for r in records)))
     options_html = '<option value="ALL">ALL PRIORITIES</option>'
     for p in unique_pris:
+        # Clean up the display name slightly
         display_p = f"PRIORITY {p}" if len(p) <= 2 else p
         options_html += f'<option value="{p}">{display_p}</option>'
 
+    # 3. Build the initial HTML shell (JS will populate the numbers)
     month_keys = sorted(list(set(r['d'][:7] for r in records)))
     cal_html = "<div style='display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:15px; margin-top:20px;'>"
     
@@ -370,6 +442,7 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
         yr, mo = int(mk.split('-')[0]), int(mk.split('-')[1])
         cal_html += f"<div style='background:#0c0c12; border:1px solid #1a1a26; border-radius:6px; padding:12px;'>"
         cal_html += f"<div style='display:flex; justify-content:space-between; align-items:baseline; border-bottom:1px solid #252535; padding-bottom:6px; margin-bottom:8px;'><span style='color:#00D2FF; font-weight:800; font-size:12px; text-transform:uppercase; letter-spacing:1px;'>{_cal.month_name[mo]} {yr}</span><span id='month-total-{mk}' style='color:#7777a0; font-size:10px; font-family:monospace;'>0 calls</span></div>"
+        
         cal_html += "<div style='display:grid; grid-template-columns:repeat(7, 1fr); gap:2px; margin-bottom:4px;'>"
         for i, dname in enumerate(['Su','Mo','Tu','We','Th','Fr','Sa']):
             c = ['#FF6B6B','#4ECDC4','#45B7D1','#F0B429','#96CEB4','#DDA0DD','#FF9A8B'][i]
@@ -497,10 +570,12 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
                     if(!mMax[m] || daily[r.d] > mMax[m]) mMax[m] = daily[r.d];
                 }});
 
+                // Peak Hour
                 let peakHr = hourly.indexOf(Math.max(...hourly));
                 if(total === 0) peakHr = 0;
                 document.getElementById('kpi-peak-val').innerText = peakHr + ':00';
 
+                // Shifts
                 let shiftHtml = "";
                 [8, 10, 12].forEach(win => {{
                     let bestV = 0, bestS = 0;
@@ -530,6 +605,7 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
                 }});
                 document.getElementById('shift-container').innerHTML = shiftHtml;
 
+                // DOW
                 let maxDow = Math.max(...dowCounts, 1);
                 let dowHtml = "";
                 for(let i=0; i<7; i++) {{
@@ -543,12 +619,14 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
                 }}
                 document.getElementById('dow-container').innerHTML = dowHtml;
 
+                // Month Headers
                 document.querySelectorAll('[id^="month-total-"]').forEach(el => {{
                     let m = el.id.replace('month-total-','');
                     let cnt = mTotal[m] || 0;
                     el.innerText = cnt.toLocaleString() + ' calls';
                 }});
 
+                // Calendar Cells
                 document.querySelectorAll('.day-cell').forEach(cell => {{
                     if(!cell.hasAttribute('data-date')) return;
                     let d = cell.getAttribute('data-date');
@@ -636,12 +714,16 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
                 document.getElementById('dfr-tooltip').style.display = 'none';
             }}
 
+            // Run once to populate the dashboard on load
             updateDashboard();
         </script>
     </div>
     """
     return full_html
 
+# ============================================================
+# AGGRESSIVE DATA PARSER
+# ============================================================
 def aggressive_parse_calls(uploaded_files):
     all_calls_list = []
     CV = {
@@ -658,24 +740,34 @@ def aggressive_parse_calls(uploaded_files):
 
     def _infer_city_from_location_text(raw_df):
         text_cols = [c for c in raw_df.columns if c in ['location', 'address', 'incident_location', 'addr', 'street']]
-        if not text_cols: return None
+        if not text_cols:
+            return None
+
         s = raw_df[text_cols[0]].dropna().astype(str).str.upper().str.strip()
-        if s.empty: return None
+        if s.empty:
+            return None
+
         s = s.str.replace(r':.*$', '', regex=True)
-        s = s.str.replace(r' CNTY ', 'COUNTY', regex=True)
+        s = s.str.replace(r'CNTY', 'COUNTY', regex=True)
         s = s.str.replace(r'[^A-Z0-9 /-]', ' ', regex=True)
         s = s.str.replace(r'\s+', ' ', regex=True).str.strip()
+
         candidates = []
         for val in s:
             padded = f' {val} '
             if ' MOBILE ' in padded:
                 candidates.append('Mobile')
                 continue
-            m = re.search(r' ([A-Z]{3,}(?:\s+[A-Z]{3,}){0,2})$', val)
+
+            m = re.search(r'([A-Z]{3,}(?:\s+[A-Z]{3,}){0,2})$', val)
             if m:
                 city = m.group(1).title()
-                if city not in {'County', 'City'}: candidates.append(city)
-        if not candidates: return None
+                if city not in {'County', 'City'}:
+                    candidates.append(city)
+
+        if not candidates:
+            return None
+
         vc = pd.Series(candidates).value_counts()
         return vc.index[0] if not vc.empty else None
 
@@ -686,11 +778,16 @@ def aggressive_parse_calls(uploaded_files):
                 if not top.empty:
                     state_val = top.index[0]
                     state_up = str(state_val).upper()
-                    if state_up in STATE_FIPS: return state_up
+                    if state_up in STATE_FIPS:
+                        return state_up
                     state_title = str(state_val).title()
-                    if state_title in US_STATES_ABBR: return US_STATES_ABBR[state_title]
-        if inferred_city == 'Mobile': return 'AL'
+                    if state_title in US_STATES_ABBR:
+                        return US_STATES_ABBR[state_title]
+
+        if inferred_city == 'Mobile':
+            return 'AL'
         return None
+
 
     def _choose_priority_column(raw_df):
         exact_names = ['priority', 'call priority', 'priority level', 'pri']
@@ -701,6 +798,7 @@ def aggressive_parse_calls(uploaded_files):
                 -raw_df[c].dropna().nunique()
             ), reverse=True)
             return exact[0]
+
         loose_names = ['priority', 'call priority', 'priority level', 'pri', 'urgency']
         loose = [c for c in raw_df.columns if any(k in c for k in loose_names)]
         if loose:
@@ -714,9 +812,11 @@ def aggressive_parse_calls(uploaded_files):
     def parse_priority(raw):
         s = str(raw).strip().upper()
         if not s or s == 'NAN': return None
+        # Smart inference for PD offenses if priority column is missing
         if any(w in s for w in ['ROBBERY','BURGLARY','ASSAULT','SHOOTING','STABBING','CRITICAL','EMERG']): return 1
         if any(w in s for w in ['ACCIDENT','DISTURBANCE','THEFT','MED','ALARM']): return 2
         if any(w in s for w in ['NON REPORTABLE','FOUND PROPERTY','INFO','ROUTINE','MISC']): return 4
+        
         m = re.search(r'^(\d+)', s)
         if m: return int(m.group(1))
         return 3
@@ -725,24 +825,35 @@ def aggressive_parse_calls(uploaded_files):
         try:
             fname = cfile.name.lower()
             excel_exts = ('.xlsx', '.xls', '.xlsb', '.xlsm')
+
             if fname.endswith(excel_exts):
+                # ── Excel path ────────────────────────────────────────────────
                 raw_bytes = cfile.getvalue()
                 engine = 'openpyxl'
-                if fname.endswith('.xls'): engine = 'xlrd'
-                elif fname.endswith('.xlsb'): engine = 'pyxlsb'
+                if fname.endswith('.xls'):
+                    engine = 'xlrd'
+                elif fname.endswith('.xlsb'):
+                    engine = 'pyxlsb'
+
                 def _sheet_score(ws):
                     score = 0
                     rows = list(ws.iter_rows(min_row=1, max_row=3, values_only=True))
-                    if not rows: return -1
+                    if not rows:
+                        return -1
                     header = rows[0] or []
                     header_norm = [str(h).strip().lower() for h in header if h is not None]
-                    if not header_norm: return -1
+                    if not header_norm:
+                        return -1
                     hints = ['latitude', 'longitude', 'lat', 'lon', 'priority', 'location', 'date', 'time']
                     score += sum(10 for h in header_norm if any(k == h or k in h for k in hints))
                     score += sum(1 for h in header_norm if h and not re.match(r'^column\d+$', h))
-                    if len(rows) > 1 and rows[1] and any(v is not None and str(v).strip() != '' for v in rows[1]): score += 25
-                    if len(header_norm) == 1 and header_norm[0].startswith('externaldata_'): score -= 100
+                    if len(rows) > 1 and rows[1] and any(v is not None and str(v).strip() != '' for v in rows[1]):
+                        score += 25
+                    # Penalize external-data placeholder sheets
+                    if len(header_norm) == 1 and header_norm[0].startswith('externaldata_'):
+                        score -= 100
                     return score
+
                 try:
                     import openpyxl as _oxl
                     _wb = _oxl.load_workbook(io.BytesIO(raw_bytes), read_only=True, data_only=True)
@@ -750,21 +861,29 @@ def aggressive_parse_calls(uploaded_files):
                     _ws = _wb[_sheet_name]
                     _row_iter = _ws.iter_rows(values_only=True)
                     _headers_raw = next(_row_iter)
-                    if _headers_raw is None: raise ValueError("Selected Excel sheet has no header row.")
-                    _real_idx = [i for i, h in enumerate(_headers_raw) if h is not None and not (str(h).startswith('Column') and str(h)[6:].isdigit())]
-                    if not _real_idx: _real_idx = [i for i, h in enumerate(_headers_raw) if h is not None]
+                    if _headers_raw is None:
+                        raise ValueError("Selected Excel sheet has no header row.")
+                    _real_idx = [
+                        i for i, h in enumerate(_headers_raw)
+                        if h is not None and not (str(h).startswith('Column') and str(h)[6:].isdigit())
+                    ]
+                    if not _real_idx:
+                        _real_idx = [i for i, h in enumerate(_headers_raw) if h is not None]
                     _real_headers = [str(_headers_raw[i]).lower().strip() for i in _real_idx]
                     _rows_data = []
                     for _row in _row_iter:
-                        if _row is None: continue
+                        if _row is None:
+                            continue
                         _trimmed = [_row[i] if i < len(_row) else None for i in _real_idx]
-                        if any(v is not None and str(v).strip() != '' for v in _trimmed): _rows_data.append(_trimmed)
+                        if any(v is not None and str(v).strip() != '' for v in _trimmed):
+                            _rows_data.append(_trimmed)
                     _wb.close()
                     raw_df = pd.DataFrame(_rows_data, columns=_real_headers)
                     raw_df = raw_df.dropna(how='all')
                     raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
                 except Exception as _xe:
                     raw_df = None
+                    # Try all sheets with pandas and pick the one that looks most like CAD data
                     try:
                         _all = pd.read_excel(io.BytesIO(raw_bytes), engine=engine, sheet_name=None)
                         best_score = -10**9
@@ -773,17 +892,25 @@ def aggressive_parse_calls(uploaded_files):
                             _df.columns = [str(c).lower().strip() for c in _df.columns]
                             _score = 0
                             for _c in _df.columns:
-                                if _c in ('latitude', 'longitude', 'priority', 'location'): _score += 20
-                                elif any(k in _c for k in ['lat', 'lon', 'priority', 'location', 'date', 'time']): _score += 5
+                                if _c in ('latitude', 'longitude', 'priority', 'location'):
+                                    _score += 20
+                                elif any(k in _c for k in ['lat', 'lon', 'priority', 'location', 'date', 'time']):
+                                    _score += 5
                             _score += min(len(_df), 100)
-                            if len(_df.columns) == 1 and str(_df.columns[0]).startswith('externaldata_'): _score -= 100
-                            if _score > best_score: best_score = _score; best_df = _df
-                        if best_df is not None: raw_df = best_df
-                    except Exception: pass
+                            if len(_df.columns) == 1 and str(_df.columns[0]).startswith('externaldata_'):
+                                _score -= 100
+                            if _score > best_score:
+                                best_score = _score
+                                best_df = _df
+                        if best_df is not None:
+                            raw_df = best_df
+                    except Exception:
+                        pass
                     if raw_df is None:
                         raw_df = pd.read_excel(io.BytesIO(raw_bytes), engine=engine, dtype=str)
                         raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
             else:
+                # ── CSV / TXT path ────────────────────────────────────────────
                 content = cfile.getvalue().decode('utf-8', errors='ignore')
                 first_line = content.split('\n')[0]
                 delim = ',' if first_line.count(',') > first_line.count('\t') else '\t'
@@ -799,27 +926,45 @@ def aggressive_parse_calls(uploaded_files):
                 found_exact = [c for c in raw_df.columns if c.strip().lower() in exact_coord_names[field]]
                 found_loose = [c for c in raw_df.columns if any(s in c for s in CV[field])]
                 found = found_exact or found_loose
-                if found: res[field] = pd.to_numeric(raw_df[found[0]], errors='coerce')
+                if found:
+                    res[field] = pd.to_numeric(raw_df[found[0]], errors='coerce')
 
+            # ── Fallback: no column name matched — scan numeric columns by value range ──
+            # Lat: -90 to 90, Lon: -180 to 180. Pick best candidate for each.
             if 'lat' not in res.columns or 'lon' not in res.columns:
                 numeric_cols = []
                 for c in raw_df.columns:
                     series = pd.to_numeric(raw_df[c], errors='coerce').dropna()
-                    if len(series) > 10: numeric_cols.append((c, series))
+                    if len(series) > 10:
+                        numeric_cols.append((c, series))
+
                 lat_candidates, lon_candidates = [], []
                 for c, series in numeric_cols:
                     mn, mx = series.min(), series.max()
-                    if c in (res.get('_lat_col',''), res.get('_lon_col','')): continue
+                    # Reject if already assigned
+                    if c in (res.get('_lat_col',''), res.get('_lon_col','')):
+                        continue
+                    # Large integer coords (State Plane) — treat as potential coord pair
                     if mx > 1000:
-                        lat_candidates.append((c, series)); lon_candidates.append((c, series)); continue
-                    if -90 <= mn and mx <= 90 and mn < -1: lat_candidates.append((c, series))
-                    if -180 <= mn and mx <= 180 and (mn < -90 or mx > 90): lon_candidates.append((c, series))
-                def _score(name, hints): return sum(1 for h in hints if h in name)
+                        lat_candidates.append((c, series))
+                        lon_candidates.append((c, series))
+                        continue
+                    if -90 <= mn and mx <= 90 and mn < -1:
+                        lat_candidates.append((c, series))
+                    if -180 <= mn and mx <= 180 and (mn < -90 or mx > 90):
+                        lon_candidates.append((c, series))
+
+                # Prefer candidate whose name hints at lat/lon
+                def _score(name, hints):
+                    return sum(1 for h in hints if h in name)
+
                 if 'lat' not in res.columns and lat_candidates:
                     lat_candidates.sort(key=lambda x: -_score(x[0], ['lat','y','north']))
                     best_lat_col = lat_candidates[0][0]
                     res['lat'] = pd.to_numeric(raw_df[best_lat_col], errors='coerce')
+
                 if 'lon' not in res.columns and lon_candidates:
+                    # Don't reuse the lat column
                     used = res.get('lat', pd.Series()).name if 'lat' in res.columns else None
                     lon_candidates = [(c, s) for c, s in lon_candidates if c != used]
                     if lon_candidates:
@@ -833,80 +978,140 @@ def aggressive_parse_calls(uploaded_files):
                 parsed_priority = raw_df[_p_col].apply(parse_priority)
                 parsed_priority = pd.to_numeric(parsed_priority, errors='coerce')
                 parsed_priority = parsed_priority.where(parsed_priority.isin([1, 2, 3, 4, 5, 6, 7, 8, 9]))
-                if parsed_priority.dropna().empty: res['priority'] = 3
-                else: res['priority'] = parsed_priority.fillna(3).astype(int)
-            else: res['priority'] = 3
+                if parsed_priority.dropna().empty:
+                    res['priority'] = 3
+                else:
+                    res['priority'] = parsed_priority.fillna(3).astype(int)
+            else:
+                # No trustworthy priority field — keep the app usable with a neutral default
+                res['priority'] = 3
             
+            # ── Event type description — carried through for CAD analytics charts ──
             _desc_hints = ['desc','type','nature','offense','calltype','call_type','event_type',
                            'eventtype','calldesc','incident_type','agencyeventtype']
-            _desc_found = [c for c in raw_df.columns if any(h in c for h in _desc_hints) and c not in (p_found[:1] if p_found else [])]
+            _desc_found = [c for c in raw_df.columns
+                           if any(h in c for h in _desc_hints)
+                           and c not in (p_found[:1] if p_found else [])]
             if _desc_found:
+                # Pick the column with the most unique text values (most descriptive)
                 _best_desc = max(_desc_found, key=lambda c: raw_df[c].dropna().nunique())
                 if raw_df[_best_desc].dropna().nunique() > 2:
                     res['call_type_desc'] = raw_df[_best_desc].astype(str).str.strip()
 
             d_found = [c for c in raw_df.columns if any(s in c for s in CV['date'])]
             t_found = [c for c in raw_df.columns if any(s in c for s in CV['time'])]
+
+            # Fallback: if no date column found by name hint, scan all string columns
+            # for any that successfully parse as datetime (catches columns like
+            # 'createdtime_central', 'call_ts', 'event_dttm', etc.)
             if not d_found:
                 for _col in raw_df.columns:
-                    if _col in (t_found or []): continue
+                    if _col in (t_found or []):
+                        continue
                     try:
                         _test = pd.to_datetime(raw_df[_col].dropna().head(50), errors='coerce')
                         _valid = _test.dropna()
                         if len(_valid) >= 10 and _valid.dt.year.between(2000, 2035).mean() > 0.8:
                             d_found = [_col]
                             break
-                    except Exception: continue
+                    except Exception:
+                        continue
 
             if d_found:
-                if t_found and d_found[0] != t_found[0]: _raw_dt_str = raw_df[d_found[0]].fillna('') + ' ' + raw_df[t_found[0]].fillna('')
-                else: _raw_dt_str = raw_df[d_found[0]]
+                # Build the raw string series to parse — combine date+time cols if separate
+                if t_found and d_found[0] != t_found[0]:
+                    _raw_dt_str = raw_df[d_found[0]].fillna('') + ' ' + raw_df[t_found[0]].fillna('')
+                else:
+                    _raw_dt_str = raw_df[d_found[0]]
+
+                # Try explicit common formats first (orders of magnitude faster than
+                # dateutil fallback on large files, and avoids NaT on ghost rows).
+                # Format detection: sample the first non-null value.
                 _sample_vals = _raw_dt_str.dropna().str.strip()
                 _sample_vals = _sample_vals[_sample_vals != ''].head(5)
-                _fmt_candidates = ['%m/%d/%Y %I:%M %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y %H:%M', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M', '%Y/%m/%d %H:%M:%S', '%d/%m/%Y %H:%M:%S', '%m-%d-%Y %H:%M:%S']
+                _fmt_candidates = [
+                    '%m/%d/%Y %I:%M %p',   # 2/14/2025 6:03 PM  (Mobile AL)
+                    '%m/%d/%Y %H:%M:%S',   # 2/14/2025 18:03:00
+                    '%m/%d/%Y %H:%M',      # 2/14/2025 18:03
+                    '%Y-%m-%d %H:%M:%S',   # 2025-02-14 18:03:00
+                    '%Y-%m-%dT%H:%M:%S',   # ISO 8601
+                    '%Y-%m-%d %H:%M',      # 2025-02-14 18:03
+                    '%Y/%m/%d %H:%M:%S',
+                    '%d/%m/%Y %H:%M:%S',
+                    '%m-%d-%Y %H:%M:%S',
+                ]
                 dt_series = None
                 if not _sample_vals.empty:
                     for _fmt in _fmt_candidates:
                         try:
                             _trial = pd.to_datetime(_sample_vals.iloc[0], format=_fmt, errors='raise')
+                            # Format matched — apply to full series
                             dt_series = pd.to_datetime(_raw_dt_str, format=_fmt, errors='coerce')
                             break
-                        except Exception: continue
-                if dt_series is None: dt_series = pd.to_datetime(_raw_dt_str, errors='coerce')
+                        except Exception:
+                            continue
+                if dt_series is None:
+                    # Final fallback: let pandas infer (slow but handles edge cases)
+                    dt_series = pd.to_datetime(_raw_dt_str, errors='coerce')
+
                 res['date'] = dt_series.dt.strftime('%Y-%m-%d')
                 res['time'] = dt_series.dt.strftime('%H:%M:%S')
 
+            # --- COORDINATE CONVERSION (STATE PLANE / LARGE-INTEGER DETECTOR) ---
             if not res.empty and 'lat' in res.columns and 'lon' in res.columns:
                 res = res[(res['lat'] != 0) & (res['lon'] != 0)].dropna(subset=['lat', 'lon'])
                 if not res.empty:
                     max_val = max(res['lat'].abs().max(), res['lon'].abs().max())
                     if max_val > 1000:
                         converted = False
-                        candidate_crs = ["EPSG:2278", "EPSG:2277", "EPSG:2276", "EPSG:2279", "EPSG:32140"]
+                        # Strategy 1: Try common State Plane CRS at /100 and /1 scales
+                        candidate_crs = [
+                            "EPSG:2278",  # TX South Central (ftUS)
+                            "EPSG:2277",  # TX Central (ftUS)
+                            "EPSG:2276",  # TX North Central (ftUS)
+                            "EPSG:2279",  # TX South (ftUS)
+                            "EPSG:32140", # TX South Central (m)
+                        ]
                         for scale in [100.0, 1.0]:
                             for crs in candidate_crs:
                                 try:
                                     transformer = pyproj.Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
-                                    test_lons, test_lats = transformer.transform(res['lon'].values[:20] / scale, res['lat'].values[:20] / scale)
-                                    if (24 < float(test_lats.mean()) < 50 and -130 < float(test_lons.mean()) < -60 and float(test_lats.std()) < 5 and float(test_lons.std()) < 5):
-                                        lons, lats = transformer.transform(res['lon'].values / scale, res['lat'].values / scale)
+                                    test_lons, test_lats = transformer.transform(
+                                        res['lon'].values[:20] / scale,
+                                        res['lat'].values[:20] / scale
+                                    )
+                                    if (24 < float(test_lats.mean()) < 50 and
+                                            -130 < float(test_lons.mean()) < -60 and
+                                            float(test_lats.std()) < 5 and
+                                            float(test_lons.std()) < 5):
+                                        lons, lats = transformer.transform(
+                                            res['lon'].values / scale, res['lat'].values / scale
+                                        )
                                         res['lon'], res['lat'] = lons, lats
                                         converted = True
                                         break
-                                except Exception: continue
-                            if converted: break
+                                except Exception:
+                                    continue
+                            if converted:
+                                break
+
+                        # Strategy 2: If CRS conversion failed, anchor to city column geocode
                         if not converted:
                             try:
                                 city_name = None
                                 for col in ['city', 'city_name', 'municipality', 'jurisdiction']:
                                     if col in raw_df.columns:
                                         top = raw_df[col].dropna().str.strip().value_counts()
-                                        if not top.empty: city_name = top.index[0]; break
+                                        if not top.empty:
+                                            city_name = top.index[0]
+                                            break
                                 state_name = None
                                 for col in ['state', 'state_name']:
                                     if col in raw_df.columns:
                                         top = raw_df[col].dropna().str.strip().value_counts()
-                                        if not top.empty: state_name = top.index[0]; break
+                                        if not top.empty:
+                                            state_name = top.index[0]
+                                            break
                                 if city_name:
                                     query_str = f"{city_name}, {state_name}" if state_name else city_name
                                     geo_url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(query_str)}&limit=1"
@@ -914,18 +1119,26 @@ def aggressive_parse_calls(uploaded_files):
                                     with urllib.request.urlopen(req, timeout=10) as resp:
                                         geo_data = json.loads(resp.read().decode("utf-8"))
                                     if geo_data:
-                                        anchor_lat = float(geo_data[0]["lat"]); anchor_lon = float(geo_data[0]["lon"])
-                                        raw_cx = res["lon"].median(); raw_cy = res["lat"].median()
+                                        anchor_lat = float(geo_data[0]["lat"])
+                                        anchor_lon = float(geo_data[0]["lon"])
+                                        raw_cx = res["lon"].median()
+                                        raw_cy = res["lat"].median()
                                         city_radius_deg = 0.35
                                         raw_spread = max(res["lon"].std(), res["lat"].std(), 1)
                                         deg_per_unit = city_radius_deg / raw_spread
                                         res["lon"] = anchor_lon + (res["lon"] - raw_cx) * deg_per_unit
                                         res["lat"] = anchor_lat + (res["lat"] - raw_cy) * deg_per_unit
                                         converted = True
-                            except Exception: pass
-                        if converted:
-                            res = res[(res["lat"] > 18) & (res["lat"] < 72) & (res["lon"] > -170) & (res["lon"] < -60)]
+                            except Exception:
+                                pass
 
+                        if converted:
+                            res = res[
+                                (res["lat"] > 18) & (res["lat"] < 72) &
+                                (res["lon"] > -170) & (res["lon"] < -60)
+                            ]
+
+            # City/state detection: store top values on rows for location detection
             top_city_name = None
             for col in ["city", "city_name", "municipality", "jurisdiction"]:
                 if col in raw_df.columns:
@@ -934,31 +1147,52 @@ def aggressive_parse_calls(uploaded_files):
                         top_city_name = str(top_city.index[0]).title()
                         res["_csv_city"] = top_city_name
                         break
+
             if "_csv_city" not in res.columns:
                 inferred_city = _infer_city_from_location_text(raw_df)
                 if inferred_city:
                     top_city_name = inferred_city
                     res["_csv_city"] = inferred_city
+
             inferred_state = _infer_state_from_text(raw_df, top_city_name)
-            if inferred_state: res["_csv_state"] = inferred_state
+            if inferred_state:
+                res["_csv_state"] = inferred_state
+
             all_calls_list.append(res)
         except: continue
         
     if not all_calls_list: return pd.DataFrame()
+    # Only keep frames that actually have lat/lon columns — Excel sheets
+    # without coordinate data should not crash the concat
     valid = [df for df in all_calls_list if 'lat' in df.columns and 'lon' in df.columns]
     if not valid: return pd.DataFrame()
     combined = pd.concat(valid, ignore_index=True)
+    # Safe dropna — columns guaranteed to exist now
     combined = combined.dropna(subset=['lat', 'lon'])
+    # IMPORTANT: keep the full parsed CAD dataset here.
+    #
+    # The optimizer is sampled later (after upload) for performance, but the
+    # parsed dataframe itself must preserve every incident so:
+    #   1) Total Incidents shows the true uploaded count
+    #   2) the stations map can render a much denser full-history call cloud
+    #   3) export/reporting math stays tied to the source file, not a k-means
+    #      surrogate created during parsing
     return combined
 
 def _build_cad_charts_html(df_calls):
-    if df_calls is None or df_calls.empty: return ""
+    """Generate a self-contained HTML block with Chart.js charts for the PDF/HTML export.
+    Returns an empty string if no real CAD data is available."""
+    if df_calls is None or df_calls.empty:
+        return ""
     try:
+        # Priority counts
         pri_labels, pri_vals = [], []
         if 'priority' in df_calls.columns:
             pc = df_calls['priority'].dropna().astype(str).value_counts().sort_index()
             pri_labels = [f"Priority {p}" for p in pc.index]
             pri_vals   = pc.values.tolist()
+
+        # Top event types
         type_labels, type_vals = [], []
         for _c in ['call_type_desc','agencyeventtypecodedesc','eventdesc','calldesc','description','nature','event_desc']:
             if _c in df_calls.columns and df_calls[_c].dropna().nunique() > 2:
@@ -966,6 +1200,8 @@ def _build_cad_charts_html(df_calls):
                 type_labels = tc.index.tolist()
                 type_vals   = tc.values.tolist()
                 break
+
+        # Concentration curve
         conc_x, conc_y, n_cells, pct10 = [], [], 0, 0
         try:
             LAT_MI, LON_MI, BIN = 69.0, 55.0, 0.5
@@ -978,11 +1214,15 @@ def _build_cad_charts_html(df_calls):
             n_cells = len(bins)
             top10 = max(1, int(n_cells * 0.1))
             pct10  = round(float(cum.iloc[top10-1]) / total * 100, 1)
+            # Downsample to max 200 points for the export chart
             step = max(1, n_cells // 200)
             conc_x = list(range(1, n_cells+1, step))
             conc_y = [round(float(cum.iloc[min(i-1, n_cells-1)]) / total * 100, 1) for i in conc_x]
-        except Exception: pass
+        except Exception:
+            pass
+
         total_calls = len(df_calls)
+
         import json
         pri_labels_js  = json.dumps(pri_labels)
         pri_vals_js    = json.dumps(pri_vals)
@@ -990,25 +1230,36 @@ def _build_cad_charts_html(df_calls):
         type_vals_js   = json.dumps(type_vals)
         conc_x_js      = json.dumps(conc_x)
         conc_y_js      = json.dumps(conc_y)
+
         has_pri   = "true" if pri_vals   else "false"
         has_types = "true" if type_vals  else "false"
         has_conc  = "true" if conc_x     else "false"
+
         bar_height = max(260, len(type_labels) * 28 + 60) if type_labels else 260
+
         return f"""
-<h2 style="color:#111; font-size:22px; font-weight:800; margin-top:40px; margin-bottom:20px; padding-bottom:10px; border-bottom:2px solid #eee;">Incident Data Analysis</h2>
-<p style="font-size:13px; color:#666; margin-bottom:20px;">Summary of <strong>{total_calls:,}</strong> calls for service used to optimise drone placement.</p>
+<h2 style="color:#111; font-size:22px; font-weight:800; margin-top:40px; margin-bottom:20px;
+           padding-bottom:10px; border-bottom:2px solid #eee;">Incident Data Analysis</h2>
+<p style="font-size:13px; color:#666; margin-bottom:20px;">
+  Summary of <strong>{total_calls:,}</strong> calls for service used to optimise drone placement.
+</p>
 <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px;">
   <div>
-    <p style="font-size:12px; font-weight:700; color:#555; text-transform:uppercase; letter-spacing:0.5px; margin:0 0 8px;">Call Priority Breakdown</p>
+    <p style="font-size:12px; font-weight:700; color:#555; text-transform:uppercase;
+              letter-spacing:0.5px; margin:0 0 8px;">Call Priority Breakdown</p>
     <div style="position:relative; height:220px;"><canvas id="expPriChart"></canvas></div>
   </div>
   <div>
-    <p style="font-size:12px; font-weight:700; color:#555; text-transform:uppercase; letter-spacing:0.5px; margin:0 0 8px;">Call Density Concentration</p>
+    <p style="font-size:12px; font-weight:700; color:#555; text-transform:uppercase;
+              letter-spacing:0.5px; margin:0 0 8px;">Call Density Concentration</p>
     <div style="position:relative; height:220px;"><canvas id="expConcChart"></canvas></div>
   </div>
 </div>
-<p style="font-size:12px; font-weight:700; color:#555; text-transform:uppercase; letter-spacing:0.5px; margin:0 0 8px;">Top Call Types</p>
-<div style="position:relative; height:{bar_height}px; margin-bottom:24px;"><canvas id="expTypeChart"></canvas></div>
+<p style="font-size:12px; font-weight:700; color:#555; text-transform:uppercase;
+          letter-spacing:0.5px; margin:0 0 8px;">Top Call Types</p>
+<div style="position:relative; height:{bar_height}px; margin-bottom:24px;">
+  <canvas id="expTypeChart"></canvas>
+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
 (function(){{
@@ -1016,40 +1267,140 @@ def _build_cad_charts_html(df_calls):
   var typL={type_labels_js}, typV={type_vals_js};
   var cX={conc_x_js}, cY={conc_y_js};
   var hasPri={has_pri}, hasTypes={has_types}, hasConc={has_conc};
-  if(hasPri && priL.length) {{ new Chart(document.getElementById('expPriChart'), {{ type:'doughnut', data:{{ labels:priL, datasets:[{{ data:priV, backgroundColor:['#E24B4A','#3B8BD4','#9FE1CB','#888780','#EF9F27'], borderWidth:0 }}] }}, options:{{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{{legend:{{position:'bottom',labels:{{font:{{size:11}},padding:8}}}}}}}}}}); }}
-  if(hasConc && cX.length) {{ new Chart(document.getElementById('expConcChart'), {{ type:'line', data:{{ labels:cX, datasets:[{{ data:cY, borderColor:'#00D2FF', backgroundColor:'rgba(0,210,255,0.12)', fill:true, tension:0.3, pointRadius:0, borderWidth:2 }}] }}, options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}},annotation:{{annotations:{{}}}}}},scales:{{x:{{title:{{display:true,text:'Cells ranked by density',font:{{size:10}}}},ticks:{{maxTicksLimit:6}}}},y:{{title:{{display:true,text:'% of calls',font:{{size:10}}}},min:0,max:100,ticks:{{callback:function(v){{return v+'%'}}}}}}}}}}}}); }}
-  if(hasTypes && typL.length) {{ new Chart(document.getElementById('expTypeChart'), {{ type:'bar', data:{{ labels:typL, datasets:[{{data:typV,backgroundColor:'#00D2FF',borderRadius:3,borderSkipped:false}}] }}, options:{{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{{legend:{{display:false}}}},scales:{{x:{{ticks:{{callback:function(v){{return v>=1000?Math.round(v/1000)+'k':v}}}}}},y:{{ticks:{{font:{{size:11}}}}}}}}}}}}); }}
+
+  if(hasPri && priL.length) {{
+    new Chart(document.getElementById('expPriChart'), {{
+      type:'doughnut',
+      data:{{
+        labels:priL,
+        datasets:[{{
+          data:priV,
+          backgroundColor:['#E24B4A','#3B8BD4','#9FE1CB','#888780','#EF9F27'],
+          borderWidth:0
+        }}]
+      }},
+      options:{{responsive:true,maintainAspectRatio:false,cutout:'55%',
+        plugins:{{legend:{{position:'bottom',labels:{{font:{{size:11}},padding:8}}}}}}
+      }}
+    }});
+  }}
+
+  if(hasConc && cX.length) {{
+    new Chart(document.getElementById('expConcChart'), {{
+      type:'line',
+      data:{{
+        labels:cX,
+        datasets:[{{
+          data:cY, borderColor:'#00D2FF', backgroundColor:'rgba(0,210,255,0.12)',
+          fill:true, tension:0.3, pointRadius:0, borderWidth:2
+        }}]
+      }},
+      options:{{responsive:true,maintainAspectRatio:false,
+        plugins:{{legend:{{display:false}},
+          annotation:{{annotations:{{}}}}
+        }},
+        scales:{{
+          x:{{title:{{display:true,text:'Cells ranked by density',font:{{size:10}}}},
+             ticks:{{maxTicksLimit:6}}}},
+          y:{{title:{{display:true,text:'% of calls',font:{{size:10}}}},min:0,max:100,
+             ticks:{{callback:function(v){{return v+'%'}}}}}}
+        }}
+      }}
+    }});
+  }}
+
+  if(hasTypes && typL.length) {{
+    new Chart(document.getElementById('expTypeChart'), {{
+      type:'bar',
+      data:{{
+        labels:typL,
+        datasets:[{{data:typV,backgroundColor:'#00D2FF',borderRadius:3,borderSkipped:false}}]
+      }},
+      options:{{responsive:true,maintainAspectRatio:false,indexAxis:'y',
+        plugins:{{legend:{{display:false}}}},
+        scales:{{
+          x:{{ticks:{{callback:function(v){{return v>=1000?Math.round(v/1000)+'k':v}}}}}},
+          y:{{ticks:{{font:{{size:11}}}}}}
+        }}
+      }}
+    }});
+  }}
 }})();
 </script>
 """
-    except Exception: return ""
+    except Exception:
+        return ""
+
 
 def _build_cad_charts(df_calls, text_main, text_muted, card_bg, card_border, accent_color):
+    """Render three Plotly charts summarising the uploaded CAD dataset."""
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
-    if df_calls is None or df_calls.empty: return
-    layout_base = dict(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color=text_muted, size=11), margin=dict(l=10, r=10, t=32, b=10), hoverlabel=dict(bgcolor=card_bg, font_size=12, font_color=text_main, bordercolor=accent_color))
+
+    if df_calls is None or df_calls.empty:
+        return
+
+    layout_base = dict(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color=text_muted, size=11),
+        margin=dict(l=10, r=10, t=32, b=10),
+        hoverlabel=dict(bgcolor=card_bg, font_size=12, font_color=text_main, bordercolor=accent_color),
+    )
     grid_color = card_border
+
+    # ── Chart 1: Priority breakdown (donut) ──────────────────────────────────
     if 'priority' in df_calls.columns:
         pri_counts = df_calls['priority'].dropna().astype(str).value_counts().sort_index()
         if not pri_counts.empty:
             colors = ['#E24B4A','#3B8BD4','#9FE1CB','#888780','#EF9F27','#5DCAA5']
             labels = [f"Priority {p}" for p in pri_counts.index]
-            fig_pri = go.Figure(go.Pie(labels=labels, values=pri_counts.values, hole=0.55, marker_colors=colors[:len(pri_counts)], textinfo='percent', hovertemplate='<b>%{label}</b><br>%{value:,} calls (%{percent})<extra></extra>'))
-            fig_pri.update_layout(**layout_base, height=240, title=dict(text='Call Priority Distribution', font=dict(size=13, color=text_main), x=0), showlegend=True, legend=dict(orientation='h', yanchor='bottom', y=-0.25, xanchor='center', x=0.5, font=dict(size=10, color=text_muted)))
+            fig_pri = go.Figure(go.Pie(
+                labels=labels, values=pri_counts.values,
+                hole=0.55, marker_colors=colors[:len(pri_counts)],
+                textinfo='percent', hovertemplate='<b>%{label}</b><br>%{value:,} calls (%{percent})<extra></extra>'
+            ))
+            fig_pri.update_layout(**layout_base, height=240,
+                title=dict(text='Call Priority Distribution', font=dict(size=13, color=text_main), x=0),
+                showlegend=True,
+                legend=dict(orientation='h', yanchor='bottom', y=-0.25, xanchor='center', x=0.5,
+                            font=dict(size=10, color=text_muted))
+            )
             st.plotly_chart(fig_pri, use_container_width=True, config={'displayModeBar': False})
+
+    # ── Chart 2: Top event types (horizontal bar) ─────────────────────────────
     desc_col = None
     for _c in ['call_type_desc','agencyeventtypecodedesc','eventdesc','calldesc','description','nature','event_desc']:
-        if _c in df_calls.columns and df_calls[_c].dropna().nunique() > 2: desc_col = _c; break
+        if _c in df_calls.columns and df_calls[_c].dropna().nunique() > 2:
+            desc_col = _c
+            break
+
     if desc_col:
         top_types = df_calls[desc_col].dropna().str.strip().value_counts().head(12)
         if not top_types.empty:
-            fig_types = go.Figure(go.Bar(x=top_types.values, y=top_types.index, orientation='h', marker_color=accent_color, text=[f'{v:,}' for v in top_types.values], textposition='outside', hovertemplate='<b>%{y}</b><br>%{x:,} calls<extra></extra>'))
-            fig_types.update_layout(**layout_base, height=max(280, len(top_types) * 30 + 60), title=dict(text='Top Call Types', font=dict(size=13, color=text_main), x=0), xaxis=dict(showgrid=True, gridcolor=grid_color, title='Calls'), yaxis=dict(showgrid=False, autorange='reversed'), showlegend=False)
+            fig_types = go.Figure(go.Bar(
+                x=top_types.values, y=top_types.index,
+                orientation='h',
+                marker_color=accent_color,
+                text=[f'{v:,}' for v in top_types.values],
+                textposition='outside',
+                hovertemplate='<b>%{y}</b><br>%{x:,} calls<extra></extra>',
+            ))
+            fig_types.update_layout(**layout_base,
+                height=max(280, len(top_types) * 30 + 60),
+                title=dict(text='Top Call Types', font=dict(size=13, color=text_main), x=0),
+                xaxis=dict(showgrid=True, gridcolor=grid_color, title='Calls'),
+                yaxis=dict(showgrid=False, autorange='reversed'),
+                showlegend=False,
+            )
             st.plotly_chart(fig_types, use_container_width=True, config={'displayModeBar': False})
+
+    # ── Chart 3: Call density concentration (Lorenz curve) ───────────────────
     try:
-        LAT_MI, LON_MI = 69.0, 55.0; BIN = 0.5
-        bin_lat = BIN / LAT_MI; bin_lon = BIN / LON_MI
+        LAT_MI, LON_MI = 69.0, 55.0
+        BIN = 0.5
+        bin_lat = BIN / LAT_MI
+        bin_lon = BIN / LON_MI
         _df = df_calls[['lat','lon']].dropna().copy()
         _df['_bl'] = (_df['lat'] / bin_lat).round().astype(int)
         _df['_bn'] = (_df['lon'] / bin_lon).round().astype(int)
@@ -1060,48 +1411,98 @@ def _build_cad_charts(df_calls, text_main, text_muted, card_bg, card_border, acc
         top10 = int(n_cells * 0.1)
         pct_from_top10 = round(float(cum_pct[min(top10-1, len(cum_pct)-1)]), 1)
         x_vals = list(range(1, n_cells + 1))
+
         fig_conc = go.Figure()
-        fig_conc.add_trace(go.Scatter(x=x_vals, y=list(cum_pct), fill='tozeroy', line=dict(color=accent_color, width=2), fillcolor=f'rgba(0,210,255,0.12)', hovertemplate='Top %{x} cells → %{y:.1f}% of calls<extra></extra>', name='Cumulative calls'))
-        fig_conc.add_annotation(x=top10, y=pct_from_top10, text=f'Top 10% of cells<br>= {pct_from_top10}% of calls', showarrow=True, arrowhead=2, arrowcolor=accent_color, font=dict(size=10, color=text_main), bgcolor=card_bg, bordercolor=accent_color, borderwidth=1)
-        fig_conc.update_layout(**layout_base, height=220, title=dict(text=f'Call Density Concentration — {n_cells} active 0.5-mi cells', font=dict(size=13, color=text_main), x=0), xaxis=dict(title='Cells ranked by call density', showgrid=True, gridcolor=grid_color), yaxis=dict(title='% of total calls', showgrid=True, gridcolor=grid_color, range=[0,105]), showlegend=False)
+        fig_conc.add_trace(go.Scatter(
+            x=x_vals, y=list(cum_pct),
+            fill='tozeroy', line=dict(color=accent_color, width=2),
+            fillcolor=f'rgba(0,210,255,0.12)',
+            hovertemplate='Top %{x} cells → %{y:.1f}% of calls<extra></extra>',
+            name='Cumulative calls'
+        ))
+        fig_conc.add_annotation(
+            x=top10, y=pct_from_top10,
+            text=f'Top 10% of cells<br>= {pct_from_top10}% of calls',
+            showarrow=True, arrowhead=2, arrowcolor=accent_color,
+            font=dict(size=10, color=text_main),
+            bgcolor=card_bg, bordercolor=accent_color, borderwidth=1
+        )
+        fig_conc.update_layout(**layout_base,
+            height=220,
+            title=dict(text=f'Call Density Concentration — {n_cells} active 0.5-mi cells', font=dict(size=13, color=text_main), x=0),
+            xaxis=dict(title='Cells ranked by call density', showgrid=True, gridcolor=grid_color),
+            yaxis=dict(title='% of total calls', showgrid=True, gridcolor=grid_color, range=[0,105]),
+            showlegend=False,
+        )
         st.plotly_chart(fig_conc, use_container_width=True, config={'displayModeBar': False})
-    except Exception: pass
+    except Exception:
+        pass
+
+
 
 def _safe_df_to_records(df):
-    if df is None: return []
+    """Safely serialize a DataFrame to a JSON-safe list of records.
+    Returns an empty list if df is None, empty, or serialization fails."""
+    if df is None:
+        return []
     try:
-        if hasattr(df, 'empty') and df.empty: return []
+        if hasattr(df, 'empty') and df.empty:
+            return []
         return json.loads(df.replace({float('nan'): None}).to_json(orient='records'))
     except Exception:
-        try: return json.loads(df.fillna('').to_json(orient='records'))
-        except Exception: return []
+        try:
+            return json.loads(df.fillna('').to_json(orient='records'))
+        except Exception:
+            return []
+
 
 def _make_random_stations(df_calls, n=40, boundary_geom=None, epsg_code=None):
-    if df_calls is None or df_calls.empty: return pd.DataFrame()
+    """Fallback station generator based on call-density hotspots.
+
+    If a city boundary is supplied, only incidents inside that boundary are used and
+    final station coordinates are snapped to the nearest in-boundary incident so every
+    suggested site remains inside the geographic area.
+    """
+    if df_calls is None or df_calls.empty:
+        return pd.DataFrame()
+
     work = df_calls.copy()
     work['lat'] = pd.to_numeric(work['lat'], errors='coerce')
     work['lon'] = pd.to_numeric(work['lon'], errors='coerce')
     work = work.dropna(subset=['lat', 'lon']).reset_index(drop=True)
-    if work.empty: return pd.DataFrame()
+    if work.empty:
+        return pd.DataFrame()
+
     if boundary_geom is not None and epsg_code is not None:
         try:
             work_gdf = gpd.GeoDataFrame(work, geometry=gpd.points_from_xy(work.lon, work.lat), crs="EPSG:4326").to_crs(epsg=int(epsg_code))
             inside_mask = work_gdf.within(boundary_geom)
-            if inside_mask.any(): work = work.loc[inside_mask.values].reset_index(drop=True)
-        except Exception: pass
-        if work.empty: return pd.DataFrame()
+            if inside_mask.any():
+                work = work.loc[inside_mask.values].reset_index(drop=True)
+        except Exception:
+            pass
+        if work.empty:
+            return pd.DataFrame()
+
     lats = work['lat'].dropna().values
     lons = work['lon'].dropna().values
-    if len(lats) == 0: return pd.DataFrame()
+    if len(lats) == 0:
+        return pd.DataFrame()
+
     q1_la, q3_la = np.percentile(lats, 5), np.percentile(lats, 95)
     q1_lo, q3_lo = np.percentile(lons, 5), np.percentile(lons, 95)
     iqr_la, iqr_lo = q3_la - q1_la, q3_lo - q1_lo
     buf_la, buf_lo = max(iqr_la * 0.5, 0.01), max(iqr_lo * 0.5, 0.01)
-    mask = ((lats >= q1_la - buf_la) & (lats <= q3_la + buf_la) & (lons >= q1_lo - buf_lo) & (lons <= q3_lo + buf_lo))
+    mask = ((lats >= q1_la - buf_la) & (lats <= q3_la + buf_la) &
+            (lons >= q1_lo - buf_lo) & (lons <= q3_lo + buf_lo))
     clean_lats, clean_lons = lats[mask], lons[mask]
-    if len(clean_lats) == 0: clean_lats, clean_lons = lats, lons
+    if len(clean_lats) == 0:
+        clean_lats, clean_lons = lats, lons
+
     base_coords = np.column_stack([clean_lats, clean_lons])
-    if len(base_coords) == 0: return pd.DataFrame()
+    if len(base_coords) == 0:
+        return pd.DataFrame()
+
     try:
         from sklearn.cluster import MiniBatchKMeans as _KM
         k = min(n, len(base_coords))
@@ -1112,41 +1513,81 @@ def _make_random_stations(df_calls, n=40, boundary_geom=None, epsg_code=None):
         np.random.seed(42)
         idx = np.random.choice(len(base_coords), min(n, len(base_coords)), replace=False)
         centroids = base_coords[idx]
+
+    # Snap every centroid to the nearest actual in-boundary call to guarantee the
+    # proposed station remains inside the jurisdiction geometry.
     snapped = []
     for cen_lat, cen_lon in centroids:
         d2 = (base_coords[:, 0] - cen_lat) ** 2 + (base_coords[:, 1] - cen_lon) ** 2
         nearest = base_coords[int(np.argmin(d2))]
         snapped.append((float(nearest[0]), float(nearest[1])))
-    if not snapped: return pd.DataFrame()
+
+    if not snapped:
+        return pd.DataFrame()
+
     deduped = list(dict.fromkeys((round(lat, 6), round(lon, 6)) for lat, lon in snapped))
     station_lats = np.array([lat for lat, _ in deduped])
     station_lons = np.array([lon for _, lon in deduped])
+
     k_actual = len(station_lats)
-    types = (['Police'] * max(1, math.ceil(k_actual * 0.5)) + ['Fire'] * max(1, math.ceil(k_actual * 0.3)) + ['School'] * max(1, math.ceil(k_actual * 0.2)))[:k_actual]
-    return pd.DataFrame({'name': [f"{types[i]} Station {i+1}" for i in range(k_actual)], 'lat':  station_lats, 'lon':  station_lons, 'type': types})
+    types = (['Police'] * max(1, math.ceil(k_actual * 0.5)) +
+             ['Fire']   * max(1, math.ceil(k_actual * 0.3)) +
+             ['School'] * max(1, math.ceil(k_actual * 0.2)))[:k_actual]
+    return pd.DataFrame({
+        'name': [f"{types[i]} Station {i+1}" for i in range(k_actual)],
+        'lat':  station_lats,
+        'lon':  station_lons,
+        'type': types,
+    })
 
 def generate_stations_from_calls(df_calls, max_stations=100):
+    """Query OpenStreetMap for real stations; fall back gracefully if unavailable."""
     lats = df_calls['lat'].dropna().values
     lons = df_calls['lon'].dropna().values
     if len(lats) == 0: return None, "No coordinates available to generate stations."
+
     q1_la, q3_la = np.percentile(lats, 25), np.percentile(lats, 75)
     q1_lo, q3_lo = np.percentile(lons, 25), np.percentile(lons, 75)
-    iqr_la = q3_la - q1_la; iqr_lo = q3_lo - q1_lo
+    iqr_la = q3_la - q1_la
+    iqr_lo = q3_lo - q1_lo
     mask = (lats >= q1_la - 2.5 * iqr_la) & (lats <= q3_la + 2.5 * iqr_la) & (lons >= q1_lo - 2.5 * iqr_lo) & (lons <= q3_lo + 2.5 * iqr_lo)
     cen_lat, cen_lon = lats[mask].mean(), lons[mask].mean()
+
+    # Try a slightly larger radius first, then fall back to tighter if too many results
     for R in [0.25, 0.45]:
         bbox = f"{cen_lat - R},{cen_lon - R},{cen_lat + R},{cen_lon + R}"
-        query = (f'[out:json][timeout:30];(node["amenity"="fire_station"]({bbox});node["amenity"="police"]({bbox});node["amenity"="school"]({bbox});way["amenity"="fire_station"]({bbox});way["amenity"="police"]({bbox});way["amenity"="school"]({bbox}););out center;')
+        query = (
+            f'[out:json][timeout:30];'
+            f'(node["amenity"="fire_station"]({bbox});'
+            f'node["amenity"="police"]({bbox});'
+            f'node["amenity"="school"]({bbox});'
+            f'way["amenity"="fire_station"]({bbox});'
+            f'way["amenity"="police"]({bbox});'
+            f'way["amenity"="school"]({bbox});'
+            f');out center;'
+        )
+
         data = None
-        osm_urls = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.openstreetmap.ru/api/interpreter']
+        osm_urls = [
+            'https://overpass-api.de/api/interpreter',
+            'https://overpass.kumi.systems/api/interpreter',
+            'https://overpass.openstreetmap.ru/api/interpreter',  # third mirror
+        ]
         for osm_url in osm_urls:
             try:
-                req = urllib.request.Request(f"{osm_url}?data={urllib.parse.quote(query)}", headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+                req = urllib.request.Request(
+                    f"{osm_url}?data={urllib.parse.quote(query)}",
+                    headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'}
+                )
                 with urllib.request.urlopen(req, timeout=25) as resp:
                     data = json.loads(resp.read().decode('utf-8'))
                 break
-            except Exception: continue
-        if data is None: continue
+            except Exception:
+                continue
+
+        if data is None:
+            continue  # try next radius / give up
+
         elements = data.get('elements', [])
         rows = []
         for el in elements:
@@ -1158,8 +1599,10 @@ def generate_stations_from_calls(df_calls, max_stations=100):
             type_label = 'Fire' if amenity == 'fire_station' else 'Police' if amenity == 'police' else 'School'
             fac_name = tags.get('name', f"{type_label} Station")
             rows.append({'name': fac_name, 'lat': round(lat, 6), 'lon': round(lon, 6), 'type': type_label})
+
         if rows:
             df_s = pd.DataFrame(rows).drop_duplicates(subset=['lat', 'lon']).reset_index(drop=True)
+            # Enforce unique names
             counts = {}
             new_names = []
             for n in df_s['name']:
@@ -1175,10 +1618,18 @@ def generate_stations_from_calls(df_calls, max_stations=100):
                 df_s['_pri'] = df_s['type'].map(priority_order).fillna(3)
                 df_s = df_s.sort_values('_pri').head(max_stations).drop(columns='_pri').reset_index(drop=True)
             return df_s, f"Auto-generated {len(df_s)} stations from OpenStreetMap."
+
+    # ── All OSM attempts failed — use random stations from call locations ──
     df_fallback = _make_random_stations(df_calls, n=40)
-    if not df_fallback.empty: return df_fallback, "⚠️ OpenStreetMap unavailable — using estimated station locations from call data."
+    if not df_fallback.empty:
+        return df_fallback, "⚠️ OpenStreetMap unavailable — using estimated station locations from call data. Upload a stations CSV for accuracy."
     return None, "Could not generate stations — no valid call coordinates."
 
+    return df_s, f"Auto-generated {len(df_s)} stations from OpenStreetMap."
+
+# ============================================================
+# CACHED DATA FUNCTIONS
+# ============================================================
 @st.cache_data
 def get_address_from_latlon(lat, lon):
     url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=18&addressdetails=1"
@@ -1191,8 +1642,11 @@ def get_address_from_latlon(lat, lon):
                 road = addr.get('road', '')
                 house_number = addr.get('house_number', '')
                 city = addr.get('city', addr.get('town', addr.get('village', '')))
-                if road: return f"{house_number} {road}, {city}".strip(', ')
-    except Exception: pass
+                if road:
+                    return f"{house_number} {road}, {city}".strip(', ')
+    except Exception:
+        pass
+    # Fallback to coordinates if an exact street address isn't found
     return f"{lat:.5f}, {lon:.5f}"
 
 @st.cache_data
@@ -1203,11 +1657,14 @@ def forward_geocode(address_str):
         req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
         with urllib.request.urlopen(req, timeout=5) as response:
             data = json.loads(response.read().decode('utf-8'))
-            if data: return float(data[0]['lat']), float(data[0]['lon'])
+            if data:
+                return float(data[0]['lat']), float(data[0]['lon'])
     except Exception: pass
     return None, None
 
 def lookup_county_for_city(city_name, state_abbr):
+    """Use Nominatim reverse-geocode to find the county name for a city that
+    doesn't directly match a county name in the local parquet."""
     try:
         lat, lon = forward_geocode(f"{city_name}, {state_abbr}, USA")
         if lat is None: return None
@@ -1216,55 +1673,92 @@ def lookup_county_for_city(city_name, state_abbr):
         with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read().decode('utf-8'))
         county_raw = data.get('address', {}).get('county', '')
+        # Nominatim returns "Winnebago County" — strip the suffix
         county_name = county_raw.replace(' County', '').replace(' Parish', '').replace(' Borough', '').strip()
         return county_name if county_name else None
-    except Exception: return None
+    except Exception:
+        return None
 
 @st.cache_data
 def fetch_county_boundary_local(state_abbr, county_name_input):
+    # 1. Clean the input
     search_name = county_name_input.lower().strip()
-    if search_name.endswith(" county"): search_name = search_name.replace(" county", "").strip()
+    if search_name.endswith(" county"):
+        search_name = search_name.replace(" county", "").strip()
+        
     state_fips = STATE_FIPS.get(state_abbr)
     if not state_fips: return False, None
+    
+    # 2. Look for our new ultra-compressed parquet file
     local_file = "counties_lite.parquet"
-    if not os.path.exists(local_file): return False, None
+    if not os.path.exists(local_file):
+        st.error(f"Missing {local_file}! Please ensure it is uploaded to your repository.")
+        return False, None
+                
+    # 3. Read directly from the Parquet file instantly
     try:
+        # Geopandas reads Parquet files in milliseconds!
         gdf = gpd.read_parquet(local_file)
+        
+        # Filter for the exact State FIPS code and County Name
         match = gdf[(gdf['STATEFP'] == state_fips) & (gdf['NAME'].str.lower() == search_name)]
+        
         if not match.empty:
+            # Put the word "County" back on for the UI displays
             match = match.copy()
             match['NAME'] = match['NAME'] + " County"
             return True, match[['NAME', 'geometry']]
-    except Exception: pass
+    except Exception as e:
+        st.error(f"Error reading local database: {e}")
+        pass
+        
     return False, None
 
 @st.cache_data
 def fetch_place_boundary_local(state_abbr, place_name_input):
+    """Look up a city/town/CDP boundary from the local places_lite.parquet.
+    Returns (True, GeoDataFrame) on success, (False, None) if not found or
+    the file doesn't exist yet (falls back to county lookup in caller)."""
     local_file = "places_lite.parquet"
-    if not os.path.exists(local_file): return False, None
+    if not os.path.exists(local_file):
+        return False, None   # file not yet added — caller falls back to county
+
     state_fips = STATE_FIPS.get(state_abbr)
     if not state_fips: return False, None
+
     search_name = place_name_input.lower().strip()
+    # Strip common suffixes the user might have typed
     for suffix in [" city", " town", " village", " borough", " township", " cdp"]:
         if search_name.endswith(suffix):
             search_name = search_name[:-len(suffix)].strip()
             break
+
     try:
         gdf = gpd.read_parquet(local_file)
         state_rows = gdf[gdf["STATEFP"] == state_fips]
+
+        # Exact match first
         match = state_rows[state_rows["NAME"].str.lower() == search_name]
+
+        # Partial match fallback (e.g. "Fort Worth" matching "Fort Worth city")
         if match.empty:
             match = state_rows[state_rows["NAME"].str.lower().str.startswith(search_name)]
             if not match.empty:
                 match = match.copy()
                 match["_diff"] = match["NAME"].str.len() - len(search_name)
                 match = match.sort_values("_diff").head(1)
-        if match.empty: return False, None
+
+        if match.empty:
+            return False, None
+
         result = match.copy()
+        # Use NAMELSAD for display if available (e.g. "Rockford city"), else NAME
         name_col = "NAMELSAD" if "NAMELSAD" in result.columns else "NAME"
         result["NAME"] = result[name_col].astype(str)
         return True, result[["NAME", "geometry"]]
-    except Exception: return False, None
+
+    except Exception:
+        return False, None
 
 @st.cache_data
 def reverse_geocode_state(lat, lon):
@@ -1281,8 +1775,10 @@ def reverse_geocode_state(lat, lon):
 
 @st.cache_data
 def fetch_census_population(state_fips, place_name, is_county=False):
-    if is_county: url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=county:*&in=state:{state_fips}"
-    else: url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=place:*&in=state:{state_fips}"
+    if is_county:
+        url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=county:*&in=state:{state_fips}"
+    else:
+        url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=place:*&in=state:{state_fips}"
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=10) as response:
@@ -1299,18 +1795,25 @@ if not os.path.exists(SHAPEFILE_DIR): os.makedirs(SHAPEFILE_DIR)
 
 @st.cache_data
 def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
+    # Check if we already downloaded and cached this state's places file
     temp_dir = os.path.join(output_dir, f"temp_tiger_{state_fips}")
     cached_shp = os.path.join(temp_dir, f"tl_2023_{state_fips}_place.shp")
     gdf = None
+
     if os.path.exists(cached_shp):
-        try: gdf = gpd.read_file(cached_shp)
-        except Exception: gdf = None
+        try:
+            gdf = gpd.read_file(cached_shp)
+        except Exception:
+            gdf = None
+
     if gdf is None:
+        # Download from Census TIGER — try 2023 then 2022 as fallback
         for year in ["2023", "2022"]:
             url = f"https://www2.census.gov/geo/tiger/TIGER{year}/PLACE/tl_{year}_{state_fips}_place.zip"
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"})
-                with urllib.request.urlopen(req, timeout=45) as resp: zip_data = resp.read()
+                with urllib.request.urlopen(req, timeout=45) as resp:
+                    zip_data = resp.read()
                 zip_file = zipfile.ZipFile(io.BytesIO(zip_data))
                 os.makedirs(temp_dir, exist_ok=True)
                 zip_file.extractall(temp_dir)
@@ -1318,25 +1821,38 @@ def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
                 if shp_files:
                     gdf = gpd.read_file(shp_files[0])
                     break
-            except Exception: continue
-    if gdf is None: return False, None
+            except Exception:
+                continue
+
+    if gdf is None:
+        return False, None
+
     try:
         search_name = city_name.lower().strip()
         exact_mask = gdf['NAME'].str.lower().str.strip() == search_name
-        if exact_mask.any(): city_gdf = gdf[exact_mask].copy()
+        if exact_mask.any():
+            city_gdf = gdf[exact_mask].copy()
         else:
+            # Partial match — prefer the longest name match to avoid tiny place with same substring
             partial = gdf[gdf['NAME'].str.lower().str.contains(search_name, case=False, na=False)].copy()
-            if partial.empty: return False, None
+            if partial.empty:
+                return False, None
+            # Pick the row whose NAME most closely matches (shortest extra chars)
             partial['_diff'] = partial['NAME'].str.len() - len(search_name)
             city_gdf = partial.sort_values('_diff').head(1)
-        if city_gdf.empty: return False, None
+
+        if city_gdf.empty:
+            return False, None
+
         city_gdf = city_gdf.dissolve(by='NAME').reset_index()
-        if city_gdf.crs is None: city_gdf = city_gdf.set_crs(epsg=4269)
+        if city_gdf.crs is None:
+            city_gdf = city_gdf.set_crs(epsg=4269)
         city_gdf = city_gdf.to_crs(epsg=4326)
         save_path = os.path.join(output_dir, f"{city_name.replace(' ', '_')}_{state_fips}.shp")
         city_gdf.to_file(save_path)
         return True, city_gdf
-    except Exception: return False, None
+    except Exception:
+        return False, None
 
 def generate_mock_faa_grid(minx, miny, maxx, maxy):
     features = []
@@ -1501,7 +2017,15 @@ def format_3_lines(name_str):
     return name_str
 
 def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2):
-    if not active_drones: return ""
+    if not active_drones:
+        return ""
+    # Per-type daily airtime budgets derived from CONFIG duty cycles:
+    #   Guardian: 60 min flight + 3 min charge → (24*60/63)*60 = 1371.4 min = 22.86 hr
+    #   Responder: patrol-unit model, 11.6 hr shift equivalent
+    _GUARDIAN_DAILY_MINS  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]   # ~1371.4
+    _GUARDIAN_DAILY_HOURS = CONFIG["GUARDIAN_PATROL_HOURS"]        # ~22.86
+    _RESPONDER_DAILY_MINS  = CONFIG["RESPONDER_PATROL_HOURS"] * 60 # 11.6 * 60 = 696
+    _RESPONDER_DAILY_HOURS = CONFIG["RESPONDER_PATROL_HOURS"]      # 11.6
     columns_per_row = max(1, int(columns_per_row))
 
     cards_html = []
@@ -1509,17 +2033,6 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         short_name  = format_3_lines(d["name"])
         d_color     = d["color"]
         d_type      = d["type"]
-        
-        # Calculate maximum patrol hours dynamically based on drone type charging specs
-        if d_type == 'GUARDIAN':
-            # 60 min flight + 3 min charge = 63 mins per cycle -> (24 * 60) / 63 cycles
-            cycles_per_day = (24 * 60) / 63
-            MAX_PATROL_HOURS = round((cycles_per_day * 60) / 60, 1) # ~ 22.9
-        else:
-            MAX_PATROL_HOURS = 11.6
-            
-        MAX_PATROL_MINS  = MAX_PATROL_HOURS * 60
-        
         d_step      = d["deploy_step"]
         d_savings   = d["annual_savings"]
         d_flights   = d["marginal_flights"]
@@ -1535,18 +2048,56 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_address   = get_address_from_latlon(d_lat, d_lon)
         gmaps_url   = f"https://www.google.com/maps/search/?api=1&query={d_lat},{d_lon}"
 
+        # Pick duty-cycle values for this drone type
+        is_guardian = (d_type == "GUARDIAN")
+        max_patrol_mins  = _GUARDIAN_DAILY_MINS  if is_guardian else _RESPONDER_DAILY_MINS
+        max_patrol_hours = _GUARDIAN_DAILY_HOURS if is_guardian else _RESPONDER_DAILY_HOURS
+
+        # Uptime tooltip: show the duty-cycle breakdown for Guardians
+        if is_guardian:
+            _g_fl  = CONFIG["GUARDIAN_FLIGHT_MIN"]
+            _g_ch  = CONFIG["GUARDIAN_CHARGE_MIN"]
+            _g_cyc = _g_fl + _g_ch
+            _cycles_per_day = (24 * 60) / _g_cyc
+            uptime_tooltip = (
+                f"{_g_fl}min flight + {_g_ch}min charge = {_g_cyc}min cycle · "
+                f"{_cycles_per_day:.1f} cycles/day · "
+                f"{max_patrol_hours:.2f}hr airtime"
+            )
+        else:
+            uptime_tooltip = f"{max_patrol_hours}hr patrol shift"
+
         total_daily_flights = d_flights + d_shared
         patrol_time_line = ""
         if total_daily_flights > 0 and d_savings > 0:
-            mins_per_flight = MAX_PATROL_MINS / total_daily_flights
+            mins_per_flight = max_patrol_mins / total_daily_flights
             if total_daily_flights >= 5 or mins_per_flight < 60:
                 patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= 30 else "#00D2FF"
                 patrol_time_line = (
                     f'<div style="border-top:1px dashed rgba(255,255,255,0.15); margin-top:5px; '
-                    f'padding-top:5px; font-size:0.58rem; color:{text_muted};">'
-                    f'{total_daily_flights:.1f} flights ÷ {MAX_PATROL_HOURS}hr max = '
+                    f'padding-top:5px; font-size:0.58rem; color:{text_muted};" '
+                    f'title="{uptime_tooltip}">'
+                    f'{total_daily_flights:.1f} flights ÷ {max_patrol_hours:.2f}hr max = '
                     f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight</span></div>'
                 )
+
+        # Concurrency / value breakdown
+        d_util         = d.get('utilization', 0)
+        d_blocked      = d.get('blocked_per_day', 0)
+        d_base_annual  = d.get('base_annual', d_savings)
+        d_conc_annual  = d.get('concurrent_annual', 0)
+        d_best         = d.get('best_case_annual', d_savings)
+        d_best_be      = d.get('best_be_text', d_be)
+        util_pct       = f"{d_util*100:.1f}%"
+        util_color     = "#dc3545" if d_util > 0.75 else "#F0B429" if d_util > 0.4 else "#2ecc71"
+        has_concurrent = d_shared > 0.1 and d_conc_annual > 0
+        # Breakdown label for the value box
+        if has_concurrent:
+            _excl_str = f"${d_base_annual:,.0f} exclusive"
+            _conc_str = f"+ ${d_conc_annual:,.0f} concurrent"
+        else:
+            _excl_str = "exclusive zone coverage"
+            _conc_str = ""
 
         cards_html.append(f'''
 <div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color}; border-left:1px solid {card_border}; border-right:1px solid {card_border}; border-bottom:1px solid {card_border}; border-radius:4px; padding:12px; cursor:default; display:flex; flex-direction:column; box-sizing:border-box; min-height:100%;">
@@ -1555,16 +2106,46 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   <div style="font-size:0.62rem; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
     <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
   </div>
-  <div style="background:rgba(0,210,255,0.07); border-radius:4px; padding:8px; text-align:center; margin-bottom:8px;">
+
+  <!-- Primary value: best-case (exclusive + concurrent) is the headline -->
+  <div style="background:rgba(0,210,255,0.07); border:1px solid rgba(0,210,255,0.15); border-radius:4px; padding:8px; text-align:center; margin-bottom:4px;">
     <div style="font-size:0.6rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
-    <div style="font-size:1.25rem; font-weight:900; color:{accent_color};">${d_savings:,.0f}</div>
+    <div style="font-size:1.25rem; font-weight:900; color:{accent_color};">${d_best:,.0f}</div>
     {patrol_time_line}
   </div>
+
+  <!-- Value breakdown: always visible -->
+  <div style="border:1px solid rgba(57,255,20,0.20); border-radius:4px; padding:5px 8px; text-align:center; margin-bottom:8px; background:rgba(57,255,20,0.04);"
+       title="Exclusive: calls only this drone covers. Concurrent: shared-zone calls this drone handles while its partner is airborne.">
+    <div style="font-size:0.52rem; color:#39FF14; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; opacity:0.75;">Value breakdown</div>
+    <div style="display:flex; justify-content:space-around; font-size:0.58rem; margin-bottom:2px;">
+      <div style="text-align:center;">
+        <div style="color:{accent_color}; font-weight:700;">${d_base_annual:,.0f}</div>
+        <div style="color:{text_muted}; font-size:0.5rem;">exclusive zone</div>
+      </div>
+      <div style="color:{text_muted}; opacity:0.5; padding-top:2px; font-size:0.7rem;">+</div>
+      <div style="text-align:center;">
+        <div style="color:#39FF14; font-weight:700;">${d_conc_annual:,.0f}</div>
+        <div style="color:{text_muted}; font-size:0.5rem;">concurrent</div>
+      </div>
+    </div>
+    <div style="font-size:0.5rem; color:{text_muted}; opacity:0.7;">{d_blocked:.1f} concurrent/day · {util_pct} utilization · ROI {d_best_be}</div>
+  </div>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem; flex:1;">
+    <div style="color:{text_muted};">Zone Flights/day</div>
+    <div style="text-align:right; font-weight:700; color:{accent_color};">{d.get("zone_flights",d_flights):.1f}</div>
+    <div style="color:{text_muted};">Shared Flights/day</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_shared:.1f}</div>
+    <div style="color:{text_muted};">Utilization</div>
+    <div style="text-align:right; font-weight:700; color:{util_color};">{util_pct}</div>
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem; flex:1;">
     <div style="color:{text_muted};">Net Flights/day</div>
     <div style="text-align:right; font-weight:700; color:{accent_color};">{d_flights:.1f}</div>
     <div style="color:{text_muted};">Shared Flights/day</div>
     <div style="text-align:right; font-weight:700; color:{card_title};">{d_shared:.1f}</div>
+    <div style="color:{text_muted};">Utilization</div>
+    <div style="text-align:right; font-weight:700; color:{util_color};">{util_pct}</div>
     <div style="color:{text_muted};">Resolved/day</div>
     <div style="text-align:right; font-weight:700; color:{card_title};">{d_deflected:.1f}</div>
     <div style="color:{text_muted};">Avg Response</div>
@@ -1577,12 +2158,17 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   <div style="border-top:1px dashed {card_border}; margin-top:8px; padding-top:6px; display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem;">
     <div style="color:{text_muted};">CapEx</div>
     <div style="text-align:right; font-weight:700; color:{card_title};">${d_cost:,.0f}</div>
-    <div style="color:{text_muted};">ROI</div>
+    <div style="color:{text_muted};">Base ROI</div>
     <div style="text-align:right; font-weight:800; color:{accent_color};">{d_be}</div>
   </div>
 </div>''')
 
-    return ('<div style="display:grid; grid-template-columns:repeat(' + str(columns_per_row) + ', minmax(0,1fr)); gap:12px; align-items:stretch; margin-bottom:12px;">' + "".join(cards_html) + '</div>')
+    return (
+        '<div style="display:grid; grid-template-columns:repeat(' + str(columns_per_row) + ', minmax(0,1fr)); '
+        'gap:12px; align-items:stretch; margin-bottom:12px;">' +
+        "".join(cards_html) +
+        '</div>'
+    )
 
 def to_kml_color(hex_str):
     h = hex_str.lstrip('#')
@@ -1597,7 +2183,13 @@ def calculate_zoom(min_lon, max_lon, min_lat, max_lat):
 def generate_kml(active_gdf, active_drones, calls_gdf):
     kml = simplekml.Kml()
     kml.document.name = "BRINC DFR Deployment Plan"
-    kml.document.description = ("SIMULATOR DISCLAIMER: This file was generated by the BRINC Drones Coverage Optimization Simulator. All coverage zones, station locations, and incident data are model estimates based on user-provided inputs. Real-world results will vary. This file does not constitute a legal recommendation, binding proposal, contract, or guarantee of any product, service, or financial outcome. All deployments require FAA authorization, local ordinances review, and formal procurement.")
+    kml.document.description = (
+        "SIMULATOR DISCLAIMER: This file was generated by the BRINC Drones Coverage Optimization Simulator. "
+        "All coverage zones, station locations, and incident data are model estimates based on user-provided inputs. "
+        "Real-world results will vary. This file does not constitute a legal recommendation, binding proposal, "
+        "contract, or guarantee of any product, service, or financial outcome. "
+        "All deployments require FAA authorization, local ordinances review, and formal procurement."
+    )
     fol_bounds = kml.newfolder(name="Jurisdictions")
     for _, row in active_gdf.iterrows():
         geoms = [row.geometry] if isinstance(row.geometry, Polygon) else row.geometry.geoms
@@ -1624,7 +2216,8 @@ def generate_kml(active_gdf, active_drones, calls_gdf):
         pol.style.polystyle.color = simplekml.Color.changealphaint(60, kml_c)
     fol_calls = kml.newfolder(name="Incident Data (Sample)")
     calls_export = calls_gdf.to_crs(epsg=4326)
-    if len(calls_export) > 2000: calls_export = calls_export.sample(2000, random_state=42)
+    if len(calls_export) > 2000:
+        calls_export = calls_export.sample(2000, random_state=42)
     for _, row in calls_export.iterrows():
         pnt = fol_calls.newpoint()
         pnt.coords = [(row.geometry.x, row.geometry.y)]
@@ -1673,20 +2266,32 @@ def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir):
 
 @st.cache_data(show_spinner=False)
 def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, seed=42):
-    if df_calls_full is None or len(df_calls_full) == 0: return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+    if df_calls_full is None or len(df_calls_full) == 0:
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
     df = df_calls_full.copy()
-    if 'lat' not in df.columns or 'lon' not in df.columns: return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+    if 'lat' not in df.columns or 'lon' not in df.columns:
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
     df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
     df['lon'] = pd.to_numeric(df['lon'], errors='coerce')
     df = df.dropna(subset=['lat', 'lon']).reset_index(drop=True)
-    if df.empty: return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+    if df.empty:
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
     gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon, df.lat), crs="EPSG:4326")
     try:
         gdf_m = gdf.to_crs(epsg=int(epsg_code))
         calls_in_city = gdf_m[gdf_m.within(_city_m)] if _city_m is not None else gdf_m
-    except Exception: calls_in_city = gdf
-    if calls_in_city.empty: return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
-    if len(calls_in_city) <= max_points: return calls_in_city.to_crs(epsg=4326)
+    except Exception:
+        calls_in_city = gdf
+
+    if calls_in_city.empty:
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+    if len(calls_in_city) <= max_points:
+        return calls_in_city.to_crs(epsg=4326)
+
     sampled = calls_in_city.copy()
     minx, miny, maxx, maxy = sampled.total_bounds
     span_x = max(maxx - minx, 1.0)
@@ -1694,24 +2299,34 @@ def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, se
     target_cells = max(25, int(np.sqrt(max_points) * 0.7))
     nx = max(25, min(120, target_cells))
     ny = max(25, min(120, int(target_cells * (span_y / span_x))))
+
     sampled['_gx'] = np.floor((sampled.geometry.x - minx) / span_x * nx).clip(0, nx - 1).astype(int)
     sampled['_gy'] = np.floor((sampled.geometry.y - miny) / span_y * ny).clip(0, ny - 1).astype(int)
     sampled['_cell'] = sampled['_gx'].astype(str) + '_' + sampled['_gy'].astype(str)
+
     counts = sampled['_cell'].value_counts()
     alloc = np.maximum(1, np.floor(counts / counts.sum() * max_points).astype(int))
     shortfall = int(max_points - alloc.sum())
     if shortfall > 0:
         remainders = (counts / counts.sum() * max_points) - np.floor(counts / counts.sum() * max_points)
-        for cell in remainders.sort_values(ascending=False).index[:shortfall]: alloc.loc[cell] += 1
+        for cell in remainders.sort_values(ascending=False).index[:shortfall]:
+            alloc.loc[cell] += 1
+
     parts = []
     for cell, group in sampled.groupby('_cell', sort=False):
         take = int(min(len(group), alloc.get(cell, 1)))
-        if take >= len(group): parts.append(group)
-        elif take > 0: parts.append(group.sample(take, random_state=seed))
-    if not parts: display_calls = sampled.sample(max_points, random_state=seed)
+        if take >= len(group):
+            parts.append(group)
+        elif take > 0:
+            parts.append(group.sample(take, random_state=seed))
+
+    if not parts:
+        display_calls = sampled.sample(max_points, random_state=seed)
     else:
         display_calls = pd.concat(parts, ignore_index=False)
-        if len(display_calls) > max_points: display_calls = display_calls.sample(max_points, random_state=seed)
+        if len(display_calls) > max_points:
+            display_calls = display_calls.sample(max_points, random_state=seed)
+
     display_calls = display_calls.drop(columns=['_gx', '_gy', '_cell'], errors='ignore')
     return display_calls.to_crs(epsg=4326)
 
@@ -1760,98 +2375,66 @@ def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, e
             })
     return calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls
 
-def solve_single_fleet(cov_matrix, dist_matrix, target_k, locked_pins, call_weights=None, excluded_stations=None):
-    """Core MCLP solver for a single drone type, supporting call-weight masking."""
-    n_stations, n_calls = cov_matrix.shape
-    if target_k == 0 or n_calls == 0: return []
-    
-    if call_weights is None:
-        call_weights = np.ones(n_calls)
-        
-    df_profiles = pd.DataFrame(cov_matrix.T).astype(int).astype(str).agg(''.join, axis=1)
-    weights_df = pd.DataFrame({'sig': df_profiles, 'w': call_weights})
-    grouped = weights_df.groupby('sig', sort=False)
-    weights = grouped['w'].sum().values
-    unique_idx = grouped.head(1).index
-    
-    u_cov = cov_matrix[:, unique_idx]
-    u_dist = dist_matrix[:, unique_idx]
-    n_u = len(weights)
-    
-    model = pulp.LpProblem("SingleFleetCoverage", pulp.LpMaximize)
-    x = pulp.LpVariable.dicts("st", range(n_stations), 0, 1, pulp.LpBinary)
-    
-    model += pulp.lpSum(x[i] for i in range(n_stations)) == target_k
-    
-    for p in locked_pins:
-        if p < n_stations: model += x[p] == 1
-        
-    if excluded_stations:
-        for e in excluded_stations:
-            if e < n_stations: model += x[e] == 0
-            
-    y = pulp.LpVariable.dicts("cl", range(n_u), 0, 1, pulp.LpBinary)
-    penalty = 0.00001
-    
-    model += pulp.lpSum(y[i]*weights[i] for i in range(n_u)) - pulp.lpSum(
-        x[s]*np.sum(u_dist[s,:])*penalty for s in range(n_stations)
-    )
-    
-    for i in range(n_u):
-        cover = [x[s] for s in range(n_stations) if u_cov[s,i]]
-        if cover:
-            model += y[i] <= pulp.lpSum(cover)
-        else:
-            model += y[i] == 0
-            
-    model.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=10, gapRel=0.0))
-    return [i for i in range(n_stations) if (pulp.value(x[i]) or 0) > 0.5]
-
-
-def solve_multi_tier_mclp(resp_matrix, guard_matrix, dist_r, dist_g, num_resp, num_guard, strategy, incremental=True, forced_r=None, forced_g=None):
-    """Sequential orchestrator that applies the selected Fleet Strategy logic."""
+def solve_mclp(resp_matrix, guard_matrix, dist_r, dist_g, num_resp, num_guard, allow_redundancy, incremental=True, forced_r=None, forced_g=None):
+    """MCLP optimizer. forced_r / forced_g are lists of station indices that must
+    be included as Responders / Guardians regardless of coverage score."""
     forced_r = list(forced_r or [])
     forced_g = list(forced_g or [])
     n_stations, n_calls = resp_matrix.shape
-    
+    if n_calls == 0 or (num_resp == 0 and num_guard == 0): return [], [], [], []
+    df_profiles = pd.DataFrame(resp_matrix.T).astype(int).astype(str)
+    df_profiles['g'] = pd.DataFrame(guard_matrix.T).astype(int).astype(str).agg(''.join, axis=1)
+    df_profiles['r'] = df_profiles.drop(columns='g').agg(''.join, axis=1)
+    grouped = df_profiles.groupby(['r', 'g'], sort=False)
+    weights = grouped.size().values
+    unique_idx = grouped.head(1).index
+    u_resp = resp_matrix[:, unique_idx]
+    u_guard = guard_matrix[:, unique_idx]
+    u_dist_r = dist_r[:, unique_idx]
+    u_dist_g = dist_g[:, unique_idx]
+    n_u = len(weights)
+
+    def run_lp(target_r, target_g, locked_r, locked_g):
+        model = pulp.LpProblem("DroneCoverage", pulp.LpMaximize)
+        x_r = pulp.LpVariable.dicts("r_st", range(n_stations), 0, 1, pulp.LpBinary)
+        x_g = pulp.LpVariable.dicts("g_st", range(n_stations), 0, 1, pulp.LpBinary)
+        model += pulp.lpSum(x_r[i] for i in range(n_stations)) == target_r
+        model += pulp.lpSum(x_g[i] for i in range(n_stations)) == target_g
+        for r in locked_r: model += x_r[r] == 1
+        for g in locked_g: model += x_g[g] == 1
+        if not allow_redundancy:
+            for s in range(n_stations): model += x_r[s] + x_g[s] <= 1
+        y = pulp.LpVariable.dicts("cl", range(n_u), 0, 1, pulp.LpBinary)
+        penalty = 0.00001
+        model += pulp.lpSum(y[i]*weights[i] for i in range(n_u)) - pulp.lpSum(
+            x_r[s]*np.sum(u_dist_r[s,:])*penalty + x_g[s]*np.sum(u_dist_g[s,:])*penalty
+            for s in range(n_stations))
+        for i in range(n_u):
+            cover = [x_r[s] for s in range(n_stations) if u_resp[s,i]] + [x_g[s] for s in range(n_stations) if u_guard[s,i]]
+            if cover: model += y[i] <= pulp.lpSum(cover)
+            else: model += y[i] == 0
+        model.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=10, gapRel=0.0))
+        return (
+            [i for i in range(n_stations) if (pulp.value(x_r[i]) or 0) > 0.5],
+            [i for i in range(n_stations) if (pulp.value(x_g[i]) or 0) > 0.5]
+        )
+
+    if not incremental:
+        res_r, res_g = run_lp(num_resp, num_guard, forced_r, forced_g)
+        return res_r, res_g, res_r, res_g
+    # Start with forced pins already locked in
     curr_r, curr_g = list(forced_r), list(forced_g)
     chrono_r, chrono_g = list(forced_r), list(forced_g)
-    
-    if num_guard == 0 and num_resp == 0:
-        return [], [], [], []
-        
-    # --- TIER 1: GUARDIAN SOLVE ---
-    if incremental:
-        for tg in range(len(forced_g) + 1, num_guard + 1):
-            next_g = solve_single_fleet(guard_matrix, dist_g, tg, curr_g)
-            chrono_g.extend([x for x in next_g if x not in curr_g])
-            curr_g = next_g
-    else:
-        if num_guard > 0:
-            curr_g = solve_single_fleet(guard_matrix, dist_g, num_guard, forced_g)
-            chrono_g = list(curr_g)
-
-    # --- TIER 2: RESPONDER SOLVE ---
-    call_weights = np.ones(n_calls)
-    excluded_stations = set()
-    
-    if strategy == "Tiered (Gap-Fill)":
-        if curr_g:
-            guard_coverage = guard_matrix[curr_g].any(axis=0)
-            call_weights[guard_coverage] = 0.0 
-    elif strategy == "Strict Separation":
-        excluded_stations = set(curr_g)
-
-    if incremental:
-        for tr in range(len(forced_r) + 1, num_resp + 1):
-            next_r = solve_single_fleet(resp_matrix, dist_r, tr, curr_r, call_weights, excluded_stations)
-            chrono_r.extend([x for x in next_r if x not in curr_r])
-            curr_r = next_r
-    else:
-        if num_resp > 0:
-            curr_r = solve_single_fleet(resp_matrix, dist_r, num_resp, forced_r, call_weights, excluded_stations)
-            chrono_r = list(curr_r)
-            
+    # Add remaining Guardians one at a time (incremental)
+    for tg in range(len(forced_g) + 1, num_guard + 1):
+        next_r, next_g = run_lp(0, tg, curr_r, curr_g)
+        chrono_g.extend([x for x in next_g if x not in curr_g])
+        curr_r, curr_g = next_r, next_g
+    # Add remaining Responders one at a time
+    for tr in range(len(forced_r) + 1, num_resp + 1):
+        next_r, next_g = run_lp(tr, num_guard, curr_r, curr_g)
+        chrono_r.extend([x for x in next_r if x not in curr_r])
+        curr_r, curr_g = next_r, next_g
     return curr_r, curr_g, chrono_r, chrono_g
 
 @st.cache_resource
@@ -1883,7 +2466,8 @@ def compute_all_elbow_curves(n_calls, _resp_matrix, _guard_matrix, _geos_r, _geo
                 cov_count += best_cov
                 curve.append((cov_count / max(1, n_calls)) * 100)
                 if cov_count == n_calls: break
-            else: break
+            else:
+                break
         return curve
 
     def greedy_area(geos, limit):
@@ -1892,25 +2476,35 @@ def compute_all_elbow_curves(n_calls, _resp_matrix, _guard_matrix, _geos_r, _geo
         curve = [0.0]
         import heapq as hq
         geos_sub = geos[:limit]
+        
         pq = [(-geos_sub[i].area, i) for i in range(len(geos_sub))]
         hq.heapify(pq)
+        
         for _ in range(len(geos_sub)):
             if not pq: break
             best_s, best_gain = -1, -1
+            
             while pq:
                 neg_gain, idx = hq.heappop(pq)
-                try: actual_gain = current_union.union(geos_sub[idx]).area - current_union.area
-                except Exception: actual_gain = 0
+                try:
+                    actual_gain = current_union.union(geos_sub[idx]).area - current_union.area
+                except Exception:
+                    actual_gain = 0
+                    
                 if not pq or actual_gain >= -pq[0][0]:
                     best_s, best_gain = idx, actual_gain
                     break
-                else: hq.heappush(pq, (-actual_gain, idx))
+                else:
+                    hq.heappush(pq, (-actual_gain, idx))
+                    
             if best_s != -1 and best_gain > 0:
                 try:
                     current_union = current_union.union(geos_sub[best_s])
                     curve.append((current_union.area / total_area) * 100)
-                except Exception: pass
-            else: break
+                except Exception:
+                    pass
+            else:
+                break
         return curve
 
     with ThreadPoolExecutor() as executor:
@@ -1927,8 +2521,10 @@ def compute_all_elbow_curves(n_calls, _resp_matrix, _guard_matrix, _geos_r, _geo
         return r
     return pd.DataFrame({
         'Drones': range(max_len),
-        'Responder (Calls)': pad(c_r), 'Responder (Area)': pad(a_r),
-        'Guardian (Calls)':  pad(c_g), 'Guardian (Area)':  pad(a_g)
+        'Responder (Calls)': pad(c_r),
+        'Responder (Area)':  pad(a_r),
+        'Guardian (Calls)':  pad(c_g),
+        'Guardian (Area)':   pad(a_g)
     })
 
 # ============================================================
@@ -1937,40 +2533,155 @@ def compute_all_elbow_curves(n_calls, _resp_matrix, _guard_matrix, _geos_r, _geo
 
 if not st.session_state['csvs_ready']:
 
+    # GRAB THE LOGO FOR THE UPLOAD PAGE
     logo_b64 = get_base64_of_bin_file("logo.png")
     hero_logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:48px; margin-bottom:15px; filter: brightness(0) invert(1);">' if logo_b64 else f'<div style="font-size:2.5rem; font-weight:900; letter-spacing:4px; color:#ffffff; margin-bottom:15px;">BRINC</div>'
 
     st.markdown(f"""
     <style>
-    @keyframes pulseGlow {{ 0%, 100% {{ opacity: 0.55; }} 50% {{ opacity: 1.0; }} }}
-    @keyframes fadeUp {{ from {{ opacity:0; transform:translateY(14px); }} to {{ opacity:1; transform:translateY(0); }} }}
-    .brinc-hero {{ position: relative; text-align: center; padding: 52px 24px 40px; margin-bottom: 36px; border-radius: 12px; background: radial-gradient(ellipse at 50% 0%, rgba(0,210,255,0.13) 0%, rgba(0,0,0,0) 68%); border-bottom: 1px solid rgba(0,210,255,0.15); overflow: hidden; animation: fadeUp 0.5s ease both; }}
-    .brinc-hero::before {{ content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(0,210,255,0.025) 39px, rgba(0,210,255,0.025) 40px), repeating-linear-gradient(90deg, transparent, transparent 79px, rgba(0,210,255,0.025) 79px, rgba(0,210,255,0.025) 80px); pointer-events: none; }}
-    .brinc-eyebrow {{ font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 700; letter-spacing: 4px; color: {accent_color}; text-transform: uppercase; opacity: 0.7; margin-bottom: 12px; }}
-    .brinc-h1 {{ font-family: 'Manrope', sans-serif; font-size: clamp(2rem, 4vw, 3rem); font-weight: 900; color: #ffffff; letter-spacing: -0.5px; line-height: 1.08; margin-bottom: 12px; }}
-    .brinc-h1 em {{ font-style: normal; color: {accent_color}; }}
-    .brinc-tagline {{ font-size: 0.88rem; color: #666; max-width: 500px; margin: 0 auto 22px; line-height: 1.65; }}
-    .brinc-badges {{ display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }}
-    .brinc-badge {{ display: inline-flex; align-items: center; gap: 6px; background: rgba(0,210,255,0.07); border: 1px solid rgba(0,210,255,0.2); border-radius: 100px; padding: 4px 13px; font-size: 0.64rem; font-weight: 700; color: {accent_color}; letter-spacing: 0.8px; text-transform: uppercase; }}
-    .brinc-badge.pulse {{ animation: pulseGlow 3s ease-in-out infinite; }}
-    .path-card {{ background: #080808; border: 1px solid #1c1c1c; border-radius: 10px; padding: 22px 18px 16px; position: relative; overflow: hidden; transition: border-color 0.2s ease, box-shadow 0.2s ease; }}
-    .path-card::after {{ content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent); border-radius: 10px 10px 0 0; }}
-    .path-card:hover {{ border-color: rgba(255,255,255,0.12); box-shadow: 0 0 28px rgba(0,210,255,0.05); }}
-    .pc-icon {{ font-size: 1.5rem; display:block; margin-bottom:9px; }}
-    .pc-tag {{ font-size:0.55rem; font-weight:800; letter-spacing:2.5px; text-transform:uppercase; color:var(--accent); margin-bottom:5px; }}
-    .pc-title {{ font-size:1rem; font-weight:800; color:#fff; line-height:1.25; margin-bottom:7px; }}
-    .pc-desc {{ font-size:0.7rem; color:#555; line-height:1.6; margin-bottom:0; }}
-    .field-footnote {{ font-size: 0.63rem; color: #3a3a3a; line-height: 1.75; margin-top: 10px; border-top: 1px solid #141414; padding-top: 10px; }}
-    .demo-cities {{ font-size: 0.65rem; color: #444; line-height: 1.9; margin-top: 10px; }}
+    @keyframes pulseGlow {{
+        0%, 100% {{ opacity: 0.55; }}
+        50%       {{ opacity: 1.0; }}
+    }}
+    @keyframes fadeUp {{
+        from {{ opacity:0; transform:translateY(14px); }}
+        to   {{ opacity:1; transform:translateY(0); }}
+    }}
+    .brinc-hero {{
+        position: relative;
+        text-align: center;
+        padding: 52px 24px 40px;
+        margin-bottom: 36px;
+        border-radius: 12px;
+        background: radial-gradient(ellipse at 50% 0%,
+            rgba(0,210,255,0.13) 0%, rgba(0,0,0,0) 68%);
+        border-bottom: 1px solid rgba(0,210,255,0.15);
+        overflow: hidden;
+        animation: fadeUp 0.5s ease both;
+    }}
+    .brinc-hero::before {{
+        content: '';
+        position: absolute; inset: 0;
+        background:
+            repeating-linear-gradient(0deg,
+                transparent, transparent 39px,
+                rgba(0,210,255,0.025) 39px,
+                rgba(0,210,255,0.025) 40px),
+            repeating-linear-gradient(90deg,
+                transparent, transparent 79px,
+                rgba(0,210,255,0.025) 79px,
+                rgba(0,210,255,0.025) 80px);
+        pointer-events: none;
+    }}
+    .brinc-eyebrow {{
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 0.62rem;
+        font-weight: 700;
+        letter-spacing: 4px;
+        color: {accent_color};
+        text-transform: uppercase;
+        opacity: 0.7;
+        margin-bottom: 12px;
+    }}
+    .brinc-h1 {{
+        font-family: 'Manrope', sans-serif;
+        font-size: clamp(2rem, 4vw, 3rem);
+        font-weight: 900;
+        color: #ffffff;
+        letter-spacing: -0.5px;
+        line-height: 1.08;
+        margin-bottom: 12px;
+    }}
+    .brinc-h1 em {{
+        font-style: normal;
+        color: {accent_color};
+    }}
+    .brinc-tagline {{
+        font-size: 0.88rem;
+        color: #666;
+        max-width: 500px;
+        margin: 0 auto 22px;
+        line-height: 1.65;
+    }}
+    .brinc-badges {{
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 4px;
+    }}
+    .brinc-badge {{
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(0,210,255,0.07);
+        border: 1px solid rgba(0,210,255,0.2);
+        border-radius: 100px;
+        padding: 4px 13px;
+        font-size: 0.64rem;
+        font-weight: 700;
+        color: {accent_color};
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+    }}
+    .brinc-badge.pulse {{
+        animation: pulseGlow 3s ease-in-out infinite;
+    }}
+    .path-card {{
+        background: #080808;
+        border: 1px solid #1c1c1c;
+        border-radius: 10px;
+        padding: 22px 18px 16px;
+        position: relative;
+        overflow: hidden;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }}
+    .path-card::after {{
+        content: '';
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: 3px;
+        background: var(--accent);
+        border-radius: 10px 10px 0 0;
+    }}
+    .path-card:hover {{
+        border-color: rgba(255,255,255,0.12);
+        box-shadow: 0 0 28px rgba(0,210,255,0.05);
+    }}
+    .pc-icon  {{ font-size: 1.5rem; display:block; margin-bottom:9px; }}
+    .pc-tag   {{ font-size:0.55rem; font-weight:800; letter-spacing:2.5px;
+                 text-transform:uppercase; color:var(--accent); margin-bottom:5px; }}
+    .pc-title {{ font-size:1rem; font-weight:800; color:#fff;
+                 line-height:1.25; margin-bottom:7px; }}
+    .pc-desc  {{ font-size:0.7rem; color:#555; line-height:1.6; margin-bottom:0; }}
+    .field-footnote {{
+        font-size: 0.63rem; color: #3a3a3a; line-height: 1.75;
+        margin-top: 10px; border-top: 1px solid #141414;
+        padding-top: 10px;
+    }}
+    .demo-cities {{
+        font-size: 0.65rem; color: #444; line-height: 1.9;
+        margin-top: 10px;
+    }}
     .demo-cities b {{ color: #555; }}
-    .demo-check {{ font-size: 0.63rem; color: #333; line-height: 1.8; margin-top: 12px; border-top: 1px solid #141414; padding-top: 10px; }}
+    .demo-check {{
+        font-size: 0.63rem; color: #333; line-height: 1.8;
+        margin-top: 12px; border-top: 1px solid #141414;
+        padding-top: 10px;
+    }}
     .demo-check span {{ color: {accent_color}; margin-right: 5px; }}
     </style>
+
     <div class="brinc-hero">
         {hero_logo_html}
         <div class="brinc-eyebrow">BRINC Drones · DFR Platform</div>
-        <div class="brinc-h1">Coverage. Operations.<br><em>Savings.</em></div>
-        <div class="brinc-tagline">Optimize drone-as-first-responder deployments for any US jurisdiction. Model coverage, forecast ROI, and generate grant-ready proposals in minutes.</div>
+        <div class="brinc-h1">
+            Coverage. Operations.<br><em>Savings.</em>
+        </div>
+        <div class="brinc-tagline">
+            Optimize drone-as-first-responder deployments for any US jurisdiction.
+            Model coverage, forecast ROI, and generate grant-ready proposals in minutes.
+        </div>
         <div class="brinc-badges">
             <div class="brinc-badge pulse">🛰 3D Swarm Simulation</div>
             <div class="brinc-badge">🗺 Census Boundaries</div>
@@ -1986,41 +2697,74 @@ if not st.session_state['csvs_ready']:
     with path_sim_col:
         st.markdown(f"""
         <div class="path-card" style="--accent:{accent_color};">
-            <span class="pc-icon">🗺</span><div class="pc-tag">Path 01</div>
+            <span class="pc-icon">🗺</span>
+            <div class="pc-tag">Path 01</div>
             <div class="pc-title">Simulate Any<br>US Region</div>
             <div class="pc-desc">No data needed. Real Census boundaries + realistic 911 call distribution generated automatically. Stack multiple jurisdictions in one run.</div>
         </div>
         """, unsafe_allow_html=True)
+
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
         for i in range(st.session_state.city_count):
             c1, c2 = st.columns([3, 1])
             c_val = st.session_state['target_cities'][i]['city'] if i < len(st.session_state['target_cities']) else ""
             s_val = st.session_state['target_cities'][i]['state'] if i < len(st.session_state['target_cities']) else "FL"
-            c_name = c1.text_input(f"City or County {i+1}", value=c_val, key=f"c_{i}", placeholder="e.g. Orlando OR Orange County")
+            c_name = c1.text_input(
+                f"City or County {i+1}", value=c_val, key=f"c_{i}",
+                placeholder="e.g. Orlando OR Orange County",
+                help="Official municipality or county name."
+            )
             state_idx = list(STATE_FIPS.keys()).index(s_val) if s_val in STATE_FIPS else 8
-            s_name = c2.selectbox(f"State {i+1}", list(STATE_FIPS.keys()), index=state_idx, key=f"s_{i}", label_visibility="collapsed" if i > 0 else "visible")
-            if i < len(st.session_state['target_cities']): st.session_state['target_cities'][i] = {"city": c_name, "state": s_name}
-            else: st.session_state['target_cities'].append({"city": c_name, "state": s_name})
+            s_name = c2.selectbox(
+                f"State {i+1}", list(STATE_FIPS.keys()), index=state_idx,
+                key=f"s_{i}",
+                label_visibility="collapsed" if i > 0 else "visible"
+            )
+            if i < len(st.session_state['target_cities']):
+                st.session_state['target_cities'][i] = {"city": c_name, "state": s_name}
+            else:
+                st.session_state['target_cities'].append({"city": c_name, "state": s_name})
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-        st.file_uploader("Optional: Custom stations (CSV or Excel)", type=['csv', 'xlsx', 'xls', 'xlsm', 'xlsb'], key="sim_station_uploader")
+        st.file_uploader(
+            "Optional: Custom stations (CSV or Excel)",
+            type=['csv', 'xlsx', 'xls', 'xlsm', 'xlsb'],
+            key="sim_station_uploader",
+            help="Include 'lat'/'lon' OR 'address' columns. Max ~20 locations for auto-geocoding."
+        )
+
         col_add, col_run = st.columns([1, 1])
         if st.session_state.city_count < 10:
             if col_add.button("＋ City", use_container_width=True, key="add_city_btn"):
-                st.session_state.city_count += 1; st.rerun()
-        submit_demo = col_run.button("▶ Run", use_container_width=True, key="run_sim_btn")
+                st.session_state.city_count += 1
+                st.rerun()
+        submit_demo = col_run.button("▶ Run", use_container_width=True, key="run_sim_btn",
+                                     help="Fetch boundaries and launch the simulation.")
 
     with path_upload_col:
         st.markdown(f"""
         <div class="path-card" style="--accent:#39FF14;">
-            <span class="pc-icon">📂</span><div class="pc-tag">Path 02</div>
+            <span class="pc-icon">📂</span>
+            <div class="pc-tag">Path 02</div>
             <div class="pc-title">Upload CAD<br>or .brinc Save</div>
-            <div class="pc-desc">Drop <b>any</b> CAD export CSV — no renaming needed. Or, drop a previously saved <b>.brinc</b> file to instantly restore your deployment.</div>
+            <div class="pc-desc">
+                Drop <b>any</b> CAD export CSV — no renaming needed.
+                Or, drop a previously saved <b>.brinc</b> file to instantly restore your deployment.
+            </div>
         </div>
         """, unsafe_allow_html=True)
+
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-        uploaded_files = st.file_uploader("Drop your CAD export (+ optional stations CSV)", accept_multiple_files=True, type=['csv', 'xlsx', 'xls', 'xlsb', 'xlsm', 'brinc', 'json', 'txt'], label_visibility="collapsed")
+
+        uploaded_files = st.file_uploader(
+            "Drop your CAD export (+ optional stations CSV)",
+            accept_multiple_files=True,
+            type=['csv', 'xlsx', 'xls', 'xlsb', 'xlsm', 'brinc', 'json', 'txt'],
+            label_visibility="collapsed",
+            help="One file = raw CAD export. Two files = calls + stations. OR drop a .brinc file to restore a previous session."
+        )
+
         st.markdown("""
         <div class="field-footnote">
             <b style='color:#555;'>1 file</b> — any CAD export (CSV or Excel); stations auto-built from OSM<br>
@@ -2031,24 +2775,33 @@ if not st.session_state['csvs_ready']:
         """, unsafe_allow_html=True)
 
         def _looks_like_stations(fname):
-            return any(k in fname.lower() for k in ['station','dept','agency','facility','police','fire','loc'])
+            n = fname.lower()
+            return any(k in n for k in ['station','dept','agency','facility','police','fire','loc'])
 
         if uploaded_files and len(uploaded_files) >= 1:
+            
+            # --- 1. INTELLIGENTLY CHECK FOR .BRINC FILE ---
+            # Browsers sometimes append .json to .brinc files on download
             brinc_file = None
             for f in uploaded_files:
                 fname = f.name.lower()
                 if '.brinc' in fname or fname.endswith('.json'):
                     try:
+                        # Quick peek inside to see if it has our save data keys
                         f.seek(0)
                         peek = json.loads(f.getvalue().decode('utf-8'))
                         if 'k_resp' in peek and 'calls_data' in peek:
-                            brinc_file = f; break
-                    except: pass
+                            brinc_file = f
+                            break
+                    except:
+                        pass
+
             if brinc_file:
                 with st.spinner("💾 Restoring saved deployment..."):
                     try:
                         brinc_file.seek(0)
                         save_data = json.loads(brinc_file.getvalue().decode('utf-8'))
+                        
                         st.session_state['active_city'] = save_data.get('city', 'Unknown')
                         st.session_state['active_state'] = save_data.get('state', 'US')
                         st.session_state['k_resp'] = save_data.get('k_resp', 2)
@@ -2057,19 +2810,23 @@ if not st.session_state['csvs_ready']:
                         st.session_state['r_guard'] = save_data.get('r_guard', 8.0)
                         st.session_state['dfr_rate'] = save_data.get('dfr_rate', 25)
                         st.session_state['deflect_rate'] = save_data.get('deflect_rate', 30)
+                        
                         if save_data.get('calls_data'):
                             df_c = pd.DataFrame(save_data['calls_data'])
+                            # Safely cast to numeric so the map geometry doesn't crash
                             if 'lat' in df_c.columns: df_c['lat'] = pd.to_numeric(df_c['lat'], errors='coerce')
                             if 'lon' in df_c.columns: df_c['lon'] = pd.to_numeric(df_c['lon'], errors='coerce')
                             st.session_state['df_calls'] = df_c
                             st.session_state['df_calls_full'] = df_c.copy()
                             st.session_state['total_original_calls'] = len(df_c)
                             st.session_state['total_modeled_calls'] = len(df_c)
+                        
                         if save_data.get('stations_data'):
                             df_s = pd.DataFrame(save_data['stations_data'])
                             if 'lat' in df_s.columns: df_s['lat'] = pd.to_numeric(df_s['lat'], errors='coerce')
                             if 'lon' in df_s.columns: df_s['lon'] = pd.to_numeric(df_s['lon'], errors='coerce')
                             st.session_state['df_stations'] = df_s
+                            
                         st.session_state['data_source'] = 'brinc_file'
                         st.session_state['map_build_logged'] = False
                         st.session_state['csvs_ready'] = True
@@ -2078,27 +2835,45 @@ if not st.session_state['csvs_ready']:
                     except Exception as e:
                         st.error(f"❌ Error loading .brinc file: {e}")
                         st.stop()
+
             else:
-                st.session_state['active_city'] = ""; st.session_state['active_state'] = ""; st.session_state['target_cities'] = []
+                # --- 2. OTHERWISE, PROCESS AS NORMAL CSV CAD DATA ---
+                st.session_state['active_city'] = ""
+                st.session_state['active_state'] = ""
+                st.session_state['target_cities'] = []
+
                 f_list = list(uploaded_files)
-                call_files = []; station_file = None
+                call_files = []
+                station_file = None
+
                 for f in f_list:
-                    if _looks_like_stations(f.name): station_file = f
-                    else: call_files.append(f)
+                    if _looks_like_stations(f.name):
+                        station_file = f
+                    else:
+                        call_files.append(f)
+                
                 if len(f_list) == 2 and not station_file:
                     f0, f1 = f_list
                     f0.seek(0); sz0 = len(f0.read()); f0.seek(0)
                     f1.seek(0); sz1 = len(f1.read()); f1.seek(0)
-                    if sz0 >= sz1: call_files = [f0]; station_file = f1
-                    else: call_files = [f1]; station_file = f0
+                    if sz0 >= sz1:
+                        call_files = [f0]
+                        station_file = f1
+                    else:
+                        call_files = [f1]
+                        station_file = f0
+
                 if call_files:
                     with st.spinner("🔍 Detecting column types in CAD export…"):
                         df_c = aggressive_parse_calls(call_files)
+
                     if df_c is None or df_c.empty:
                         st.error("❌ Calls file error: Could not parse valid coordinates.")
                         st.stop()
+
                     df_c_full = df_c.reset_index(drop=True).copy()
                     st.session_state['total_original_calls'] = len(df_c_full)
+
                     if len(df_c_full) > 25000:
                         df_c = df_c_full.sample(25000, random_state=42).reset_index(drop=True)
                         st.session_state['total_modeled_calls'] = len(df_c)
@@ -2106,6 +2881,7 @@ if not st.session_state['csvs_ready']:
                     else:
                         df_c = df_c_full.copy()
                         st.session_state['total_modeled_calls'] = len(df_c)
+
                     if station_file is not None:
                         with st.spinner("🔍 Reading stations file…"):
                             try:
@@ -2113,51 +2889,78 @@ if not st.session_state['csvs_ready']:
                                 if sfname.endswith(('.xlsx', '.xls', '.xlsm', '.xlsb')):
                                     engine = 'xlrd' if sfname.endswith('.xls') else 'pyxlsb' if sfname.endswith('.xlsb') else 'openpyxl'
                                     df_s = pd.read_excel(io.BytesIO(station_file.getvalue()), engine=engine)
-                                else: df_s = pd.read_csv(station_file)
+                                else:
+                                    df_s = pd.read_csv(station_file)
                                 df_s.columns = [str(c).lower().strip() for c in df_s.columns]
                                 if 'latitude' in df_s.columns: df_s = df_s.rename(columns={'latitude':'lat'})
                                 if 'longitude' in df_s.columns: df_s = df_s.rename(columns={'longitude':'lon'})
                                 if 'station_name' in df_s.columns: df_s = df_s.rename(columns={'station_name':'name'})
                                 if 'station_type' in df_s.columns: df_s = df_s.rename(columns={'station_type':'type'})
+                                
                                 if 'lat' in df_s.columns and 'lon' in df_s.columns:
                                     df_s['lat'] = pd.to_numeric(df_s['lat'], errors='coerce')
                                     df_s['lon'] = pd.to_numeric(df_s['lon'], errors='coerce')
-                                else: raise ValueError("Could not find lat/lon columns.")
-                                if 'name' not in df_s.columns: df_s['name'] = [f"Site {i+1}" for i in range(len(df_s))]
+                                else:
+                                    raise ValueError("Could not find lat/lon columns.")
+
+                                if 'name' not in df_s.columns: 
+                                    df_s['name'] = [f"Site {i+1}" for i in range(len(df_s))]
                                 else:
                                     df_s['name'] = df_s['name'].fillna('').astype(str).str.strip()
                                     df_s['name'] = df_s['name'].replace(r'(?i)^(null|<null>|nan|none)$', '', regex=True)
                                     df_s['name'] = [n if n else f"Site {i+1}" for i, n in enumerate(df_s['name'])]
+
                                 counts = {}
                                 new_names = []
                                 for n in df_s['name']:
-                                    if n in counts: counts[n] += 1; new_names.append(f"{n} ({counts[n]})")
-                                    else: counts[n] = 0; new_names.append(n)
+                                    if n in counts:
+                                        counts[n] += 1
+                                        new_names.append(f"{n} ({counts[n]})")
+                                    else:
+                                        counts[n] = 0
+                                        new_names.append(n)
                                 df_s['name'] = new_names
+
                                 if 'type' not in df_s.columns: df_s['type'] = 'Police'
                                 df_s = df_s.dropna(subset=['lat', 'lon']).reset_index(drop=True)
                                 osm_note = "Loaded stations from file."
-                            except Exception as e: df_s, osm_note = None, f"Failed: {e}"
-                        if df_s is None or df_s.empty: st.error(f"❌ Stations file error: {osm_note}"); st.stop()
+                            except Exception as e:
+                                df_s, osm_note = None, f"Failed: {e}"
+                        if df_s is None or df_s.empty:
+                            st.error(f"❌ Stations file error: {osm_note}")
+                            st.stop()
                     else:
                         with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools…"):
                             df_s, osm_note = generate_stations_from_calls(df_c)
                         if df_s is None or df_s.empty:
+                            # Final safety net: scatter stations across call bounding box
                             df_s = _make_random_stations(df_c, n=40)
                             osm_note = "⚠️ Could not reach any map source — using estimated station positions from call data."
                             st.warning(osm_note)
-                        else: st.toast(f"✅ {osm_note}")
-                    if len(df_s) > 100: df_s = df_s.sample(100, random_state=42).reset_index(drop=True)
+                        else:
+                            st.toast(f"✅ {osm_note}")
 
-                    detected_city, detected_state = None, None
+                    if len(df_s) > 100:
+                        df_s = df_s.sample(100, random_state=42).reset_index(drop=True)
+
+                    detected_city = None
+                    detected_state = None
+
                     with st.spinner(get_jurisdiction_message()):
+                        # Priority 1: city/state extracted directly from the CAD export
                         if '_csv_city' in df_c.columns:
                             city_val = str(df_c['_csv_city'].iloc[0]).strip().title()
-                            if city_val and city_val.lower() not in ('nan', 'none', ''): detected_city = city_val
+                            if city_val and city_val.lower() not in ('nan', 'none', ''):
+                                detected_city = city_val
+
                         if '_csv_state' in df_c.columns:
                             state_val = str(df_c['_csv_state'].iloc[0]).strip().upper()
-                            if state_val in STATE_FIPS: detected_state = state_val
-                            elif state_val.title() in US_STATES_ABBR: detected_state = US_STATES_ABBR[state_val.title()]
+                            if state_val in STATE_FIPS:
+                                detected_state = state_val
+                            elif state_val.title() in US_STATES_ABBR:
+                                detected_state = US_STATES_ABBR[state_val.title()]
+
+                        # If the export gives us a city but not a state, forward-geocode the city name.
                         if detected_city and not detected_state:
                             try:
                                 geo_url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(detected_city)}&limit=1&countrycodes=us"
@@ -2168,28 +2971,44 @@ if not st.session_state['csvs_ready']:
                                     display_name = geo_result[0].get('display_name', '')
                                     parts = [p.strip() for p in display_name.split(',')]
                                     state_full = parts[2] if len(parts) >= 3 else ''
-                                    if state_full in US_STATES_ABBR: detected_state = US_STATES_ABBR[state_full]
-                            except Exception: pass
+                                    if state_full in US_STATES_ABBR:
+                                        detected_state = US_STATES_ABBR[state_full]
+                            except Exception:
+                                pass
+
+                        # Priority 2: reverse-geocode the centroid of the calls, not the first row.
                         if not detected_city or not detected_state:
                             try:
-                                cen_lat, cen_lon = float(df_c['lat'].median()), float(df_c['lon'].median())
+                                cen_lat = float(df_c['lat'].median())
+                                cen_lon = float(df_c['lon'].median())
                                 detected_state_full, detected_city_rg = reverse_geocode_state(cen_lat, cen_lon)
                                 if detected_state_full and detected_state_full in US_STATES_ABBR:
-                                    if not detected_state: detected_state = US_STATES_ABBR[detected_state_full]
-                                    if not detected_city and detected_city_rg and detected_city_rg != 'Unknown City': detected_city = detected_city_rg
-                            except Exception: pass
+                                    if not detected_state:
+                                        detected_state = US_STATES_ABBR[detected_state_full]
+                                    if not detected_city and detected_city_rg and detected_city_rg != 'Unknown City':
+                                        detected_city = detected_city_rg
+                            except Exception:
+                                pass
+
                         if detected_city and detected_state:
                             st.session_state['active_city'] = detected_city
                             st.session_state['active_state'] = detected_state
                             st.session_state['target_cities'] = [{"city": detected_city, "state": detected_state}]
                             st.toast(f"📍 Detected: {detected_city}, {detected_state}")
 
+                    # Only clip calls to the station bbox once we know the correct jurisdiction.
                     if detected_city and detected_state:
                         lat_min, lat_max = df_s['lat'].min(), df_s['lat'].max()
                         lon_min, lon_max = df_s['lon'].min(), df_s['lon'].max()
-                        clip_mask_modeled = ((df_c['lat'] >= lat_min - 0.5) & (df_c['lat'] <= lat_max + 0.5) & (df_c['lon'] >= lon_min - 0.5) & (df_c['lon'] <= lon_max + 0.5))
+                        clip_mask_modeled = (
+                            (df_c['lat'] >= lat_min - 0.5) & (df_c['lat'] <= lat_max + 0.5) &
+                            (df_c['lon'] >= lon_min - 0.5) & (df_c['lon'] <= lon_max + 0.5)
+                        )
                         df_c = df_c[clip_mask_modeled].reset_index(drop=True)
-                        clip_mask_full = ((df_c_full['lat'] >= lat_min - 0.5) & (df_c_full['lat'] <= lat_max + 0.5) & (df_c_full['lon'] >= lon_min - 0.5) & (df_c_full['lon'] <= lon_max + 0.5))
+                        clip_mask_full = (
+                            (df_c_full['lat'] >= lat_min - 0.5) & (df_c_full['lat'] <= lat_max + 0.5) &
+                            (df_c_full['lon'] >= lon_min - 0.5) & (df_c_full['lon'] <= lon_max + 0.5)
+                        )
                         df_c_full = df_c_full[clip_mask_full].reset_index(drop=True)
 
                     st.session_state['df_calls']             = df_c
@@ -2199,26 +3018,41 @@ if not st.session_state['csvs_ready']:
                     st.session_state['total_modeled_calls']  = len(df_c)
 
                     with st.spinner(get_jurisdiction_message()):
+                        # ── BOUNDARY LOOKUP: fetch & save shapefile NOW so
+                        # find_relevant_jurisdictions() can use it on the map page ──
                         detected_city_for_boundary = st.session_state.get('active_city', '')
                         detected_state_for_boundary = st.session_state.get('active_state', '')
                         if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
-                            b_success, b_gdf = fetch_place_boundary_local(detected_state_for_boundary, detected_city_for_boundary)
+                            # Boundary lookup priority:
+                            # 1. places_lite.parquet  — exact city shape (best)
+                            # 2. counties_lite.parquet — same-name county
+                            # 3. Geocode → find county → counties_lite.parquet
+                            b_success, b_gdf = fetch_place_boundary_local(
+                                detected_state_for_boundary, detected_city_for_boundary)
                             if not b_success:
-                                for name_try in [detected_city_for_boundary, detected_city_for_boundary + " County"]:
-                                    b_success, b_gdf = fetch_county_boundary_local(detected_state_for_boundary, name_try)
-                                    if b_success and b_gdf is not None: break
+                                for name_try in [detected_city_for_boundary,
+                                                 detected_city_for_boundary + " County"]:
+                                    b_success, b_gdf = fetch_county_boundary_local(
+                                        detected_state_for_boundary, name_try)
+                                    if b_success and b_gdf is not None:
+                                        break
                             if not b_success:
-                                county_name = lookup_county_for_city(detected_city_for_boundary, detected_state_for_boundary)
+                                county_name = lookup_county_for_city(
+                                    detected_city_for_boundary, detected_state_for_boundary)
                                 if county_name:
-                                    b_success, b_gdf = fetch_county_boundary_local(detected_state_for_boundary, county_name)
+                                    b_success, b_gdf = fetch_county_boundary_local(
+                                        detected_state_for_boundary, county_name)
                                     if b_success and b_gdf is not None:
                                         b_gdf = b_gdf.copy()
                                         b_gdf['NAME'] = detected_city_for_boundary + " (" + county_name + " County)"
                             if b_success and b_gdf is not None:
                                 try:
                                     safe_n = detected_city_for_boundary.replace(" ", "_").replace("/", "_")
-                                    b_gdf.to_file(os.path.join(SHAPEFILE_DIR, f"{safe_n}_{detected_state_for_boundary}.shp"))
-                                except Exception: pass
+                                    b_gdf.to_file(os.path.join(
+                                        SHAPEFILE_DIR,
+                                        f"{safe_n}_{detected_state_for_boundary}.shp"))
+                                except Exception:
+                                    pass
 
                     st.session_state['data_source'] = 'cad_upload'
                     st.session_state['map_build_logged'] = False
@@ -2228,12 +3062,15 @@ if not st.session_state['csvs_ready']:
     with path_demo_col:
         st.markdown(f"""
         <div class="path-card" style="--accent:#FFD700;">
-            <span class="pc-icon">⚡</span><div class="pc-tag">Path 03</div>
+            <span class="pc-icon">⚡</span>
+            <div class="pc-tag">Path 03</div>
             <div class="pc-title">1-Click Demo<br>Large US City</div>
             <div class="pc-desc">Instantly spin up a fully pre-configured scenario for a major US city. Ideal for live stakeholder presentations and platform walkthroughs.</div>
         </div>
         """, unsafe_allow_html=True)
+
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
         if st.button("⚡ Launch Random Demo City", use_container_width=True, key="demo_btn"):
             random.seed(datetime.datetime.now().microsecond + os.getpid())
             already_used = st.session_state.get('_last_demo_city', '')
@@ -2242,22 +3079,43 @@ if not st.session_state['csvs_ready']:
             st.session_state['_last_demo_city'] = rcity
             st.session_state['target_cities'] = [{"city": rcity, "state": rstate}]
             st.session_state.city_count = 1
-            for i in range(10): st.session_state.pop(f"c_{i}", None); st.session_state.pop(f"s_{i}", None)
+            for i in range(10):
+                st.session_state.pop(f"c_{i}", None)
+                st.session_state.pop(f"s_{i}", None)
             st.session_state['trigger_sim'] = True
             st.rerun()
 
         city_chips = "  ·  ".join([f"{c}" for c, _ in DEMO_CITIES[:12]]) + "  · and more…"
         st.markdown(f"""
-        <div class="demo-cities"><b>Available Cities</b><br>{city_chips}</div>
-        <div class="demo-check"><span>✓</span>Real Census boundaries<br><span>✓</span>Clustered 911 simulation<br><span>✓</span>100 station candidates<br><span>✓</span>Full optimization & export</div>
+        <div class="demo-cities">
+            <b>Available Cities</b><br>
+            {city_chips}
+        </div>
+        <div class="demo-check">
+            <span>✓</span>Real Census boundaries<br>
+            <span>✓</span>Clustered 911 simulation<br>
+            <span>✓</span>100 station candidates<br>
+            <span>✓</span>Full optimization & export
+        </div>
         """, unsafe_allow_html=True)
 
-    st.markdown(f"""<div style="text-align:center; margin-top:8px; font-size:0.63rem; color:#2a2a2a;">BRINC Drones, Inc. · <a href="https://brincdrones.com" target="_blank" style="color:#333; text-decoration:none;">brincdrones.com</a> · All coverage estimates are for planning purposes only.</div>""", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style="text-align:center; margin-top:8px; font-size:0.63rem; color:#2a2a2a;">
+        BRINC Drones, Inc. · <a href="https://brincdrones.com" target="_blank"
+        style="color:#333; text-decoration:none;">brincdrones.com</a>
+        · All coverage estimates are for planning purposes only.
+    </div>
+    """, unsafe_allow_html=True)
 
     if submit_demo or st.session_state.get('trigger_sim', False):
-        if st.session_state.get('trigger_sim', False): st.session_state['trigger_sim'] = False
+        if st.session_state.get('trigger_sim', False):
+            st.session_state['trigger_sim'] = False
+
         active_targets = [loc for loc in st.session_state['target_cities'] if loc['city'].strip()]
-        if not active_targets: st.error("Please enter at least one valid city name."); st.stop()
+        if not active_targets:
+            st.error("Please enter at least one valid city name.")
+            st.stop()
+
         if len(active_targets) == 1:
             st.session_state['active_city']  = active_targets[0]['city']
             st.session_state['active_state'] = active_targets[0]['state']
@@ -2266,39 +3124,62 @@ if not st.session_state['csvs_ready']:
             st.session_state['active_state'] = active_targets[0]['state']
 
         prog = st.progress(0, text="🫡 Preparing tools worthy of those who serve…")
-        all_gdfs = []; total_estimated_pop = 0
+        all_gdfs = []
+        total_estimated_pop = 0
 
         for i, loc in enumerate(active_targets):
-            c_name = loc['city'].strip(); s_name = loc['state']
+            c_name = loc['city'].strip()
+            s_name = loc['state']
             is_county = c_name.lower().endswith(" county")
-            prog.progress(10 + int((i / len(active_targets)) * 20), text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
+            
+            prog.progress(10 + int((i / len(active_targets)) * 20),
+                          text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
+            
+            # Boundary lookup priority:
+            # 1. places_lite.parquet  — exact city/town shape (best)
+            # 2. counties_lite.parquet — county that shares the city name
+            # 3. Geocode city → find its county → counties_lite.parquet
             success, temp_gdf = fetch_place_boundary_local(s_name, c_name)
-            if not success: success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
-            if not success: success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
             if not success:
+                # Direct county name match (e.g. "Gilmer County" or "Gilmer")
+                success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
+            if not success:
+                success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
+            if not success:
+                # City doesn't share its county's name — geocode to find the county
                 county_name = lookup_county_for_city(c_name, s_name)
                 if county_name:
                     success, temp_gdf = fetch_county_boundary_local(s_name, county_name)
                     if success and temp_gdf is not None:
                         temp_gdf = temp_gdf.copy()
                         temp_gdf['NAME'] = c_name + " (" + county_name + " County)"
-            if success: is_county = True
+            if success:
+                is_county = True
+
+            # County boundaries come from the parquet, not from TIGER, so they are
+            # never written to SHAPEFILE_DIR. find_relevant_jurisdictions() only scans
+            # that directory, so without this save it always falls back to
+            # "Auto-Generated Boundary". Save any successfully loaded county GDF now.
             if success and is_county and temp_gdf is not None:
                 try:
                     safe_name = c_name.replace(" ", "_").replace("/", "_")
                     county_shp_path = os.path.join(SHAPEFILE_DIR, f"{safe_name}_{s_name}.shp")
                     temp_gdf.to_file(county_shp_path)
-                except Exception: pass
+                except Exception:
+                    pass  # If save fails, fall back gracefully
+
             if success:
                 all_gdfs.append(temp_gdf)
                 pop = fetch_census_population(STATE_FIPS[s_name], c_name, is_county=is_county)
                 if pop:
-                    total_estimated_pop += pop; st.toast(f"✅ {c_name} population verified: {pop:,}")
+                    total_estimated_pop += pop
+                    st.toast(f"✅ {c_name} population verified: {pop:,}")
                 else:
-                    gdf_proj = temp_gdf.to_crs(epsg=3857)
+                    gdf_proj   = temp_gdf.to_crs(epsg=3857)
                     area_sq_mi = gdf_proj.geometry.area.sum() / 2589988.11
                     est = KNOWN_POPULATIONS.get(c_name, int(area_sq_mi * 3500))
-                    total_estimated_pop += est; st.toast(f"⚠️ {c_name} population estimated: {est:,}")
+                    total_estimated_pop += est
+                    st.toast(f"⚠️ {c_name} population estimated: {est:,}")
             else:
                 st.warning(f"⚠️ Could not find a boundary for {c_name}, {s_name}. Try another city.")
                 if st.session_state.get('_last_demo_city') == c_name:
@@ -2307,11 +3188,15 @@ if not st.session_state['csvs_ready']:
                     rcity, rstate = random.choice(candidates)
                     st.session_state['_last_demo_city'] = rcity
                     st.session_state['target_cities'] = [{"city": rcity, "state": rstate}]
-                    for j in range(10): st.session_state.pop(f"c_{j}", None); st.session_state.pop(f"s_{j}", None)
+                    for j in range(10):
+                        st.session_state.pop(f"c_{j}", None)
+                        st.session_state.pop(f"s_{j}", None)
                     st.rerun()
 
         if not all_gdfs:
-            prog.empty(); st.error("❌ Could not find Census boundaries for any of the entered locations. Check spelling."); st.stop()
+            prog.empty()
+            st.error("❌ Could not find Census boundaries for any of the entered locations. Check spelling.")
+            st.stop()
 
         prog.progress(35, text="💙 Boundaries loaded — honoring the officers who know every street…")
         active_city_gdf = pd.concat(all_gdfs, ignore_index=True)
@@ -2340,6 +3225,7 @@ if not st.session_state['csvs_ready']:
         st.session_state['df_calls_full'] = df_demo.copy()
         st.session_state['total_modeled_calls'] = len(df_demo)
 
+        # --- PROCESS OPTIONAL CUSTOM STATIONS ---
         custom_stations_used = False
         sim_uploader = st.session_state.get('sim_station_uploader')
         
@@ -2350,41 +3236,70 @@ if not st.session_state['csvs_ready']:
                 sim_uploader.seek(0)
                 s_df = pd.read_csv(sim_uploader)
                 s_df.columns = [str(c).lower().strip() for c in s_df.columns]
+                
+                # Detect what columns the user provided
                 lat_col = next((c for c in s_df.columns if c in ['lat', 'latitude', 'y']), None)
                 lon_col = next((c for c in s_df.columns if c in ['lon', 'long', 'longitude', 'x']), None)
                 addr_col = next((c for c in s_df.columns if any(a in c for a in ['address', 'street', 'location'])), None)
                 name_col = next((c for c in s_df.columns if any(n in c for n in ['name', 'station', 'facility', 'dept'])), None)
                 type_col = next((c for c in s_df.columns if any(t in c for t in ['type', 'category'])), None)
+                
                 parsed_stations = []
                 for idx, row in s_df.iterrows():
                     s_name = str(row[name_col]) if name_col and pd.notna(row[name_col]) else f"Custom Station {idx+1}"
                     s_type = str(row[type_col]) if type_col and pd.notna(row[type_col]) else 'Custom'
                     s_lat, s_lon = None, None
-                    if lat_col and lon_col and pd.notna(row[lat_col]) and pd.notna(row[lon_col]): s_lat, s_lon = float(row[lat_col]), float(row[lon_col])
+                    
+                    if lat_col and lon_col and pd.notna(row[lat_col]) and pd.notna(row[lon_col]):
+                        s_lat, s_lon = float(row[lat_col]), float(row[lon_col])
                     elif addr_col and pd.notna(row[addr_col]):
                         addr_str = str(row[addr_col])
+                        # Attempt geocoding
                         s_lat, s_lon = forward_geocode(addr_str)
-                        if s_lat is None: s_lat, s_lon = forward_geocode(f"{addr_str}, {active_targets[0]['city']}, {active_targets[0]['state']}")
-                        if s_lat is None: st.toast(f"⚠️ Could not geocode: {addr_str}")
-                        time.sleep(1)
-                    if s_lat and s_lon: parsed_stations.append({'name': s_name, 'lat': s_lat, 'lon': s_lon, 'type': s_type})
+                        if s_lat is None:
+                            # Fallback: Try appending the city and state to the address string
+                            s_lat, s_lon = forward_geocode(f"{addr_str}, {active_targets[0]['city']}, {active_targets[0]['state']}")
+                        if s_lat is None:
+                            st.toast(f"⚠️ Could not geocode: {addr_str}")
+                        time.sleep(1) # Slow down requests slightly to prevent API blocking
+                        
+                    if s_lat and s_lon:
+                        parsed_stations.append({
+                            'name': s_name,
+                            'lat': s_lat,
+                            'lon': s_lon,
+                            'type': s_type
+                        })
+                        
                 if parsed_stations:
                     st.session_state['df_stations'] = pd.DataFrame(parsed_stations)
                     custom_stations_used = True
-                else: st.warning("⚠️ Could not geocode or parse your custom stations. Falling back to 100 random stations.")
-            except Exception as e: st.warning(f"⚠️ Error reading custom stations: {e}. Falling back to random stations.")
+                else:
+                    st.warning("⚠️ Could not geocode or parse your custom stations. Falling back to 100 random stations.")
+            except Exception as e:
+                st.warning(f"⚠️ Error reading custom stations: {e}. Falling back to random stations.")
 
+        # --- FALLBACK: PULL REAL STATIONS FROM OPENSTREETMAP ---
         if not custom_stations_used:
             prog.progress(80, text="🌐 Querying OpenStreetMap for real police, fire & schools…")
+            
+            # Use the simulated calls we just made to find the bounding box, and pull real OSM data!
             df_s, osm_note = generate_stations_from_calls(st.session_state['df_calls'])
+            
             if df_s is not None and not df_s.empty:
                 st.session_state['df_stations'] = df_s
                 st.toast(f"✅ {osm_note}")
             else:
+                # Absolute worst-case scenario (no internet or OSM API is down): fall back to random
                 st.warning("⚠️ Could not reach OpenStreetMap for real stations. Falling back to random placements.")
                 station_points = generate_random_points_in_polygon(city_poly, 100)
                 types = ['Police', 'Fire', 'EMS'] * 34
-                st.session_state['df_stations'] = pd.DataFrame({'name': [f'Station {i+1}' for i in range(len(station_points))], 'lat': [p[0] for p in station_points], 'lon': [p[1] for p in station_points], 'type': types[:len(station_points)]})
+                st.session_state['df_stations'] = pd.DataFrame({
+                    'name': [f'Station {i+1}' for i in range(len(station_points))],
+                    'lat':  [p[0] for p in station_points],
+                    'lon':  [p[1] for p in station_points],
+                    'type': types[:len(station_points)]
+                })
 
         prog.progress(100, text="✅ Ready — built for the communities they protect and serve.")
         st.session_state['inferred_daily_calls_override'] = int(annual_cfs / 365)
@@ -2398,14 +3313,18 @@ if not st.session_state['csvs_ready']:
 # ============================================================
 if st.session_state['csvs_ready']:
     components.html("<script>window._brincHasData = true;</script>", height=0)
+
     df_calls = st.session_state['df_calls'].copy()
     df_calls_full = st.session_state.get('df_calls_full')
-    if df_calls_full is None: df_calls_full = df_calls.copy()
-    else: df_calls_full = df_calls_full.copy()
+    if df_calls_full is None:
+        df_calls_full = df_calls.copy()
+    else:
+        df_calls_full = df_calls_full.copy()
     df_stations_all = st.session_state['df_stations'].copy()
     full_total_calls = int(st.session_state.get('total_original_calls', len(df_calls_full) if df_calls_full is not None else len(df_calls)) or 0)
     full_daily_calls = max(1, int(full_total_calls / 365)) if full_total_calls else 1
 
+    # ── MAP BUILD EVENT: log to sheets once per session ──────────────────────
     if not st.session_state.get('map_build_logged', False):
         try:
             _map_city  = st.session_state.get('active_city', '')
@@ -2421,7 +3340,8 @@ if st.session_state['csvs_ready']:
             try:
                 _start_dt = datetime.datetime.strptime(_session_start, '%Y-%m-%d %H:%M:%S')
                 _dur_min  = round((datetime.datetime.now() - _start_dt).total_seconds() / 60, 1)
-            except Exception: _dur_min = ''
+            except Exception:
+                _dur_min = ''
             _map_details = {
                 'session_id':       st.session_state.get('session_id', ''),
                 'session_start':    _session_start,
@@ -2448,32 +3368,43 @@ if st.session_state['csvs_ready']:
                 'pd_dept_phone':    st.session_state.get('pd_dept_phone', ''),
                 'active_drones':    [],
             }
-            _log_to_sheets(_map_city, _map_state, 'MAP_BUILD', 0, 0, 0.0, _map_name, _map_email, _map_details)
+            _log_to_sheets(_map_city, _map_state, 'MAP_BUILD', 0, 0, 0.0,
+                           _map_name, _map_email, _map_details)
             st.session_state['map_build_logged'] = True
-        except Exception: pass
+        except Exception:
+            pass
 
     with st.spinner(get_jurisdiction_message()):
         master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR)
 
     if master_gdf is None or master_gdf.empty:
+        # ── Fallback 1: load any saved shapefile directly (spatial join may have
+        #    failed if coordinate conversion was imperfect, but the shapefile exists) ──
         shp_files = glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp"))
         if shp_files:
             try:
+                # Pick the shapefile whose name best matches active_city
                 active_city_key = st.session_state.get('active_city', '').replace(' ', '_').lower()
                 best = None
                 for sf in shp_files:
-                    if active_city_key and active_city_key in os.path.basename(sf).lower(): best = sf; break
-                if best is None: best = shp_files[0]
+                    if active_city_key and active_city_key in os.path.basename(sf).lower():
+                        best = sf
+                        break
+                if best is None:
+                    best = shp_files[0]  # just use the first one
                 fallback_gdf = gpd.read_file(best)
-                if fallback_gdf.crs is None: fallback_gdf = fallback_gdf.set_crs(epsg=4269)
+                if fallback_gdf.crs is None:
+                    fallback_gdf = fallback_gdf.set_crs(epsg=4269)
                 fallback_gdf = fallback_gdf.to_crs(epsg=4326)
                 name_col = next((c for c in ['NAME', 'DISTRICT', 'NAMELSAD'] if c in fallback_gdf.columns), fallback_gdf.columns[0])
                 fallback_gdf['DISPLAY_NAME'] = fallback_gdf[name_col].astype(str)
                 fallback_gdf['data_count'] = len(df_calls)
                 master_gdf = fallback_gdf[['DISPLAY_NAME', 'data_count', 'geometry']]
-            except Exception: master_gdf = None
+            except Exception:
+                master_gdf = None
 
     if master_gdf is None or master_gdf.empty:
+        # ── Fallback 2: bounding box around call points ──
         min_lon, min_lat = df_calls['lon'].min(), df_calls['lat'].min()
         max_lon, max_lat = df_calls['lon'].max(), df_calls['lat'].max()
         lon_pad = (max_lon - min_lon) * 0.1
@@ -2481,6 +3412,7 @@ if st.session_state['csvs_ready']:
         poly = box(min_lon-lon_pad, min_lat-lat_pad, max_lon+lon_pad, max_lat+lat_pad)
         master_gdf = gpd.GeoDataFrame({'DISPLAY_NAME':['Auto-Generated Boundary'],'data_count':[len(df_calls)]}, geometry=[poly], crs="EPSG:4326")
 
+    # --- DRAW SIDEBAR LOGO FIRST SO IT IS AT THE ABSOLUTE TOP ---
     logo_b64 = get_base64_of_bin_file("logo.png")
     if logo_b64:
         st.sidebar.markdown(f"""
@@ -2503,35 +3435,47 @@ if st.session_state['csvs_ready']:
     all_options = master_gdf['LABEL'].tolist()
     
     default_selection = [all_options[0]] if all_options else []
-    selected_labels = st.sidebar.multiselect("Jurisdictions", options=all_options, default=default_selection, help="Select which geographic areas to include in coverage analysis.")
+    selected_labels = st.sidebar.multiselect("Jurisdictions", options=all_options, default=default_selection,
+                                             help="Select which geographic areas to include in coverage analysis.")
 
-    if not selected_labels: st.warning("Please select at least one jurisdiction from the sidebar."); st.stop()
+    if not selected_labels:
+        st.warning("Please select at least one jurisdiction from the sidebar.")
+        st.stop()
         
     selected_names = [options_map[l] for l in selected_labels]
     active_gdf = master_gdf[master_gdf['DISPLAY_NAME'].isin(selected_names)]
-    if selected_names and st.session_state.get('active_city') == "Orlando": st.session_state['active_city'] = selected_names[0]
+    if selected_names and st.session_state.get('active_city') == "Orlando":
+        st.session_state['active_city'] = selected_names[0]
 
     filter_expander = st.sidebar.expander("⚙️ Data Filters", expanded=False)
     with filter_expander:
         if 'type' in df_stations_all.columns:
             all_types = sorted(df_stations_all['type'].dropna().astype(str).unique().tolist())
             if all_types:
-                selected_types = st.multiselect("Facility Type", options=all_types, default=all_types, help="Filter which station types are eligible for drone deployment.")
-                if not selected_types: st.warning("Select at least one facility type."); st.stop()
+                selected_types = st.multiselect("Facility Type", options=all_types, default=all_types,
+                                                help="Filter which station types are eligible for drone deployment.")
+                if not selected_types:
+                    st.warning("Select at least one facility type.")
+                    st.stop()
                 df_stations_all = df_stations_all[df_stations_all['type'].astype(str).isin(selected_types)].copy().reset_index(drop=True)
                 df_stations_all['name'] = "[" + df_stations_all['type'].astype(str) + "] " + df_stations_all['name'].astype(str)
         priority_source = df_calls_full if (df_calls_full is not None and 'priority' in df_calls_full.columns) else df_calls
         if 'priority' in priority_source.columns:
             all_priorities = sorted(pd.Series(priority_source['priority']).dropna().astype(int).unique().tolist())
             if all_priorities:
-                selected_priorities = st.multiselect("Incident Priority", options=all_priorities, default=all_priorities, help="Filter which call priorities to include in coverage scoring.")
-                if not selected_priorities: st.warning("Select at least one priority level."); st.stop()
+                selected_priorities = st.multiselect("Incident Priority", options=all_priorities, default=all_priorities,
+                                                     help="Filter which call priorities to include in coverage scoring.")
+                if not selected_priorities:
+                    st.warning("Select at least one priority level.")
+                    st.stop()
                 df_calls = df_calls[df_calls['priority'].isin(selected_priorities)].copy().reset_index(drop=True)
                 if df_calls_full is not None and 'priority' in df_calls_full.columns:
                     df_calls_full = df_calls_full[df_calls_full['priority'].isin(selected_priorities)].copy().reset_index(drop=True)
 
-    if len(df_stations_all) == 0: st.error("No stations match the selected filters."); st.stop()
-    if len(df_calls) == 0: st.error("No calls match the selected filters."); st.stop()
+    if len(df_stations_all) == 0:
+        st.error("No stations match the selected filters."); st.stop()
+    if len(df_calls) == 0:
+        st.error("No calls match the selected filters."); st.stop()
 
     disp_expander = st.sidebar.expander("👁️ Display Options", expanded=False)
     with disp_expander:
@@ -2546,18 +3490,57 @@ if st.session_state['csvs_ready']:
 
     strat_expander = st.sidebar.expander("⚙️ Deployment Strategy", expanded=False)
     with strat_expander:
-        fleet_strategy = st.radio(
-            "Fleet Integration Mode",
-            ["Independent (Max Density)", "Tiered (Gap-Fill)", "Strict Separation"],
-            help="Independent: Both fleets target highest call volume (overlap allowed).\nTiered: Guardians act as hubs, Responders fill the uncovered perimeter.\nStrict: Fleets cannot share the same physical station."
+        incremental_build = st.toggle("Phased Rollout", value=True,
+            help="Place drones one at a time in priority order. Disable to find the global optimum in a single pass.")
+
+        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:8px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Deployment Mode</div>", unsafe_allow_html=True)
+        deployment_mode = st.radio(
+            "Deployment Mode", 
+            ("Complement — push apart", "Independent — each maximises own area", "Shared — allow full overlap"),
+            index=st.session_state.get('deployment_mode_idx', 1),
+            label_visibility="collapsed",
+            help=(
+                "Complement: Responders fill gaps left by Guardians — no wasted overlap. "
+                "Independent: each fleet optimises on its own objective; overlap allowed but not forced. "
+                "Shared: both fleets optimise together against the same call set — hotspot stacking."
+            )
         )
-        incremental_build = st.toggle("Phased Rollout", value=True)
-        allow_redundancy = (fleet_strategy == "Independent (Max Density)")
+        _mode_map = {"Complement — push apart": 0, "Independent — each maximises own area": 1, "Shared — allow full overlap": 2}
+        st.session_state['deployment_mode_idx'] = _mode_map.get(deployment_mode, 1)
+
+        # Derived flags used by the optimizer
+        allow_redundancy  = (deployment_mode != "Complement — push apart")
+        complement_mode   = (deployment_mode == "Complement — push apart")
+        shared_mode       = (deployment_mode == "Shared — allow full overlap")
+
+        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Guardian Objective</div>", unsafe_allow_html=True)
+        guard_strategy_raw = st.radio(
+            "Guardian Objective",
+            ("Call Coverage", "Land Coverage"),
+            index=st.session_state.get('guard_strat_idx', 1),
+            horizontal=True,
+            label_visibility="collapsed",
+            help="What the Guardian optimizer maximises. Land Coverage = wide area patrol. Call Coverage = respond to highest-volume locations."
+        )
+        st.session_state['guard_strat_idx'] = 0 if guard_strategy_raw == "Call Coverage" else 1
+        guard_strategy = "Maximize Call Coverage" if guard_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
+
+        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Responder Objective</div>", unsafe_allow_html=True)
+        resp_strategy_raw = st.radio(
+            "Responder Objective",
+            ("Call Coverage", "Land Coverage"),
+            index=st.session_state.get('resp_strat_idx', 0),
+            horizontal=True,
+            label_visibility="collapsed",
+            help="What the Responder optimizer maximises. Call Coverage = densest incident areas. Land Coverage = broadest geographic reach."
+        )
+        st.session_state['resp_strat_idx'] = 0 if resp_strategy_raw == "Call Coverage" else 1
+        resp_strategy = "Maximize Call Coverage" if resp_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
+
+    # Keep opt_strategy for any code that still references it (used in export/logs)
+    opt_strategy = guard_strategy  # primary strategy label for reporting
 
     st.sidebar.markdown('<div class="sidebar-section-header">② Optimize Fleet</div>', unsafe_allow_html=True)
-
-    opt_strategy_raw = st.sidebar.radio("Optimization Goal", ("Call Coverage", "Land Coverage"), horizontal=True)
-    opt_strategy = "Maximize Call Coverage" if opt_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
 
     minx, miny, maxx, maxy = active_gdf.to_crs(epsg=4326).total_bounds
     center_lon = (minx + maxx) / 2
@@ -2570,44 +3553,84 @@ if st.session_state['csvs_ready']:
     city_boundary_geom = None
     try:
         active_utm = active_gdf.to_crs(epsg=epsg_code)
-        raw_union = (active_utm.geometry.union_all() if hasattr(active_utm.geometry, 'union_all') else active_utm.geometry.unary_union)
+        raw_union = (active_utm.geometry.union_all() if hasattr(active_utm.geometry, 'union_all')
+                     else active_utm.geometry.unary_union)
+        # buffer(0.1).buffer(-0.1) cleans self-intersections but can collapse thin geometries.
+        # Use a larger initial buffer and validate before shrinking.
         clean_geom = raw_union.buffer(1.0).buffer(-1.0)
-        if clean_geom.is_empty or not clean_geom.is_valid: clean_geom = raw_union.buffer(0)
-        if clean_geom.is_empty: clean_geom = raw_union
+        if clean_geom.is_empty or not clean_geom.is_valid:
+            clean_geom = raw_union.buffer(0)  # zero-buffer repair only
+        if clean_geom.is_empty:
+            clean_geom = raw_union          # use as-is if still empty
         city_m = clean_geom
         city_boundary_geom = gpd.GeoSeries([clean_geom], crs=epsg_code).to_crs(epsg=4326).iloc[0]
-    except Exception as e: st.error(f"Geometry Error: {e}"); st.stop()
+    except Exception as e:
+        st.error(f"Geometry Error: {e}"); st.stop()
 
+    # --- GEOGRAPHIC FILTERING FOR STATIONS ---
+    # Keep stations inside city boundary + generous buffer.
+    # If OSM found nothing inside the boundary (e.g. small cities with few public
+    # buildings tagged), fall back to call-density-derived synthetic stations so
+    # the tool never dead-ends on legitimate data.
     if not df_stations_all.empty and city_m is not None:
-        st_gdf = gpd.GeoDataFrame(df_stations_all, geometry=gpd.points_from_xy(df_stations_all.lon, df_stations_all.lat), crs="EPSG:4326")
+        st_gdf = gpd.GeoDataFrame(df_stations_all,
+                                   geometry=gpd.points_from_xy(df_stations_all.lon, df_stations_all.lat),
+                                   crs="EPSG:4326")
         st_gdf_utm = st_gdf.to_crs(epsg=epsg_code)
+
+        # Keep candidate sites strictly inside the jurisdiction whenever possible.
         mask = st_gdf_utm.within(city_m)
         df_inside = df_stations_all[mask].reset_index(drop=True)
+
         if df_inside.empty:
-            st.info("ℹ️ No OSM public buildings were found inside the jurisdiction boundary. Using call-density station placement — stations are snapped to incident locations that fall inside the city limits.")
-            try: df_stations_all = _make_random_stations(df_calls, n=60, boundary_geom=city_m, epsg_code=epsg_code)
-            except Exception: df_stations_all = pd.DataFrame()
+            st.info(
+                "ℹ️ No OSM public buildings were found inside the jurisdiction boundary. "
+                "Using call-density station placement — stations are snapped to incident "
+                "locations that fall inside the city limits."
+            )
+            try:
+                df_stations_all = _make_random_stations(df_calls, n=60, boundary_geom=city_m, epsg_code=epsg_code)
+            except Exception:
+                df_stations_all = pd.DataFrame()
+
+            # Absolute last resort: build a simple grid from call quantiles
             if df_stations_all.empty:
                 try:
-                    _lats = df_calls['lat'].dropna(); _lons = df_calls['lon'].dropna()
+                    _lats = df_calls['lat'].dropna()
+                    _lons = df_calls['lon'].dropna()
                     _grid_lats = np.linspace(_lats.quantile(0.1), _lats.quantile(0.9), 8)
                     _grid_lons = np.linspace(_lons.quantile(0.1), _lons.quantile(0.9), 8)
                     _glat, _glon = np.meshgrid(_grid_lats, _grid_lons)
-                    df_stations_all = pd.DataFrame({'name': [f'Station {i+1}' for i in range(len(_glat.ravel()))], 'lat': _glat.ravel(), 'lon': _glon.ravel(), 'type': (['Police', 'Fire', 'School'] * 30)[:len(_glat.ravel())]})
-                except Exception: df_stations_all = pd.DataFrame()
-        else: df_stations_all = df_inside
+                    df_stations_all = pd.DataFrame({
+                        'name':  [f'Station {i+1}' for i in range(len(_glat.ravel()))],
+                        'lat':   _glat.ravel(),
+                        'lon':   _glon.ravel(),
+                        'type':  (['Police', 'Fire', 'School'] * 30)[:len(_glat.ravel())],
+                    })
+                except Exception:
+                    df_stations_all = pd.DataFrame()
+        else:
+            df_stations_all = df_inside
 
         if not df_stations_all.empty:
             try:
                 _final_st_gdf = gpd.GeoDataFrame(df_stations_all, geometry=gpd.points_from_xy(df_stations_all.lon, df_stations_all.lat), crs="EPSG:4326").to_crs(epsg=epsg_code)
                 _final_mask = _final_st_gdf.within(city_m)
-                if _final_mask.any(): df_stations_all = df_stations_all[_final_mask].reset_index(drop=True)
-            except Exception: pass
+                if _final_mask.any():
+                    df_stations_all = df_stations_all[_final_mask].reset_index(drop=True)
+            except Exception:
+                pass
+
         if df_stations_all.empty:
-            st.error("⚠️ No station candidates could be generated. Please upload a CAD file with valid coordinates, or switch to Simulation mode.")
+            st.error(
+                "⚠️ No station candidates could be generated. Please upload a CAD file "
+                "with valid coordinates, or switch to Simulation mode."
+            )
             st.stop()
 
     n = len(df_stations_all)
+
+    # Dynamic Sliders based on Area Size
     area_sq_mi = city_m.area / 2589988.11 if city_m and not city_m.is_empty else 100.0
     r_resp_est = st.session_state.get('r_resp', 2.0)
     r_guard_est = st.session_state.get('r_guard', 8.0)
@@ -2615,6 +3638,7 @@ if st.session_state['csvs_ready']:
     max_resp_calc = min(n, int(math.ceil(area_sq_mi / (math.pi * (r_resp_est**2)))) + 5)
     max_guard_calc = min(n, int(math.ceil(area_sq_mi / (math.pi * (r_guard_est**2)))) + 5)
 
+    # Safely pull the default values without exceeding the allowed maximums
     val_r = min(st.session_state.get('k_resp', 2), max_resp_calc)
     val_g = min(st.session_state.get('k_guard', 0), max_guard_calc)
 
@@ -2626,18 +3650,74 @@ if st.session_state['csvs_ready']:
 
     st.session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
 
+    # ── MANUAL STATION PINS ───────────────────────────────────────────────────
     pin_expander = st.sidebar.expander("📍 Manual Station Pins", expanded=False)
     with pin_expander:
-        st.markdown("<div style='font-size:0.72rem; color:#aaa; margin-bottom:8px;'>Pin specific stations to lock them into the solution. The optimizer fills remaining slots around your picks. Total count (slider) must be ≥ number of pins.</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div style='font-size:0.7rem; color:{text_muted}; margin-bottom:8px;'>"
+            "Select stations from the scored table below, then assign them as Guardian or Responder. "
+            "The optimizer fills remaining slots around your picks.</div>",
+            unsafe_allow_html=True
+        )
+
         _station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
-        pinned_guard_names = st.multiselect("🦅 Pin Guardian station(s)", options=_station_names, default=[s for s in st.session_state.get('pinned_guard_names', []) if s in _station_names], help="These stations are always included as Guardians. Optimizer fills remaining Guardian slots.")
-        pinned_resp_names = st.multiselect("🚁 Pin Responder station(s)", options=[s for s in _station_names if s not in pinned_guard_names], default=[s for s in st.session_state.get('pinned_resp_names', []) if s in _station_names and s not in pinned_guard_names], help="These stations are always included as Responders. Optimizer fills remaining Responder slots.")
+
+        # ── SCORED STATION TABLE ──────────────────────────────────────────
+        # Pre-compute per-station scores from already-available matrices so the
+        # user can make an informed choice without running the full optimizer first.
+        if not df_stations_all.empty and station_metadata and total_calls > 0:
+            _rows = []
+            for _si, _sm in enumerate(station_metadata):
+                _g_calls  = int(guard_matrix[_si].sum())
+                _r_calls  = int(resp_matrix[_si].sum())
+                _g_pct    = round(_g_calls / total_calls * 100, 1)
+                _r_pct    = round(_r_calls / total_calls * 100, 1)
+                _cent     = round(_sm.get('centrality', 0) * 100, 0)
+                _rows.append({
+                    'Station':      _sm['name'],
+                    'As Guard %':   _g_pct,
+                    'As Resp %':    _r_pct,
+                    'Centrality':   int(_cent),
+                })
+            _pin_df = pd.DataFrame(_rows).sort_values('As Guard %', ascending=False)
+
+            # Show top-20 sorted; user can see scores before pinning
+            st.dataframe(
+                _pin_df.head(20).rename(columns={
+                    'Station': 'Station',
+                    'As Guard %': '🦅 Guard%',
+                    'As Resp %':  '🚁 Resp%',
+                    'Centrality': 'Central',
+                }).set_index('Station'),
+                use_container_width=True,
+                height=180,
+            )
+            st.caption("Guard%: call coverage as Guardian range  ·  Resp%: as Responder range  ·  Central: proximity to city centre")
+
+        pinned_guard_names = st.multiselect(
+            "🦅 Pin as Guardian",
+            options=_station_names,
+            default=[s for s in st.session_state.get('pinned_guard_names', []) if s in _station_names],
+            help="Locked as Guardians. Optimizer fills remaining Guardian slots around these."
+        )
+        pinned_resp_names = st.multiselect(
+            "🚁 Pin as Responder",
+            options=[s for s in _station_names if s not in pinned_guard_names],
+            default=[s for s in st.session_state.get('pinned_resp_names', []) if s in _station_names and s not in pinned_guard_names],
+            help="Locked as Responders. Optimizer fills remaining Responder slots around these."
+        )
         st.session_state['pinned_guard_names'] = pinned_guard_names
         st.session_state['pinned_resp_names']  = pinned_resp_names
-        if len(pinned_guard_names) > k_guardian: st.warning(f"⚠️ {len(pinned_guard_names)} Guardian pins but slider = {k_guardian}. Raise Guardian Count ≥ {len(pinned_guard_names)}.")
-        if len(pinned_resp_names) > k_responder: st.warning(f"⚠️ {len(pinned_resp_names)} Responder pins but slider = {k_responder}. Raise Responder Count ≥ {len(pinned_resp_names)}.")
-        if pinned_guard_names or pinned_resp_names: st.info(f"🔒 {len(pinned_guard_names)} Guardian + {len(pinned_resp_names)} Responder pinned. Optimizer places remaining {max(0,k_guardian-len(pinned_guard_names))}G + {max(0,k_responder-len(pinned_resp_names))}R automatically.")
 
+        # Validate pin counts don't exceed slider totals
+        if len(pinned_guard_names) > k_guardian:
+            st.warning(f"⚠️ {len(pinned_guard_names)} Guardian pins but slider = {k_guardian}. Raise Guardian Count ≥ {len(pinned_guard_names)}.")
+        if len(pinned_resp_names) > k_responder:
+            st.warning(f"⚠️ {len(pinned_resp_names)} Responder pins but slider = {k_responder}. Raise Responder Count ≥ {len(pinned_resp_names)}.")
+        if pinned_guard_names or pinned_resp_names:
+            st.info(f"🔒 {len(pinned_guard_names)}G + {len(pinned_resp_names)}R pinned · optimizer fills remaining {max(0,k_guardian-len(pinned_guard_names))}G + {max(0,k_responder-len(pinned_resp_names))}R")
+
+    # Convert pin names → station indices for the optimizer
     _name_to_idx = {row['name']: i for i, row in df_stations_all.iterrows()}
     locked_g_pins = [_name_to_idx[n] for n in pinned_guard_names if n in _name_to_idx]
     locked_r_pins = [_name_to_idx[n] for n in pinned_resp_names  if n in _name_to_idx]
@@ -2665,23 +3745,29 @@ if st.session_state['csvs_ready']:
         fallback = series.index[-1]
         return int(df_curve.loc[idx_99 if idx_99 is not None else fallback, 'Drones'])
 
-    with st.spinner(get_faa_message()): faa_geojson = load_faa_parquet(minx, miny, maxx, maxy)
-    with st.spinner(get_airfield_message()): airfields = fetch_airfields(minx, miny, maxx, maxy)
+    with st.spinner(get_faa_message()):
+        faa_geojson = load_faa_parquet(minx, miny, maxx, maxy)
+    with st.spinner(get_airfield_message()):
+        airfields = fetch_airfields(minx, miny, maxx, maxy)
 
     st.sidebar.markdown('<div class="sidebar-section-header">③ Budget & Export</div>', unsafe_allow_html=True)
 
+    # We use the strat_expander we defined earlier in the sidebar to inject the sliders
     with strat_expander:
         st.markdown("---")
         inferred_daily = st.session_state.get('inferred_daily_calls_override', full_daily_calls)
         inferred_daily = max(1, int(inferred_daily))
         calls_per_day = st.slider("Total Daily Calls (citywide)", 1, max(100, inferred_daily*3), inferred_daily)
         st.caption(f"Derived from the full uploaded CAD total ({full_total_calls:,} incidents), not the optimization sample.")
+
         st.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>DFR Dispatch Rate (%)</div>", unsafe_allow_html=True)
         st.markdown(f"<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>What % of in-range calls will the drone be sent to?</div>", unsafe_allow_html=True)
         dfr_dispatch_rate = st.slider("DFR Dispatch Rate", 1, 100, st.session_state.get('dfr_rate',25), label_visibility="collapsed") / 100.0
+
         st.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>Calls Resolved Without Officer Dispatch (%)</div>", unsafe_allow_html=True)
         st.markdown(f"<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>Of drone-attended calls, what % close without a patrol car?</div>", unsafe_allow_html=True)
         deflection_rate = st.slider("Resolution Rate", 0, 100, st.session_state.get('deflect_rate',30), label_visibility="collapsed") / 100.0
+
         st.session_state['dfr_rate']    = int(dfr_dispatch_rate * 100)
         st.session_state['deflect_rate'] = int(deflection_rate * 100)
 
@@ -2692,7 +3778,7 @@ if st.session_state['csvs_ready']:
     best_combo = None
 
     _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
-    opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{opt_strategy}_{fleet_strategy}_{incremental_build}_{bounds_hash}_{_pins_key}"
+    opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{guard_strategy}_{resp_strategy}_{deployment_mode}_{incremental_build}_{bounds_hash}_{_pins_key}"
 
     if k_responder + k_guardian > n:
         st.error("⚠️ Over-Deployment: Total drones exceed available stations.")
@@ -2705,81 +3791,96 @@ if st.session_state['csvs_ready']:
         best_combo = None
     else:
         if st.session_state.get('_opt_cache_key') != opt_cache_key:
-            if opt_strategy == "Maximize Call Coverage":
-                stage_bar = st.empty()
-                stage_bar.info(f"🧠 Optimizing fleets via {fleet_strategy.split(' ')[0]} logic...")
-                r_best, g_best, chrono_r, chrono_g = solve_multi_tier_mclp(
-                    resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g,
-                    k_responder, k_guardian, fleet_strategy, incremental=incremental_build,
-                    forced_r=locked_r_pins, forced_g=locked_g_pins
-                )
-                best_combo = (tuple(r_best), tuple(g_best))
-                stage_bar.empty()
-                st.toast("✅ Multi-tier optimization complete!", icon="✅")
-            else:
-                def evaluate_combo(rg_combo):
-                    r_combo, g_combo = rg_combo
-                    if fleet_strategy == "Strict Separation" and set(r_combo).intersection(set(g_combo)):
-                        return (-1.0, -1, -1, rg_combo)
-                        
-                    if fleet_strategy == "Independent (Max Density)":
-                        score_area = (unary_union([station_metadata[i]['clipped_2m'] for i in r_combo]).area if r_combo else 0.0) + \
-                                     (unary_union([station_metadata[i]['clipped_guard'] for i in g_combo]).area if g_combo else 0.0)
-                    else: 
-                        geos = [station_metadata[i]['clipped_2m'] for i in r_combo] + [station_metadata[i]['clipped_guard'] for i in g_combo]
-                        score_area = unary_union(geos).area if geos else 0.0
-                        
-                    cov_r = resp_matrix[list(r_combo)].any(axis=0) if r_combo else np.zeros(total_calls, bool)
-                    cov_g = guard_matrix[list(g_combo)].any(axis=0) if g_combo else np.zeros(total_calls, bool)
-                    score_calls = np.logical_or(cov_r, cov_g).sum() if total_calls > 0 else 0
-                    score_cent  = sum(station_metadata[i]['centrality'] for i in list(r_combo)+list(g_combo))
-                    return (score_area, score_calls, score_cent, rg_combo)
+            stage_bar = st.empty()
 
-                stage_bar = st.empty()
-                stage_bar.info("🗺️ Maximizing land coverage — no neighborhood left behind…")
-                if incremental_build:
-                    locked_r = tuple(sorted(set(locked_r_pins)))
-                    locked_g = tuple(sorted(set(locked_g_pins)))
-                    chrono_r = list(locked_r_pins)
-                    chrono_g = list(locked_g_pins)
-                    
-                    for _ in range(k_guardian - len(locked_g_pins)):
-                        best_pick = max(
-                            [s for s in range(n) if s not in locked_g and (fleet_strategy != "Strict Separation" or s not in locked_r)],
-                            key=lambda s: evaluate_combo((locked_r, tuple(sorted(list(locked_g)+[s])))),
-                            default=None
-                        )
-                        if best_pick is not None:
-                            locked_g = tuple(sorted(list(locked_g)+[best_pick]))
-                            chrono_g.append(best_pick)
-                            
-                    for _ in range(k_responder - len(locked_r_pins)):
-                        best_pick = max(
-                            [s for s in range(n) if s not in locked_r and (fleet_strategy != "Strict Separation" or s not in locked_g)],
-                            key=lambda s: evaluate_combo((tuple(sorted(list(locked_r)+[s])), locked_g)),
-                            default=None
-                        )
-                        if best_pick is not None:
-                            locked_r = tuple(sorted(list(locked_r)+[best_pick]))
-                            chrono_r.append(best_pick)
-                            
-                    best_combo = (locked_r, locked_g)
+            # ── HELPER: greedy area-coverage for one fleet ───────────────────
+            def _greedy_area(matrix, geo_list, k, forced, exclude_set):
+                """Greedily pick k stations maximising unary_union area,
+                starting from forced pins and skipping exclude_set."""
+                chosen = list(forced)
+                chrono  = list(forced)
+                current_union = unary_union([geo_list[i] for i in chosen]) if chosen else None
+                for _ in range(k - len(forced)):
+                    best_s, best_gain = -1, -1.0
+                    for s in range(len(geo_list)):
+                        if s in chosen or s in exclude_set:
+                            continue
+                        g = geo_list[s]
+                        new_area = current_union.union(g).area if current_union else g.area
+                        gain = new_area - (current_union.area if current_union else 0)
+                        if gain > best_gain:
+                            best_gain, best_s = gain, s
+                    if best_s != -1:
+                        chosen.append(best_s)
+                        chrono.append(best_s)
+                        g = geo_list[best_s]
+                        current_union = current_union.union(g) if current_union else g
+                return chosen, chrono
+
+            # ── PASS 1: Optimise Guardians independently ─────────────────────
+            stage_bar.info("🦅 Optimising Guardian fleet…")
+            if k_guardian > 0:
+                if guard_strategy == "Maximize Call Coverage":
+                    g_best, _, chrono_g, _ = solve_mclp(
+                        resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g,
+                        0, k_guardian, True, incremental=incremental_build,
+                        forced_r=[], forced_g=locked_g_pins
+                    )
                 else:
-                    total_possible = math.comb(n, k_responder) * (math.comb(n-k_responder, k_guardian) if n >= k_responder else 1)
-                    if total_possible > 3000:
-                        combos = list(set(
-                            (tuple(sorted(c[:k_responder])), tuple(sorted(c[k_responder:])))
-                            for c in [np.random.choice(range(n), k_responder+k_guardian, replace=False) for _ in range(3000)]
-                        ))
-                    else:
-                        combos = [(r_c, g_c) for r_c in itertools.combinations(range(n), k_responder)
-                                  for g_c in (itertools.combinations([x for x in range(n) if x not in r_c], k_guardian) if k_guardian > 0 else [()])]
-                    with ThreadPoolExecutor() as ex:
-                        results = list(ex.map(evaluate_combo, combos))
-                    best_combo = max(results, key=lambda x: x[:3])[3]
-                    chrono_r, chrono_g = list(best_combo[0]), list(best_combo[1])
-                stage_bar.empty()
-                st.toast("✅ Coverage optimized — every corner of the city now has aerial support!", icon="✅")
+                    g_best, chrono_g = _greedy_area(
+                        guard_matrix,
+                        [station_metadata[i]['clipped_guard'] for i in range(n)],
+                        k_guardian, locked_g_pins, set()
+                    )
+                g_best = list(g_best)
+            else:
+                g_best, chrono_g = [], []
+
+            # ── PASS 2: Optimise Responders around Guardian result ────────────
+            stage_bar.info("🚁 Optimising Responder fleet…")
+            if k_responder > 0:
+                # In complement mode, mask out calls already covered by Guardians
+                # so Responders fill the gaps rather than stacking on the same calls.
+                if complement_mode and g_best and total_calls > 0:
+                    guard_covered = guard_matrix[g_best].any(axis=0)
+                    # Build a reduced matrix: zero out already-covered calls for Responders
+                    resp_matrix_eff = resp_matrix.copy()
+                    resp_matrix_eff[:, guard_covered] = False
+                    dist_matrix_r_eff = dist_matrix_r.copy()
+                else:
+                    resp_matrix_eff    = resp_matrix
+                    dist_matrix_r_eff  = dist_matrix_r
+
+                # In complement mode, Responders also can't reuse Guardian stations
+                _excl = set(g_best) if not allow_redundancy else set()
+
+                if resp_strategy == "Maximize Call Coverage":
+                    r_best, _, chrono_r, _ = solve_mclp(
+                        resp_matrix_eff, guard_matrix, dist_matrix_r_eff, dist_matrix_g,
+                        k_responder, 0, allow_redundancy, incremental=incremental_build,
+                        forced_r=locked_r_pins, forced_g=[]
+                    )
+                    # Filter out Guardian stations if complement mode
+                    if complement_mode:
+                        r_best = [s for s in r_best if s not in set(g_best)]
+                        # Pad back to k_responder if exclusion removed some
+                        if len(r_best) < k_responder:
+                            remaining = [s for s in range(n)
+                                         if s not in r_best and s not in set(g_best)]
+                            r_best += remaining[:k_responder - len(r_best)]
+                else:
+                    _excl_resp = set(g_best) if complement_mode else set()
+                    r_best, chrono_r = _greedy_area(
+                        resp_matrix_eff,
+                        [station_metadata[i]['clipped_2m'] for i in range(n)],
+                        k_responder, locked_r_pins, _excl_resp
+                    )
+            else:
+                r_best, chrono_r = [], []
+
+            best_combo = (tuple(r_best), tuple(g_best))
+            stage_bar.empty()
+            st.toast("✅ Independent optimisation complete!", icon="✅")
 
             st.session_state['_opt_cache_key']  = opt_cache_key
             st.session_state['_opt_best_combo'] = best_combo
@@ -2801,9 +3902,12 @@ if st.session_state['csvs_ready']:
             active_resp_idx, active_guard_idx = [], []
 
     # ── METRICS ───────────────────────────────────────────────────────
+    # ── SPLIT METRICS: Guardian and Responder computed independently ─────────
     area_covered_perc = overlap_perc = calls_covered_perc = 0.0
-    guardian_covered_perc = 0.0
-    responder_covered_perc = 0.0
+    guard_calls_perc  = guard_area_perc  = 0.0
+    resp_calls_perc   = resp_area_perc   = 0.0
+    cov_r = np.zeros(total_calls, bool) if total_calls > 0 else np.zeros(0, bool)
+    cov_g = np.zeros(total_calls, bool) if total_calls > 0 else np.zeros(0, bool)
 
     ordered_deployments_raw = []
     for idx in chrono_g:
@@ -2818,31 +3922,44 @@ if st.session_state['csvs_ready']:
     active_color_map = {}
     c_idx = 0
     for idx, d_type in ordered_deployments_raw:
-        key = f"{idx}_{d_type}" 
+        key = f"{idx}_{d_type}"
         if key not in active_color_map:
             active_color_map[key] = STATION_COLORS[c_idx % len(STATION_COLORS)]
             c_idx += 1
 
-    active_geos = [station_metadata[i]['clipped_2m'] for i in active_resp_idx] + \
-                  [station_metadata[i]['clipped_guard'] for i in active_guard_idx]
+    guard_geos = [station_metadata[i]['clipped_guard'] for i in active_guard_idx]
+    resp_geos  = [station_metadata[i]['clipped_2m']    for i in active_resp_idx]
+    active_geos = resp_geos + guard_geos
 
-    if active_geos and not city_m.is_empty:
-        area_covered_perc = (unary_union(active_geos).area / city_m.area) * 100
-        
-    if active_geos and total_calls > 0:
-        cov_r = resp_matrix[active_resp_idx].any(axis=0) if active_resp_idx else np.zeros(total_calls, bool)
-        cov_g = guard_matrix[active_guard_idx].any(axis=0) if active_guard_idx else np.zeros(total_calls, bool)
-        
-        responder_covered_perc = (cov_r.sum() / total_calls) * 100
-        guardian_covered_perc = (cov_g.sum() / total_calls) * 100
-        calls_covered_perc = (np.logical_or(cov_r, cov_g).sum() / total_calls) * 100
-        
+    city_area = city_m.area if (city_m and not city_m.is_empty) else 1.0
+
+    # Guardian-only metrics
+    if guard_geos:
+        guard_area_perc = (unary_union(guard_geos).area / city_area) * 100
+    if active_guard_idx and total_calls > 0:
+        cov_g = guard_matrix[active_guard_idx].any(axis=0)
+        guard_calls_perc = cov_g.sum() / total_calls * 100
+
+    # Responder-only metrics
+    if resp_geos:
+        resp_area_perc = (unary_union(resp_geos).area / city_area) * 100
+    if active_resp_idx and total_calls > 0:
+        cov_r = resp_matrix[active_resp_idx].any(axis=0)
+        resp_calls_perc = cov_r.sum() / total_calls * 100
+
+    # Combined metrics
     if active_geos:
+        area_covered_perc = (unary_union(active_geos).area / city_area) * 100
+    if total_calls > 0:
+        calls_covered_perc = (np.logical_or(cov_r, cov_g).sum() / total_calls) * 100
+    if len(active_geos) >= 2:
         inters = [active_geos[i].intersection(active_geos[j])
-                  for i in range(len(active_geos)) for j in range(i+1, len(active_geos))
-                  if not active_geos[i].intersection(active_geos[j]).is_empty]
-        if inters and not city_m.is_empty:
-            overlap_perc = (unary_union(inters).area / city_m.area) * 100
+                  for i in range(len(active_geos))
+                  for j in range(i+1, len(active_geos))
+                  if not active_geos[i].is_empty and not active_geos[j].is_empty
+                  and active_geos[i].intersects(active_geos[j])]
+        if inters:
+            overlap_perc = (unary_union(inters).area / city_area) * 100
 
     # ── BUDGET CALCULATIONS ───────────────────────────────────────────
     actual_k_responder = len(active_resp_names)
@@ -2900,7 +4017,6 @@ if st.session_state['csvs_ready']:
         st.sidebar.info("👈 Set Responder/Guardian counts above to calculate budget impact.")
 
     # ── BUILD DRONE OBJECTS ───────────────────────────────────────────
-    # ── BUILD DRONE OBJECTS ───────────────────────────────────────────
     active_drones = []
     cumulative_mask = np.zeros(total_calls, dtype=bool) if total_calls > 0 else None
     step = 1
@@ -2913,7 +4029,6 @@ if st.session_state['csvs_ready']:
             cov_array = guard_matrix[idx]; cost = CONFIG["GUARDIAN_COST"]
             speed_mph = CONFIG["GUARDIAN_SPEED"]; avg_dist = station_metadata[idx]['avg_dist_g']
             radius_m  = guard_radius_mi * 1609.34
-        
         map_color    = active_color_map[f"{idx}_{d_type}"]
         avg_time_min = (avg_dist / speed_mph) * 60
         d_lat = station_metadata[idx]['lat']; d_lon = station_metadata[idx]['lon']
@@ -2931,27 +4046,82 @@ if st.session_state['csvs_ready']:
         }
 
         if total_calls > 0 and cumulative_mask is not None:
-            marginal_mask    = cov_array & ~cumulative_mask
+            # ── DEDUPLICATION: track unique calls added for combined KPI totals ──
+            marginal_mask     = cov_array & ~cumulative_mask
             marginal_historic = np.sum(marginal_mask)
             d['assigned_indices'] = np.where(marginal_mask)[0]
-            cumulative_mask  = cumulative_mask | cov_array
-            
-            d['marginal_perc'] = marginal_historic / total_calls
-            marginal_daily   = calls_per_day * d['marginal_perc']
-            d['marginal_flights']   = marginal_daily * dfr_dispatch_rate
-            d['marginal_deflected'] = d['marginal_flights'] * deflection_rate
-            
+            cumulative_mask   = cumulative_mask | cov_array
+
+            # ── RAW ZONE COVERAGE: how many calls fall in this drone's zone ───
+            # Used for per-unit economics. Independent of iteration order so
+            # Responders are never penalised for a Guardian claiming the same calls.
+            _raw_zone_calls = int(np.sum(cov_array))  # all calls inside this drone's radius
+            _raw_zone_perc  = _raw_zone_calls / total_calls
+
+            # Shared zone: calls covered by at least one OTHER active drone
             all_cov = np.vstack([resp_matrix[i] for i in active_resp_idx] + [guard_matrix[i] for i in active_guard_idx]) if (active_resp_idx or active_guard_idx) else np.zeros((1, total_calls), dtype=bool)
-            shared_mask = d['cov_array'] & (all_cov.sum(axis=0) > 1)
-            
-            d['shared_flights']  = (np.sum(shared_mask) / total_calls) * calls_per_day * dfr_dispatch_rate
-            d['monthly_savings'] = (CONFIG["OFFICER_COST_PER_CALL"] - CONFIG["DRONE_COST_PER_CALL"]) * d['marginal_deflected'] * 30.4
-            d['annual_savings']  = d['monthly_savings'] * 12
-            d['be_text'] = f"{d['cost']/d['monthly_savings']:.1f} MO" if d['monthly_savings'] > 0 else "N/A"
+            shared_mask   = d['cov_array'] & (all_cov.sum(axis=0) > 1)
+            _shared_calls = int(np.sum(shared_mask))
+            _excl_calls   = _raw_zone_calls - _shared_calls  # calls ONLY this drone covers
+
+            # ── UTILIZATION: based on full zone call load, not marginal residual ─
+            # Responders should reflect how busy they truly are in their patrol zone.
+            # daily calls dispatched to this drone = zone calls × dispatch rate
+            _is_guard    = (d_type == 'GUARDIAN')
+            _budget_min  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] if _is_guard else (CONFIG["RESPONDER_PATROL_HOURS"] * 60)
+            _zone_flights = _raw_zone_perc * calls_per_day * dfr_dispatch_rate
+            _util = min(0.99, (_zone_flights * avg_time_min) / max(1.0, _budget_min))
+
+            # ── BASE VALUE: calls uniquely covered (non-shared zone) ──────────
+            # These calls have no other drone to fall back on — pure incremental value.
+            _excl_daily        = (_excl_calls / total_calls) * calls_per_day
+            _excl_flights      = _excl_daily * dfr_dispatch_rate
+            _excl_deflected    = _excl_flights * deflection_rate
+            _cost_delta        = CONFIG["OFFICER_COST_PER_CALL"] - CONFIG["DRONE_COST_PER_CALL"]
+            _base_monthly      = _cost_delta * _excl_deflected * 30.4
+            _base_annual       = _base_monthly * 12
+
+            # ── CONCURRENT VALUE: shared-zone calls captured while partner is busy ─
+            # Guardian is airborne util% of the time → Responder handles that fraction.
+            # Responder is airborne util% of the time → Guardian handles that fraction.
+            # Net concurrent gain = shared_calls × partner_util × deflection × cost_delta
+            # For a Responder sharing zone with a Guardian: partner = Guardian utilization
+            # We approximate partner utilization as _util (symmetric; use actual if available)
+            _shared_daily      = (_shared_calls / total_calls) * calls_per_day
+            _shared_dfr        = _shared_daily * dfr_dispatch_rate
+            # Calls this drone handles while its partner is busy (partner util ≈ _util)
+            _concurrent_daily  = _shared_dfr * _util
+            _concurrent_month  = _cost_delta * (_concurrent_daily * deflection_rate) * 30.4
+            _concurrent_annual = _concurrent_month * 12
+
+            # ── BEST CASE: base + full concurrent (partner always available) ──
+            _best_monthly  = _base_monthly + _concurrent_month
+            _best_annual   = _base_annual  + _concurrent_annual
+
+            # ── STORE — use best_case as primary display value ─────────────────
+            # Base (excl-only) is the conservative floor.
+            # Best case is the headline figure shown in the card.
+            d['marginal_perc']     = marginal_historic / total_calls  # for KPI dedup only
+            d['marginal_flights']  = _excl_flights          # exclusive zone flights
+            d['marginal_deflected']= _excl_deflected
+            d['shared_flights']    = _shared_dfr             # shared zone DFR flights
+            d['zone_flights']      = _zone_flights           # total zone flights (for util)
+            d['utilization']       = _util
+            d['blocked_per_day']   = _concurrent_daily
+            d['monthly_savings']   = _best_monthly           # headline = best case
+            d['annual_savings']    = _best_annual
+            d['base_annual']       = _base_annual            # conservative floor
+            d['concurrent_annual'] = _concurrent_annual
+            d['best_case_annual']  = _best_annual            # same as headline now
+            d['concurrent_monthly']= _concurrent_month
+            d['be_text']   = f"{d['cost']/_best_monthly:.1f} MO" if _best_monthly > 0 else "N/A"
+            d['best_be_text'] = d['be_text']
         else:
             d.update({'assigned_indices':[],'annual_savings':0,'marginal_flights':0,
-                      'marginal_deflected':0,'shared_flights':0,'be_text':"N/A"})
-            
+                      'marginal_deflected':0,'shared_flights':0,'be_text':"N/A",
+                      'utilization':0,'concurrent_monthly':0,'best_case_annual':0,
+                      'blocked_per_day':0,'best_be_text':"N/A",'base_annual':0,
+                      'concurrent_annual':0,'zone_flights':0})
         active_drones.append(d)
         step += 1
 
@@ -2981,6 +4151,7 @@ if st.session_state['csvs_ready']:
             <span style="font-size:1.2em; background:rgba(128,128,128,0.15); padding:2px 10px; border-radius:4px;">{h_label}</span>
             </div>""", unsafe_allow_html=True)
 
+    # Safely compute traffic impacts with strict float casting to prevent any TypeErrors
     if simulate_traffic:
         avg_ground_speed = float(CONFIG["DEFAULT_TRAFFIC_SPEED"]) * (1 - float(traffic_level) / 100.0)
         eval_dist  = float(guard_radius_mi if active_guard_names else resp_radius_mi)
@@ -2999,6 +4170,7 @@ if st.session_state['csvs_ready']:
     displayed_points = len(display_calls) if display_calls is not None else 0
     call_str = f"{orig_calls:,}"
 
+    # Calculate Date Range of CAD data (if available)
     date_range_str = "Simulated / Unknown"
     _date_src_df = df_calls_full if df_calls_full is not None else df_calls
     _label_dt = _detect_datetime_series_for_labels(_date_src_df)
@@ -3009,10 +4181,12 @@ if st.session_state['csvs_ready']:
                 min_date = _label_dt.min().strftime('%b %Y')
                 max_date = _label_dt.max().strftime('%b %Y')
                 date_range_str = f"{min_date} – {max_date}" if min_date != max_date else min_date
-        except Exception: pass
+        except Exception:
+            pass
 
     avg_resp_time = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
 
+    # 1. THE SINGLE-LINE EXECUTIVE HEADER
     logo_b64 = get_base64_of_bin_file("logo.png")
     main_logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:24px; vertical-align:middle; margin-right:15px; filter: brightness(0) invert(1);">' if logo_b64 else f'<span style="font-size:1.5rem; font-weight:900; letter-spacing:2px; color:#ffffff; margin-right:15px;">BRINC</span>'
 
@@ -3033,6 +4207,10 @@ if st.session_state['csvs_ready']:
     """
     st.markdown(header_html, unsafe_allow_html=True)
 
+    # Cleanly evaluate dynamic CSS to avoid f-string syntax errors
+    border_css = 'border-right: 1px solid #222; padding-right: 10px;' if gain_val is not None else ''
+
+    # If traffic simulation is on, nest the time saved right inside the Avg Response box!
     if gain_val is not None:
         resp_content = (
             f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace; line-height: 1.1;">{avg_resp_time:.1f}m</div>'
@@ -3041,33 +4219,51 @@ if st.session_state['csvs_ready']:
     else:
         resp_content = f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{avg_resp_time:.1f}m</div>'
 
-    # The updated Streamlined KPI Bar (with R: and G: splits)
+    # 2. SPLIT KPI BAR — Guardian row + Responder row + combined summary
+    def _kpi_cell(label, value, color=accent_color, border=True):
+        br = f"border-right: 1px solid #222; padding-right: 10px;" if border else ""
+        return (
+            f'<div style="{br} text-align: center;">'
+            f'<div style="font-size: 0.68rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom:2px;">{label}</div>'
+            f'<div style="font-size: 1.9rem; font-weight: 800; color: {color}; font-family: \'IBM Plex Mono\', monospace;">{value}</div>'
+            f'</div>'
+        )
+
+    _GUARD_COL = "#FFD700"   # gold for Guardian
+    _RESP_COL  = "#00D2FF"   # cyan for Responder
+    _COMB_COL  = "#39FF14"   # green for combined
+
     kpi_html = (
-        f'<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); background: {card_bg}; border: 1px solid {card_border}; border-radius: 8px; padding: 20px; margin-bottom: 15px; gap: 10px;">'
-        f'<div style="border-right: 1px solid #222; padding-right: 10px; text-align: center;">'
-        f'<div style="font-size: 0.75rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px;">Total Incidents</div>'
-        f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{call_str}</div>'
-        f'</div>'
-        f'<div style="border-right: 1px solid #222; padding-right: 10px; text-align: center;">'
-        f'<div style="font-size: 0.75rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px;">Call Coverage</div>'
-        f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace; line-height: 1.1;">{calls_covered_perc:.1f}%</div>'
-        f'<div style="font-size: 0.65rem; color: #888; font-weight: 700; margin-top: 4px; letter-spacing: 0.5px;">'
-        f'<span style="color: #00D2FF;">R: {responder_covered_perc:.1f}%</span> &nbsp;|&nbsp; <span style="color: #FFD700;">G: {guardian_covered_perc:.1f}%</span>'
-        f'</div>'
-        f'</div>'
-        f'<div style="border-right: 1px solid #222; padding-right: 10px; text-align: center;">'
-        f'<div style="font-size: 0.75rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px;">Land Covered</div>'
-        f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{area_covered_perc:.1f}%</div>'
-        f'</div>'
-        f'<div style="border-right: 1px solid #222; padding-right: 10px; text-align: center;">'
-        f'<div style="font-size: 0.75rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px;">Overlap</div>'
-        f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{overlap_perc:.1f}%</div>'
-        f'</div>'
-        f'<div style="text-align: center;">'
-        f'<div style="font-size: 0.75rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px;">Est. Avg Response</div>'
-        f'{resp_content}'
-        f'</div>'
-        f'</div>'
+        # ── Row 1: summary totals ──────────────────────────────────────────
+        f'<div style="background:{card_bg}; border:1px solid {card_border}; border-radius:8px; padding:16px 20px; margin-bottom:8px;">'
+        f'<div style="font-size:0.65rem; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Fleet Summary</div>'
+        f'<div style="display:grid; grid-template-columns:repeat(5,1fr); gap:8px;">'
+        + _kpi_cell("Total Incidents", call_str)
+        + _kpi_cell("Combined Coverage", f"{calls_covered_perc:.1f}%", _COMB_COL)
+        + _kpi_cell("Land Covered", f"{area_covered_perc:.1f}%", _COMB_COL)
+        + _kpi_cell("Zone Overlap", f"{overlap_perc:.1f}%", text_muted)
+        + _kpi_cell("Avg Response", f"{avg_resp_time:.1f}m", accent_color, border=False)
+        + f'</div></div>'
+
+        # ── Row 2: Guardian-specific metrics ──────────────────────────────
+        + f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">'
+
+        + f'<div style="background:{card_bg}; border:1px solid #3a3000; border-top:3px solid {_GUARD_COL}; border-radius:8px; padding:14px 16px;">'
+        + f'<div style="font-size:0.65rem; color:{_GUARD_COL}; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; font-weight:700;">🦅 Guardian Fleet — {actual_k_guardian} unit{"s" if actual_k_guardian!=1 else ""} · {guard_strategy_raw}</div>'
+        + f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">'
+        + _kpi_cell("Call Coverage", f"{guard_calls_perc:.1f}%", _GUARD_COL)
+        + _kpi_cell("Area Coverage", f"{guard_area_perc:.1f}%", _GUARD_COL, border=False)
+        + f'</div></div>'
+
+        # ── Row 3: Responder-specific metrics ─────────────────────────────
+        + f'<div style="background:{card_bg}; border:1px solid #003a3a; border-top:3px solid {_RESP_COL}; border-radius:8px; padding:14px 16px;">'
+        + f'<div style="font-size:0.65rem; color:{_RESP_COL}; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; font-weight:700;">🚁 Responder Fleet — {actual_k_responder} unit{"s" if actual_k_responder!=1 else ""} · {resp_strategy_raw}</div>'
+        + f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">'
+        + _kpi_cell("Call Coverage", f"{resp_calls_perc:.1f}%", _RESP_COL)
+        + _kpi_cell("Area Coverage", f"{resp_area_perc:.1f}%", _RESP_COL, border=False)
+        + f'</div></div>'
+
+        + f'</div>'
     )
     
     st.markdown(kpi_html, unsafe_allow_html=True)
@@ -3083,8 +4279,10 @@ if st.session_state['csvs_ready']:
         map_note = ""
     full_daily_note = f"Citywide daily-call estimates are based on the full uploaded CAD total of {orig_calls:,} incidents." if orig_calls else ""
     note_bits = [model_note]
-    if map_note: note_bits.append(map_note)
-    if full_daily_note: note_bits.append(full_daily_note)
+    if map_note:
+        note_bits.append(map_note)
+    if full_daily_note:
+        note_bits.append(full_daily_note)
     st.markdown(f"<div style='font-size:0.65rem;color:gray;margin-top:-10px;margin-bottom:12px;text-align:right;'>{' '.join(note_bits)}</div>", unsafe_allow_html=True)
 
     cards_below_map = bool(show_cards)
@@ -3120,7 +4318,10 @@ if st.session_state['csvs_ready']:
             clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
             lbl = f"{d['name'].split(',')[0]} ({'Resp' if d['type']=='RESPONDER' else 'Guard'})"
             
+            # Determine if this is an extended Guardian (so we can relax the outer ring)
             is_extended_guardian = (d['type'] == 'GUARDIAN' and d['radius_m']/1609.34 > 5.0)
+            
+            # The outer ring becomes relaxed (thinner, more transparent) if > 5 miles
             outer_width = 1.5 if is_extended_guardian else 4.5
             outer_opac = 0.4 if is_extended_guardian else 1.0
             
@@ -3132,6 +4333,7 @@ if st.session_state['csvs_ready']:
                 line=dict(color=d['color'], width=outer_width),
                 fill='toself', fillcolor='rgba(0,0,0,0)', name=lbl, hoverinfo='name'))
 
+            # The 5-mile Rapid Response ring gets the "Important" styling (thick, solid, heavier fill)
             if is_extended_guardian:
                 f_lats, f_lons = get_circle_coords(d['lat'], d['lon'], r_mi=5.0)
                 fig.add_trace(go.Scattermapbox(
@@ -3147,6 +4349,7 @@ if st.session_state['csvs_ready']:
                     showlegend=False
                 ))
 
+            # Star marker for manually pinned stations
             if d.get('pinned'):
                 fig.add_trace(go.Scattermapbox(
                     lat=[d['lat']], lon=[d['lon']], mode='markers',
@@ -3187,14 +4390,21 @@ if st.session_state['csvs_ready']:
 
         st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
-    # ── UNIT ECONOMICS CARDS ─────────────────
+    # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────
     st.markdown("---")
     st.markdown(f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>", unsafe_allow_html=True)
-    st.markdown(f"<div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:10px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>", unsafe_allow_html=True)
-    st.markdown("""<style>.unit-card { transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; } .unit-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,210,255,0.12); }</style>""", unsafe_allow_html=True)
-    
+    st.markdown(
+        f"<div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:10px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>",
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        """<style>
+        .unit-card { transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; }
+        .unit-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,210,255,0.12); }
+        </style>""",
+        unsafe_allow_html=True
+    )
     if active_drones:
-        # NOTE: _build_unit_cards_html was already updated earlier to include Guardian 60/3 math!
         st.markdown(
             _build_unit_cards_html(
                 active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color,
@@ -3208,12 +4418,15 @@ if st.session_state['csvs_ready']:
             <div style="background:{card_bg}; border:1px dashed {card_border}; border-radius:6px; padding:22px; text-align:center; margin-top:8px;">
                 <div style="font-size:2rem; margin-bottom:8px;">🚁</div>
                 <div style="font-weight:700; color:{text_main}; margin-bottom:6px;">No drones deployed yet</div>
-                <div style="font-size:0.8rem; color:{text_muted};">Use the <b>Responder / Guardian Count</b> sliders in the sidebar to deploy drones and see per-unit economics here.</div>
+                <div style="font-size:0.8rem; color:{text_muted};">
+                    Use the <b>Responder / Guardian Count</b> sliders in the sidebar to deploy drones and see per-unit economics here.
+                </div>
             </div>
-            """, unsafe_allow_html=True
+            """,
+            unsafe_allow_html=True
         )
 
-    # ── COVERAGE CURVE + STATION RING CHART ──
+    # ── COVERAGE CURVE + STATION RING CHART (side by side, directly below cards) ──
     st.markdown("---")
     st.markdown(f"<h4 style='border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Coverage Curve</h4>", unsafe_allow_html=True)
     st.markdown(f"<div style='font-size:0.8rem; color:{text_muted}; margin-bottom:8px;'>How added drones improve coverage — and where returns flatten.</div>", unsafe_allow_html=True)
@@ -3242,7 +4455,8 @@ if st.session_state['csvs_ready']:
                 xaxis=dict(showgrid=True, gridcolor=card_border, tickfont=dict(color=text_muted)),
                 yaxis=dict(showgrid=True, gridcolor=card_border, tickfont=dict(color=text_muted),
                            tickvals=[0,20,40,60,80,90,100], range=[0,105]),
-                legend=dict(orientation="h",yanchor="bottom",y=1.02,xanchor="right",x=1, font=dict(size=9,color=text_muted)),
+                legend=dict(orientation="h",yanchor="bottom",y=1.02,xanchor="right",x=1,
+                            font=dict(size=9,color=text_muted)),
                 margin=dict(l=10,r=10,t=20,b=10), height=320,
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                 hoverlabel=dict(bgcolor=card_bg, font_size=13, font_color=text_main, bordercolor=accent_color)
@@ -3252,46 +4466,96 @@ if st.session_state['csvs_ready']:
             st.info("Run optimization to generate coverage curve.")
 
     with _ring_col:
+        # Split ring: outer ring = Guardians (gold), inner ring = Responders (cyan)
         if active_drones and total_calls > 0:
-            _ring_labels, _ring_values, _ring_colors, _ring_text = [], [], [], []
-            _uncovered = total_calls
-            for d in active_drones:
-                _marginal = int(d.get('marginal_perc', 0) * total_calls)
-                if _marginal > 0:
-                    _short = d['name'].split(',')[0][:22]
-                    _ring_labels.append(_short)
-                    _ring_values.append(_marginal)
-                    _ring_colors.append(d['color'])
-                    _ring_text.append(f"{_marginal:,} calls<br>{d['type'][:4]}")
-                    _uncovered -= _marginal
-            if _uncovered > 0:
-                _ring_labels.append("Uncovered")
-                _ring_values.append(max(0, _uncovered))
-                _ring_colors.append("#222222")
-                _ring_text.append(f"{max(0,_uncovered):,} calls<br>not reached")
+            _g_drones = [d for d in active_drones if d['type'] == 'GUARDIAN']
+            _r_drones = [d for d in active_drones if d['type'] == 'RESPONDER']
 
-            fig_ring = go.Figure(go.Pie(
-                labels=_ring_labels, values=_ring_values, hole=0.58,
-                marker=dict(colors=_ring_colors, line=dict(color='#000', width=1.5)), textinfo='none',
-                hovertemplate='<b>%{label}</b><br>%{value:,} calls (%{percent})<extra></extra>', sort=False,
-            ))
-            _covered_cnt = sum(int(d.get('marginal_perc',0)*total_calls) for d in active_drones)
-            _cov_pct = round(_covered_cnt / total_calls * 100, 1) if total_calls else 0
-            fig_ring.update_layout(
-                annotations=[dict(text=f"<b>{_cov_pct}%</b><br><span style='font-size:10px'>covered</span>", x=0.5, y=0.5, font_size=16, showarrow=False, font=dict(color=text_main))],
-                showlegend=True, legend=dict(orientation='v', x=1.02, y=0.5, font=dict(size=9, color=text_muted), bgcolor='rgba(0,0,0,0)'),
-                margin=dict(l=0, r=0, t=10, b=10), height=320, paper_bgcolor='rgba(0,0,0,0)',
-                hoverlabel=dict(bgcolor=card_bg, font_size=12, font_color=text_main),
-            )
-            st.plotly_chart(fig_ring, use_container_width=True, config={'displayModeBar':False})
+            def _build_ring_data(drones, fleet_cov_mask):
+                """Build labels/values/colors for one fleet's ring slices."""
+                labels, values, colors = [], [], []
+                remaining = int(fleet_cov_mask.sum()) if fleet_cov_mask is not None else 0
+                for d in drones:
+                    _m = int(d.get('marginal_perc', 0) * total_calls)
+                    if _m > 0:
+                        labels.append(d['name'].split(',')[0][:18])
+                        values.append(_m)
+                        colors.append(d['color'])
+                        remaining = max(0, remaining - _m)
+                return labels, values, colors
+
+            _g_labels, _g_vals, _g_cols = _build_ring_data(_g_drones, cov_g)
+            _r_labels, _r_vals, _r_cols = _build_ring_data(_r_drones, cov_r)
+
+            # Uncovered slice for combined view
+            _combined_covered = int(np.logical_or(cov_r, cov_g).sum()) if total_calls > 0 else 0
+            _uncovered = max(0, total_calls - _combined_covered)
+
+            # Build a single donut: Guardian slices (gold ring) + Responder slices (cyan ring)
+            # separated by a small "uncovered" gap
+            all_labels = _g_labels + _r_labels + (["Uncovered"] if _uncovered > 0 else [])
+            all_values = _g_vals   + _r_vals   + ([_uncovered] if _uncovered > 0 else [])
+            all_colors = _g_cols   + _r_cols   + (["#1a1a1a"] if _uncovered > 0 else [])
+
+            if all_values:
+                fig_ring = go.Figure(go.Pie(
+                    labels=all_labels,
+                    values=all_values,
+                    hole=0.58,
+                    marker=dict(colors=all_colors, line=dict(color='#000', width=1.5)),
+                    textinfo='none',
+                    hovertemplate='<b>%{label}</b><br>%{value:,} calls (%{percent})<extra></extra>',
+                    sort=False,
+                ))
+                _cov_pct = round(_combined_covered / total_calls * 100, 1)
+                _mode_short = "▶◀" if complement_mode else "↔" if shared_mode else "⊕"
+                fig_ring.update_layout(
+                    annotations=[dict(
+                        text=f"<b>{_cov_pct}%</b><br><span style='font-size:9px'>{_mode_short} combined</span>",
+                        x=0.5, y=0.5, font_size=15, showarrow=False,
+                        font=dict(color=text_main)
+                    )],
+                    showlegend=True,
+                    legend=dict(
+                        orientation='v', x=1.02, y=0.5,
+                        font=dict(size=9, color=text_muted),
+                        bgcolor='rgba(0,0,0,0)',
+                        groupclick='toggleitem',
+                    ),
+                    margin=dict(l=0, r=0, t=10, b=10),
+                    height=320,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    hoverlabel=dict(bgcolor=card_bg, font_size=12, font_color=text_main),
+                )
+                st.plotly_chart(fig_ring, use_container_width=True, config={'displayModeBar':False})
+
+                # Mode legend below the ring
+                _mode_label = {
+                    "Complement — push apart": "▶◀ Complement — Responders fill Guardian gaps",
+                    "Independent — each maximises own area": "⊕ Independent — each fleet optimised separately",
+                    "Shared — allow full overlap": "↔ Shared — both fleets maximise same call set",
+                }.get(deployment_mode, "")
+                st.markdown(
+                    f"<div style='font-size:0.65rem; color:{text_muted}; text-align:center; margin-top:-8px;'>{_mode_label}</div>",
+                    unsafe_allow_html=True
+                )
         else:
-            st.markdown(f"<div style='color:{text_muted}; font-size:0.8rem; padding:40px 0; text-align:center;'>Deploy drones to see call distribution ring.</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div style='color:{text_muted}; font-size:0.8rem; padding:40px 0; text-align:center;'>Deploy drones to see call distribution ring.</div>",
+                unsafe_allow_html=True
+            )
 
+
+    # Resolve real incident datetime coverage for labels on the stations page
     _label_dt_series = _detect_datetime_series_for_labels(df_calls_full if df_calls_full is not None else df_calls)
     _label_has_real_dates = _label_dt_series is not None and getattr(_label_dt_series, "notna", lambda: pd.Series([], dtype=bool))().sum() > 0
 
+    # ── CAD DATA CHARTS (moved into CAD Ingestion Analytics below) ───────────
     _cad_src = st.session_state.get('data_source', '')
-    _has_real_calls = _cad_src in ('cad_upload', 'brinc_file') or ('df_calls' in st.session_state and st.session_state['df_calls'] is not None and len(st.session_state['df_calls']) > 100)
+    _has_real_calls = _cad_src in ('cad_upload', 'brinc_file') or (
+        'df_calls' in st.session_state and st.session_state['df_calls'] is not None
+        and len(st.session_state['df_calls']) > 100
+    )
 
     # ── 3D SWARM SIMULATION ───────────────────────────────────────────
     if fleet_capex > 0:
@@ -3312,7 +4576,8 @@ if st.session_state['csvs_ready']:
                         dist = (cc[0]-d['lon'])**2 + (cc[1]-d['lat'])**2
                         if dist < best_dist:
                             best_dist, best_d = dist, d_idx
-                if best_d != -1: sim_assignments[best_d].append(c_idx)
+                if best_d != -1:
+                    sim_assignments[best_d].append(c_idx)
 
             stations_json, flights_json, legend_html_sim = [], [], ""
             total_sim_flights = 0
@@ -3349,7 +4614,8 @@ if st.session_state['csvs_ready']:
                     mx4 = lon0 + 0.85*(lon1-lon0);  my4 = lat0 + 0.85*(lat1-lat0)
                     flights_json.append({
                         "path": [[lon0, lat0, 0], [mx1, my1, arc_h*0.75], [mx2, my2, arc_h], [mx3, my3, arc_h], [mx4, my4, arc_h*0.75], [lon1, lat1, 0]],
-                        "timestamps": [t0, t1, t2, t3, t4, t5], "color": rgb
+                        "timestamps": [t0, t1, t2, t3, t4, t5],
+                        "color": rgb
                     })
 
             warn_html_sim = ""
@@ -3366,16 +4632,23 @@ if st.session_state['csvs_ready']:
             <style>
               body{{margin:0;padding:0;overflow:hidden;background:#000;font-family:Manrope,sans-serif;}}
               #map{{width:100vw;height:100vh;position:absolute;}}
-              #ui{{position:absolute;top:16px;left:16px;background:rgba(17,17,17,0.92);padding:16px;border-radius:8px; color:white;border:1px solid #333;z-index:10;box-shadow:0 4px 10px rgba(0,0,0,0.5);width:260px;}}
-              button{{background:#00D2FF;color:black;border:none;padding:10px;cursor:pointer;font-weight:bold; border-radius:4px;width:100%;font-size:13px;text-transform:uppercase;margin-bottom:8px;}}
+              #ui{{position:absolute;top:16px;left:16px;background:rgba(17,17,17,0.92);padding:16px;border-radius:8px;
+                   color:white;border:1px solid #333;z-index:10;box-shadow:0 4px 10px rgba(0,0,0,0.5);width:260px;}}
+              button{{background:#00D2FF;color:black;border:none;padding:10px;cursor:pointer;font-weight:bold;
+                      border-radius:4px;width:100%;font-size:13px;text-transform:uppercase;margin-bottom:8px;}}
               button:disabled{{background:#444;color:#888;cursor:not-allowed;}}
               #timeDisplay{{font-family:monospace;font-size:16px;color:#00ffcc;font-weight:bold;text-align:center;margin-bottom:8px;}}
             </style></head><body>
             <div id="ui">
               <h3 style="margin:0 0 8px;color:#00D2FF;font-size:14px;">DFR SWARM SIMULATION</h3>
               {warn_html_sim}
-              <div style="font-size:11px;color:#aaa;margin-bottom:10px;">{total_sim_flights:,} flights over 30 days at {int(dfr_dispatch_rate*100)}% dispatch rate</div>
-              <div style="margin-bottom:10px;"><label style="font-size:11px;color:#ccc;">Speed: <span id="speedLabel">1</span>x</label><input type="range" id="speedSlider" min="1" max="100" value="1" style="width:100%;margin-top:4px;"></div>
+              <div style="font-size:11px;color:#aaa;margin-bottom:10px;">
+                {total_sim_flights:,} flights over 30 days at {int(dfr_dispatch_rate*100)}% dispatch rate
+              </div>
+              <div style="margin-bottom:10px;">
+                <label style="font-size:11px;color:#ccc;">Speed: <span id="speedLabel">1</span>x</label>
+                <input type="range" id="speedSlider" min="1" max="100" value="1" style="width:100%;margin-top:4px;">
+              </div>
               <button id="runBtn">▶ LAUNCH SWARM</button>
               <div id="timeDisplay">00:00</div>
               <div style="margin-top:10px;border-top:1px solid #333;padding-top:8px;">
@@ -3393,16 +4666,27 @@ if st.session_state['csvs_ready']:
               const map=new deck.DeckGL({{
                 container:'map',
                 mapStyle:'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-                initialViewState:{{longitude:{center_lon},latitude:{center_lat},zoom:{dynamic_zoom},pitch:50,bearing:0}}, controller:true
+                initialViewState:{{longitude:{center_lon},latitude:{center_lat},zoom:{dynamic_zoom},pitch:50,bearing:0}},
+                controller:true
               }});
               let time=0,timer=null,lastTime=0;
               function render(){{
                 map.setProps({{layers:[
-                  new deck.ScatterplotLayer({{id:'rings',data:stations,getPosition:d=>[d.lon,d.lat], getFillColor:d=>[d.color[0],d.color[1],d.color[2],25], getLineColor:d=>[d.color[0],d.color[1],d.color[2],220], lineWidthMinPixels:2,stroked:true,filled:true,getRadius:d=>d.radius}}),
-                  new deck.ScatterplotLayer({{id:'pads',data:stations,getPosition:d=>[d.lon,d.lat], getFillColor:d=>[d.color[0],d.color[1],d.color[2],120],getRadius:180}}),
-                  new deck.IconLayer({{id:'icons',data:stations, getIcon:d=>({{url:"{drone_svg}",width:24,height:24,anchorY:12}}), getPosition:d=>[d.lon,d.lat],getSize:36,sizeScale:1}}),
-                  new deck.TripsLayer({{id:'flights',data:flights,getPath:d=>d.path, getTimestamps:d=>d.timestamps,getColor:d=>d.color, opacity:0.85,widthMinPixels:5,trailLength:13500,currentTime:time,rounded:true}}),
-                  new deck.ScatterplotLayer({{id:'landed',data:flights,getPosition:d=>d.path[5], getFillColor:d=>time>=d.timestamps[5]?[d.color[0],d.color[1],d.color[2],255]:[0,0,0,0], getRadius:25,radiusMinPixels:3,updateTriggers:{{getFillColor:time}}}})
+                  new deck.ScatterplotLayer({{id:'rings',data:stations,getPosition:d=>[d.lon,d.lat],
+                    getFillColor:d=>[d.color[0],d.color[1],d.color[2],25],
+                    getLineColor:d=>[d.color[0],d.color[1],d.color[2],220],
+                    lineWidthMinPixels:2,stroked:true,filled:true,getRadius:d=>d.radius}}),
+                  new deck.ScatterplotLayer({{id:'pads',data:stations,getPosition:d=>[d.lon,d.lat],
+                    getFillColor:d=>[d.color[0],d.color[1],d.color[2],120],getRadius:180}}),
+                  new deck.IconLayer({{id:'icons',data:stations,
+                    getIcon:d=>({{url:"{drone_svg}",width:24,height:24,anchorY:12}}),
+                    getPosition:d=>[d.lon,d.lat],getSize:36,sizeScale:1}}),
+                  new deck.TripsLayer({{id:'flights',data:flights,getPath:d=>d.path,
+                    getTimestamps:d=>d.timestamps,getColor:d=>d.color,
+                    opacity:0.85,widthMinPixels:5,trailLength:13500,currentTime:time,rounded:true}}),
+                  new deck.ScatterplotLayer({{id:'landed',data:flights,getPosition:d=>d.path[5],
+                    getFillColor:d=>time>=d.timestamps[5]?[d.color[0],d.color[1],d.color[2],255]:[0,0,0,0],
+                    getRadius:25,radiusMinPixels:3,updateTriggers:{{getFillColor:time}}}})
                 ]}});
                 let day=Math.floor(time/86400)+1;
                 let h=Math.floor((time%86400)/3600).toString().padStart(2,'0');
@@ -3431,6 +4715,7 @@ if st.session_state['csvs_ready']:
               }};
               render();
             </script></body></html>"""
+
             components.html(sim_html, height=700)
 
     # ── COMMAND CENTER ANALYTICS DASHBOARD ──
@@ -3457,6 +4742,7 @@ if st.session_state['csvs_ready']:
     user_clean = brinc_user.strip()
     if not user_clean: user_clean = "steven.beltran"
 
+    # Police dept fields removed from sidebar — read from session state defaults
     pd_chief_name = st.session_state.get('pd_chief_name', '')
     pd_dept_name  = st.session_state.get('pd_dept_name', '')
     pd_dept_email = st.session_state.get('pd_dept_email', '')
@@ -3464,11 +4750,17 @@ if st.session_state['csvs_ready']:
     prop_email = f"{user_clean}@brincdrones.com"
     prop_name = " ".join([word.capitalize() for word in user_clean.split('.')])
 
+    # Always define these so download buttons work regardless of fleet_capex
     prop_city  = st.session_state.get('active_city', 'City')
     prop_state = st.session_state.get('active_state', 'FL')
     _safe_city_base = prop_city.replace(" ", "_").replace("/", "_")
 
     if fleet_capex > 0:
+
+        prop_city  = st.session_state.get('active_city', 'City')
+        prop_state = st.session_state.get('active_state', 'FL')
+
+        # Police dept signatory — falls back gracefully if not filled in
         pd_chief  = pd_chief_name.strip()  if pd_chief_name.strip()  else f"Chief of Police, {prop_city}"
         pd_dept   = pd_dept_name.strip()   if pd_dept_name.strip()   else f"{prop_city} Police Department"
         pd_email  = pd_dept_email.strip()  if pd_dept_email.strip()  else ""
@@ -3483,7 +4775,8 @@ if st.session_state['csvs_ready']:
         try:
             _start_dt = datetime.datetime.strptime(_session_start, '%Y-%m-%d %H:%M:%S')
             _dur_min  = round((datetime.datetime.now() - _start_dt).total_seconds() / 60, 1)
-        except Exception: _dur_min = ''
+        except Exception:
+            _dur_min = ''
 
         avg_resp_time    = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
         avg_ground_speed = CONFIG["DEFAULT_TRAFFIC_SPEED"] * (1 - traffic_level / 100)
@@ -3496,14 +4789,17 @@ if st.session_state['csvs_ready']:
         maxy = float(_calls_lats.max()) if len(_calls_lats) else 0
         area_sq_mi_est   = max(1, int((maxx - minx) * (maxy - miny) * 3280))
         export_details = {
+            # Session
             "session_id":            st.session_state.get('session_id', ''),
             "session_start":         _session_start,
             "session_duration_min":  _dur_min,
             "data_source":           st.session_state.get('data_source', 'unknown'),
+            # Jurisdiction
             "population":            pop_metric,
             "total_calls":           st.session_state.get('total_original_calls', 0),
             "daily_calls":           max(1, int(st.session_state.get('total_original_calls', 0) / 365)),
             "area_sq_mi":            area_sq_mi_est,
+            # Financials
             "opt_strategy":          opt_strategy,
             "incremental_build":     incremental_build,
             "allow_redundancy":      allow_redundancy,
@@ -3512,27 +4808,39 @@ if st.session_state['csvs_ready']:
             "fleet_capex":           fleet_capex,
             "annual_savings":        annual_savings,
             "break_even":            break_even_text,
+            # Operational
             "avg_response_min":      round(avg_resp_time, 2),
             "avg_time_saved_min":    round(avg_time_saved, 2),
             "area_covered_pct":      round(area_covered_perc, 1),
+            # PD Contact
             "pd_chief":              st.session_state.get('pd_chief_name', ''),
             "pd_dept":               st.session_state.get('pd_dept_name', ''),
             "pd_dept_email":         st.session_state.get('pd_dept_email', ''),
             "pd_dept_phone":         st.session_state.get('pd_dept_phone', ''),
+            # Drones
             "active_drones": [{
-                "name": d['name'], "type": d['type'], "lat": d['lat'], "lon": d['lon'],
-                "avg_time_min": d.get('avg_time_min', 0), "faa_ceiling": d.get('faa_ceiling', ''),
-                "annual_savings": d.get('annual_savings', 0),
+                "name": d['name'], "type": d['type'],
+                "lat": d['lat'],   "lon": d['lon'],
+                "avg_time_min":    d.get('avg_time_min', 0),
+                "faa_ceiling":     d.get('faa_ceiling', ''),
+                "annual_savings":  d.get('annual_savings', 0),
             } for d in active_drones],
         }
 
         export_dict = {
             "city": prop_city, "state": prop_state,
-            "_disclaimer": ("SIMULATION TOOL: All figures in this file are model estimates based on user-provided inputs. Real-world results will vary. This is not a legal recommendation, binding proposal, contract, or guarantee of any product, service, or financial outcome."),
+            "_disclaimer": (
+                "SIMULATION TOOL: All figures in this file are model estimates based on user-provided inputs. "
+                "Real-world results will vary. This is not a legal recommendation, binding proposal, contract, "
+                "or guarantee of any product, service, or financial outcome."
+            ),
             "k_resp": k_responder, "k_guard": k_guardian,
             "r_resp": resp_radius_mi, "r_guard": guard_radius_mi,
             "dfr_rate": int(dfr_dispatch_rate*100), "deflect_rate": int(deflection_rate*100),
-            "calls_data": _safe_df_to_records(st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None else st.session_state.get('df_calls')),
+            "calls_data": _safe_df_to_records(
+                st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None
+                else st.session_state.get('df_calls')
+            ),
             "stations_data": _safe_df_to_records(st.session_state.get('df_stations')),
             "faa_geojson": faa_geojson
         }
@@ -3570,7 +4878,9 @@ if st.session_state['csvs_ready']:
 
         police_stations = [d['name'] for d in active_drones if 'Police' in d.get('name','') or (
             'type' in df_stations_all.columns and
-            'Police' in str(df_stations_all[df_stations_all['name'].str.contains(d['name'].split(']')[-1].strip(), na=False, regex=False)]['type'].values[:1])
+            'Police' in str(df_stations_all[df_stations_all['name'].str.contains(
+                d['name'].split(']')[-1].strip(), na=False, regex=False
+            )]['type'].values[:1])
         )]
 
         dept_summary_parts = []
@@ -3580,8 +4890,6 @@ if st.session_state['csvs_ready']:
         dept_summary = ", ".join(dept_summary_parts) if dept_summary_parts else f"{len(active_drones)} municipal stations"
         police_names_str = (", ".join([n.replace('[Police] ','') for n in police_dept_names[:6]]) + ("..." if len(police_dept_names)>6 else "")) if police_dept_names else "municipal facilities"
         total_fleet = actual_k_responder + actual_k_guardian
-        
-        # NOTE: Updated to pass the independent metrics down to the HTML report generator if desired
         analytics_html_export = generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls), export_mode=True)
         cad_charts_html_export = _build_cad_charts_html(df_calls_full if df_calls_full is not None else df_calls)
 
@@ -3633,7 +4941,7 @@ if st.session_state['csvs_ready']:
                 </div>
                 <div class="kpi-card">
                     <h3>Operational Impact</h3>
-                    <div class="kpi-row"><span class="kpi-lbl">Total Covered (R/G)</span><span class="kpi-val">{calls_covered_perc:.1f}%</span></div>
+                    <div class="kpi-row"><span class="kpi-lbl">911 Call Coverage</span><span class="kpi-val">{calls_covered_perc:.1f}%</span></div>
                     <div class="kpi-row"><span class="kpi-lbl">Avg Response Time</span><span class="kpi-val">{avg_resp_time:.1f} min</span></div>
                     <div class="kpi-row"><span class="kpi-lbl">Time Saved vs Patrol</span><span class="kpi-val" style="color:#2ecc71;">{avg_time_saved:.1f} min</span></div>
                 </div>
@@ -3660,7 +4968,7 @@ if st.session_state['csvs_ready']:
             </table>
 
             <h2>Grant Narrative (AI Draft)</h2>
-            <div class="disclaimer"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission. All financial projections, coverage statistics, and operational estimates are produced by a simulation tool based on user-provided inputs — they are not a guarantee of performance, legal recommendation, or binding commitment of any kind.</div>
+            <div class="disclaimer"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission. All financial projections, coverage statistics, and operational estimates are produced by a simulation tool based on user-provided inputs &mdash; they are not a guarantee of performance, legal recommendation, or binding commitment of any kind.</div>
             <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — {prepared_for_city}</p>
             <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully submits this application requesting funding to establish a BRINC Drones-powered Drone as a First Responder (DFR) program. This initiative will deploy a fleet of {total_fleet} purpose-built BRINC Drones aerial systems — comprising {actual_k_responder} BRINC Responder and {actual_k_guardian} BRINC Guardian units — across {dept_summary} serving a combined population of {pop_metric:,} residents across approximately {area_sq_mi_est:,} square miles in {prop_city}, {prop_state}.</p>
             <p><strong>Statement of Need:</strong> The {jurisdiction_list} currently serves a population of {pop_metric:,} residents and responds to an estimated {st.session_state.get('total_original_calls', total_calls):,} calls for service annually. Ground-based patrol response times are constrained by traffic, geography, and unit availability. This proposal addresses a critical public safety gap: the need for immediate aerial situational awareness that arrives before ground units, enabling smarter, safer, and faster emergency response. BRINC Drones, the world leader in purpose-built DFR technology, provides the only fully integrated hardware, software, and operational support platform purpose-designed for law enforcement DFR deployment.</p>
@@ -3748,7 +5056,7 @@ if st.session_state['csvs_ready']:
             </div>
         </div>
         <div style="background:#fff8e6; border:1px solid #F0B429; border-radius:8px; padding:20px 25px; margin:40px 50px 0 50px; font-size:12px; color:#6b5000; line-height:1.7;">
-            <strong style="font-size:13px;">⚠ DISCLAIMER — SIMULATION TOOL</strong><br>
+            <strong style="font-size:13px;">&#9888; DISCLAIMER &mdash; SIMULATION TOOL</strong><br>
             This document was generated by the BRINC Drones Coverage Optimization Simulator. All coverage percentages,
             response time projections, financial figures (including CapEx, annual savings, and break-even estimates),
             population statistics, and operational metrics are <strong>model estimates calculated from user-provided
@@ -3778,9 +5086,11 @@ if st.session_state['csvs_ready']:
 
         export_html = export_html.replace("[ANALYTICS_HTML_EXPORT]", analytics_html_export)
 
+    # ── Download buttons — always rendered so they're visible in the sidebar ──
     _safe_city   = _safe_city_base
     _ts          = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
+    # 1. Save Deployment Plan (.brinc) — always available
     _brinc_data = json.dumps(export_dict) if fleet_capex > 0 else json.dumps({
         "city": st.session_state.get('active_city', ''), "state": st.session_state.get('active_state', ''),
         "_disclaimer": "No drones deployed yet.", "k_resp": 0, "k_guard": 0,
@@ -3801,6 +5111,7 @@ if st.session_state['csvs_ready']:
                            "BRINC", k_responder, k_guardian, calls_covered_perc,
                            prop_name, prop_email, details=export_details)
 
+    # 2. Executive Summary HTML — only meaningful when drones are deployed
     if fleet_capex > 0:
         if st.sidebar.download_button("📄 Executive Summary (HTML)", data=export_html,
                                       file_name=f"Brinc_{_safe_city}_Proposal_{_ts}.html",
@@ -3816,6 +5127,7 @@ if st.session_state['csvs_ready']:
                           use_container_width=True,
                           help="Deploy at least one drone to generate the proposal document.")
 
+    # 3. Google Earth KML — only when drones are placed
     if active_drones:
         if st.sidebar.download_button("🌏 Google Earth Briefing File",
                                       data=generate_kml(active_gdf, active_drones, calls_in_city),

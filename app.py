@@ -661,6 +661,27 @@ def aggressive_parse_calls(uploaded_files):
             return 'AL'
         return None
 
+
+    def _choose_priority_column(raw_df):
+        exact_names = ['priority', 'call priority', 'priority level', 'pri']
+        exact = [c for c in raw_df.columns if c.strip().lower() in exact_names]
+        if exact:
+            exact.sort(key=lambda c: (
+                pd.to_numeric(raw_df[c], errors='coerce').dropna().isin([1,2,3,4,5,6,7,8,9]).mean(),
+                -raw_df[c].dropna().nunique()
+            ), reverse=True)
+            return exact[0]
+
+        loose_names = ['priority', 'call priority', 'priority level', 'pri', 'urgency']
+        loose = [c for c in raw_df.columns if any(k in c for k in loose_names)]
+        if loose:
+            loose.sort(key=lambda c: (
+                pd.to_numeric(raw_df[c], errors='coerce').dropna().isin([1,2,3,4,5,6,7,8,9]).mean(),
+                -raw_df[c].dropna().nunique()
+            ), reverse=True)
+            return loose[0]
+        return None
+
     def parse_priority(raw):
         s = str(raw).strip().upper()
         if not s or s == 'NAN': return None
@@ -686,44 +707,81 @@ def aggressive_parse_calls(uploaded_files):
                     engine = 'xlrd'
                 elif fname.endswith('.xlsb'):
                     engine = 'pyxlsb'
-                # Streaming Excel read — handles files with thousands of empty ghost columns
-                # (e.g. exports with 16k "ColumnN" placeholder columns) without OOM
+
+                def _sheet_score(ws):
+                    score = 0
+                    rows = list(ws.iter_rows(min_row=1, max_row=3, values_only=True))
+                    if not rows:
+                        return -1
+                    header = rows[0] or []
+                    header_norm = [str(h).strip().lower() for h in header if h is not None]
+                    if not header_norm:
+                        return -1
+                    hints = ['latitude', 'longitude', 'lat', 'lon', 'priority', 'location', 'date', 'time']
+                    score += sum(10 for h in header_norm if any(k == h or k in h for k in hints))
+                    score += sum(1 for h in header_norm if h and not re.match(r'^column\d+$', h))
+                    if len(rows) > 1 and rows[1] and any(v is not None and str(v).strip() != '' for v in rows[1]):
+                        score += 25
+                    # Penalize external-data placeholder sheets
+                    if len(header_norm) == 1 and header_norm[0].startswith('externaldata_'):
+                        score -= 100
+                    return score
+
                 try:
                     import openpyxl as _oxl
                     _wb = _oxl.load_workbook(io.BytesIO(raw_bytes), read_only=True, data_only=True)
-                    # Pick the sheet that actually has two rows of data
-                    _sheet_name = _wb.sheetnames[0]
-                    for _sn in _wb.sheetnames:
-                        _ws_peek = _wb[_sn]
-                        _peek = []
-                        for _pr in _ws_peek.iter_rows(max_row=2, values_only=True):
-                            _peek.append(_pr)
-                        if len(_peek) >= 2 and any(v is not None for v in (_peek[1] or [])):
-                            _sheet_name = _sn
-                            break
-                    # Stream rows, keeping only real (non-ghost) columns
+                    _sheet_name = max(_wb.sheetnames, key=lambda sn: _sheet_score(_wb[sn]))
                     _ws = _wb[_sheet_name]
                     _row_iter = _ws.iter_rows(values_only=True)
                     _headers_raw = next(_row_iter)
-                    _real_idx = [i for i, h in enumerate(_headers_raw)
-                                 if h is not None and not (str(h).startswith('Column') and str(h)[6:].isdigit())]
+                    if _headers_raw is None:
+                        raise ValueError("Selected Excel sheet has no header row.")
+                    _real_idx = [
+                        i for i, h in enumerate(_headers_raw)
+                        if h is not None and not (str(h).startswith('Column') and str(h)[6:].isdigit())
+                    ]
                     if not _real_idx:
-                        _real_idx = list(range(min(50, len(_headers_raw))))
+                        _real_idx = [i for i, h in enumerate(_headers_raw) if h is not None]
                     _real_headers = [str(_headers_raw[i]).lower().strip() for i in _real_idx]
                     _rows_data = []
                     for _row in _row_iter:
-                        _rows_data.append([_row[i] if i < len(_row) else None for i in _real_idx])
+                        if _row is None:
+                            continue
+                        _trimmed = [_row[i] if i < len(_row) else None for i in _real_idx]
+                        if any(v is not None and str(v).strip() != '' for v in _trimmed):
+                            _rows_data.append(_trimmed)
                     _wb.close()
-                    raw_df = pd.DataFrame(_rows_data, columns=_real_headers).astype(str)
-                    raw_df.replace('None', pd.NA, inplace=True)
-                except Exception as _xe:
-                    # Fallback to standard read (may be slow on huge files)
-                    raw_df = pd.read_excel(io.BytesIO(raw_bytes), engine=engine, dtype=str)
+                    raw_df = pd.DataFrame(_rows_data, columns=_real_headers)
+                    raw_df = raw_df.dropna(how='all')
                     raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
-
-
-
-                raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
+                except Exception as _xe:
+                    raw_df = None
+                    # Try all sheets with pandas and pick the one that looks most like CAD data
+                    try:
+                        _all = pd.read_excel(io.BytesIO(raw_bytes), engine=engine, sheet_name=None)
+                        best_score = -10**9
+                        best_df = None
+                        for _sn, _df in _all.items():
+                            _df.columns = [str(c).lower().strip() for c in _df.columns]
+                            _score = 0
+                            for _c in _df.columns:
+                                if _c in ('latitude', 'longitude', 'priority', 'location'):
+                                    _score += 20
+                                elif any(k in _c for k in ['lat', 'lon', 'priority', 'location', 'date', 'time']):
+                                    _score += 5
+                            _score += min(len(_df), 100)
+                            if len(_df.columns) == 1 and str(_df.columns[0]).startswith('externaldata_'):
+                                _score -= 100
+                            if _score > best_score:
+                                best_score = _score
+                                best_df = _df
+                        if best_df is not None:
+                            raw_df = best_df
+                    except Exception:
+                        pass
+                    if raw_df is None:
+                        raw_df = pd.read_excel(io.BytesIO(raw_bytes), engine=engine, dtype=str)
+                        raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
             else:
                 # ── CSV / TXT path ────────────────────────────────────────────
                 content = cfile.getvalue().decode('utf-8', errors='ignore')
@@ -733,9 +791,16 @@ def aggressive_parse_calls(uploaded_files):
                 raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
             
             res = pd.DataFrame()
+            exact_coord_names = {
+                'lat': ['latitude', 'lat', 'gps_lat', 'gps_latitude'],
+                'lon': ['longitude', 'lon', 'long', 'gps_lon', 'gps_longitude']
+            }
             for field in ['lat', 'lon']:
-                found = [c for c in raw_df.columns if any(s in c for s in CV[field])]
-                if found: res[field] = pd.to_numeric(raw_df[found[0]], errors='coerce')
+                found_exact = [c for c in raw_df.columns if c.strip().lower() in exact_coord_names[field]]
+                found_loose = [c for c in raw_df.columns if any(s in c for s in CV[field])]
+                found = found_exact or found_loose
+                if found:
+                    res[field] = pd.to_numeric(raw_df[found[0]], errors='coerce')
 
             # ── Fallback: no column name matched — scan numeric columns by value range ──
             # Lat: -90 to 90, Lon: -180 to 180. Pick best candidate for each.

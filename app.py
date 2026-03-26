@@ -2044,7 +2044,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         cards_html.append(f'''
 <div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color}; border-left:1px solid {card_border}; border-right:1px solid {card_border}; border-bottom:1px solid {card_border}; border-radius:4px; padding:12px; cursor:default; display:flex; flex-direction:column; box-sizing:border-box; min-height:100%;">
   <div style="font-weight:700; font-size:0.73rem; color:{card_title}; margin-bottom:2px; line-height:1.25em;">{short_name}</div>
-  <div style="font-size:0.58rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{d_type} · Phase #{d_step}</div>
+  <div style="font-size:0.58rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{"🔒 " if d.get("pinned") else ""}{d_type} · Phase #{d_step}</div>
   <div style="font-size:0.62rem; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
     <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
   </div>
@@ -2287,7 +2287,11 @@ def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, e
             })
     return calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls
 
-def solve_mclp(resp_matrix, guard_matrix, dist_r, dist_g, num_resp, num_guard, allow_redundancy, incremental=True):
+def solve_mclp(resp_matrix, guard_matrix, dist_r, dist_g, num_resp, num_guard, allow_redundancy, incremental=True, forced_r=None, forced_g=None):
+    """MCLP optimizer. forced_r / forced_g are lists of station indices that must
+    be included as Responders / Guardians regardless of coverage score."""
+    forced_r = list(forced_r or [])
+    forced_g = list(forced_g or [])
     n_stations, n_calls = resp_matrix.shape
     if n_calls == 0 or (num_resp == 0 and num_guard == 0): return [], [], [], []
     df_profiles = pd.DataFrame(resp_matrix.T).astype(int).astype(str)
@@ -2328,15 +2332,18 @@ def solve_mclp(resp_matrix, guard_matrix, dist_r, dist_g, num_resp, num_guard, a
         )
 
     if not incremental:
-        res_r, res_g = run_lp(num_resp, num_guard, [], [])
+        res_r, res_g = run_lp(num_resp, num_guard, forced_r, forced_g)
         return res_r, res_g, res_r, res_g
-    curr_r, curr_g = [], []
-    chrono_r, chrono_g = [], []
-    for tg in range(1, num_guard+1):
+    # Start with forced pins already locked in
+    curr_r, curr_g = list(forced_r), list(forced_g)
+    chrono_r, chrono_g = list(forced_r), list(forced_g)
+    # Add remaining Guardians one at a time (incremental)
+    for tg in range(len(forced_g) + 1, num_guard + 1):
         next_r, next_g = run_lp(0, tg, curr_r, curr_g)
         chrono_g.extend([x for x in next_g if x not in curr_g])
         curr_r, curr_g = next_r, next_g
-    for tr in range(1, num_resp+1):
+    # Add remaining Responders one at a time
+    for tr in range(len(forced_r) + 1, num_resp + 1):
         next_r, next_g = run_lp(tr, num_guard, curr_r, curr_g)
         chrono_r.extend([x for x in next_r if x not in curr_r])
         curr_r, curr_g = next_r, next_g
@@ -3511,6 +3518,46 @@ if st.session_state['csvs_ready']:
 
     st.session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
 
+    # ── MANUAL STATION PINS ───────────────────────────────────────────────────
+    pin_expander = st.sidebar.expander("📍 Manual Station Pins", expanded=False)
+    with pin_expander:
+        st.markdown(
+            "<div style='font-size:0.72rem; color:#aaa; margin-bottom:8px;'>"
+            "Pin specific stations to lock them into the solution. "
+            "The optimizer fills remaining slots around your picks. "
+            "Total count (slider) must be ≥ number of pins.</div>",
+            unsafe_allow_html=True
+        )
+        _station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
+
+        pinned_guard_names = st.multiselect(
+            "🦅 Pin Guardian station(s)",
+            options=_station_names,
+            default=[s for s in st.session_state.get('pinned_guard_names', []) if s in _station_names],
+            help="These stations are always included as Guardians. Optimizer fills remaining Guardian slots."
+        )
+        pinned_resp_names = st.multiselect(
+            "🚁 Pin Responder station(s)",
+            options=[s for s in _station_names if s not in pinned_guard_names],
+            default=[s for s in st.session_state.get('pinned_resp_names', []) if s in _station_names and s not in pinned_guard_names],
+            help="These stations are always included as Responders. Optimizer fills remaining Responder slots."
+        )
+        st.session_state['pinned_guard_names'] = pinned_guard_names
+        st.session_state['pinned_resp_names']  = pinned_resp_names
+
+        # Validate pin counts don't exceed slider totals
+        if len(pinned_guard_names) > k_guardian:
+            st.warning(f"⚠️ {len(pinned_guard_names)} Guardian pins but slider = {k_guardian}. Raise Guardian Count ≥ {len(pinned_guard_names)}.")
+        if len(pinned_resp_names) > k_responder:
+            st.warning(f"⚠️ {len(pinned_resp_names)} Responder pins but slider = {k_responder}. Raise Responder Count ≥ {len(pinned_resp_names)}.")
+        if pinned_guard_names or pinned_resp_names:
+            st.info(f"🔒 {len(pinned_guard_names)} Guardian + {len(pinned_resp_names)} Responder pinned. Optimizer places remaining {max(0,k_guardian-len(pinned_guard_names))}G + {max(0,k_responder-len(pinned_resp_names))}R automatically.")
+
+    # Convert pin names → station indices for the optimizer
+    _name_to_idx = {row['name']: i for i, row in df_stations_all.iterrows()}
+    locked_g_pins = [_name_to_idx[n] for n in pinned_guard_names if n in _name_to_idx]
+    locked_r_pins = [_name_to_idx[n] for n in pinned_resp_names  if n in _name_to_idx]
+
     bounds_hash = f"{minx}_{miny}_{maxx}_{maxy}_{n}_{resp_radius_mi}_{guard_radius_mi}"
 
     prog2 = st.sidebar.empty()
@@ -3566,7 +3613,8 @@ if st.session_state['csvs_ready']:
     chrono_r, chrono_g = [], []
     best_combo = None
 
-    opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{opt_strategy}_{allow_redundancy}_{incremental_build}_{bounds_hash}"
+    _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
+    opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{opt_strategy}_{allow_redundancy}_{incremental_build}_{bounds_hash}_{_pins_key}"
 
     if k_responder + k_guardian > n:
         st.error("⚠️ Over-Deployment: Total drones exceed available stations.")
@@ -3584,7 +3632,8 @@ if st.session_state['csvs_ready']:
                 stage_bar.info("🧠 Optimizing coverage — because smarter deployment means safer streets…")
                 r_best, g_best, chrono_r, chrono_g = solve_mclp(
                     resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g,
-                    k_responder, k_guardian, allow_redundancy, incremental=incremental_build
+                    k_responder, k_guardian, allow_redundancy, incremental=incremental_build,
+                    forced_r=locked_r_pins, forced_g=locked_g_pins
                 )
                 best_combo = (tuple(r_best), tuple(g_best))
                 stage_bar.empty()
@@ -3607,9 +3656,12 @@ if st.session_state['csvs_ready']:
                 stage_bar = st.empty()
                 stage_bar.info("🗺️ Maximizing land coverage — no neighborhood left behind…")
                 if incremental_build:
-                    locked_r, locked_g = (), ()
-                    chrono_r, chrono_g = [], []
-                    for _ in range(k_guardian):
+                    # Seed greedy search with any manually pinned stations
+                    locked_r = tuple(sorted(set(locked_r_pins)))
+                    locked_g = tuple(sorted(set(locked_g_pins)))
+                    chrono_r = list(locked_r_pins)
+                    chrono_g = list(locked_g_pins)
+                    for _ in range(k_guardian - len(locked_g_pins)):
                         best_pick = max(
                             [s for s in range(n) if s not in locked_g and (allow_redundancy or s not in locked_r)],
                             key=lambda s: evaluate_combo((locked_r, tuple(sorted(list(locked_g)+[s])))),
@@ -3618,7 +3670,7 @@ if st.session_state['csvs_ready']:
                         if best_pick is not None:
                             locked_g = tuple(sorted(list(locked_g)+[best_pick]))
                             chrono_g.append(best_pick)
-                    for _ in range(k_responder):
+                    for _ in range(k_responder - len(locked_r_pins)):
                         best_pick = max(
                             [s for s in range(n) if s not in locked_r and (allow_redundancy or s not in locked_g)],
                             key=lambda s: evaluate_combo((tuple(sorted(list(locked_r)+[s])), locked_g)),
@@ -3773,10 +3825,12 @@ if st.session_state['csvs_ready']:
         avg_time_min = (avg_dist / speed_mph) * 60
         d_lat = station_metadata[idx]['lat']; d_lon = station_metadata[idx]['lon']
 
+        _is_pinned = (d_type == 'GUARDIAN' and idx in locked_g_pins) or (d_type == 'RESPONDER' and idx in locked_r_pins)
         d = {
             'idx': idx, 'name': station_metadata[idx]['name'],
             'lat': d_lat, 'lon': d_lon, 'type': d_type, 'cost': cost,
             'cov_array': cov_array, 'color': map_color,
+            'pinned': _is_pinned,
             'deploy_step': step if (idx in chrono_r or idx in chrono_g) else "MANUAL",
             'avg_time_min': avg_time_min, 'speed_mph': speed_mph, 'radius_m': radius_m,
             'faa_ceiling': get_station_faa_ceiling(d_lat, d_lon, faa_geojson),
@@ -4004,6 +4058,16 @@ if st.session_state['csvs_ready']:
                     name=f"Rapid Response 5mi · {d['name'].split(',')[0]}",
                     hoverinfo='text',
                     text=f"⚡ Rapid Response Focus Zone — 5mi<br>{d['name'].split(',')[0]}",
+                    showlegend=False
+                ))
+
+            # Star marker for manually pinned stations
+            if d.get('pinned'):
+                fig.add_trace(go.Scattermapbox(
+                    lat=[d['lat']], lon=[d['lon']], mode='markers',
+                    marker=dict(size=18, color=d['color'], symbol='star'),
+                    name=f"📍 {d['name'].split(',')[0]} (Pinned)",
+                    hovertemplate=f"<b>🔒 PINNED</b><br>{d['name']}<br>{d['type']}<extra></extra>",
                     showlegend=False
                 ))
 
@@ -4462,7 +4526,8 @@ if st.session_state['csvs_ready']:
             "r_resp": resp_radius_mi, "r_guard": guard_radius_mi,
             "dfr_rate": int(dfr_dispatch_rate*100), "deflect_rate": int(deflection_rate*100),
             "calls_data": _safe_df_to_records(
-                st.session_state.get('df_calls_full') or st.session_state.get('df_calls')
+                st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None
+                else st.session_state.get('df_calls')
             ),
             "stations_data": _safe_df_to_records(st.session_state.get('df_stations')),
             "faa_geojson": faa_geojson
@@ -4717,7 +4782,10 @@ if st.session_state['csvs_ready']:
     _brinc_data = json.dumps(export_dict) if fleet_capex > 0 else json.dumps({
         "city": st.session_state.get('active_city', ''), "state": st.session_state.get('active_state', ''),
         "_disclaimer": "No drones deployed yet.", "k_resp": 0, "k_guard": 0,
-        "calls_data": _safe_df_to_records(st.session_state.get('df_calls_full') or st.session_state.get('df_calls')),
+        "calls_data": _safe_df_to_records(
+            st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None
+            else st.session_state.get('df_calls')
+        ),
         "stations_data": _safe_df_to_records(st.session_state.get('df_stations')),
     })
     if st.sidebar.download_button("💾 Save Deployment Plan", data=_brinc_data,

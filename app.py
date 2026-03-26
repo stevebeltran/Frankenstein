@@ -603,6 +603,56 @@ def aggressive_parse_calls(uploaded_files):
                 'x_wgs','lon_wgs','incident_lon','inc_lon','event_lon','x_coordinate','address_x','xlocation']
     }
 
+    def _infer_city_from_location_text(raw_df):
+        text_cols = [c for c in raw_df.columns if c in ['location', 'address', 'incident_location', 'addr', 'street']]
+        if not text_cols:
+            return None
+
+        s = raw_df[text_cols[0]].dropna().astype(str).str.upper().str.strip()
+        if s.empty:
+            return None
+
+        s = s.str.replace(r':.*$', '', regex=True)
+        s = s.str.replace(r'CNTY', 'COUNTY', regex=True)
+        s = s.str.replace(r'[^A-Z0-9 /-]', ' ', regex=True)
+        s = s.str.replace(r'\s+', ' ', regex=True).str.strip()
+
+        candidates = []
+        for val in s:
+            padded = f' {val} '
+            if ' MOBILE ' in padded:
+                candidates.append('Mobile')
+                continue
+
+            m = re.search(r'([A-Z]{3,}(?:\s+[A-Z]{3,}){0,2})$', val)
+            if m:
+                city = m.group(1).title()
+                if city not in {'County', 'City'}:
+                    candidates.append(city)
+
+        if not candidates:
+            return None
+
+        vc = pd.Series(candidates).value_counts()
+        return vc.index[0] if not vc.empty else None
+
+    def _infer_state_from_text(raw_df, inferred_city=None):
+        for col in ['state', 'state_name']:
+            if col in raw_df.columns:
+                top = raw_df[col].dropna().astype(str).str.strip().value_counts()
+                if not top.empty:
+                    state_val = top.index[0]
+                    state_up = str(state_val).upper()
+                    if state_up in STATE_FIPS:
+                        return state_up
+                    state_title = str(state_val).title()
+                    if state_title in US_STATES_ABBR:
+                        return US_STATES_ABBR[state_title]
+
+        if inferred_city == 'Mobile':
+            return 'AL'
+        return None
+
     def parse_priority(raw):
         s = str(raw).strip().upper()
         if not s or s == 'NAN': return None
@@ -816,7 +866,7 @@ def aggressive_parse_calls(uploaded_files):
                                 if city_name:
                                     query_str = f"{city_name}, {state_name}" if state_name else city_name
                                     geo_url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(query_str)}&limit=1"
-                                    req = urllib.request.Request(geo_url, headers={"User-Agent": f"BRINC_COS_Optimizer_{uuid.uuid4().hex[:8]}"})
+                                    req = urllib.request.Request(geo_url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"})
                                     with urllib.request.urlopen(req, timeout=10) as resp:
                                         geo_data = json.loads(resp.read().decode("utf-8"))
                                     if geo_data:
@@ -839,13 +889,25 @@ def aggressive_parse_calls(uploaded_files):
                                 (res["lon"] > -170) & (res["lon"] < -60)
                             ]
 
-            # City column detection: store top city name on rows for location detection
-            for col in ["city", "city_name", "municipality"]:
+            # City/state detection: store top values on rows for location detection
+            top_city_name = None
+            for col in ["city", "city_name", "municipality", "jurisdiction"]:
                 if col in raw_df.columns:
-                    top_city = raw_df[col].dropna().str.strip().value_counts()
+                    top_city = raw_df[col].dropna().astype(str).str.strip().value_counts()
                     if not top_city.empty:
-                        res["_csv_city"] = top_city.index[0]
+                        top_city_name = str(top_city.index[0]).title()
+                        res["_csv_city"] = top_city_name
                         break
+
+            if "_csv_city" not in res.columns:
+                inferred_city = _infer_city_from_location_text(raw_df)
+                if inferred_city:
+                    top_city_name = inferred_city
+                    res["_csv_city"] = inferred_city
+
+            inferred_state = _infer_state_from_text(raw_df, top_city_name)
+            if inferred_state:
+                res["_csv_state"] = inferred_state
 
             all_calls_list.append(res)
         except: continue
@@ -1255,7 +1317,7 @@ def generate_stations_from_calls(df_calls, max_stations=100):
             try:
                 req = urllib.request.Request(
                     f"{osm_url}?data={urllib.parse.quote(query)}",
-                    headers={'User-Agent': f'BRINC_COS_Optimizer_{uuid.uuid4().hex[:8]}'}
+                    headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'}
                 )
                 with urllib.request.urlopen(req, timeout=25) as resp:
                     data = json.loads(resp.read().decode('utf-8'))
@@ -1303,6 +1365,8 @@ def generate_stations_from_calls(df_calls, max_stations=100):
         return df_fallback, "⚠️ OpenStreetMap unavailable — using estimated station locations from call data. Upload a stations CSV for accuracy."
     return None, "Could not generate stations — no valid call coordinates."
 
+    return df_s, f"Auto-generated {len(df_s)} stations from OpenStreetMap."
+
 # ============================================================
 # CACHED DATA FUNCTIONS
 # ============================================================
@@ -1310,7 +1374,7 @@ def generate_stations_from_calls(df_calls, max_stations=100):
 def get_address_from_latlon(lat, lon):
     url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=18&addressdetails=1"
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': f'BRINC_DFR_Optimizer_App_{uuid.uuid4().hex[:8]}'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_DFR_Optimizer_App/2.0'})
         with urllib.request.urlopen(req, timeout=2) as response:
             data = json.loads(response.read().decode('utf-8'))
             if 'address' in data:
@@ -1330,7 +1394,7 @@ def forward_geocode(address_str):
     import urllib.parse
     url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(address_str)}&limit=1"
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': f'BRINC_COS_Optimizer_{uuid.uuid4().hex[:8]}'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
         with urllib.request.urlopen(req, timeout=5) as response:
             data = json.loads(response.read().decode('utf-8'))
             if data:
@@ -1345,7 +1409,7 @@ def lookup_county_for_city(city_name, state_abbr):
         lat, lon = forward_geocode(f"{city_name}, {state_abbr}, USA")
         if lat is None: return None
         url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=8&addressdetails=1"
-        req = urllib.request.Request(url, headers={'User-Agent': f'BRINC_COS_Optimizer_{uuid.uuid4().hex[:8]}'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
         with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read().decode('utf-8'))
         county_raw = data.get('address', {}).get('county', '')
@@ -1440,7 +1504,7 @@ def fetch_place_boundary_local(state_abbr, place_name_input):
 def reverse_geocode_state(lat, lon):
     url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=10&addressdetails=1"
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': f'BRINC_COS_Optimizer_{uuid.uuid4().hex[:8]}'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
         with urllib.request.urlopen(req) as response:
             data = json.loads(response.read().decode('utf-8'))
             address = data.get('address', {})
@@ -2285,6 +2349,10 @@ if not st.session_state['csvs_ready']:
 
             else:
                 # --- 2. OTHERWISE, PROCESS AS NORMAL CSV CAD DATA ---
+                st.session_state['active_city'] = ""
+                st.session_state['active_state'] = ""
+                st.session_state['target_cities'] = []
+
                 f_list = list(uploaded_files)
                 call_files = []
                 station_file = None
@@ -2383,62 +2451,72 @@ if not st.session_state['csvs_ready']:
                     if len(df_s) > 100:
                         df_s = df_s.sample(100, random_state=42).reset_index(drop=True)
 
-                    lat_min, lat_max = df_s['lat'].min(), df_s['lat'].max()
-                    lon_min, lon_max = df_s['lon'].min(), df_s['lon'].max()
-                    df_c = df_c[
-                        (df_c['lat'] >= lat_min - 0.5) & (df_c['lat'] <= lat_max + 0.5) &
-                        (df_c['lon'] >= lon_min - 0.5) & (df_c['lon'] <= lon_max + 0.5)
-                    ].reset_index(drop=True)
+                    detected_city = None
+                    detected_state = None
+
+                    with st.spinner(get_jurisdiction_message()):
+                        # Priority 1: city/state extracted directly from the CAD export
+                        if '_csv_city' in df_c.columns:
+                            city_val = str(df_c['_csv_city'].iloc[0]).strip().title()
+                            if city_val and city_val.lower() not in ('nan', 'none', ''):
+                                detected_city = city_val
+
+                        if '_csv_state' in df_c.columns:
+                            state_val = str(df_c['_csv_state'].iloc[0]).strip().upper()
+                            if state_val in STATE_FIPS:
+                                detected_state = state_val
+                            elif state_val.title() in US_STATES_ABBR:
+                                detected_state = US_STATES_ABBR[state_val.title()]
+
+                        # If the export gives us a city but not a state, forward-geocode the city name.
+                        if detected_city and not detected_state:
+                            try:
+                                geo_url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(detected_city)}&limit=1&countrycodes=us"
+                                req_geo = urllib.request.Request(geo_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+                                with urllib.request.urlopen(req_geo, timeout=8) as resp_geo:
+                                    geo_result = json.loads(resp_geo.read().decode('utf-8'))
+                                if geo_result:
+                                    display_name = geo_result[0].get('display_name', '')
+                                    parts = [p.strip() for p in display_name.split(',')]
+                                    state_full = parts[2] if len(parts) >= 3 else ''
+                                    if state_full in US_STATES_ABBR:
+                                        detected_state = US_STATES_ABBR[state_full]
+                            except Exception:
+                                pass
+
+                        # Priority 2: reverse-geocode the centroid of the calls, not the first row.
+                        if not detected_city or not detected_state:
+                            try:
+                                cen_lat = float(df_c['lat'].median())
+                                cen_lon = float(df_c['lon'].median())
+                                detected_state_full, detected_city_rg = reverse_geocode_state(cen_lat, cen_lon)
+                                if detected_state_full and detected_state_full in US_STATES_ABBR:
+                                    if not detected_state:
+                                        detected_state = US_STATES_ABBR[detected_state_full]
+                                    if not detected_city and detected_city_rg and detected_city_rg != 'Unknown City':
+                                        detected_city = detected_city_rg
+                            except Exception:
+                                pass
+
+                        if detected_city and detected_state:
+                            st.session_state['active_city'] = detected_city
+                            st.session_state['active_state'] = detected_state
+                            st.session_state['target_cities'] = [{"city": detected_city, "state": detected_state}]
+                            st.toast(f"📍 Detected: {detected_city}, {detected_state}")
+
+                    # Only clip calls to the station bbox once we know the correct jurisdiction.
+                    if detected_city and detected_state:
+                        lat_min, lat_max = df_s['lat'].min(), df_s['lat'].max()
+                        lon_min, lon_max = df_s['lon'].min(), df_s['lon'].max()
+                        df_c = df_c[
+                            (df_c['lat'] >= lat_min - 0.5) & (df_c['lat'] <= lat_max + 0.5) &
+                            (df_c['lon'] >= lon_min - 0.5) & (df_c['lon'] <= lon_max + 0.5)
+                        ].reset_index(drop=True)
 
                     st.session_state['df_calls']             = df_c
                     st.session_state['df_stations']          = df_s
 
                     with st.spinner(get_jurisdiction_message()):
-                        
-                        # --- REMOVE DEFAULT VICTORIA TO AVOID STICKING ON FAILURE ---
-                        st.session_state['active_city'] = "Uploaded Region"
-                        st.session_state['active_state'] = "US"
-                        st.session_state['target_cities'] = [{"city": "Uploaded Region", "state": "US"}]
-
-                        # Priority 1: use city name embedded in the CSV itself
-                        csv_city_detected = False
-                        if '_csv_city' in df_c.columns:
-                            csv_city_val = str(df_c['_csv_city'].iloc[0]).strip().title()
-                            if csv_city_val and csv_city_val.lower() not in ('nan', 'none', ''):
-                                # Forward-geocode to get the state abbreviation
-                                try:
-                                    geo_url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(csv_city_val)}&limit=1&countrycodes=us"
-                                    req_geo = urllib.request.Request(geo_url, headers={'User-Agent': f'BRINC_COS_Optimizer_{uuid.uuid4().hex[:8]}'})
-                                    with urllib.request.urlopen(req_geo, timeout=8) as resp_geo:
-                                        geo_result = json.loads(resp_geo.read().decode('utf-8'))
-                                    if geo_result:
-                                        display_name = geo_result[0].get('display_name', '')
-                                        # display_name format: "City, County, State, US"
-                                        parts = [p.strip() for p in display_name.split(',')]
-                                        state_full = parts[2] if len(parts) >= 3 else ''
-                                        if state_full in US_STATES_ABBR:
-                                            st.session_state['active_city']  = csv_city_val
-                                            st.session_state['active_state'] = US_STATES_ABBR[state_full]
-                                            st.session_state['target_cities'] = [{"city": csv_city_val, "state": US_STATES_ABBR[state_full]}]
-                                            st.toast(f"📍 Detected from data: {csv_city_val}, {US_STATES_ABBR[state_full]}")
-                                            csv_city_detected = True
-                                except Exception:
-                                    pass
-
-                        # Priority 2: reverse-geocode a call coordinate
-                        if not csv_city_detected:
-                            try:
-                                detected_state_full, detected_city = reverse_geocode_state(
-                                    df_c['lat'].iloc[0], df_c['lon'].iloc[0]
-                                )
-                                if detected_state_full and detected_state_full in US_STATES_ABBR:
-                                    st.session_state['active_state'] = US_STATES_ABBR[detected_state_full]
-                                    if detected_city and detected_city != 'Unknown City':
-                                        st.session_state['active_city'] = detected_city
-                                        st.session_state['target_cities'] = [{"city": detected_city, "state": US_STATES_ABBR[detected_state_full]}]
-                                    st.toast(f"📍 Detected: {st.session_state['active_city']}, {st.session_state['active_state']}")
-                            except Exception:
-                                pass
                         # ── BOUNDARY LOOKUP: fetch & save shapefile NOW so
                         # find_relevant_jurisdictions() can use it on the map page ──
                         detected_city_for_boundary = st.session_state.get('active_city', '')
@@ -2798,23 +2876,20 @@ if st.session_state['csvs_ready']:
                 # Pick the shapefile whose name best matches active_city
                 active_city_key = st.session_state.get('active_city', '').replace(' ', '_').lower()
                 best = None
-                # ONLY use this fallback if we actually found a name that isn't the generic default
-                if active_city_key and active_city_key not in ('custom_region', 'uploaded_region', 'unknown_city'):
-                    for sf in shp_files:
-                        if active_city_key in os.path.basename(sf).lower():
-                            best = sf
-                            break
-                if best is not None:
-                    fallback_gdf = gpd.read_file(best)
-                    if fallback_gdf.crs is None:
-                        fallback_gdf = fallback_gdf.set_crs(epsg=4269)
-                    fallback_gdf = fallback_gdf.to_crs(epsg=4326)
-                    name_col = next((c for c in ['NAME', 'DISTRICT', 'NAMELSAD'] if c in fallback_gdf.columns), fallback_gdf.columns[0])
-                    fallback_gdf['DISPLAY_NAME'] = fallback_gdf[name_col].astype(str)
-                    fallback_gdf['data_count'] = len(df_calls)
-                    master_gdf = fallback_gdf[['DISPLAY_NAME', 'data_count', 'geometry']]
-                else:
-                    master_gdf = None
+                for sf in shp_files:
+                    if active_city_key and active_city_key in os.path.basename(sf).lower():
+                        best = sf
+                        break
+                if best is None:
+                    best = shp_files[0]  # just use the first one
+                fallback_gdf = gpd.read_file(best)
+                if fallback_gdf.crs is None:
+                    fallback_gdf = fallback_gdf.set_crs(epsg=4269)
+                fallback_gdf = fallback_gdf.to_crs(epsg=4326)
+                name_col = next((c for c in ['NAME', 'DISTRICT', 'NAMELSAD'] if c in fallback_gdf.columns), fallback_gdf.columns[0])
+                fallback_gdf['DISPLAY_NAME'] = fallback_gdf[name_col].astype(str)
+                fallback_gdf['data_count'] = len(df_calls)
+                master_gdf = fallback_gdf[['DISPLAY_NAME', 'data_count', 'geometry']]
             except Exception:
                 master_gdf = None
 
@@ -3437,3 +3512,777 @@ if st.session_state['csvs_ready']:
                     hoverinfo='skip', showlegend=(gi==0)))
 
         if show_heatmap and not display_calls.empty:
+            fig.add_trace(go.Densitymapbox(lat=display_calls.geometry.y, lon=display_calls.geometry.x,
+                z=np.ones(len(display_calls)), radius=12, colorscale='Inferno', opacity=0.6,
+                showscale=False, name="Heatmap", hoverinfo='skip'))
+
+        if not display_calls.empty:
+            fig.add_trace(go.Scattermapbox(lat=display_calls.geometry.y, lon=display_calls.geometry.x,
+                mode='markers', marker=dict(size=4, color=map_incident_color, opacity=0.4),
+                name="Incident Data", hoverinfo='skip'))
+
+        if show_faa and faa_geojson:
+            add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=not show_satellite)
+
+        for d in active_drones:
+            clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
+            lbl = f"{d['name'].split(',')[0]} ({'Resp' if d['type']=='RESPONDER' else 'Guard'})"
+            
+            # Determine if this is an extended Guardian (so we can relax the outer ring)
+            is_extended_guardian = (d['type'] == 'GUARDIAN' and d['radius_m']/1609.34 > 5.0)
+            
+            # The outer ring becomes relaxed (thinner, more transparent) if > 5 miles
+            outer_width = 1.5 if is_extended_guardian else 4.5
+            outer_opac = 0.4 if is_extended_guardian else 1.0
+            
+            fig.add_trace(go.Scattermapbox(
+                lat=list(clats)+[None,d['lat']], lon=list(clons)+[None,d['lon']],
+                mode='lines+markers',
+                opacity=outer_opac,
+                marker=dict(size=[0]*len(clats)+[0,20], color=d['color']),
+                line=dict(color=d['color'], width=outer_width),
+                fill='toself', fillcolor='rgba(0,0,0,0)', name=lbl, hoverinfo='name'))
+
+            # The 5-mile Rapid Response ring gets the "Important" styling (thick, solid, heavier fill)
+            if is_extended_guardian:
+                f_lats, f_lons = get_circle_coords(d['lat'], d['lon'], r_mi=5.0)
+                fig.add_trace(go.Scattermapbox(
+                    lat=list(f_lats), lon=list(f_lons),
+                    mode='lines',
+                    line=dict(color=d['color'], width=4.5),
+                    opacity=1.0,
+                    fill='toself',
+                    fillcolor=f"rgba({int(d['color'][1:3],16)},{int(d['color'][3:5],16)},{int(d['color'][5:7],16)},0.12)",
+                    name=f"Rapid Response 5mi · {d['name'].split(',')[0]}",
+                    hoverinfo='text',
+                    text=f"⚡ Rapid Response Focus Zone — 5mi<br>{d['name'].split(',')[0]}",
+                    showlegend=False
+                ))
+
+            if simulate_traffic:
+                t_color = "#28a745" if traffic_level<35 else "#ffc107" if traffic_level<75 else "#dc3545"
+                t_fill  = f"rgba({'40,167,69' if traffic_level<35 else '255,193,7' if traffic_level<75 else '220,53,69'}, 0.15)"
+                t_label = "Light" if traffic_level<35 else "Moderate" if traffic_level<75 else "Heavy"
+                gs = CONFIG["DEFAULT_TRAFFIC_SPEED"]*(1-traffic_level/100)
+                if gs > 0:
+                    gr_mi = (gs/60) * (d['radius_m']/1609.34/d['speed_mph'])*60
+                    ga = np.linspace(0,2*np.pi,9)
+                    fig.add_trace(go.Scattermapbox(
+                        lat=list(d['lat']+(gr_mi/69.172)*np.sin(ga)),
+                        lon=list(d['lon']+(gr_mi/(69.172*np.cos(np.radians(d['lat']))))*np.cos(ga)),
+                        mode='lines', line=dict(color=t_color, width=2.5),
+                        fill='toself', fillcolor=t_fill,
+                        name=f"Ground ({t_label})", hoverinfo='skip'))
+
+        mapbox_cfg = dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style=map_style)
+        if show_satellite:
+            mapbox_cfg["style"] = "carto-positron"
+            mapbox_cfg["layers"] = [{"below":"traces","sourcetype":"raster",
+                "sourceattribution":"Esri, Maxar, Earthstar Geographics",
+                "source":["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"]}]
+
+        fig.update_layout(uirevision="LOCKED_MAP", mapbox=mapbox_cfg,
+            margin=dict(l=0,r=0,t=0,b=0), height=800, font=dict(size=18),
+            showlegend=True,
+            legend=dict(yanchor="top", y=0.98, xanchor="left", x=0.02,
+                        bgcolor=legend_bg, bordercolor=accent_color, borderwidth=1,
+                        font=dict(size=12, color=legend_text), itemclick="toggle"))
+
+        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
+
+    with stats_col:
+        st.markdown(f"<h4 style='margin-top:0; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Coverage Curve</h4>", unsafe_allow_html=True)
+
+        if not df_curve.empty:
+            fig_curve = go.Figure()
+            for col, color, dash in [('Responder (Calls)',accent_color,'solid'),('Guardian (Calls)','#FFD700','solid'),
+                                      ('Responder (Area)',accent_color,'dash'),('Guardian (Area)','#FFD700','dash')]:
+                y_data = df_curve[col].dropna()
+                x_data = df_curve.loc[y_data.index,'Drones']
+                if not y_data.empty:
+                    fig_curve.add_trace(go.Scatter(x=x_data, y=y_data, mode='lines+markers', name=col,
+                        line=dict(color=color,width=2,dash=dash), marker=dict(size=4),
+                        hovertemplate=f"<b>{col}</b><br>Drones: %{{x}}<br>Coverage: %{{y:.1f}}%<extra></extra>"))
+                    if 'Calls' in col:
+                        idx_90 = y_data[y_data >= 90.0].first_valid_index()
+                        if idx_90 is not None:
+                            fig_curve.add_trace(go.Scatter(x=[int(x_data.loc[idx_90])], y=[y_data.loc[idx_90]],
+                                mode='markers', marker=dict(color=color,size=12,symbol='star',line=dict(color='white',width=1)),
+                                showlegend=False, hoverinfo='skip'))
+            fig_curve.update_layout(
+                xaxis_title="Drones", yaxis_title="Coverage %",
+                xaxis=dict(showgrid=True, gridcolor=card_border, tickfont=dict(color=text_muted)),
+                yaxis=dict(showgrid=True, gridcolor=card_border, tickfont=dict(color=text_muted),
+                           tickvals=[0,20,40,60,80,90,100], range=[0,105]),
+                legend=dict(orientation="h",yanchor="bottom",y=1.02,xanchor="right",x=1,
+                            font=dict(size=9,color=text_muted)),
+                margin=dict(l=10,r=10,t=20,b=10), height=260,
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                hoverlabel=dict(bgcolor=card_bg, font_size=13, font_color=text_main, bordercolor=accent_color)
+            )
+            st.plotly_chart(fig_curve, use_container_width=True, config={'displayModeBar':False})
+
+        if show_cards:
+            st.markdown(f"""
+            <h4 style='margin-top:8px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>
+            <div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:8px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>
+            <style>
+            .unit-card {{ transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; }}
+            .unit-card:hover {{ transform: scale(1.02); box-shadow: 0 8px 20px rgba(0,210,255,0.12); }}
+            </style>
+            """, unsafe_allow_html=True)
+            if not active_drones:
+                st.markdown(f"""
+                <div style="background:{card_bg}; border:1px dashed {card_border}; border-radius:6px;
+                     padding:24px; text-align:center; margin-top:10px;">
+                    <div style="font-size:2rem; margin-bottom:8px;">🚁</div>
+                    <div style="font-weight:700; color:{text_main}; margin-bottom:6px;">No drones deployed yet</div>
+                    <div style="font-size:0.8rem; color:{text_muted};">
+                        👈 Use the <b>Responder / Guardian Count</b> sliders in the <b>② Optimize Fleet</b> sidebar section to deploy drones and see per-unit economics here.
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                # Build all card HTML at once so CSS grid can equalise heights natively.
+                # CSS grid with align-items:stretch is the only reliable cross-browser way
+                # to guarantee every card in a row is exactly the same height regardless
+                # of content — no JS, no fixed pixel heights needed.
+                MAX_PATROL_HOURS = 11.6
+                MAX_PATROL_MINS  = MAX_PATROL_HOURS * 60
+
+                cards_html = []
+                for d in active_drones:
+                    short_name  = format_3_lines(d["name"])
+                    d_color     = d["color"]
+                    d_type      = d["type"]
+                    d_step      = d["deploy_step"]
+                    d_savings   = d["annual_savings"]
+                    d_flights   = d["marginal_flights"]
+                    d_shared    = d["shared_flights"]
+                    d_deflected = d["marginal_deflected"]
+                    d_time      = d["avg_time_min"]
+                    d_faa       = d["faa_ceiling"]
+                    d_airport   = d["nearest_airport"]
+                    d_cost      = d["cost"]
+                    d_be        = d["be_text"]
+                    d_lat       = d["lat"]
+                    d_lon       = d["lon"]
+                    d_address   = get_address_from_latlon(d_lat, d_lon)
+                    gmaps_url   = f"https://www.google.com/maps/search/?api=1&query={d_lat},{d_lon}"
+
+                    total_daily_flights = d_flights + d_shared
+                    patrol_time_line = ""
+                    if total_daily_flights > 0 and d_savings > 0:
+                        mins_per_flight = MAX_PATROL_MINS / total_daily_flights
+                        if total_daily_flights >= 5 or mins_per_flight < 60:
+                            patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= 30 else "#00D2FF"
+                            patrol_time_line = (
+                                f'<div style="border-top:1px dashed rgba(255,255,255,0.15); margin-top:5px; ' +
+                                f'padding-top:5px; font-size:0.58rem; color:{text_muted};">' +
+                                f'{total_daily_flights:.1f} flights ÷ {MAX_PATROL_HOURS}hr max = ' +
+                                f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight</span></div>'
+                            )
+
+                    cards_html.append(f"""
+<div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color}; border-left:1px solid {card_border}; border-right:1px solid {card_border}; border-bottom:1px solid {card_border}; border-radius:4px; padding:12px; cursor:default; display:flex; flex-direction:column; box-sizing:border-box;">
+  <div style="font-weight:700; font-size:0.73rem; color:{card_title}; margin-bottom:2px; line-height:1.25em;">{short_name}</div>
+  <div style="font-size:0.58rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{d_type} · Phase #{d_step}</div>
+  <div style="font-size:0.62rem; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+    <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
+  </div>
+  <div style="background:rgba(0,210,255,0.07); border-radius:4px; padding:8px; text-align:center; margin-bottom:8px;">
+    <div style="font-size:0.6rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
+    <div style="font-size:1.25rem; font-weight:900; color:{accent_color};">${d_savings:,.0f}</div>
+    {patrol_time_line}
+  </div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem; flex:1;">
+    <div style="color:{text_muted};">Net Flights/day</div>
+    <div style="text-align:right; font-weight:700; color:{accent_color};">{d_flights:.1f}</div>
+    <div style="color:{text_muted};">Shared Flights/day</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_shared:.1f}</div>
+    <div style="color:{text_muted};">Resolved/day</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_deflected:.1f}</div>
+    <div style="color:{text_muted};">Avg Response</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_time:.1f} min</div>
+    <div style="color:{text_muted};">FAA Ceiling</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_faa}</div>
+    <div style="color:{text_muted};">Nearest Airfield</div>
+    <div style="text-align:right; font-weight:700; color:{card_title}; font-size:0.55rem; word-break:break-word;">{d_airport}</div>
+  </div>
+  <div style="border-top:1px dashed {card_border}; margin-top:8px; padding-top:6px; display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem;">
+    <div style="color:{text_muted};">CapEx</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">${d_cost:,.0f}</div>
+    <div style="color:{text_muted};">ROI</div>
+    <div style="text-align:right; font-weight:800; color:{accent_color};">{d_be}</div>
+  </div>
+</div>""")
+
+                # Emit all cards in one markdown call inside a CSS grid.
+                # grid-template-columns: repeat(2, 1fr) gives 2 per row.
+                # align-items: stretch makes every cell the same height as the tallest.
+                all_cards_html = (
+                    f'<div style="display:grid; grid-template-columns:repeat(2,1fr); ' +
+                    f'gap:12px; align-items:stretch; margin-bottom:12px;">' +
+                    "".join(cards_html) +
+                    "</div>"
+                )
+                st.markdown(all_cards_html, unsafe_allow_html=True)
+
+    # ── CAD DATA CHARTS (bottom of station page) ─────────────────────────────
+    _cad_src = st.session_state.get('data_source', '')
+    _has_real_calls = _cad_src in ('cad_upload', 'brinc_file') or (
+        'df_calls' in st.session_state and st.session_state['df_calls'] is not None
+        and len(st.session_state['df_calls']) > 100
+    )
+    if _has_real_calls and df_calls is not None and not df_calls.empty:
+        st.markdown("---")
+        st.markdown(f"<h3 style='color:{text_main};'>📊 Incident Data Analysis</h3>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:12px;'>"
+            f"Summary analytics derived from your uploaded CAD data — use these to identify priority focus areas and hotspot cells."
+            f"</div>",
+            unsafe_allow_html=True
+        )
+        _build_cad_charts(df_calls, text_main, text_muted, card_bg, card_border, accent_color)
+
+    # ── 3D SWARM SIMULATION ───────────────────────────────────────────
+    if fleet_capex > 0:
+        st.markdown("---")
+        st.markdown(f"<h3 style='color:{text_main};'>🚁 3D Swarm Simulation</h3>", unsafe_allow_html=True)
+        st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Animated deck.gl simulation of all DFR flights over a compressed 24-hour day. Use the speed slider to accelerate or slow the simulation. Great for council presentations.</div>", unsafe_allow_html=True)
+
+        show_sim = st.toggle("🎬 Enable 3D Simulation", value=False)
+        if show_sim:
+            calls_lonlat = calls_in_city.to_crs(epsg=4326)
+            calls_coords = np.column_stack((calls_lonlat.geometry.x, calls_lonlat.geometry.y))
+
+            sim_assignments = {i:[] for i in range(len(active_drones))}
+            for c_idx, cc in enumerate(calls_coords):
+                best_d, best_dist = -1, float('inf')
+                for d_idx, d in enumerate(active_drones):
+                    if d['cov_array'][c_idx] if c_idx < len(d['cov_array']) else False:
+                        dist = (cc[0]-d['lon'])**2 + (cc[1]-d['lat'])**2
+                        if dist < best_dist:
+                            best_dist, best_d = dist, d_idx
+                if best_d != -1:
+                    sim_assignments[best_d].append(c_idx)
+
+            stations_json, flights_json, legend_html_sim = [], [], ""
+            total_sim_flights = 0
+            for d_idx, d in enumerate(active_drones):
+                hex_c = d['color'].lstrip('#')
+                rgb = [int(hex_c[j:j+2],16) for j in (0,2,4)]
+                stations_json.append({"name":d['name'].split(',')[0][:30],"lon":d['lon'],"lat":d['lat'],"color":rgb,"radius":d['radius_m']})
+                legend_html_sim += f'<div style="margin-bottom:3px;"><span style="display:inline-block;width:9px;height:9px;background:{d["color"]};margin-right:7px;border-radius:50%;"></span>{d["name"].split(",")[0][:28]} ({d["type"][:3]})</div>'
+                frac = len(sim_assignments[d_idx])/len(calls_coords) if calls_coords.shape[0]>0 else 0
+                monthly_for_drone = int(frac * calls_per_day * 30 * dfr_dispatch_rate)
+                pool = sim_assignments[d_idx]
+
+                if not pool: sim_calls = []
+                elif monthly_for_drone > len(pool): sim_calls = random.choices(pool, k=monthly_for_drone)
+                else: sim_calls = random.sample(pool, monthly_for_drone)
+
+                total_sim_flights += len(sim_calls)
+                for ci in sim_calls:
+                    lon1,lat1 = calls_coords[ci]
+                    lon0,lat0 = d['lon'],d['lat']
+                    dist_mi = math.sqrt((lon1-lon0)**2+(lat1-lat0)**2)*69.172
+                    vis_time = max((dist_mi/d['speed_mph'])*3600*8, 240)
+                    launch = random.randint(0, 2592000)
+                    arc_h = min(max(dist_mi*90, 80), 400)
+                    t0 = launch
+                    t1 = launch + vis_time * 0.15
+                    t2 = launch + vis_time * 0.40
+                    t3 = launch + vis_time * 0.75
+                    t4 = launch + vis_time * 0.90
+                    t5 = launch + vis_time
+                    mx1 = lon0 + 0.15*(lon1-lon0);  my1 = lat0 + 0.15*(lat1-lat0)
+                    mx2 = lon0 + 0.35*(lon1-lon0);  my2 = lat0 + 0.35*(lat1-lat0)
+                    mx3 = lon0 + 0.65*(lon1-lon0);  my3 = lat0 + 0.65*(lat1-lat0)
+                    mx4 = lon0 + 0.85*(lon1-lon0);  my4 = lat0 + 0.85*(lat1-lat0)
+                    flights_json.append({
+                        "path": [[lon0, lat0, 0], [mx1, my1, arc_h*0.75], [mx2, my2, arc_h], [mx3, my3, arc_h], [mx4, my4, arc_h*0.75], [lon1, lat1, 0]],
+                        "timestamps": [t0, t1, t2, t3, t4, t5],
+                        "color": rgb
+                    })
+
+            warn_html_sim = ""
+            if len(flights_json) > 3000:
+                flights_json = random.sample(flights_json, 3000)
+                warn_html_sim = f'<div style="background:#440000;border:1px solid #ff4b4b;color:#ffbbbb;padding:5px;font-size:10px;border-radius:4px;margin-bottom:8px;">⚠️ Capped at 3,000 flights for performance (actual: {total_sim_flights:,})</div>'
+
+            drone_svg = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M18 6a2 2 0 100-4 2 2 0 000 4zm-12 0a2 2 0 100-4 2 2 0 000 4zm12 12a2 2 0 100-4 2 2 0 000 4zm-12 0a2 2 0 100-4 2 2 0 000 4z'/%3E%3Cpath stroke='white' stroke-width='2' stroke-linecap='round' d='M8.5 8.5l7 7m0-7l-7 7'/%3E%3Ccircle cx='12' cy='12' r='2' fill='white'/%3E%3C/svg%3E"
+
+            sim_html = f"""<!DOCTYPE html><html><head>
+            <script src="https://unpkg.com/deck.gl@8.9.35/dist.min.js"></script>
+            <script src="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.js"></script>
+            <link href="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.css" rel="stylesheet"/>
+            <style>
+              body{{margin:0;padding:0;overflow:hidden;background:#000;font-family:Manrope,sans-serif;}}
+              #map{{width:100vw;height:100vh;position:absolute;}}
+              #ui{{position:absolute;top:16px;left:16px;background:rgba(17,17,17,0.92);padding:16px;border-radius:8px;
+                   color:white;border:1px solid #333;z-index:10;box-shadow:0 4px 10px rgba(0,0,0,0.5);width:260px;}}
+              button{{background:#00D2FF;color:black;border:none;padding:10px;cursor:pointer;font-weight:bold;
+                      border-radius:4px;width:100%;font-size:13px;text-transform:uppercase;margin-bottom:8px;}}
+              button:disabled{{background:#444;color:#888;cursor:not-allowed;}}
+              #timeDisplay{{font-family:monospace;font-size:16px;color:#00ffcc;font-weight:bold;text-align:center;margin-bottom:8px;}}
+            </style></head><body>
+            <div id="ui">
+              <h3 style="margin:0 0 8px;color:#00D2FF;font-size:14px;">DFR SWARM SIMULATION</h3>
+              {warn_html_sim}
+              <div style="font-size:11px;color:#aaa;margin-bottom:10px;">
+                {total_sim_flights:,} flights over 30 days at {int(dfr_dispatch_rate*100)}% dispatch rate
+              </div>
+              <div style="margin-bottom:10px;">
+                <label style="font-size:11px;color:#ccc;">Speed: <span id="speedLabel">1</span>x</label>
+                <input type="range" id="speedSlider" min="1" max="100" value="1" style="width:100%;margin-top:4px;">
+              </div>
+              <button id="runBtn">▶ LAUNCH SWARM</button>
+              <div id="timeDisplay">00:00</div>
+              <div style="margin-top:10px;border-top:1px solid #333;padding-top:8px;">
+                <div style="font-size:10px;color:#888;text-transform:uppercase;margin-bottom:5px;">Stations</div>
+                <div style="font-size:10px;color:#ddd;max-height:100px;overflow-y:auto;">{legend_html_sim}</div>
+              </div>
+            </div>
+            <div id="map"></div>
+            <script>
+              const stations={json.dumps(stations_json)};
+              const flights={json.dumps(flights_json)};
+              const speedSlider=document.getElementById('speedSlider');
+              const speedLabel=document.getElementById('speedLabel');
+              speedSlider.oninput=()=>speedLabel.innerText=speedSlider.value;
+              const map=new deck.DeckGL({{
+                container:'map',
+                mapStyle:'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+                initialViewState:{{longitude:{center_lon},latitude:{center_lat},zoom:{dynamic_zoom},pitch:50,bearing:0}},
+                controller:true
+              }});
+              let time=0,timer=null,lastTime=0;
+              function render(){{
+                map.setProps({{layers:[
+                  new deck.ScatterplotLayer({{id:'rings',data:stations,getPosition:d=>[d.lon,d.lat],
+                    getFillColor:d=>[d.color[0],d.color[1],d.color[2],25],
+                    getLineColor:d=>[d.color[0],d.color[1],d.color[2],220],
+                    lineWidthMinPixels:2,stroked:true,filled:true,getRadius:d=>d.radius}}),
+                  new deck.ScatterplotLayer({{id:'pads',data:stations,getPosition:d=>[d.lon,d.lat],
+                    getFillColor:d=>[d.color[0],d.color[1],d.color[2],120],getRadius:180}}),
+                  new deck.IconLayer({{id:'icons',data:stations,
+                    getIcon:d=>({{url:"{drone_svg}",width:24,height:24,anchorY:12}}),
+                    getPosition:d=>[d.lon,d.lat],getSize:36,sizeScale:1}}),
+                  new deck.TripsLayer({{id:'flights',data:flights,getPath:d=>d.path,
+                    getTimestamps:d=>d.timestamps,getColor:d=>d.color,
+                    opacity:0.85,widthMinPixels:5,trailLength:13500,currentTime:time,rounded:true}}),
+                  new deck.ScatterplotLayer({{id:'landed',data:flights,getPosition:d=>d.path[5],
+                    getFillColor:d=>time>=d.timestamps[5]?[d.color[0],d.color[1],d.color[2],255]:[0,0,0,0],
+                    getRadius:25,radiusMinPixels:3,updateTriggers:{{getFillColor:time}}}})
+                ]}});
+                let day=Math.floor(time/86400)+1;
+                let h=Math.floor((time%86400)/3600).toString().padStart(2,'0');
+                let m=Math.floor((time%3600)/60).toString().padStart(2,'0');
+                document.getElementById('timeDisplay').innerText=`Day ${{day}} · ${{h}}:${{m}}`;
+              }}
+              const animate=()=>{{
+                let now=performance.now();
+                let dt=Math.min(now-lastTime,100);
+                lastTime=now;
+                time+=dt/1000*43200*parseFloat(speedSlider.value);
+                render();
+                if(time<2592000){{timer=requestAnimationFrame(animate);}}
+                else{{
+                  document.getElementById('runBtn').disabled=false;
+                  document.getElementById('runBtn').innerText='↺ RESTART';
+                  time=0;
+                }}
+              }};
+              document.getElementById('runBtn').onclick=()=>{{
+                document.getElementById('runBtn').disabled=true;
+                document.getElementById('runBtn').innerText='SIMULATING…';
+                time=0;lastTime=performance.now();
+                if(timer)cancelAnimationFrame(timer);
+                animate();
+              }};
+              render();
+            </script></body></html>"""
+
+            components.html(sim_html, height=700)
+
+    # ── COMMAND CENTER ANALYTICS DASHBOARD ──
+    st.markdown("---")
+    st.markdown(f"<h3 style='color:{text_main};'>📊 CAD Ingestion Analytics</h3>", unsafe_allow_html=True)
+    st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Temporal patterns derived from your uploaded CAD data — hourly volumes, day-of-week distribution, optimal DFR shift windows, and an interactive call-volume calendar.</div>", unsafe_allow_html=True)
+
+    show_cad_analytics = st.toggle("📈 Show Data Analytics Heatmaps", value=False)
+    
+    if show_cad_analytics:
+        analytics_html_block = generate_command_center_html(df_calls, total_orig_calls=st.session_state.get('total_original_calls', total_calls))
+        components.html(analytics_html_block, height=1600, scrolling=False)
+
+    # ── EXPORT BUTTONS ──
+    if fleet_capex > 0:
+        st.sidebar.markdown("---")
+        
+        brinc_user = st.sidebar.text_input("BRINC Email Prefix (first.last)", value=st.session_state.get('brinc_user', 'steven.beltran'), key='brinc_user', help="Enter 'first.last' to auto-generate your name and @brincdrones.com email address.")
+        st.sidebar.caption("*(Press **Enter** after typing to apply changes)*")
+
+        user_clean = brinc_user.strip()
+        if not user_clean: user_clean = "steven.beltran"
+
+        # Police dept fields removed from sidebar — read from session state defaults
+        pd_chief_name = st.session_state.get('pd_chief_name', '')
+        pd_dept_name  = st.session_state.get('pd_dept_name', '')
+        pd_dept_email = st.session_state.get('pd_dept_email', '')
+        pd_dept_phone = st.session_state.get('pd_dept_phone', '')
+        prop_email = f"{user_clean}@brincdrones.com"
+        prop_name = " ".join([word.capitalize() for word in user_clean.split('.')])
+
+        prop_city  = st.session_state.get('active_city', 'City')
+        prop_state = st.session_state.get('active_state', 'FL')
+
+        # Police dept signatory — falls back gracefully if not filled in
+        pd_chief  = pd_chief_name.strip()  if pd_chief_name.strip()  else f"Chief of Police, {prop_city}"
+        pd_dept   = pd_dept_name.strip()   if pd_dept_name.strip()   else f"{prop_city} Police Department"
+        pd_email  = pd_dept_email.strip()  if pd_dept_email.strip()  else ""
+        pd_phone  = pd_dept_phone.strip()  if pd_dept_phone.strip()  else ""
+        pd_email_html = f'📧 <a href="mailto:{pd_email}">{pd_email}</a><br>' if pd_email else ""
+        pd_phone_html = f'📞 {pd_phone}<br>' if pd_phone else ""
+        pop_metric = st.session_state.get('estimated_pop', 250000)
+        current_time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        safe_city = prop_city.replace(" ","_").replace("/","_")
+
+        _session_start = st.session_state.get('session_start', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        try:
+            _start_dt = datetime.datetime.strptime(_session_start, '%Y-%m-%d %H:%M:%S')
+            _dur_min  = round((datetime.datetime.now() - _start_dt).total_seconds() / 60, 1)
+        except Exception:
+            _dur_min = ''
+
+        avg_resp_time    = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
+        avg_ground_speed = CONFIG["DEFAULT_TRAFFIC_SPEED"] * (1 - traffic_level / 100)
+        avg_time_saved   = ((sum((d['radius_m']/1609.34*1.4/avg_ground_speed)*60 for d in active_drones) / len(active_drones)) - avg_resp_time) if active_drones and avg_ground_speed > 0 else 0.0
+        _calls_lons = df_calls['lon'].dropna()
+        _calls_lats = df_calls['lat'].dropna()
+        minx = float(_calls_lons.min()) if len(_calls_lons) else 0
+        maxx = float(_calls_lons.max()) if len(_calls_lons) else 0
+        miny = float(_calls_lats.min()) if len(_calls_lats) else 0
+        maxy = float(_calls_lats.max()) if len(_calls_lats) else 0
+        area_sq_mi_est   = max(1, int((maxx - minx) * (maxy - miny) * 3280))
+        export_details = {
+            # Session
+            "session_id":            st.session_state.get('session_id', ''),
+            "session_start":         _session_start,
+            "session_duration_min":  _dur_min,
+            "data_source":           st.session_state.get('data_source', 'unknown'),
+            # Jurisdiction
+            "population":            pop_metric,
+            "total_calls":           st.session_state.get('total_original_calls', 0),
+            "daily_calls":           max(1, int(st.session_state.get('total_original_calls', 0) / 365)),
+            "area_sq_mi":            area_sq_mi_est,
+            # Financials
+            "opt_strategy":          opt_strategy,
+            "incremental_build":     incremental_build,
+            "allow_redundancy":      allow_redundancy,
+            "dfr_rate":              int(dfr_dispatch_rate*100),
+            "deflect_rate":          int(deflection_rate*100),
+            "fleet_capex":           fleet_capex,
+            "annual_savings":        annual_savings,
+            "break_even":            break_even_text,
+            # Operational
+            "avg_response_min":      round(avg_resp_time, 2),
+            "avg_time_saved_min":    round(avg_time_saved, 2),
+            "area_covered_pct":      round(area_covered_perc, 1),
+            # PD Contact
+            "pd_chief":              st.session_state.get('pd_chief_name', ''),
+            "pd_dept":               st.session_state.get('pd_dept_name', ''),
+            "pd_dept_email":         st.session_state.get('pd_dept_email', ''),
+            "pd_dept_phone":         st.session_state.get('pd_dept_phone', ''),
+            # Drones
+            "active_drones": [{
+                "name": d['name'], "type": d['type'],
+                "lat": d['lat'],   "lon": d['lon'],
+                "avg_time_min":    d.get('avg_time_min', 0),
+                "faa_ceiling":     d.get('faa_ceiling', ''),
+                "annual_savings":  d.get('annual_savings', 0),
+            } for d in active_drones],
+        }
+
+        export_dict = {
+            "city": prop_city, "state": prop_state,
+            "_disclaimer": (
+                "SIMULATION TOOL: All figures in this file are model estimates based on user-provided inputs. "
+                "Real-world results will vary. This is not a legal recommendation, binding proposal, contract, "
+                "or guarantee of any product, service, or financial outcome."
+            ),
+            "k_resp": k_responder, "k_guard": k_guardian,
+            "r_resp": resp_radius_mi, "r_guard": guard_radius_mi,
+            "dfr_rate": int(dfr_dispatch_rate*100), "deflect_rate": int(deflection_rate*100),
+            "calls_data": json.loads(st.session_state['df_calls'].replace({np.nan:None}).to_json(orient='records')) if st.session_state.get('df_calls') is not None else None,
+            "stations_data": json.loads(st.session_state['df_stations'].replace({np.nan:None}).to_json(orient='records')) if st.session_state.get('df_stations') is not None else None,
+            "faa_geojson": faa_geojson
+        }
+
+        fig_for_export = go.Figure()
+        for d in active_drones:
+            clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
+            fig_for_export.add_trace(go.Scattermapbox(
+                lat=list(clats)+[None,d['lat']], lon=list(clons)+[None,d['lon']],
+                mode='lines+markers', line=dict(color=d['color'], width=3),
+                marker=dict(size=[0]*len(clats)+[0,16], color=d['color']),
+                fill='toself', fillcolor='rgba(0,0,0,0)', name=d['name'][:30]
+            ))
+        fig_for_export.update_layout(
+            mapbox=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
+            margin=dict(l=0,r=0,t=0,b=0), height=500, showlegend=True,
+            legend=dict(bgcolor=legend_bg, font=dict(color=legend_text, size=11))
+        )
+        map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
+        station_rows = "".join(f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>" for d in active_drones)
+
+        all_bldgs_rows = ""
+        for _, row in df_stations_all.iterrows():
+            gmaps_link = f"https://www.google.com/maps/search/?api=1&query={row['lat']},{row['lon']}"
+            all_bldgs_rows += f"<tr><td>{row['name']}</td><td>{row['type']}</td><td>{row['lat']:.5f}</td><td>{row['lon']:.5f}</td><td><a href='{gmaps_link}' target='_blank' style='color:#00D2FF; font-weight:bold; text-decoration:none;'>View Map ↗</a></td></tr>"
+
+        logo_b64 = get_base64_of_bin_file("logo.png")
+        logo_html_str = f'<img src="data:image/png;base64,{logo_b64}" style="height:32px;">' if logo_b64 else '<div style="font-size:24px;font-weight:900;letter-spacing:3px;color:#fff;">BRINC</div>'
+
+        jurisdiction_list = ", ".join(selected_names) if selected_names else prop_city
+        all_station_types = df_stations_all['type'].dropna().unique().tolist() if 'type' in df_stations_all.columns else []
+        police_dept_names = [d['name'] for d in active_drones if '[Police]' in d['name']]
+        fire_dept_names   = [d['name'] for d in active_drones if '[Fire]' in d['name']]
+        ems_dept_names    = [d['name'] for d in active_drones if '[EMS]' in d['name']]
+
+        police_stations = [d['name'] for d in active_drones if 'Police' in d.get('name','') or (
+            'type' in df_stations_all.columns and
+            'Police' in str(df_stations_all[df_stations_all['name'].str.contains(
+                d['name'].split(']')[-1].strip(), na=False, regex=False
+            )]['type'].values[:1])
+        )]
+
+        dept_summary_parts = []
+        if police_dept_names: dept_summary_parts.append(f"{len(police_dept_names)} Police station{'s' if len(police_dept_names)>1 else ''}")
+        if fire_dept_names:   dept_summary_parts.append(f"{len(fire_dept_names)} Fire station{'s' if len(fire_dept_names)>1 else ''}")
+        if ems_dept_names:    dept_summary_parts.append(f"{len(ems_dept_names)} EMS station{'s' if len(ems_dept_names)>1 else ''}")
+        dept_summary = ", ".join(dept_summary_parts) if dept_summary_parts else f"{len(active_drones)} municipal stations"
+        police_names_str = (", ".join([n.replace('[Police] ','') for n in police_dept_names[:6]]) + ("..." if len(police_dept_names)>6 else "")) if police_dept_names else "municipal facilities"
+        total_fleet = actual_k_responder + actual_k_guardian
+        analytics_html_export = generate_command_center_html(df_calls, total_orig_calls=st.session_state.get('total_original_calls', total_calls), export_mode=True)
+        cad_charts_html_export = _build_cad_charts_html(df_calls)
+
+        export_html = f"""<html><head><title>BRINC DFR Proposal — {prop_city}</title>
+        <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
+        <style>
+        body {{ font-family: 'Manrope', Arial, sans-serif; color: #1e1e24; margin: 0; padding: 40px; background: #f4f6f9; }}
+        .page {{ max-width: 1000px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.08); overflow: hidden; }}
+        .header {{ background: #06060a; color: #fff; padding: 40px 50px; border-bottom: 4px solid #00D2FF; display: flex; justify-content: space-between; align-items: center; }}
+        .header h1 {{ margin: 0; font-size: 28px; font-weight: 800; letter-spacing: 0.5px; }}
+        .header-sub {{ font-size: 14px; color: #aaa; margin-top: 8px; font-family: monospace; letter-spacing: 1px; }}
+        .content {{ padding: 40px 50px; }}
+        h2 {{ color: #111; font-size: 22px; font-weight: 800; margin-top: 40px; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #eee; }}
+        .kpi-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 40px; }}
+        .kpi-card {{ border: 1px solid #eaeaea; border-radius: 10px; padding: 25px; background: #fafafa; }}
+        .kpi-card h3 {{ margin: 0 0 20px 0; font-size: 16px; color: #444; text-transform: uppercase; letter-spacing: 1px; }}
+        .kpi-row {{ display: flex; justify-content: space-between; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #eee; }}
+        .kpi-row:last-child {{ margin-bottom: 0; padding-bottom: 0; border-bottom: none; }}
+        .kpi-lbl {{ font-size: 13px; color: #666; font-weight: 600; }}
+        .kpi-val {{ font-size: 20px; font-weight: 800; color: #00D2FF; font-family: monospace; }}
+        table {{ width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 30px; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.03); }}
+        th, td {{ padding: 14px 15px; text-align: left; border-bottom: 1px solid #eee; }}
+        th {{ background: #f8f9fa; font-weight: 800; text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px; color: #555; }}
+        .map-container {{ border: 1px solid #eee; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }}
+        .disclaimer {{ background: #fff8e6; border-left: 4px solid #F0B429; padding: 15px 20px; font-size: 13px; color: #856404; border-radius: 0 8px 8px 0; margin-bottom: 25px; }}
+        p {{ line-height: 1.8; color: #444; font-size: 15px; margin-bottom: 15px; }}
+        .footer {{ background: #06060a; color: #888; padding: 40px 50px; text-align: center; font-size: 13px; }}
+        .footer a {{ color: #00D2FF; text-decoration: none; font-weight: 600; }}
+        </style>
+        </head><body><div class="page">
+        <div class="header">
+            <div>{logo_html_str}</div>
+            <div style="text-align:right;">
+                <h1>DFR Deployment Proposal</h1>
+                <div class="header-sub">{prop_city}, {prop_state} | Pop: {pop_metric:,}</div>
+                <div class="header-sub" style="color:#00D2FF;">Prepared by: {prop_name}</div>
+            </div>
+        </div>
+        <div class="content">
+            <div class="kpi-grid">
+                <div class="kpi-card">
+                    <h3>Financial Impact</h3>
+                    <div class="kpi-row"><span class="kpi-lbl">Fleet CapEx</span><span class="kpi-val">${fleet_capex:,.0f}</span></div>
+                    <div class="kpi-row"><span class="kpi-lbl">Annual Savings Capacity</span><span class="kpi-val">${annual_savings:,.0f}</span></div>
+                    <div class="kpi-row"><span class="kpi-lbl">Break-Even</span><span class="kpi-val" style="color:#F0B429;">{break_even_text}</span></div>
+                </div>
+                <div class="kpi-card">
+                    <h3>Operational Impact</h3>
+                    <div class="kpi-row"><span class="kpi-lbl">911 Call Coverage</span><span class="kpi-val">{calls_covered_perc:.1f}%</span></div>
+                    <div class="kpi-row"><span class="kpi-lbl">Avg Response Time</span><span class="kpi-val">{avg_resp_time:.1f} min</span></div>
+                    <div class="kpi-row"><span class="kpi-lbl">Time Saved vs Patrol</span><span class="kpi-val" style="color:#2ecc71;">{avg_time_saved:.1f} min</span></div>
+                </div>
+            </div>
+
+            <h2>Proposed Fleet</h2>
+            <table>
+                <tr><th>Type</th><th>Qty</th><th>Range</th><th>Unit Cost</th></tr>
+                <tr><td>BRINC Responder</td><td>{actual_k_responder}</td><td>{resp_radius_mi} mi</td><td>${CONFIG['RESPONDER_COST']:,}</td></tr>
+                <tr><td>BRINC Guardian</td><td>{actual_k_guardian}</td><td>{guard_radius_mi} mi</td><td>${CONFIG['GUARDIAN_COST']:,}</td></tr>
+            </table>
+
+            <h2>Coverage Map</h2>
+            <div class="map-container">{map_html_str}</div>
+
+            {cad_charts_html_export}
+
+            <h2>Deployment Locations</h2>
+            <table>
+                <tr><th>Station</th><th>Type</th><th>Avg Response</th><th>FAA Ceiling</th><th>CapEx</th></tr>
+                {station_rows}
+            </table>
+
+            <h2>Grant Narrative (AI Draft)</h2>
+            <div class="disclaimer"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission. All financial projections, coverage statistics, and operational estimates are produced by a simulation tool based on user-provided inputs &mdash; they are not a guarantee of performance, legal recommendation, or binding commitment of any kind.</div>
+            <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — {jurisdiction_list}</p>
+            <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully submits this application requesting funding to establish a BRINC Drones-powered Drone as a First Responder (DFR) program. This initiative will deploy a fleet of {total_fleet} purpose-built BRINC Drones aerial systems — comprising {actual_k_responder} BRINC Responder and {actual_k_guardian} BRINC Guardian units — across {dept_summary} serving a combined population of {pop_metric:,} residents across approximately {area_sq_mi_est:,} square miles in {prop_city}, {prop_state}.</p>
+            <p><strong>Statement of Need:</strong> The {jurisdiction_list} currently serves a population of {pop_metric:,} residents and responds to an estimated {st.session_state.get('total_original_calls', total_calls):,} calls for service annually. Ground-based patrol response times are constrained by traffic, geography, and unit availability. This proposal addresses a critical public safety gap: the need for immediate aerial situational awareness that arrives before ground units, enabling smarter, safer, and faster emergency response. BRINC Drones, the world leader in purpose-built DFR technology, provides the only fully integrated hardware, software, and operational support platform purpose-designed for law enforcement DFR deployment.</p>
+            <p><strong>Geographic Scope & Participating Agencies:</strong> The proposed DFR network covers the jurisdictions of <strong>{jurisdiction_list}</strong> ({prop_state}). Drone stations will be hosted at {dept_summary}, including facilities operated by: <em>{police_names_str}</em>. The deployment area encompasses an estimated {area_sq_mi_est:,} square miles of mixed urban and suburban terrain, with BRINC Drones units positioned to achieve {calls_covered_perc:.1f}% coverage of historical incident locations and {area_covered_perc:.1f}% geographic area coverage.</p>
+            <p><strong>Program Design:</strong> The proposed fleet consists of {actual_k_responder} <strong>BRINC Responder</strong> units (short-range tactical response, {resp_radius_mi}-mile operational radius) and {actual_k_guardian} <strong>BRINC Guardian</strong> units (long-range heavy-lift, {guard_radius_mi}-mile operational radius). All deployment sites have been pre-screened against FAA LAANC UAS Facility Maps. The BRINC Drones platform provides automated launch-on-dispatch, live-streaming HD/thermal video to dispatch and responding officers, and full chain-of-custody flight logging. Average aerial response time under this configuration is projected at <strong>{avg_resp_time:.1f} minutes</strong> — approximately <strong>{avg_time_saved:.1f} minutes faster</strong> than current vehicular patrol response for equivalent distances.</p>
+            <p><strong>Fiscal Impact & Return on Investment:</strong> Total program capital expenditure is <strong>${fleet_capex:,.0f}</strong>. Based on a {int(dfr_dispatch_rate*100)}% DFR dispatch rate and {int(deflection_rate*100)}% call resolution rate, the program is projected to generate <strong>${annual_savings:,.0f} in annual operational savings</strong> through reduced officer dispatch on drone-resolved incidents, reaching full cost recovery in <strong>{break_even_text.lower()}</strong>. At ${CONFIG["DRONE_COST_PER_CALL"]}/drone response versus ${CONFIG["OFFICER_COST_PER_CALL"]}/officer dispatch, the BRINC Drones platform delivers a demonstrated cost-per-response reduction of over {int((1 - CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}%.</p>
+            <p><strong>About BRINC Drones:</strong> BRINC Drones, Inc. is the global leader in purpose-built Drone as a First Responder technology, with deployments across hundreds of law enforcement agencies in the United States. BRINC Drones designs, manufactures, and supports the only DFR platform built from the ground up for public safety — including the BRINC Responder for rapid tactical response and the BRINC Guardian for extended-range operations. BRINC provides full agency onboarding, FAA coordination support, pilot training, and ongoing operational guidance. Learn more at <a href="https://brincdrones.com" target="_blank">brincdrones.com</a>.</p>
+            
+            <p style="background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #eee;"><strong>Potential Grant Funding Sources:</strong><br>
+              <a href="https://bja.ojp.gov/program/jag/overview" target="_blank">DOJ Byrne JAG</a> — UAS and technology procurement eligible <br>
+              <a href="https://www.fema.gov/grants/preparedness/homeland-security" target="_blank">FEMA HSGP</a> — CapEx offset for tactical deployments <br>
+              <a href="https://cops.usdoj.gov/grants" target="_blank">DOJ COPS Office</a> — Law enforcement technology grants <br>
+              <a href="https://www.transportation.gov/grants" target="_blank">DOT RAISE</a> — Regional infrastructure and safety
+            </p>
+
+            <h2>Candidate Infrastructure Directory</h2>
+            <p>The following public buildings and facilities were evaluated as potential deployment locations during this optimization simulation:</p>
+            <table style="font-size: 12px; margin-bottom: 40px;">
+                <tr><th>Facility Name</th><th>Type</th><th>Latitude</th><th>Longitude</th><th>Location</th></tr>
+                {all_bldgs_rows}
+            </table>
+
+            <div style="page-break-before: always;"></div>
+            <h2 style="color:#1a1a2e; border-bottom: 3px solid #00D2FF;">📬 Community Business Partnership — Request for Support</h2>
+            <div style="background:#f0f8ff; border-left:5px solid #00D2FF; padding:20px 25px; border-radius:0 8px 8px 0; margin-bottom:25px; font-size:14px; color:#333;">
+                <strong>To: Local Business Community of {prop_city}, {prop_state}</strong><br>
+                <strong>Re: Drone as a First Responder Program — Community Investment Opportunity</strong><br>
+                <strong>Date:</strong> {datetime.datetime.now().strftime("%B %d, %Y")}
+            </div>
+            <p>Dear {prop_city} Business Owner,</p>
+            <p>On behalf of the public safety community of <strong>{prop_city}, {prop_state}</strong>, we are reaching out to local businesses to join a groundbreaking initiative that directly protects your investment, your employees, and your customers. Our city is proposing the deployment of a <strong>BRINC Drones Drone as a First Responder (DFR)</strong> network — an advanced aerial response system that puts a camera and tactical awareness on scene in under two minutes, before any ground unit can arrive.</p>
+
+            <h3 style="color:#1a1a2e; margin-top:30px;">Why Businesses Like Yours Should Care</h3>
+            <p>Property crimes cost American businesses billions each year. In <strong>{prop_city}</strong> and surrounding communities, the impact is felt directly in higher insurance premiums, inventory losses, property repairs, and the intangible cost of a less safe commercial environment. Consider the local data context:</p>
+            <table style="margin-bottom:20px;">
+                <tr><th>Crime Category</th><th>National Avg Cost per Incident</th><th>Business Impact</th></tr>
+                <tr><td><strong>Retail Theft / Shoplifting</strong></td><td>$559 per incident (NRF)</td><td>Inventory loss, employee safety risk, insurance premiums</td></tr>
+                <tr><td><strong>Vandalism / Property Damage</strong></td><td>$1,000–$5,000 per incident</td><td>Repair costs, business downtime, deterred customers</td></tr>
+                <tr><td><strong>Commercial Burglary</strong></td><td>$3,000–$8,500 per incident</td><td>Equipment/cash loss, security upgrades, psychological toll</td></tr>
+                <tr><td><strong>Robbery / Armed Incidents</strong></td><td>$8,000+ per incident</td><td>Worker's comp, legal liability, staff turnover</td></tr>
+                <tr><td><strong>Trespass / Loitering</strong></td><td>$200–$1,500 per incident</td><td>Customer deterrence, staff distraction, facility wear</td></tr>
+            </table>
+            <p>A DFR program acts as a <strong>force multiplier</strong> for law enforcement — drone units arrive on scene an average of <strong>{avg_resp_time:.1f} minutes</strong> after dispatch, capturing real-time aerial video that dramatically improves the probability of apprehension and conviction. Deterrence effects from visible drone patrols have been shown in peer-reviewed studies to reduce commercial property crime by 15–30% in covered zones.</p>
+
+            <h3 style="color:#1a1a2e; margin-top:30px;">The Investment We're Requesting</h3>
+            <p>The total capital cost for deploying the full DFR network across <strong>{jurisdiction_list}</strong> is <strong>${fleet_capex:,.0f}</strong>. We are seeking contributions from the local business community to offset a portion of this cost and accelerate deployment. Any amount helps — and contributions will be recognized publicly through the program.</p>
+            <table style="margin-bottom:20px;">
+                <tr><th>Sponsorship Tier</th><th>Contribution</th><th>Recognition</th></tr>
+                <tr><td>🥇 <strong>Founding Sponsor</strong></td><td>$25,000+</td><td>Named drone unit, press release, plaque at station, annual briefing</td></tr>
+                <tr><td>🥈 <strong>Community Champion</strong></td><td>$10,000–$24,999</td><td>Logo on program materials, certificate of recognition, annual update</td></tr>
+                <tr><td>🥉 <strong>Neighborhood Partner</strong></td><td>$2,500–$9,999</td><td>Listed on program website, certificate, public acknowledgment</td></tr>
+                <tr><td>🤝 <strong>Business Supporter</strong></td><td>$500–$2,499</td><td>Listed on donor roll, formal thank-you letter</td></tr>
+                <tr><td>💙 <strong>Community Contributor</strong></td><td>Any amount</td><td>Recognized in annual program report</td></tr>
+            </table>
+
+            <h3 style="color:#1a1a2e; margin-top:30px;">Program Performance Metrics</h3>
+            <table style="margin-bottom:20px;">
+                <tr><th>Metric</th><th>Projected Value</th></tr>
+                <tr><td>911 Calls Covered by Drone Network</td><td><strong>{calls_covered_perc:.1f}%</strong></td></tr>
+                <tr><td>Average Drone Response Time</td><td><strong>{avg_resp_time:.1f} minutes</strong></td></tr>
+                <tr><td>Time Saved vs. Ground Patrol</td><td><strong>{avg_time_saved:.1f} minutes faster</strong></td></tr>
+                <tr><td>Annual Cost Savings to Taxpayers</td><td><strong>${annual_savings:,.0f}</strong></td></tr>
+                <tr><td>Program Break-Even</td><td><strong>{break_even_text}</strong></td></tr>
+                <tr><td>Cost per Drone Response</td><td><strong>${CONFIG['DRONE_COST_PER_CALL']} vs. ${CONFIG['OFFICER_COST_PER_CALL']} (patrol)</strong></td></tr>
+                <tr><td>Deployment Coverage Area</td><td><strong>{area_sq_mi_est:,} sq mi</strong> across {jurisdiction_list}</td></tr>
+                <tr><td>Population Protected</td><td><strong>{pop_metric:,} residents</strong></td></tr>
+            </table>
+
+            <p>For every dollar invested in this program, the community receives an estimated <strong>${round(annual_savings / max(fleet_capex, 1) * 10, 1):.1f}x return</strong> in operational savings and crime cost avoidance over a 10-year horizon — before accounting for reduced insurance claims, higher foot traffic in safer commercial districts, and improved employee retention in a safer work environment.</p>
+
+            <p>To make a contribution or learn more about sponsorship opportunities, please contact:</p>
+            <div style="background:#f8f9fa; border:1px solid #eee; border-radius:8px; padding:20px; margin:20px 0;">
+                <strong>{pd_chief}</strong><br>
+                {pd_dept}<br>
+                {pd_email_html}{pd_phone_html}
+            </div>
+            <p>Together, we can build a safer, more prosperous {prop_city}. Thank you for your consideration and for your commitment to this community.</p>
+            <p>Respectfully,</p>
+            <p><strong>{pd_chief}</strong><br>{pd_dept}</p>
+            
+            <div style="margin-top: 50px; font-family:'Manrope', Arial, sans-serif !important;">
+                <div style="border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+                    [ANALYTICS_HTML_EXPORT]
+                </div>
+            </div>
+        </div>
+        <div style="background:#fff8e6; border:1px solid #F0B429; border-radius:8px; padding:20px 25px; margin:40px 50px 0 50px; font-size:12px; color:#6b5000; line-height:1.7;">
+            <strong style="font-size:13px;">&#9888; DISCLAIMER &mdash; SIMULATION TOOL</strong><br>
+            This document was generated by the BRINC Drones Coverage Optimization Simulator. All coverage percentages,
+            response time projections, financial figures (including CapEx, annual savings, and break-even estimates),
+            population statistics, and operational metrics are <strong>model estimates calculated from user-provided
+            inputs and publicly available data</strong>. They are intended for planning and discussion purposes only.
+            Actual performance, costs, and outcomes will vary based on real-world conditions including terrain,
+            infrastructure, staffing, regulatory requirements, weather, and other factors.
+            <strong>This output does not constitute a legal recommendation, binding proposal, contract, or guarantee
+            of any product, service, or financial outcome.</strong> BRINC Drones, Inc. makes no representations or
+            warranties regarding the accuracy or completeness of these estimates. All deployments are subject to
+            individual agency requirements, FAA authorization, local ordinances, and formal procurement processes.
+        </div>
+        <div class="footer">
+            <div class="footer-logo">BRINC</div>
+            <div style="font-weight:bold; font-size:15px; margin-bottom:8px; color:#fff;">BRINC Drones, Inc.</div>
+            <div style="margin-bottom:15px;">Leading the world in purpose-built Drone as a First Responder technology.</div>
+            <div style="margin-bottom:10px; color:#aaa;">Prepared by: {prop_name} | <a href="mailto:{prop_email}">{prop_email}</a></div>
+            <div style="margin-bottom:15px;">
+                <a href="https://brincdrones.com" target="_blank">brincdrones.com</a> | <a href="mailto:sales@brincdrones.com">sales@brincdrones.com</a> | +1 (855) 950-0226
+            </div>
+            <div style="color:#555;">
+                <a href="https://www.linkedin.com/company/brincdrones" target="_blank">LinkedIn</a>  • 
+                <a href="https://twitter.com/brincdrones" target="_blank">Twitter / X</a>  • 
+                <a href="https://www.youtube.com/c/brincdrones" target="_blank">YouTube</a>
+            </div>
+        </div>
+        </div></body></html>"""
+
+        export_html = export_html.replace("[ANALYTICS_HTML_EXPORT]", analytics_html_export)
+
+        if st.sidebar.download_button("💾 Save Deployment Plan", data=json.dumps(export_dict),
+                                      file_name=f"Brinc_{safe_city}_{current_time_str}.brinc",
+                                      mime="application/json", use_container_width=True):
+            _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                          "BRINC", k_responder, k_guardian, calls_covered_perc,
+                          prop_name, prop_email, details=export_details)
+            _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                           "BRINC", k_responder, k_guardian, calls_covered_perc,
+                           prop_name, prop_email, details=export_details)
+
+        if st.sidebar.download_button("📄 Executive Summary (HTML)", data=export_html,
+                                      file_name=f"Brinc_{safe_city}_Proposal_{current_time_str}.html",
+                                      mime="text/html", use_container_width=True):
+            _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                          "HTML", k_responder, k_guardian, calls_covered_perc,
+                          prop_name, prop_email, details=export_details)
+            _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                           "HTML", k_responder, k_guardian, calls_covered_perc,
+                           prop_name, prop_email, details=export_details)
+
+        if active_drones:
+            if st.sidebar.download_button("🌏 Google Earth Briefing File", data=generate_kml(active_gdf, active_drones, calls_in_city),
+                                          file_name="drone_deployment.kml", mime="application/vnd.google-earth.kml+xml",
+                                          use_container_width=True):
+                _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                              "KML", k_responder, k_guardian, calls_covered_perc,
+                              prop_name, prop_email, details=export_details)
+                _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                               "KML", k_responder, k_guardian, calls_covered_perc,
+                               prop_name, prop_email, details=export_details)

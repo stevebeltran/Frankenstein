@@ -2159,12 +2159,18 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     <div style="text-align:right; font-weight:600; color:{card_title}; font-size:0.52rem; word-break:break-word;">{d_airport}</div>
   </div>
 
-  <!-- CapEx + ROI footer — inside the card, part of the flow -->
-  <div style="border-top:1px solid {card_border}; padding-top:5px; display:grid; grid-template-columns:1fr 1fr; gap:2px 6px; font-size:0.59rem;">
+  <!-- CapEx + ROI footer -->
+  <div style="border-top:1px solid {card_border}; padding-top:5px; display:grid; grid-template-columns:1fr 1fr; gap:2px 6px; font-size:0.59rem; margin-bottom:6px;">
     <div style="color:{text_muted};">CapEx</div>
     <div style="text-align:right; font-weight:700; color:{card_title};">${d_cost:,.0f}</div>
     <div style="color:{text_muted};">Base ROI</div>
     <div style="text-align:right; font-weight:800; color:{accent_color};">{d_be}</div>
+  </div>
+
+  <!-- Pin buttons — rendered via session_state keys set by JS postMessage -->
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+    {"'''<div style=\'background:rgba(255,215,0,0.15); border:1px solid rgba(255,215,0,0.4); border-radius:4px; padding:3px 6px; font-size:0.55rem; font-weight:700; color:#FFD700; text-align:center; cursor:pointer;\'>&nbsp;🔒 GUARDIAN LOCKED</div>'''" if d.get("pinned") and d_type=="GUARDIAN" else "'''<div style=\'border:1px dashed rgba(255,215,0,0.25); border-radius:4px; padding:3px 6px; font-size:0.55rem; color:rgba(255,215,0,0.5); text-align:center;\'><span style=\'opacity:0.6\'>🦅 lock as guard</span></div>'''" }
+    {"'''<div style=\'background:rgba(0,210,255,0.15); border:1px solid rgba(0,210,255,0.4); border-radius:4px; padding:3px 6px; font-size:0.55rem; font-weight:700; color:#00D2FF; text-align:center; cursor:pointer;\'>&nbsp;🔒 RESPONDER LOCKED</div>'''" if d.get("pinned") and d_type=="RESPONDER" else "'''<div style=\'border:1px dashed rgba(0,210,255,0.25); border-radius:4px; padding:3px 6px; font-size:0.55rem; color:rgba(0,210,255,0.5); text-align:center;\'><span style=\'opacity:0.6\'>🚁 lock as resp</span></div>'''" }
   </div>
 </div>''')
 
@@ -3666,65 +3672,135 @@ if st.session_state['csvs_ready']:
     st.session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
 
     # ── MANUAL STATION PINS ───────────────────────────────────────────────────
-    pin_expander = st.sidebar.expander("📍 Manual Station Pins", expanded=False)
+    pin_expander = st.sidebar.expander("📍 Station Pins", expanded=False)
+
+    # Pinning now happens via buttons on the unit economics cards.
+    # This expander shows current state and allows clearing.
+    _station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
+    _saved_g = [s for s in st.session_state.get('pinned_guard_names', []) if s in _station_names]
+    _saved_r = [s for s in st.session_state.get('pinned_resp_names',  []) if s in _station_names]
+    # Sync back in case stale names were filtered out
+    st.session_state['pinned_guard_names'] = _saved_g
+    st.session_state['pinned_resp_names']  = _saved_r
+    pinned_guard_names = _saved_g
+    pinned_resp_names  = _saved_r
+
     with pin_expander:
-        st.markdown(
-            f"<div style='font-size:0.7rem; color:{text_muted}; margin-bottom:8px;'>"
-            "The table below scores every candidate station. Use the multiselects to lock "
-            "specific stations as Guardian or Responder — the optimizer fills remaining "
-            "slots around your picks. Raise the fleet sliders if you need more slots than pins.</div>",
-            unsafe_allow_html=True
-        )
-
-        _station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
-
-        # Restore persisted pins, filtering out any names no longer in the station list
-        _saved_g = [s for s in st.session_state.get('pinned_guard_names', []) if s in _station_names]
-        _saved_r = [s for s in st.session_state.get('pinned_resp_names',  []) if s in _station_names]
-
-        pinned_guard_names = st.multiselect(
-            "🦅 Lock as Guardian",
-            options=_station_names,
-            default=_saved_g,
-            help=(
-                "These stations are always placed as Guardians. "
-                "Guardian Count slider must be ≥ number of pins. "
-                "The optimizer then finds the best additional Guardians to complement yours."
-            )
-        )
-        pinned_resp_names = st.multiselect(
-            "🚁 Lock as Responder",
-            options=[s for s in _station_names if s not in pinned_guard_names],
-            default=[s for s in _saved_r if s not in pinned_guard_names],
-            help=(
-                "These stations are always placed as Responders. "
-                "Responder Count slider must be ≥ number of pins. "
-                "Guardian-pinned stations are excluded from this list."
-            )
-        )
-        st.session_state['pinned_guard_names'] = pinned_guard_names
-        st.session_state['pinned_resp_names']  = pinned_resp_names
-
-        # Status summary
-        n_g_auto = max(0, k_guardian  - len(pinned_guard_names))
-        n_r_auto = max(0, k_responder - len(pinned_resp_names))
         if pinned_guard_names or pinned_resp_names:
-            _parts = []
-            if pinned_guard_names: _parts.append(f"🦅 {len(pinned_guard_names)} Guardian pinned")
-            if pinned_resp_names:  _parts.append(f"🚁 {len(pinned_resp_names)} Responder pinned")
-            if n_g_auto + n_r_auto > 0:
-                _parts.append(f"optimizer places {n_g_auto}G + {n_r_auto}R")
-            st.info(" · ".join(_parts))
+            for _pn in pinned_guard_names:
+                st.markdown(f"<div style='font-size:0.68rem; color:#FFD700; padding:2px 0;'>🦅 {_pn}</div>",
+                            unsafe_allow_html=True)
+            for _pn in pinned_resp_names:
+                st.markdown(f"<div style='font-size:0.68rem; color:#00D2FF; padding:2px 0;'>🚁 {_pn}</div>",
+                            unsafe_allow_html=True)
+            _ng = max(0, k_guardian  - len(pinned_guard_names))
+            _nr = max(0, k_responder - len(pinned_resp_names))
+            if _ng + _nr > 0:
+                st.caption(f"Optimizer fills remaining {_ng}G + {_nr}R slots automatically.")
+            if st.button("✕ Clear all pins", use_container_width=True, key="clear_pins"):
+                st.session_state['pinned_guard_names'] = []
+                st.session_state['pinned_resp_names']  = []
+                st.rerun()
+        else:
+            st.markdown(
+                f"<div style='font-size:0.7rem; color:{text_muted};'>"
+                "Use the <b>Lock</b> buttons on the unit cards below the map to pin stations.</div>",
+                unsafe_allow_html=True
+            )
 
         if len(pinned_guard_names) > k_guardian:
             st.warning(f"⚠️ Raise Guardian Count to at least {len(pinned_guard_names)}.")
         if len(pinned_resp_names) > k_responder:
             st.warning(f"⚠️ Raise Responder Count to at least {len(pinned_resp_names)}.")
 
-        if pinned_guard_names or pinned_resp_names:
-            if st.button("✕ Clear all pins", use_container_width=True, key="clear_pins"):
-                st.session_state['pinned_guard_names'] = []
-                st.session_state['pinned_resp_names']  = []
+    # ── ADD CUSTOM STATION BY ADDRESS ─────────────────────────────────────────
+    add_expander = st.sidebar.expander("➕ Add Custom Station", expanded=False)
+    with add_expander:
+        st.markdown(
+            f"<div style='font-size:0.7rem; color:{text_muted}; margin-bottom:8px;'>"
+            "Enter an address to add a custom deployment location. "
+            "The Census geocoder resolves it to lat/lon. Custom stations persist for this session.</div>",
+            unsafe_allow_html=True
+        )
+        _custom_addr  = st.text_input("Address", placeholder="123 Main St, Mobile, AL",
+                                       key="custom_station_addr")
+        _custom_label = st.text_input("Label (optional)", placeholder="Fire Station 7",
+                                       key="custom_station_label")
+        _custom_type  = st.selectbox("Type", ["Police", "Fire", "School", "Government",
+                                               "Hospital", "Library", "Other"],
+                                      key="custom_station_type")
+
+        if st.button("📍 Geocode & Add Station", use_container_width=True, key="geocode_btn"):
+            if _custom_addr.strip():
+                try:
+                    import urllib.request, urllib.parse, json as _json
+                    _params = urllib.parse.urlencode({
+                        "address": _custom_addr.strip(),
+                        "benchmark": "2020",
+                        "format": "json"
+                    })
+                    _url = f"https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?{_params}"
+                    with urllib.request.urlopen(_url, timeout=6) as _resp:
+                        _data = _json.loads(_resp.read().decode())
+                    _matches = _data.get("result", {}).get("addressMatches", [])
+                    if _matches:
+                        _coords = _matches[0]["coordinates"]
+                        _geo_lat = float(_coords["y"])
+                        _geo_lon = float(_coords["x"])
+                        _matched_addr = _matches[0].get("matchedAddress", _custom_addr)
+                        _label = _custom_label.strip() or _matched_addr
+                        # Append to session station list
+                        _new_row = pd.DataFrame([{
+                            "name": _label,
+                            "lat": _geo_lat,
+                            "lon": _geo_lon,
+                            "type": _custom_type
+                        }])
+                        _existing = st.session_state.get('df_stations', pd.DataFrame())
+                        if not _existing.empty:
+                            st.session_state['df_stations'] = pd.concat(
+                                [_existing, _new_row], ignore_index=True
+                            )
+                        else:
+                            st.session_state['df_stations'] = _new_row
+                        st.success(f"✅ Added: {_label} ({_geo_lat:.4f}, {_geo_lon:.4f})")
+                        st.caption(f"Matched: {_matched_addr}")
+                        # Clear inputs
+                        st.session_state['custom_station_addr']  = ""
+                        st.session_state['custom_station_label'] = ""
+                        # Force cache invalidation so the new station appears
+                        if '_opt_cache_key' in st.session_state:
+                            del st.session_state['_opt_cache_key']
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ Address not found. Try adding city and state.")
+                except Exception as _ge:
+                    st.error(f"Geocoding failed: {_ge}")
+            else:
+                st.warning("Enter an address first.")
+
+        # Show any custom stations added this session
+        _custom_added = [
+            r['name'] for _, r in st.session_state.get('df_stations', pd.DataFrame()).iterrows()
+            if r.get('type') not in ['Police', 'Fire', 'School', 'Government', 'Hospital',
+                                      'Library', 'Park', 'Recreation', 'Shopping', 'Transit',
+                                      'Utility', 'Emergency', 'Medical']
+        ] if not st.session_state.get('df_stations', pd.DataFrame()).empty else []
+        if _custom_added:
+            st.caption(f"Custom this session: {', '.join(_custom_added[:5])}")
+            if st.button("🗑 Remove all custom stations", key="remove_custom",
+                         use_container_width=True):
+                # Keep only original station types
+                _orig = st.session_state.get('df_stations', pd.DataFrame())
+                if not _orig.empty and 'type' in _orig.columns:
+                    _known_types = {'Police','Fire','School','Government','Hospital',
+                                    'Library','Park','Recreation','Shopping','Transit',
+                                    'Utility','Emergency','Medical'}
+                    st.session_state['df_stations'] = _orig[
+                        _orig['type'].astype(str).isin(_known_types)
+                    ].reset_index(drop=True)
+                if '_opt_cache_key' in st.session_state:
+                    del st.session_state['_opt_cache_key']
                 st.rerun()
 
     # Convert pin names → station indices for the optimizer
@@ -4439,13 +4515,61 @@ if st.session_state['csvs_ready']:
         unsafe_allow_html=True
     )
     if active_drones:
+        _n_cols = 4 if len(active_drones) >= 4 else (2 if len(active_drones) > 1 else 1)
         st.markdown(
             _build_unit_cards_html(
                 active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color,
-                columns_per_row=4 if len(active_drones) >= 4 else (2 if len(active_drones) > 1 else 1)
+                columns_per_row=_n_cols
             ),
             unsafe_allow_html=True
         )
+
+        # ── Interactive pin/unpin buttons aligned under each card ─────────
+        _saved_gnames = list(st.session_state.get('pinned_guard_names', []))
+        _saved_rnames = list(st.session_state.get('pinned_resp_names',  []))
+        _station_names_set = set(df_stations_all['name'].tolist()) if not df_stations_all.empty else set()
+
+        _btn_cols = st.columns(_n_cols)
+        for _ci, _d in enumerate(active_drones):
+            _dname  = _d['name']
+            _dtype  = _d['type']
+            _col    = _btn_cols[_ci % _n_cols]
+            _is_pg  = _dname in _saved_gnames
+            _is_pr  = _dname in _saved_rnames
+            with _col:
+                if _dtype == 'GUARDIAN':
+                    if _is_pg:
+                        if st.button(f"🔒 Unpin Guardian", key=f"unpin_g_{_ci}",
+                                     use_container_width=True, type="primary"):
+                            _saved_gnames = [x for x in _saved_gnames if x != _dname]
+                            st.session_state['pinned_guard_names'] = _saved_gnames
+                            st.rerun()
+                    else:
+                        if st.button(f"🦅 Lock as Guardian", key=f"pin_g_{_ci}",
+                                     use_container_width=True):
+                            if _dname not in _saved_gnames:
+                                _saved_gnames.append(_dname)
+                                # Remove from responder pins if there
+                                _saved_rnames = [x for x in _saved_rnames if x != _dname]
+                            st.session_state['pinned_guard_names'] = _saved_gnames
+                            st.session_state['pinned_resp_names']  = _saved_rnames
+                            st.rerun()
+                else:  # RESPONDER
+                    if _is_pr:
+                        if st.button(f"🔒 Unpin Responder", key=f"unpin_r_{_ci}",
+                                     use_container_width=True, type="primary"):
+                            _saved_rnames = [x for x in _saved_rnames if x != _dname]
+                            st.session_state['pinned_resp_names'] = _saved_rnames
+                            st.rerun()
+                    else:
+                        if st.button(f"🚁 Lock as Responder", key=f"pin_r_{_ci}",
+                                     use_container_width=True):
+                            if _dname not in _saved_rnames:
+                                _saved_rnames.append(_dname)
+                                _saved_gnames = [x for x in _saved_gnames if x != _dname]
+                            st.session_state['pinned_guard_names'] = _saved_gnames
+                            st.session_state['pinned_resp_names']  = _saved_rnames
+                            st.rerun()
     else:
         st.markdown(
             f"""

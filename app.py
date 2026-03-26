@@ -3700,7 +3700,7 @@ if st.session_state['csvs_ready']:
     st.markdown(f"<div style='font-size:0.65rem;color:gray;margin-top:-10px;margin-bottom:12px;text-align:right;'>{' '.join(note_bits)}</div>", unsafe_allow_html=True)
 
     cards_below_map = bool(show_cards and len(active_drones) > 2)
-    map_col, stats_col = st.columns([4.2, 1.8])
+    map_col = st.container()
 
     with map_col:
         fig = go.Figure()
@@ -3794,8 +3794,8 @@ if st.session_state['csvs_ready']:
 
         st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
-    with stats_col:
-        st.markdown(f"<h4 style='margin-top:0; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Coverage Curve</h4>", unsafe_allow_html=True)
+    with st.expander('Coverage Curve', expanded=False):
+        st.markdown(f"<div style='font-size:0.8rem; color:{text_muted}; margin-bottom:8px;'>Use this to see how added drones improve coverage and where returns start to flatten.</div>", unsafe_allow_html=True)
 
         if not df_curve.empty:
             fig_curve = go.Figure()

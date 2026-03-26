@@ -43,6 +43,8 @@ if 'target_cities' not in st.session_state:
     st.session_state['target_cities'] = [{"city": st.session_state.get('active_city', 'Victoria'), "state": st.session_state.get('active_state', 'TX')}]
 
 
+GUARDIAN_FLIGHT_HOURS_PER_DAY = 23.5
+
 SIMULATOR_DISCLAIMER_SHORT = (
     "Simulation output only. Coverage, station placement, response time, and ROI figures are model estimates based on uploaded data and configuration settings. "
     "They are not guarantees of real-world performance, legal compliance, FAA approval, procurement outcome, or financial results."
@@ -275,6 +277,37 @@ def get_base64_of_bin_file(bin_file):
 # ============================================================
 # COMMAND CENTER ANALYTICS GENERATOR
 # ============================================================
+
+def _detect_datetime_series_for_labels(df):
+    """Return a best-effort parsed datetime series from common CAD field patterns."""
+    if df is None or len(df) == 0:
+        return None
+    try:
+        if 'date' in df.columns and 'time' in df.columns:
+            s = pd.to_datetime(df['date'].astype(str).fillna('') + ' ' + df['time'].astype(str).fillna(''), errors='coerce')
+            if s.notna().sum() > 0:
+                return s
+        if 'date' in df.columns:
+            s = pd.to_datetime(df['date'], errors='coerce')
+            if s.notna().sum() > 0:
+                return s
+        candidates = [
+            'createdtime_central', 'created time', 'createdtime', 'call datetime', 'calldatetime',
+            'timestamp', 'datetime', 'incident datetime', 'received time', 'time received',
+            'dispatch datetime', 'event time', 'event datetime'
+        ]
+        col_map = {str(c).strip().lower(): c for c in df.columns}
+        for cand in candidates:
+            col = cand if cand in df.columns else col_map.get(cand)
+            if col is not None:
+                s = pd.to_datetime(df[col], errors='coerce')
+                if s.notna().sum() > 0:
+                    return s
+    except Exception:
+        return None
+    return None
+
+
 def generate_command_center_html(df, total_orig_calls, export_mode=False):
     """Generates the full Command Center visual suite with interactive Javascript filtering."""
     if df is None or df.empty:
@@ -3953,7 +3986,7 @@ if st.session_state['csvs_ready']:
             st.markdown(
                 _build_unit_cards_html(
                     active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color,
-                    columns_per_row=2 if len(active_drones) > 1 else 1
+                    columns_per_row=4 if len(active_drones) >= 4 else (2 if len(active_drones) > 1 else 1)
                 ),
                 unsafe_allow_html=True
             )
@@ -3970,6 +4003,11 @@ if st.session_state['csvs_ready']:
                 """,
                 unsafe_allow_html=True
             )
+
+
+    # Resolve real incident datetime coverage for labels on the stations page
+    _label_dt_series = _detect_datetime_series_for_labels(df_calls_full if df_calls_full is not None else df_calls)
+    _label_has_real_dates = _label_dt_series is not None and getattr(_label_dt_series, "notna", lambda: pd.Series([], dtype=bool))().sum() > 0
 
     # ── CAD DATA CHARTS (moved into CAD Ingestion Analytics below) ───────────
     _cad_src = st.session_state.get('data_source', '')

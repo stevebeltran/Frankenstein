@@ -277,17 +277,57 @@ def get_base64_of_bin_file(bin_file):
 # ============================================================
 def generate_command_center_html(df, total_orig_calls, export_mode=False):
     """Generates the full Command Center visual suite with interactive Javascript filtering."""
-    if df is None or df.empty or 'date' not in df.columns:
-        return "<div style='color:gray; padding:20px;'>Analytics unavailable. Missing date/time fields.</div>"
-    
+    if df is None or df.empty:
+        return "<div style='color:gray; padding:20px;'>Analytics unavailable. No incident records loaded.</div>"
+
     import calendar as _cal
     import json
-    
+
     df_ana = df.copy()
-    df_ana['dt_obj'] = pd.to_datetime(df_ana['date'] + ' ' + df_ana.get('time', '00:00:00'), errors='coerce')
+
+    dt_obj = None
+    if 'date' in df_ana.columns:
+        if 'time' in df_ana.columns:
+            dt_obj = pd.to_datetime(
+                df_ana['date'].astype(str).fillna('') + ' ' + df_ana['time'].astype(str).fillna(''),
+                errors='coerce'
+            )
+        else:
+            dt_obj = pd.to_datetime(df_ana['date'], errors='coerce')
+
+    if dt_obj is None or dt_obj.dropna().empty:
+        dt_candidates = [
+            'createdtime_central', 'created time', 'createdtime', 'call datetime', 'calldatetime',
+            'timestamp', 'datetime', 'incident datetime', 'received time', 'time received',
+            'dispatch datetime', 'event time', 'event datetime'
+        ]
+        for cand in dt_candidates:
+            if cand in df_ana.columns:
+                trial = pd.to_datetime(df_ana[cand], errors='coerce')
+                if trial.dropna().shape[0] > 0:
+                    dt_obj = trial
+                    break
+
+    if dt_obj is None or dt_obj.dropna().empty:
+        col_map = {str(c).strip().lower(): c for c in df_ana.columns}
+        for cand in [
+            'createdtime_central', 'created time', 'createdtime', 'call datetime', 'calldatetime',
+            'timestamp', 'datetime', 'incident datetime', 'received time', 'time received',
+            'dispatch datetime', 'event time', 'event datetime'
+        ]:
+            if cand in col_map:
+                trial = pd.to_datetime(df_ana[col_map[cand]], errors='coerce')
+                if trial.dropna().shape[0] > 0:
+                    dt_obj = trial
+                    break
+
+    if dt_obj is None:
+        return "<div style='color:gray; padding:20px;'>Analytics unavailable. Missing date/time fields.</div>"
+
+    df_ana['dt_obj'] = dt_obj
     df_ana = df_ana.dropna(subset=['dt_obj'])
     if df_ana.empty: return "<div>No valid dates found in data.</div>"
-    
+
     # 1. Parse dates and build a lightweight records array for JavaScript
     records = []
     for _, r in df_ana.iterrows():
@@ -3215,7 +3255,7 @@ if st.session_state['csvs_ready']:
         show_heatmap    = st.toggle("911 Call Heatmap", value=False)
         show_health     = st.toggle("Health Score", value=False)
         show_satellite  = st.toggle("Satellite Imagery", value=False)
-        show_cards      = st.toggle("Unit Economics Cards", value=True)
+        show_cards      = True
         show_faa        = st.toggle("FAA LAANC Airspace", value=False)
         simulate_traffic = st.toggle("Simulate Ground Traffic", value=False)
         traffic_level   = st.slider("Traffic Congestion", 0, 100, 40) if simulate_traffic else 40
@@ -3766,7 +3806,7 @@ if st.session_state['csvs_ready']:
         note_bits.append(full_daily_note)
     st.markdown(f"<div style='font-size:0.65rem;color:gray;margin-top:-10px;margin-bottom:12px;text-align:right;'>{' '.join(note_bits)}</div>", unsafe_allow_html=True)
 
-    cards_below_map = bool(show_cards and len(active_drones) > 2)
+    cards_below_map = bool(show_cards)
     map_col = st.container()
 
     with map_col:
@@ -3893,40 +3933,43 @@ if st.session_state['csvs_ready']:
             )
             st.plotly_chart(fig_curve, use_container_width=True, config={'displayModeBar':False})
 
-        if show_cards and not cards_below_map:
-            st.markdown(f"""
-            <h4 style='margin-top:8px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>
-            <div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:8px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>
+        if show_cards:
+        st.markdown("---")
+        st.markdown(f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:10px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>",
+            unsafe_allow_html=True
+        )
+        st.markdown(
+            """
             <style>
-            .unit-card {{ transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; }}
-            .unit-card:hover {{ transform: scale(1.02); box-shadow: 0 8px 20px rgba(0,210,255,0.12); }}
+            .unit-card { transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; }
+            .unit-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,210,255,0.12); }
             </style>
-            """, unsafe_allow_html=True)
-            if not active_drones:
-                st.markdown(f"""
-                <div style="background:{card_bg}; border:1px dashed {card_border}; border-radius:6px;
-                     padding:24px; text-align:center; margin-top:10px;">
+            """,
+            unsafe_allow_html=True
+        )
+        if active_drones:
+            st.markdown(
+                _build_unit_cards_html(
+                    active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color,
+                    columns_per_row=2 if len(active_drones) > 1 else 1
+                ),
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                f"""
+                <div style="background:{card_bg}; border:1px dashed {card_border}; border-radius:6px; padding:22px; text-align:center; margin-top:8px;">
                     <div style="font-size:2rem; margin-bottom:8px;">🚁</div>
                     <div style="font-weight:700; color:{text_main}; margin-bottom:6px;">No drones deployed yet</div>
                     <div style="font-size:0.8rem; color:{text_muted};">
-                        👈 Use the <b>Responder / Guardian Count</b> sliders in the <b>② Optimize Fleet</b> sidebar section to deploy drones and see per-unit economics here.
+                        Use the <b>Responder / Guardian Count</b> sliders in the <b>Optimize Fleet</b> sidebar section to generate unit economics cards directly beneath the map.
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(_build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=1), unsafe_allow_html=True)
-
-    if show_cards and cards_below_map:
-        st.markdown(f"""
-        <h4 style='margin-top:12px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>
-        <div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:8px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>
-        <style>
-        .unit-card {{ transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; }}
-        .unit-card:hover {{ transform: scale(1.02); box-shadow: 0 8px 20px rgba(0,210,255,0.12); }}
-        </style>
-        """, unsafe_allow_html=True)
-        st.caption("More than two drones selected — unit cards have been moved below the map for a wider, aligned layout.")
-        st.markdown(_build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2), unsafe_allow_html=True)
+                """,
+                unsafe_allow_html=True
+            )
 
     # ── CAD DATA CHARTS (moved into CAD Ingestion Analytics below) ───────────
     _cad_src = st.session_state.get('data_source', '')

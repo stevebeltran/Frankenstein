@@ -43,7 +43,10 @@ if 'target_cities' not in st.session_state:
     st.session_state['target_cities'] = [{"city": st.session_state.get('active_city', 'Victoria'), "state": st.session_state.get('active_state', 'TX')}]
 
 
-GUARDIAN_FLIGHT_HOURS_PER_DAY = 23.5
+GUARDIAN_OPERATIONAL_CYCLE_MINUTES = 60
+GUARDIAN_RECHARGE_MINUTES = 3
+GUARDIAN_FLIGHT_HOURS_PER_DAY = (24.0 * GUARDIAN_OPERATIONAL_CYCLE_MINUTES) / (GUARDIAN_OPERATIONAL_CYCLE_MINUTES + GUARDIAN_RECHARGE_MINUTES)
+RESPONDER_FLIGHT_HOURS_PER_DAY = 11.6
 
 SIMULATOR_DISCLAIMER_SHORT = (
     "Simulation output only. Coverage, station placement, response time, and ROI figures are model estimates based on uploaded data and configuration settings. "
@@ -91,7 +94,7 @@ def _build_details_html(details):
         <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:15px;">
             <tr><td style="padding:4px; color:#888; width:50%;">Strategy</td><td style="padding:4px;">{details.get('opt_strategy', '')}</td></tr>
             <tr><td style="padding:4px; color:#888;">Incremental Build</td><td style="padding:4px;">{details.get('incremental_build', False)}</td></tr>
-            <tr><td style="padding:4px; color:#888;">Allow Overlap</td><td style="padding:4px;">{details.get('allow_redundancy', False)}</td></tr>
+            <tr><td style="padding:4px; color:#888;">Fleet Interaction</td><td style="padding:4px;">{details.get('fleet_interaction_mode', 'Shared')}</td></tr>
             <tr><td style="padding:4px; color:#888;">DFR Dispatch Rate</td><td style="padding:4px;">{details.get('dfr_rate', 0)}%</td></tr>
             <tr><td style="padding:4px; color:#888;">Deflection Rate</td><td style="padding:4px;">{details.get('deflect_rate', 0)}%</td></tr>
             <tr><td style="padding:4px; color:#888;">Total CapEx</td><td style="padding:4px;">${details.get('fleet_capex', 0):,.0f}</td></tr>
@@ -162,7 +165,7 @@ def _build_sheets_row(city, state, event_type, k_resp, k_guard, coverage, name, 
         d.get('dfr_rate', ''),                 # AC: DFR Rate %
         d.get('deflect_rate', ''),             # AD: Deflection Rate %
         d.get('incremental_build', ''),        # AE: Incremental Build
-        d.get('allow_redundancy', ''),         # AF: Allow Overlap
+        d.get('fleet_interaction_mode', ''),     # AF: Fleet Interaction
         # ── Drones detail (JSON) ─────────────────────────────────────────────
         json.dumps([{"name": dr.get("name"), "type": dr.get("type"),
                      "lat": dr.get("lat"), "lon": dr.get("lon"),
@@ -228,22 +231,7 @@ def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, emai
     except: pass
 
 # --- GLOBAL CONFIGURATION ---
-CONFIG = {
-    "RESPONDER_COST": 80000, "GUARDIAN_COST": 160000, "RESPONDER_RANGE_MI": 2.0,
-    "OFFICER_COST_PER_CALL": 82, "DRONE_COST_PER_CALL": 6,
-    "DEFAULT_TRAFFIC_SPEED": 35.0, "RESPONDER_SPEED": 42.0, "GUARDIAN_SPEED": 60.0,
-    # Guardian duty cycle: 60 min flight + 3 min charge = 63 min cycle
-    # Daily airtime = (24*60) / 63 * 60 = 1371.4 min = 22.86 hrs
-    "GUARDIAN_FLIGHT_MIN":  60,   # flight minutes per cycle
-    "GUARDIAN_CHARGE_MIN":   3,   # charge minutes per cycle
-    # Responder duty cycle: patrol unit, ~11.6 hr shift equivalent
-    "RESPONDER_PATROL_HOURS": 11.6,
-}
-# Derived: compute Guardian daily airtime from duty cycle
-CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] = (
-    (24 * 60) / (CONFIG["GUARDIAN_FLIGHT_MIN"] + CONFIG["GUARDIAN_CHARGE_MIN"])
-) * CONFIG["GUARDIAN_FLIGHT_MIN"]
-CONFIG["GUARDIAN_PATROL_HOURS"] = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] / 60
+CONFIG = {"RESPONDER_COST": 80000, "GUARDIAN_COST": 160000, "RESPONDER_RANGE_MI": 2.0, "OFFICER_COST_PER_CALL": 82, "DRONE_COST_PER_CALL": 6, "DEFAULT_TRAFFIC_SPEED": 35.0, "RESPONDER_SPEED": 42.0, "GUARDIAN_SPEED": 60.0}
 STATE_FIPS = {"AL": "01", "AK": "02", "AZ": "04", "AR": "05", "CA": "06", "CO": "08", "CT": "09", "DE": "10", "FL": "12", "GA": "13", "HI": "15", "ID": "16", "IL": "17", "IN": "18", "IA": "19", "KS": "20", "KY": "21", "LA": "22", "ME": "23", "MD": "24", "MA": "25", "MI": "26", "MN": "27", "MS": "28", "MO": "29", "MT": "30", "NE": "31", "NV": "32", "NH": "33", "NJ": "34", "NM": "35", "NY": "36", "NC": "37", "ND": "38", "OH": "39", "OK": "40", "OR": "41", "PA": "42", "RI": "44", "SC": "45", "SD": "46", "TN": "47", "TX": "48", "UT": "49", "VT": "50", "VA": "51", "WA": "53", "WV": "54", "WI": "55", "WY": "56"}
 US_STATES_ABBR = {"Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA", "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL", "Indiana": "IN", "Iowa": "IA", "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA", "Maine": "ME", "Maryland": "MD", "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN", "Mississippi": "MS", "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV", "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK", "Oregon": "OR", "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD", "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT", "Virginia": "VA", "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY"}
 KNOWN_POPULATIONS = {"Victoria": 65534, "New York": 8336817, "Los Angeles": 3822238, "Chicago": 2665039, "Houston": 1304379, "Phoenix": 1644409, "Philadelphia": 1567258, "San Antonio": 2302878, "San Diego": 1472530, "Dallas": 1299544, "San Jose": 1381162, "Austin": 974447, "Jacksonville": 971319, "Fort Worth": 956709, "Columbus": 907971, "Indianapolis": 880621, "Charlotte": 897720, "San Francisco": 971233, "Seattle": 749256, "Denver": 713252, "Washington": 678972, "Nashville": 683622, "Oklahoma City": 694800, "El Paso": 694553, "Boston": 650706, "Portland": 635067, "Las Vegas": 656274, "Detroit": 620376, "Memphis": 633104, "Louisville": 628594, "Baltimore": 620961, "Milwaukee": 620251, "Albuquerque": 677122, "Tucson": 564559, "Fresno": 677102, "Sacramento": 808418, "Kansas City": 697738, "Mesa": 504258, "Atlanta": 499127, "Omaha": 508901, "Colorado Springs": 483956, "Raleigh": 476587, "Miami": 449514, "Virginia Beach": 455369, "Oakland": 530763, "Minneapolis": 563332, "Tulsa": 547239, "Arlington": 398654, "New Orleans": 562503, "Wichita": 402263, "Cleveland": 900000, "Tampa": 449514, "Orlando": 316081}
@@ -321,6 +309,204 @@ def _detect_datetime_series_for_labels(df):
     except Exception:
         return None
     return None
+
+
+
+def build_fleet_masks(df_calls, resp_demand_mode="Priority 1-2", guard_demand_mode="All Calls"):
+    """Create boolean masks over the original call rows for each fleet."""
+    if df_calls is None or len(df_calls) == 0:
+        empty = np.array([], dtype=bool)
+        return empty, empty
+
+    resp_mask = np.ones(len(df_calls), dtype=bool)
+    guard_mask = np.ones(len(df_calls), dtype=bool)
+
+    pri = None
+    if 'priority' in df_calls.columns:
+        try:
+            pri = pd.to_numeric(df_calls['priority'], errors='coerce')
+        except Exception:
+            pri = None
+
+    if pri is not None:
+        if resp_demand_mode == "Priority 1 Only":
+            resp_mask = (pri == 1).fillna(False).to_numpy()
+        elif resp_demand_mode == "Priority 1-2":
+            resp_mask = pri.isin([1, 2]).fillna(False).to_numpy()
+        elif resp_demand_mode == "Priority 1-3":
+            resp_mask = pri.isin([1, 2, 3]).fillna(False).to_numpy()
+
+        if guard_demand_mode == "Priority 1 Only":
+            guard_mask = (pri == 1).fillna(False).to_numpy()
+        elif guard_demand_mode == "Priority 1-2":
+            guard_mask = pri.isin([1, 2]).fillna(False).to_numpy()
+        elif guard_demand_mode == "Priority 1-3":
+            guard_mask = pri.isin([1, 2, 3]).fillna(False).to_numpy()
+
+    return np.asarray(resp_mask, dtype=bool), np.asarray(guard_mask, dtype=bool)
+
+
+def apply_mask_to_matrix(matrix, mask):
+    if matrix is None:
+        return None
+    if mask is None or len(mask) == 0:
+        return matrix[:, :0]
+    return matrix[:, mask]
+
+
+def choose_weight_profile(resp_goal, guard_goal, fleet_interaction_mode):
+    """Numerical weights used by fallback land-coverage scoring."""
+    resp_weight = 1.0 if resp_goal == "Call Coverage" else 1.2 if resp_goal == "Priority Coverage" else 1.1
+    guard_weight = 1.0 if guard_goal == "Call Coverage" else 1.15 if guard_goal == "Land Coverage" else 1.25
+    overlap_penalty = 0.0 if fleet_interaction_mode == "Shared" else 0.12 if fleet_interaction_mode == "Hybrid: Guardian Core + Responder Edge" else 0.28
+    return resp_weight, guard_weight, overlap_penalty
+
+
+def solve_multi_fleet(resp_matrix, guard_matrix, dist_r, dist_g, num_resp, num_guard,
+                      fleet_interaction_mode="Shared", resp_goal="Priority Coverage",
+                      guard_goal="Land Coverage", cross_fleet_spacing_penalty=0.35,
+                      incremental=True, forced_r=None, forced_g=None):
+    """Multi-fleet optimizer with Shared / Independent / Hybrid interaction modes."""
+    forced_r = list(forced_r or [])
+    forced_g = list(forced_g or [])
+    n_stations = resp_matrix.shape[0]
+    n_resp_calls = resp_matrix.shape[1] if resp_matrix is not None else 0
+    n_guard_calls = guard_matrix.shape[1] if guard_matrix is not None else 0
+    if (n_resp_calls == 0 and n_guard_calls == 0) or (num_resp == 0 and num_guard == 0):
+        return [], [], [], []
+
+    no_same_site = fleet_interaction_mode == "Independent"
+
+    def run_single_lp(matrix, dist_matrix, target_count, locked=None):
+        locked = list(locked or [])
+        if target_count <= 0 or matrix is None or matrix.shape[1] == 0:
+            return []
+        model = pulp.LpProblem("FleetCoverage", pulp.LpMaximize)
+        x = pulp.LpVariable.dicts("st", range(n_stations), 0, 1, pulp.LpBinary)
+        model += pulp.lpSum(x[i] for i in range(n_stations)) == target_count
+        for s in locked:
+            model += x[s] == 1
+        y = pulp.LpVariable.dicts("cl", range(matrix.shape[1]), 0, 1, pulp.LpBinary)
+        penalty = 0.00001
+        model += pulp.lpSum(y[i] for i in range(matrix.shape[1])) - pulp.lpSum(
+            x[s] * np.sum(dist_matrix[s, :]) * penalty for s in range(n_stations)
+        )
+        for i in range(matrix.shape[1]):
+            cover = [x[s] for s in range(n_stations) if matrix[s, i]]
+            if cover:
+                model += y[i] <= pulp.lpSum(cover)
+            else:
+                model += y[i] == 0
+        model.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=10, gapRel=0.0))
+        return [i for i in range(n_stations) if (pulp.value(x[i]) or 0) > 0.5]
+
+    def run_joint_lp(target_r, target_g, locked_r, locked_g):
+        model = pulp.LpProblem("DroneCoverage", pulp.LpMaximize)
+        x_r = pulp.LpVariable.dicts("r_st", range(n_stations), 0, 1, pulp.LpBinary)
+        x_g = pulp.LpVariable.dicts("g_st", range(n_stations), 0, 1, pulp.LpBinary)
+        model += pulp.lpSum(x_r[i] for i in range(n_stations)) == target_r
+        model += pulp.lpSum(x_g[i] for i in range(n_stations)) == target_g
+        for r in locked_r:
+            model += x_r[r] == 1
+        for g in locked_g:
+            model += x_g[g] == 1
+        if no_same_site:
+            for s in range(n_stations):
+                model += x_r[s] + x_g[s] <= 1
+
+        # separate coverage vars
+        y_r = pulp.LpVariable.dicts("r_cl", range(n_resp_calls), 0, 1, pulp.LpBinary)
+        y_g = pulp.LpVariable.dicts("g_cl", range(n_guard_calls), 0, 1, pulp.LpBinary)
+
+        resp_weight = 1.0 if resp_goal == "Call Coverage" else 1.15 if resp_goal == "Priority Coverage" else 1.1
+        guard_weight = 1.0 if guard_goal == "Call Coverage" else 1.1 if guard_goal == "Land Coverage" else 1.2
+        dist_penalty = 0.00001
+        overlap_penalty = 0.0 if fleet_interaction_mode == "Shared" else 0.01 * cross_fleet_spacing_penalty
+        model += (
+            pulp.lpSum(y_r[i] * resp_weight for i in range(n_resp_calls)) +
+            pulp.lpSum(y_g[i] * guard_weight for i in range(n_guard_calls)) -
+            pulp.lpSum(x_r[s] * np.sum(dist_r[s, :]) * dist_penalty + x_g[s] * np.sum(dist_g[s, :]) * dist_penalty for s in range(n_stations)) -
+            pulp.lpSum((x_r[s] + x_g[s] - 1) * overlap_penalty for s in range(n_stations))
+        )
+
+        for i in range(n_resp_calls):
+            cover = [x_r[s] for s in range(n_stations) if resp_matrix[s, i]]
+            if fleet_interaction_mode == "Shared":
+                cover += [x_g[s] for s in range(n_stations) if guard_matrix.shape[1] == n_resp_calls and guard_matrix[s, i]]
+            if cover:
+                model += y_r[i] <= pulp.lpSum(cover)
+            else:
+                model += y_r[i] == 0
+
+        for i in range(n_guard_calls):
+            cover = [x_g[s] for s in range(n_stations) if guard_matrix[s, i]]
+            if fleet_interaction_mode == "Shared":
+                cover += [x_r[s] for s in range(n_stations) if resp_matrix.shape[1] == n_guard_calls and resp_matrix[s, i]]
+            if cover:
+                model += y_g[i] <= pulp.lpSum(cover)
+            else:
+                model += y_g[i] == 0
+
+        model.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=12, gapRel=0.0))
+        return (
+            [i for i in range(n_stations) if (pulp.value(x_r[i]) or 0) > 0.5],
+            [i for i in range(n_stations) if (pulp.value(x_g[i]) or 0) > 0.5]
+        )
+
+    # Hybrid: solve Guardians first, then Responders on residual demand
+    if fleet_interaction_mode == "Hybrid: Guardian Core + Responder Edge":
+        curr_g = run_single_lp(guard_matrix, dist_g, num_guard, forced_g)
+        chrono_g = list(curr_g)
+
+        if num_resp > 0 and resp_matrix is not None and resp_matrix.shape[1] > 0:
+            # residual responder demand excludes calls already covered by guardians when the dimensions align
+            resp_residual = resp_matrix.copy()
+            if guard_matrix is not None and guard_matrix.shape[1] == resp_matrix.shape[1] and curr_g:
+                g_cov = guard_matrix[curr_g].any(axis=0)
+                resp_residual[:, g_cov] = False
+
+            # optionally discourage same-site picks
+            chosen_r = []
+            locked_r_now = list(forced_r)
+            available = set(range(n_stations))
+            if no_same_site:
+                available -= set(curr_g)
+                available -= set(forced_g)
+
+            for _ in range(num_resp):
+                best_s, best_score = None, -1
+                for s in sorted(available):
+                    if s in chosen_r or s in forced_r:
+                        continue
+                    trial = chosen_r + [s]
+                    cov = resp_residual[trial].any(axis=0) if trial else np.zeros(resp_residual.shape[1], dtype=bool)
+                    score = int(cov.sum()) - int(cross_fleet_spacing_penalty * 10 * (1 if s in curr_g else 0))
+                    if score > best_score:
+                        best_s, best_score = s, score
+                if best_s is not None:
+                    chosen_r.append(best_s)
+            curr_r = sorted(set(forced_r + chosen_r))[:num_resp]
+        else:
+            curr_r = []
+        chrono_r = list(curr_r)
+        return curr_r, curr_g, chrono_r, chrono_g
+
+    # Shared / Independent
+    if not incremental:
+        res_r, res_g = run_joint_lp(num_resp, num_guard, forced_r, forced_g)
+        return res_r, res_g, res_r, res_g
+
+    curr_r, curr_g = list(forced_r), list(forced_g)
+    chrono_r, chrono_g = list(forced_r), list(forced_g)
+    for tg in range(len(forced_g) + 1, num_guard + 1):
+        next_r, next_g = run_joint_lp(len(curr_r), tg, curr_r, curr_g)
+        chrono_g.extend([x for x in next_g if x not in curr_g])
+        curr_r, curr_g = next_r, next_g
+    for tr in range(len(forced_r) + 1, num_resp + 1):
+        next_r, next_g = run_joint_lp(tr, num_guard, curr_r, curr_g)
+        chrono_r.extend([x for x in next_r if x not in curr_r])
+        curr_r, curr_g = next_r, next_g
+    return curr_r, curr_g, chrono_r, chrono_g
 
 
 def generate_command_center_html(df, total_orig_calls, export_mode=False):
@@ -2019,13 +2205,7 @@ def format_3_lines(name_str):
 def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2):
     if not active_drones:
         return ""
-    # Per-type daily airtime budgets derived from CONFIG duty cycles:
-    #   Guardian: 60 min flight + 3 min charge → (24*60/63)*60 = 1371.4 min = 22.86 hr
-    #   Responder: patrol-unit model, 11.6 hr shift equivalent
-    _GUARDIAN_DAILY_MINS  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]   # ~1371.4
-    _GUARDIAN_DAILY_HOURS = CONFIG["GUARDIAN_PATROL_HOURS"]        # ~22.86
-    _RESPONDER_DAILY_MINS  = CONFIG["RESPONDER_PATROL_HOURS"] * 60 # 11.6 * 60 = 696
-    _RESPONDER_DAILY_HOURS = CONFIG["RESPONDER_PATROL_HOURS"]      # 11.6
+    default_patrol_hours = RESPONDER_FLIGHT_HOURS_PER_DAY
     columns_per_row = max(1, int(columns_per_row))
 
     cards_html = []
@@ -2048,50 +2228,20 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_address   = get_address_from_latlon(d_lat, d_lon)
         gmaps_url   = f"https://www.google.com/maps/search/?api=1&query={d_lat},{d_lon}"
 
-        # Pick duty-cycle values for this drone type
-        is_guardian = (d_type == "GUARDIAN")
-        max_patrol_mins  = _GUARDIAN_DAILY_MINS  if is_guardian else _RESPONDER_DAILY_MINS
-        max_patrol_hours = _GUARDIAN_DAILY_HOURS if is_guardian else _RESPONDER_DAILY_HOURS
-
-        # Uptime tooltip: show the duty-cycle breakdown for Guardians
-        if is_guardian:
-            _g_fl  = CONFIG["GUARDIAN_FLIGHT_MIN"]
-            _g_ch  = CONFIG["GUARDIAN_CHARGE_MIN"]
-            _g_cyc = _g_fl + _g_ch
-            _cycles_per_day = (24 * 60) / _g_cyc
-            uptime_tooltip = (
-                f"{_g_fl}min flight + {_g_ch}min charge = {_g_cyc}min cycle · "
-                f"{_cycles_per_day:.1f} cycles/day · "
-                f"{max_patrol_hours:.2f}hr airtime"
-            )
-        else:
-            uptime_tooltip = f"{max_patrol_hours}hr patrol shift"
-
         total_daily_flights = d_flights + d_shared
         patrol_time_line = ""
+        patrol_hours = float(d.get("max_patrol_hours", default_patrol_hours))
+        patrol_mins = patrol_hours * 60.0
         if total_daily_flights > 0 and d_savings > 0:
-            mins_per_flight = max_patrol_mins / total_daily_flights
+            mins_per_flight = patrol_mins / total_daily_flights
             if total_daily_flights >= 5 or mins_per_flight < 60:
                 patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= 30 else "#00D2FF"
                 patrol_time_line = (
                     f'<div style="border-top:1px dashed rgba(255,255,255,0.15); margin-top:5px; '
-                    f'padding-top:5px; font-size:0.58rem; color:{text_muted};" '
-                    f'title="{uptime_tooltip}">'
-                    f'{total_daily_flights:.1f} flights ÷ {max_patrol_hours:.2f}hr max = '
+                    f'padding-top:5px; font-size:0.58rem; color:{text_muted};">'
+                    f'{total_daily_flights:.1f} flights ÷ {patrol_hours:.1f}hr max = '
                     f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight</span></div>'
                 )
-
-        # Pull concurrency values (safe defaults if not computed)
-        d_util       = d.get('utilization', 0)
-        d_blocked    = d.get('blocked_per_day', 0)
-        d_best       = d.get('best_case_annual', d_savings)
-        d_best_be    = d.get('best_be_text', d_be)
-        d_conc_mo    = d.get('concurrent_monthly', 0)
-        util_pct     = f"{d_util*100:.1f}%"
-        util_color   = "#dc3545" if d_util > 0.75 else "#F0B429" if d_util > 0.4 else "#2ecc71"
-        best_delta   = d_best - d_savings
-        best_delta_str = f"+${best_delta:,.0f}" if best_delta > 0 else "—"
-        show_best    = d_shared > 0.1 and best_delta > 0
 
         cards_html.append(f'''
 <div class="unit-card" style="background:{card_bg}; border-top:4px solid {d_color}; border-left:1px solid {card_border}; border-right:1px solid {card_border}; border-bottom:1px solid {card_border}; border-radius:4px; padding:12px; cursor:default; display:flex; flex-direction:column; box-sizing:border-box; min-height:100%;">
@@ -2100,33 +2250,16 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   <div style="font-size:0.62rem; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
     <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
   </div>
-
-  <!-- Base value box -->
-  <div style="background:rgba(0,210,255,0.07); border-radius:4px 4px 0 0; padding:8px; text-align:center; {"margin-bottom:0;" if show_best else "margin-bottom:8px;"}">
+  <div style="background:rgba(0,210,255,0.07); border-radius:4px; padding:8px; text-align:center; margin-bottom:8px;">
     <div style="font-size:0.6rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
     <div style="font-size:1.25rem; font-weight:900; color:{accent_color};">${d_savings:,.0f}</div>
     {patrol_time_line}
   </div>
-
-  <!-- Best-case box (only shown when shared coverage exists) -->
-  {"" if not show_best else f'''
-  <div style="background:rgba(57,255,20,0.07); border:1px solid rgba(57,255,20,0.25); border-top:none; border-radius:0 0 4px 4px; padding:6px 8px; text-align:center; margin-bottom:8px;"
-       title="Best case assumes a second drone is always available to handle calls blocked by this drone's flight time. Concurrent value = shared-zone calls × utilization ({util_pct}) × resolution rate × cost delta.">
-    <div style="font-size:0.55rem; color:#39FF14; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:1px;">⚡ Best Case (concurrent coverage)</div>
-    <div style="display:flex; align-items:baseline; justify-content:center; gap:6px;">
-      <span style="font-size:1.1rem; font-weight:900; color:#39FF14;">${d_best:,.0f}</span>
-      <span style="font-size:0.62rem; color:#39FF14; opacity:0.8;">{best_delta_str}/yr</span>
-    </div>
-    <div style="font-size:0.55rem; color:#39FF14; opacity:0.65; margin-top:1px;">{d_blocked:.1f} blocked calls/day captured · ROI {d_best_be}</div>
-  </div>'''}
-
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem; flex:1;">
     <div style="color:{text_muted};">Net Flights/day</div>
     <div style="text-align:right; font-weight:700; color:{accent_color};">{d_flights:.1f}</div>
     <div style="color:{text_muted};">Shared Flights/day</div>
     <div style="text-align:right; font-weight:700; color:{card_title};">{d_shared:.1f}</div>
-    <div style="color:{text_muted};">Utilization</div>
-    <div style="text-align:right; font-weight:700; color:{util_color};">{util_pct}</div>
     <div style="color:{text_muted};">Resolved/day</div>
     <div style="text-align:right; font-weight:700; color:{card_title};">{d_deflected:.1f}</div>
     <div style="color:{text_muted};">Avg Response</div>
@@ -2139,7 +2272,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   <div style="border-top:1px dashed {card_border}; margin-top:8px; padding-top:6px; display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.62rem;">
     <div style="color:{text_muted};">CapEx</div>
     <div style="text-align:right; font-weight:700; color:{card_title};">${d_cost:,.0f}</div>
-    <div style="color:{text_muted};">Base ROI</div>
+    <div style="color:{text_muted};">ROI</div>
     <div style="text-align:right; font-weight:800; color:{accent_color};">{d_be}</div>
   </div>
 </div>''')
@@ -2355,68 +2488,6 @@ def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, e
                 'centrality': 1.0 - (dist_c / max_dist)
             })
     return calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls
-
-def solve_mclp(resp_matrix, guard_matrix, dist_r, dist_g, num_resp, num_guard, allow_redundancy, incremental=True, forced_r=None, forced_g=None):
-    """MCLP optimizer. forced_r / forced_g are lists of station indices that must
-    be included as Responders / Guardians regardless of coverage score."""
-    forced_r = list(forced_r or [])
-    forced_g = list(forced_g or [])
-    n_stations, n_calls = resp_matrix.shape
-    if n_calls == 0 or (num_resp == 0 and num_guard == 0): return [], [], [], []
-    df_profiles = pd.DataFrame(resp_matrix.T).astype(int).astype(str)
-    df_profiles['g'] = pd.DataFrame(guard_matrix.T).astype(int).astype(str).agg(''.join, axis=1)
-    df_profiles['r'] = df_profiles.drop(columns='g').agg(''.join, axis=1)
-    grouped = df_profiles.groupby(['r', 'g'], sort=False)
-    weights = grouped.size().values
-    unique_idx = grouped.head(1).index
-    u_resp = resp_matrix[:, unique_idx]
-    u_guard = guard_matrix[:, unique_idx]
-    u_dist_r = dist_r[:, unique_idx]
-    u_dist_g = dist_g[:, unique_idx]
-    n_u = len(weights)
-
-    def run_lp(target_r, target_g, locked_r, locked_g):
-        model = pulp.LpProblem("DroneCoverage", pulp.LpMaximize)
-        x_r = pulp.LpVariable.dicts("r_st", range(n_stations), 0, 1, pulp.LpBinary)
-        x_g = pulp.LpVariable.dicts("g_st", range(n_stations), 0, 1, pulp.LpBinary)
-        model += pulp.lpSum(x_r[i] for i in range(n_stations)) == target_r
-        model += pulp.lpSum(x_g[i] for i in range(n_stations)) == target_g
-        for r in locked_r: model += x_r[r] == 1
-        for g in locked_g: model += x_g[g] == 1
-        if not allow_redundancy:
-            for s in range(n_stations): model += x_r[s] + x_g[s] <= 1
-        y = pulp.LpVariable.dicts("cl", range(n_u), 0, 1, pulp.LpBinary)
-        penalty = 0.00001
-        model += pulp.lpSum(y[i]*weights[i] for i in range(n_u)) - pulp.lpSum(
-            x_r[s]*np.sum(u_dist_r[s,:])*penalty + x_g[s]*np.sum(u_dist_g[s,:])*penalty
-            for s in range(n_stations))
-        for i in range(n_u):
-            cover = [x_r[s] for s in range(n_stations) if u_resp[s,i]] + [x_g[s] for s in range(n_stations) if u_guard[s,i]]
-            if cover: model += y[i] <= pulp.lpSum(cover)
-            else: model += y[i] == 0
-        model.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=10, gapRel=0.0))
-        return (
-            [i for i in range(n_stations) if (pulp.value(x_r[i]) or 0) > 0.5],
-            [i for i in range(n_stations) if (pulp.value(x_g[i]) or 0) > 0.5]
-        )
-
-    if not incremental:
-        res_r, res_g = run_lp(num_resp, num_guard, forced_r, forced_g)
-        return res_r, res_g, res_r, res_g
-    # Start with forced pins already locked in
-    curr_r, curr_g = list(forced_r), list(forced_g)
-    chrono_r, chrono_g = list(forced_r), list(forced_g)
-    # Add remaining Guardians one at a time (incremental)
-    for tg in range(len(forced_g) + 1, num_guard + 1):
-        next_r, next_g = run_lp(0, tg, curr_r, curr_g)
-        chrono_g.extend([x for x in next_g if x not in curr_g])
-        curr_r, curr_g = next_r, next_g
-    # Add remaining Responders one at a time
-    for tr in range(len(forced_r) + 1, num_resp + 1):
-        next_r, next_g = run_lp(tr, num_guard, curr_r, curr_g)
-        chrono_r.extend([x for x in next_r if x not in curr_r])
-        curr_r, curr_g = next_r, next_g
-    return curr_r, curr_g, chrono_r, chrono_g
 
 @st.cache_resource
 def compute_all_elbow_curves(n_calls, _resp_matrix, _guard_matrix, _geos_r, _geos_g, total_area, _bounds_hash, max_stations=100):
@@ -3339,7 +3410,7 @@ if st.session_state['csvs_ready']:
                 'dfr_rate':         st.session_state.get('dfr_rate', 0),
                 'deflect_rate':     st.session_state.get('deflect_rate', 0),
                 'incremental_build': False,
-                'allow_redundancy': False,
+                'fleet_interaction_mode': 'Shared',
                 'avg_response_min': 0,
                 'avg_time_saved_min': 0,
                 'area_covered_pct': 0,
@@ -3471,57 +3542,43 @@ if st.session_state['csvs_ready']:
 
     strat_expander = st.sidebar.expander("⚙️ Deployment Strategy", expanded=False)
     with strat_expander:
-        incremental_build = st.toggle("Phased Rollout", value=True,
-            help="Place drones one at a time in priority order. Disable to find the global optimum in a single pass.")
-
-        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:8px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Deployment Mode</div>", unsafe_allow_html=True)
-        deployment_mode = st.radio(
-            "Deployment Mode", 
-            ("Complement — push apart", "Independent — each maximises own area", "Shared — allow full overlap"),
-            index=st.session_state.get('deployment_mode_idx', 1),
-            label_visibility="collapsed",
-            help=(
-                "Complement: Responders fill gaps left by Guardians — no wasted overlap. "
-                "Independent: each fleet optimises on its own objective; overlap allowed but not forced. "
-                "Shared: both fleets optimise together against the same call set — hotspot stacking."
-            )
+        incremental_build = st.toggle("Phased Rollout", value=True, help="Build the fleet in deployment order rather than solving all stations as one batch.")
+        fleet_interaction_mode = st.radio(
+            "Fleet Interaction",
+            ["Shared", "Independent", "Hybrid: Guardian Core + Responder Edge"],
+            index=2,
+            help="Shared allows overlap/co-location. Independent pushes fleets apart. Hybrid places Guardians first, then Responders fill residual edge demand."
         )
-        _mode_map = {"Complement — push apart": 0, "Independent — each maximises own area": 1, "Shared — allow full overlap": 2}
-        st.session_state['deployment_mode_idx'] = _mode_map.get(deployment_mode, 1)
-
-        # Derived flags used by the optimizer
-        allow_redundancy  = (deployment_mode != "Complement — push apart")
-        complement_mode   = (deployment_mode == "Complement — push apart")
-        shared_mode       = (deployment_mode == "Shared — allow full overlap")
-
-        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Guardian Objective</div>", unsafe_allow_html=True)
-        guard_strategy_raw = st.radio(
-            "Guardian Objective",
-            ("Call Coverage", "Land Coverage"),
-            index=st.session_state.get('guard_strat_idx', 1),
-            horizontal=True,
-            label_visibility="collapsed",
-            help="What the Guardian optimizer maximises. Land Coverage = wide area patrol. Call Coverage = respond to highest-volume locations."
+        resp_goal = st.selectbox(
+            "Responder Optimization Goal",
+            ["Call Coverage", "Priority Coverage", "Response Time"],
+            index=1
         )
-        st.session_state['guard_strat_idx'] = 0 if guard_strategy_raw == "Call Coverage" else 1
-        guard_strategy = "Maximize Call Coverage" if guard_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
-
-        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Responder Objective</div>", unsafe_allow_html=True)
-        resp_strategy_raw = st.radio(
-            "Responder Objective",
-            ("Call Coverage", "Land Coverage"),
-            index=st.session_state.get('resp_strat_idx', 0),
-            horizontal=True,
-            label_visibility="collapsed",
-            help="What the Responder optimizer maximises. Call Coverage = densest incident areas. Land Coverage = broadest geographic reach."
+        guard_goal = st.selectbox(
+            "Guardian Optimization Goal",
+            ["Call Coverage", "Land Coverage", "Persistent Area Presence"],
+            index=1
         )
-        st.session_state['resp_strat_idx'] = 0 if resp_strategy_raw == "Call Coverage" else 1
-        resp_strategy = "Maximize Call Coverage" if resp_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
-
-    # Keep opt_strategy for any code that still references it (used in export/logs)
-    opt_strategy = guard_strategy  # primary strategy label for reporting
+        resp_demand_mode = st.selectbox(
+            "Responder Demand Filter",
+            ["All Calls", "Priority 1 Only", "Priority 1-2", "Priority 1-3"],
+            index=2
+        )
+        guard_demand_mode = st.selectbox(
+            "Guardian Demand Filter",
+            ["All Calls", "Priority 1 Only", "Priority 1-2", "Priority 1-3"],
+            index=0
+        )
+        cross_fleet_spacing_penalty = st.slider(
+            "Cross-Fleet Spacing Penalty",
+            0.0, 1.0, 0.35, 0.05,
+            help="Higher values discourage Guardian and Responder stations from clustering near the same demand footprint."
+        )
 
     st.sidebar.markdown('<div class="sidebar-section-header">② Optimize Fleet</div>', unsafe_allow_html=True)
+
+    opt_strategy_raw = st.sidebar.radio("Optimization Goal", ("Call Coverage", "Land Coverage"), horizontal=True)
+    opt_strategy = "Maximize Call Coverage" if opt_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
 
     minx, miny, maxx, maxy = active_gdf.to_crs(epsg=4326).total_bounds
     center_lon = (minx + maxx) / 2
@@ -3678,8 +3735,32 @@ if st.session_state['csvs_ready']:
     calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls = precompute_spatial_data(
         df_calls, df_calls_full, df_stations_all, city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash
     )
+
+    resp_call_mask, guard_call_mask = build_fleet_masks(
+        df_calls,
+        resp_demand_mode=resp_demand_mode,
+        guard_demand_mode=guard_demand_mode
+    )
+    if total_calls > 0:
+        if len(resp_call_mask) != total_calls:
+            resp_call_mask = np.ones(total_calls, dtype=bool)
+        if len(guard_call_mask) != total_calls:
+            guard_call_mask = np.ones(total_calls, dtype=bool)
+    else:
+        resp_call_mask = np.array([], dtype=bool)
+        guard_call_mask = np.array([], dtype=bool)
+
+    resp_matrix_eff = apply_mask_to_matrix(resp_matrix, resp_call_mask)
+    guard_matrix_eff = apply_mask_to_matrix(guard_matrix, guard_call_mask)
+    dist_matrix_r_eff = apply_mask_to_matrix(dist_matrix_r, resp_call_mask)
+    dist_matrix_g_eff = apply_mask_to_matrix(dist_matrix_g, guard_call_mask)
+    total_calls_resp = int(resp_call_mask.sum()) if len(resp_call_mask) else 0
+    total_calls_guard = int(guard_call_mask.sum()) if len(guard_call_mask) else 0
+
     df_curve = compute_all_elbow_curves(
-        total_calls, resp_matrix, guard_matrix,
+        max(total_calls_resp, total_calls_guard, 1),
+        resp_matrix_eff if total_calls_resp > 0 else resp_matrix[:, :0],
+        guard_matrix_eff if total_calls_guard > 0 else guard_matrix[:, :0],
         [s['clipped_2m'] for s in station_metadata],
         [s['clipped_guard'] for s in station_metadata],
         city_m.area if city_m else 1.0, bounds_hash,
@@ -3727,7 +3808,7 @@ if st.session_state['csvs_ready']:
     best_combo = None
 
     _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
-    opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{guard_strategy}_{resp_strategy}_{deployment_mode}_{incremental_build}_{bounds_hash}_{_pins_key}"
+    opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{opt_strategy}_{fleet_interaction_mode}_{resp_goal}_{guard_goal}_{resp_demand_mode}_{guard_demand_mode}_{cross_fleet_spacing_penalty}_{incremental_build}_{bounds_hash}_{_pins_key}"
 
     if k_responder + k_guardian > n:
         st.error("⚠️ Over-Deployment: Total drones exceed available stations.")
@@ -3740,96 +3821,111 @@ if st.session_state['csvs_ready']:
         best_combo = None
     else:
         if st.session_state.get('_opt_cache_key') != opt_cache_key:
-            stage_bar = st.empty()
-
-            # ── HELPER: greedy area-coverage for one fleet ───────────────────
-            def _greedy_area(matrix, geo_list, k, forced, exclude_set):
-                """Greedily pick k stations maximising unary_union area,
-                starting from forced pins and skipping exclude_set."""
-                chosen = list(forced)
-                chrono  = list(forced)
-                current_union = unary_union([geo_list[i] for i in chosen]) if chosen else None
-                for _ in range(k - len(forced)):
-                    best_s, best_gain = -1, -1.0
-                    for s in range(len(geo_list)):
-                        if s in chosen or s in exclude_set:
-                            continue
-                        g = geo_list[s]
-                        new_area = current_union.union(g).area if current_union else g.area
-                        gain = new_area - (current_union.area if current_union else 0)
-                        if gain > best_gain:
-                            best_gain, best_s = gain, s
-                    if best_s != -1:
-                        chosen.append(best_s)
-                        chrono.append(best_s)
-                        g = geo_list[best_s]
-                        current_union = current_union.union(g) if current_union else g
-                return chosen, chrono
-
-            # ── PASS 1: Optimise Guardians independently ─────────────────────
-            stage_bar.info("🦅 Optimising Guardian fleet…")
-            if k_guardian > 0:
-                if guard_strategy == "Maximize Call Coverage":
-                    g_best, _, chrono_g, _ = solve_mclp(
-                        resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g,
-                        0, k_guardian, True, incremental=incremental_build,
-                        forced_r=[], forced_g=locked_g_pins
-                    )
-                else:
-                    g_best, chrono_g = _greedy_area(
-                        guard_matrix,
-                        [station_metadata[i]['clipped_guard'] for i in range(n)],
-                        k_guardian, locked_g_pins, set()
-                    )
-                g_best = list(g_best)
+            if opt_strategy == "Maximize Call Coverage":
+                stage_bar = st.empty()
+                stage_bar.info("🧠 Optimizing coverage — because smarter deployment means safer streets…")
+                r_best, g_best, chrono_r, chrono_g = solve_multi_fleet(
+                    resp_matrix_eff, guard_matrix_eff, dist_matrix_r_eff, dist_matrix_g_eff,
+                    k_responder, k_guardian,
+                    fleet_interaction_mode=fleet_interaction_mode,
+                    resp_goal=resp_goal,
+                    guard_goal=guard_goal,
+                    cross_fleet_spacing_penalty=cross_fleet_spacing_penalty,
+                    incremental=incremental_build,
+                    forced_r=locked_r_pins, forced_g=locked_g_pins
+                )
+                best_combo = (tuple(r_best), tuple(g_best))
+                stage_bar.empty()
+                st.toast("✅ Optimization complete — your officers just got powerful new backup!", icon="✅")
             else:
-                g_best, chrono_g = [], []
+                resp_weight, guard_weight, overlap_penalty_default = choose_weight_profile(resp_goal, guard_goal, fleet_interaction_mode)
 
-            # ── PASS 2: Optimise Responders around Guardian result ────────────
-            stage_bar.info("🚁 Optimising Responder fleet…")
-            if k_responder > 0:
-                # In complement mode, mask out calls already covered by Guardians
-                # so Responders fill the gaps rather than stacking on the same calls.
-                if complement_mode and g_best and total_calls > 0:
-                    guard_covered = guard_matrix[g_best].any(axis=0)
-                    # Build a reduced matrix: zero out already-covered calls for Responders
-                    resp_matrix_eff = resp_matrix.copy()
-                    resp_matrix_eff[:, guard_covered] = False
-                    dist_matrix_r_eff = dist_matrix_r.copy()
+                def evaluate_combo(rg_combo):
+                    r_combo, g_combo = rg_combo
+                    r_geos = [station_metadata[i]['clipped_2m'] for i in r_combo]
+                    g_geos = [station_metadata[i]['clipped_guard'] for i in g_combo]
+
+                    r_union = unary_union(r_geos) if r_geos else Polygon()
+                    g_union = unary_union(g_geos) if g_geos else Polygon()
+
+                    score_resp_area = r_union.area if r_geos else 0.0
+                    score_guard_area = g_union.area if g_geos else 0.0
+
+                    cov_r = resp_matrix_eff[list(r_combo)].any(axis=0) if (r_combo and total_calls_resp > 0) else np.zeros(total_calls_resp, bool)
+                    cov_g = guard_matrix_eff[list(g_combo)].any(axis=0) if (g_combo and total_calls_guard > 0) else np.zeros(total_calls_guard, bool)
+
+                    score_resp_calls = int(cov_r.sum()) if total_calls_resp > 0 else 0
+                    score_guard_calls = int(cov_g.sum()) if total_calls_guard > 0 else 0
+
+                    score_cent = sum(station_metadata[i]['centrality'] for i in list(r_combo) + list(g_combo))
+                    overlap_penalty = 0.0
+                    if fleet_interaction_mode != "Shared" and not r_union.is_empty and not g_union.is_empty:
+                        overlap_penalty = r_union.intersection(g_union).area * (overlap_penalty_default + cross_fleet_spacing_penalty)
+
+                    if fleet_interaction_mode == "Hybrid: Guardian Core + Responder Edge":
+                        shared_bonus = 0.0
+                        if total_calls_resp > 0 and total_calls_guard > 0 and resp_matrix_eff.shape[1] == guard_matrix_eff.shape[1]:
+                            shared_bonus = np.logical_and(cov_r, ~cov_g).sum()
+                        score = (
+                            guard_weight * score_guard_area +
+                            resp_weight * score_resp_calls +
+                            0.4 * score_guard_calls +
+                            0.25 * shared_bonus -
+                            overlap_penalty
+                        )
+                    else:
+                        score = (
+                            resp_weight * score_resp_calls +
+                            guard_weight * score_guard_calls +
+                            0.000001 * score_resp_area +
+                            0.000001 * score_guard_area +
+                            0.05 * score_cent -
+                            overlap_penalty
+                        )
+                    return (score, score_resp_calls, score_guard_calls, score_cent, rg_combo)
+                stage_bar = st.empty()
+                stage_bar.info("🗺️ Maximizing land coverage — no neighborhood left behind…")
+                if incremental_build:
+                    # Seed greedy search with any manually pinned stations
+                    locked_r = tuple(sorted(set(locked_r_pins)))
+                    locked_g = tuple(sorted(set(locked_g_pins)))
+                    chrono_r = list(locked_r_pins)
+                    chrono_g = list(locked_g_pins)
+                    for _ in range(k_guardian - len(locked_g_pins)):
+                        best_pick = max(
+                            [s for s in range(n) if s not in locked_g and (fleet_interaction_mode == "Shared" or s not in locked_r)],
+                            key=lambda s: evaluate_combo((locked_r, tuple(sorted(list(locked_g)+[s])))),
+                            default=None
+                        )
+                        if best_pick is not None:
+                            locked_g = tuple(sorted(list(locked_g)+[best_pick]))
+                            chrono_g.append(best_pick)
+                    for _ in range(k_responder - len(locked_r_pins)):
+                        best_pick = max(
+                            [s for s in range(n) if s not in locked_r and (fleet_interaction_mode == "Shared" or s not in locked_g)],
+                            key=lambda s: evaluate_combo((tuple(sorted(list(locked_r)+[s])), locked_g)),
+                            default=None
+                        )
+                        if best_pick is not None:
+                            locked_r = tuple(sorted(list(locked_r)+[best_pick]))
+                            chrono_r.append(best_pick)
+                    best_combo = (locked_r, locked_g)
                 else:
-                    resp_matrix_eff    = resp_matrix
-                    dist_matrix_r_eff  = dist_matrix_r
-
-                # In complement mode, Responders also can't reuse Guardian stations
-                _excl = set(g_best) if not allow_redundancy else set()
-
-                if resp_strategy == "Maximize Call Coverage":
-                    r_best, _, chrono_r, _ = solve_mclp(
-                        resp_matrix_eff, guard_matrix, dist_matrix_r_eff, dist_matrix_g,
-                        k_responder, 0, allow_redundancy, incremental=incremental_build,
-                        forced_r=locked_r_pins, forced_g=[]
-                    )
-                    # Filter out Guardian stations if complement mode
-                    if complement_mode:
-                        r_best = [s for s in r_best if s not in set(g_best)]
-                        # Pad back to k_responder if exclusion removed some
-                        if len(r_best) < k_responder:
-                            remaining = [s for s in range(n)
-                                         if s not in r_best and s not in set(g_best)]
-                            r_best += remaining[:k_responder - len(r_best)]
-                else:
-                    _excl_resp = set(g_best) if complement_mode else set()
-                    r_best, chrono_r = _greedy_area(
-                        resp_matrix_eff,
-                        [station_metadata[i]['clipped_2m'] for i in range(n)],
-                        k_responder, locked_r_pins, _excl_resp
-                    )
-            else:
-                r_best, chrono_r = [], []
-
-            best_combo = (tuple(r_best), tuple(g_best))
-            stage_bar.empty()
-            st.toast("✅ Independent optimisation complete!", icon="✅")
+                    total_possible = math.comb(n, k_responder) * (math.comb(n-k_responder, k_guardian) if n >= k_responder else 1)
+                    if total_possible > 3000:
+                        combos = list(set(
+                            (tuple(sorted(c[:k_responder])), tuple(sorted(c[k_responder:])))
+                            for c in [np.random.choice(range(n), k_responder+k_guardian, replace=False) for _ in range(3000)]
+                        ))
+                    else:
+                        combos = [(r_c, g_c) for r_c in itertools.combinations(range(n), k_responder)
+                                  for g_c in (itertools.combinations([x for x in range(n) if x not in r_c], k_guardian) if k_guardian > 0 else [()])]
+                    with ThreadPoolExecutor() as ex:
+                        results = list(ex.map(evaluate_combo, combos))
+                    best_combo = max(results, key=lambda x: x[:3])[3]
+                    chrono_r, chrono_g = list(best_combo[0]), list(best_combo[1])
+                stage_bar.empty()
+                st.toast("✅ Coverage optimized — every corner of the city now has aerial support!", icon="✅")
 
             st.session_state['_opt_cache_key']  = opt_cache_key
             st.session_state['_opt_best_combo'] = best_combo
@@ -3851,12 +3947,9 @@ if st.session_state['csvs_ready']:
             active_resp_idx, active_guard_idx = [], []
 
     # ── METRICS ───────────────────────────────────────────────────────
-    # ── SPLIT METRICS: Guardian and Responder computed independently ─────────
     area_covered_perc = overlap_perc = calls_covered_perc = 0.0
-    guard_calls_perc  = guard_area_perc  = 0.0
-    resp_calls_perc   = resp_area_perc   = 0.0
-    cov_r = np.zeros(total_calls, bool) if total_calls > 0 else np.zeros(0, bool)
-    cov_g = np.zeros(total_calls, bool) if total_calls > 0 else np.zeros(0, bool)
+    responder_calls_covered_perc = guardian_calls_covered_perc = 0.0
+    responder_area_covered_perc = guardian_area_covered_perc = 0.0
 
     ordered_deployments_raw = []
     for idx in chrono_g:
@@ -3871,44 +3964,41 @@ if st.session_state['csvs_ready']:
     active_color_map = {}
     c_idx = 0
     for idx, d_type in ordered_deployments_raw:
-        key = f"{idx}_{d_type}"
+        key = f"{idx}_{d_type}" # Using strictly unique index instead of name
         if key not in active_color_map:
             active_color_map[key] = STATION_COLORS[c_idx % len(STATION_COLORS)]
             c_idx += 1
 
-    guard_geos = [station_metadata[i]['clipped_guard'] for i in active_guard_idx]
-    resp_geos  = [station_metadata[i]['clipped_2m']    for i in active_resp_idx]
-    active_geos = resp_geos + guard_geos
+    active_geos = [station_metadata[i]['clipped_2m'] for i in active_resp_idx] + \
+                  [station_metadata[i]['clipped_guard'] for i in active_guard_idx]
 
-    city_area = city_m.area if (city_m and not city_m.is_empty) else 1.0
+    if active_geos and not city_m.is_empty:
+        area_covered_perc = (unary_union(active_geos).area / city_m.area) * 100
 
-    # Guardian-only metrics
-    if guard_geos:
-        guard_area_perc = (unary_union(guard_geos).area / city_area) * 100
-    if active_guard_idx and total_calls > 0:
-        cov_g = guard_matrix[active_guard_idx].any(axis=0)
-        guard_calls_perc = cov_g.sum() / total_calls * 100
+    cov_r_full = (resp_matrix[active_resp_idx].any(axis=0) if active_resp_idx else np.zeros(total_calls, bool)) if total_calls > 0 else np.array([], dtype=bool)
+    cov_g_full = (guard_matrix[active_guard_idx].any(axis=0) if active_guard_idx else np.zeros(total_calls, bool)) if total_calls > 0 else np.array([], dtype=bool)
 
-    # Responder-only metrics
-    if resp_geos:
-        resp_area_perc = (unary_union(resp_geos).area / city_area) * 100
-    if active_resp_idx and total_calls > 0:
-        cov_r = resp_matrix[active_resp_idx].any(axis=0)
-        resp_calls_perc = cov_r.sum() / total_calls * 100
-
-    # Combined metrics
-    if active_geos:
-        area_covered_perc = (unary_union(active_geos).area / city_area) * 100
     if total_calls > 0:
-        calls_covered_perc = (np.logical_or(cov_r, cov_g).sum() / total_calls) * 100
-    if len(active_geos) >= 2:
+        if resp_call_mask.any():
+            responder_calls_covered_perc = (np.logical_and(cov_r_full, resp_call_mask).sum() / max(1, resp_call_mask.sum())) * 100
+        if guard_call_mask.any():
+            guardian_calls_covered_perc = (np.logical_and(cov_g_full, guard_call_mask).sum() / max(1, guard_call_mask.sum())) * 100
+        combined_mask = np.logical_or(np.logical_and(cov_r_full, resp_call_mask), np.logical_and(cov_g_full, guard_call_mask))
+        union_demand = max(1, np.logical_or(resp_call_mask, guard_call_mask).sum())
+        calls_covered_perc = (combined_mask.sum() / union_demand) * 100
+
+    if city_m is not None and not city_m.is_empty:
+        if active_resp_idx:
+            responder_area_covered_perc = (unary_union([station_metadata[i]['clipped_2m'] for i in active_resp_idx]).area / city_m.area) * 100
+        if active_guard_idx:
+            guardian_area_covered_perc = (unary_union([station_metadata[i]['clipped_guard'] for i in active_guard_idx]).area / city_m.area) * 100
+
+    if active_geos:
         inters = [active_geos[i].intersection(active_geos[j])
-                  for i in range(len(active_geos))
-                  for j in range(i+1, len(active_geos))
-                  if not active_geos[i].is_empty and not active_geos[j].is_empty
-                  and active_geos[i].intersects(active_geos[j])]
-        if inters:
-            overlap_perc = (unary_union(inters).area / city_area) * 100
+                  for i in range(len(active_geos)) for j in range(i+1, len(active_geos))
+                  if not active_geos[i].intersection(active_geos[j]).is_empty]
+        if inters and not city_m.is_empty:
+            overlap_perc = (unary_union(inters).area / city_m.area) * 100
 
     # ── BUDGET CALCULATIONS ───────────────────────────────────────────
     actual_k_responder = len(active_resp_names)
@@ -3962,8 +4052,23 @@ if st.session_state['csvs_ready']:
             </div>
         </div>
         """, unsafe_allow_html=True)
+
     else:
         st.sidebar.info("👈 Set Responder/Guardian counts above to calculate budget impact.")
+
+    st.sidebar.markdown(f"""
+    <div style="margin-top:10px; background:{card_bg}; border:1px solid {card_border}; padding:10px; border-radius:4px;">
+        <div style="font-size:0.68rem; color:{text_muted}; font-weight:bold; text-transform:uppercase; margin-bottom:6px;">Independent Fleet Coverage</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:0.68rem;">
+            <div style="color:{text_muted};">Responder Calls</div><div style="text-align:right; color:{accent_color}; font-weight:800;">{responder_calls_covered_perc:.1f}%</div>
+            <div style="color:{text_muted};">Guardian Calls</div><div style="text-align:right; color:{accent_color}; font-weight:800;">{guardian_calls_covered_perc:.1f}%</div>
+            <div style="color:{text_muted};">Responder Area</div><div style="text-align:right; color:{card_title}; font-weight:800;">{responder_area_covered_perc:.1f}%</div>
+            <div style="color:{text_muted};">Guardian Area</div><div style="text-align:right; color:{card_title}; font-weight:800;">{guardian_area_covered_perc:.1f}%</div>
+        </div>
+        <div style="margin-top:8px; font-size:0.62rem; color:#777;">Mode: <b>{fleet_interaction_mode}</b> · Resp Demand: <b>{resp_demand_mode}</b> · Guard Demand: <b>{guard_demand_mode}</b></div>
+    </div>
+    """, unsafe_allow_html=True)
+
 
     # ── BUILD DRONE OBJECTS ───────────────────────────────────────────
     active_drones = []
@@ -3971,13 +4076,17 @@ if st.session_state['csvs_ready']:
     step = 1
     for idx, d_type in ordered_deployments_raw:
         if d_type == 'RESPONDER':
-            cov_array = resp_matrix[idx]; cost = CONFIG["RESPONDER_COST"]
+            cov_array = np.logical_and(resp_matrix[idx], resp_call_mask) if total_calls > 0 else np.array([], dtype=bool)
+            cost = CONFIG["RESPONDER_COST"]
             speed_mph = CONFIG["RESPONDER_SPEED"]; avg_dist = station_metadata[idx]['avg_dist_r']
             radius_m  = resp_radius_mi * 1609.34
+            max_patrol_hours = RESPONDER_FLIGHT_HOURS_PER_DAY
         else:
-            cov_array = guard_matrix[idx]; cost = CONFIG["GUARDIAN_COST"]
+            cov_array = np.logical_and(guard_matrix[idx], guard_call_mask) if total_calls > 0 else np.array([], dtype=bool)
+            cost = CONFIG["GUARDIAN_COST"]
             speed_mph = CONFIG["GUARDIAN_SPEED"]; avg_dist = station_metadata[idx]['avg_dist_g']
             radius_m  = guard_radius_mi * 1609.34
+            max_patrol_hours = GUARDIAN_FLIGHT_HOURS_PER_DAY
         map_color    = active_color_map[f"{idx}_{d_type}"]
         avg_time_min = (avg_dist / speed_mph) * 60
         d_lat = station_metadata[idx]['lat']; d_lon = station_metadata[idx]['lon']
@@ -3991,7 +4100,8 @@ if st.session_state['csvs_ready']:
             'deploy_step': step if (idx in chrono_r or idx in chrono_g) else "MANUAL",
             'avg_time_min': avg_time_min, 'speed_mph': speed_mph, 'radius_m': radius_m,
             'faa_ceiling': get_station_faa_ceiling(d_lat, d_lon, faa_geojson),
-            'nearest_airport': get_nearest_airfield(d_lat, d_lon, airfields)
+            'nearest_airport': get_nearest_airfield(d_lat, d_lon, airfields),
+            'max_patrol_hours': max_patrol_hours
         }
 
         if total_calls > 0 and cumulative_mask is not None:
@@ -4009,38 +4119,9 @@ if st.session_state['csvs_ready']:
             d['monthly_savings'] = (CONFIG["OFFICER_COST_PER_CALL"] - CONFIG["DRONE_COST_PER_CALL"]) * d['marginal_deflected'] * 30.4
             d['annual_savings']  = d['monthly_savings'] * 12
             d['be_text'] = f"{d['cost']/d['monthly_savings']:.1f} MO" if d['monthly_savings'] > 0 else "N/A"
-
-            # ── CONCURRENCY / BEST-CASE VALUE ────────────────────────────────
-            # How often is this drone already airborne when the next call arrives
-            # in its zone?  That probability = utilization rate.
-            # A second drone covering the shared zone can capture those blocked calls.
-            #
-            # Utilization = (total_daily_flights × avg_flight_min) / daily_budget_min
-            # Blocked calls/day = shared_zone_calls × utilization  (Erlang-B approx)
-            # Concurrent value  = blocked_calls × deflection_rate × cost_delta × 365
-            _is_guard     = (d_type == 'GUARDIAN')
-            _budget_min   = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] if _is_guard else (CONFIG["RESPONDER_PATROL_HOURS"] * 60)
-            _total_flights = d['marginal_flights'] + d['shared_flights']
-            _util = min(0.99, (_total_flights * avg_time_min) / max(1.0, _budget_min))
-            d['utilization'] = _util
-
-            # Calls in the shared zone this drone competes for
-            _shared_zone_calls = d['shared_flights'] / max(dfr_dispatch_rate, 0.01)
-            # Probability a call in the shared zone arrives while this drone is busy
-            _blocked_per_day = _shared_zone_calls * _util
-            _cost_delta = CONFIG["OFFICER_COST_PER_CALL"] - CONFIG["DRONE_COST_PER_CALL"]
-            _concurrent_monthly = _cost_delta * (_blocked_per_day * deflection_rate) * 30.4
-            d['concurrent_monthly'] = _concurrent_monthly
-            d['best_case_annual']   = d['annual_savings'] + (_concurrent_monthly * 12)
-            d['blocked_per_day']    = _blocked_per_day
-            # Best-case break-even uses the full concurrent value
-            _total_monthly = d['monthly_savings'] + _concurrent_monthly
-            d['best_be_text'] = f"{d['cost']/_total_monthly:.1f} MO" if _total_monthly > 0 else "N/A"
         else:
             d.update({'assigned_indices':[],'annual_savings':0,'marginal_flights':0,
-                      'marginal_deflected':0,'shared_flights':0,'be_text':"N/A",
-                      'utilization':0,'concurrent_monthly':0,'best_case_annual':0,
-                      'blocked_per_day':0,'best_be_text':"N/A"})
+                      'marginal_deflected':0,'shared_flights':0,'be_text':"N/A"})
         active_drones.append(d)
         step += 1
 
@@ -4138,54 +4219,56 @@ if st.session_state['csvs_ready']:
     else:
         resp_content = f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{avg_resp_time:.1f}m</div>'
 
-    # 2. SPLIT KPI BAR — Guardian row + Responder row + combined summary
-    def _kpi_cell(label, value, color=accent_color, border=True):
-        br = f"border-right: 1px solid #222; padding-right: 10px;" if border else ""
-        return (
-            f'<div style="{br} text-align: center;">'
-            f'<div style="font-size: 0.68rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom:2px;">{label}</div>'
-            f'<div style="font-size: 1.9rem; font-weight: 800; color: {color}; font-family: \'IBM Plex Mono\', monospace;">{value}</div>'
-            f'</div>'
-        )
-
-    _GUARD_COL = "#FFD700"   # gold for Guardian
-    _RESP_COL  = "#00D2FF"   # cyan for Responder
-    _COMB_COL  = "#39FF14"   # green for combined
-
+    # 2. THE STREAMLINED OPERATIONAL KPI BAR (FLATTENED TO PREVENT MARKDOWN ERRORS)
     kpi_html = (
-        # ── Row 1: summary totals ──────────────────────────────────────────
-        f'<div style="background:{card_bg}; border:1px solid {card_border}; border-radius:8px; padding:16px 20px; margin-bottom:8px;">'
-        f'<div style="font-size:0.65rem; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Fleet Summary</div>'
-        f'<div style="display:grid; grid-template-columns:repeat(5,1fr); gap:8px;">'
-        + _kpi_cell("Total Incidents", call_str)
-        + _kpi_cell("Combined Coverage", f"{calls_covered_perc:.1f}%", _COMB_COL)
-        + _kpi_cell("Land Covered", f"{area_covered_perc:.1f}%", _COMB_COL)
-        + _kpi_cell("Zone Overlap", f"{overlap_perc:.1f}%", text_muted)
-        + _kpi_cell("Avg Response", f"{avg_resp_time:.1f}m", accent_color, border=False)
-        + f'</div></div>'
-
-        # ── Row 2: Guardian-specific metrics ──────────────────────────────
-        + f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">'
-
-        + f'<div style="background:{card_bg}; border:1px solid #3a3000; border-top:3px solid {_GUARD_COL}; border-radius:8px; padding:14px 16px;">'
-        + f'<div style="font-size:0.65rem; color:{_GUARD_COL}; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; font-weight:700;">🦅 Guardian Fleet — {actual_k_guardian} unit{"s" if actual_k_guardian!=1 else ""} · {guard_strategy_raw}</div>'
-        + f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">'
-        + _kpi_cell("Call Coverage", f"{guard_calls_perc:.1f}%", _GUARD_COL)
-        + _kpi_cell("Area Coverage", f"{guard_area_perc:.1f}%", _GUARD_COL, border=False)
-        + f'</div></div>'
-
-        # ── Row 3: Responder-specific metrics ─────────────────────────────
-        + f'<div style="background:{card_bg}; border:1px solid #003a3a; border-top:3px solid {_RESP_COL}; border-radius:8px; padding:14px 16px;">'
-        + f'<div style="font-size:0.65rem; color:{_RESP_COL}; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; font-weight:700;">🚁 Responder Fleet — {actual_k_responder} unit{"s" if actual_k_responder!=1 else ""} · {resp_strategy_raw}</div>'
-        + f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">'
-        + _kpi_cell("Call Coverage", f"{resp_calls_perc:.1f}%", _RESP_COL)
-        + _kpi_cell("Area Coverage", f"{resp_area_perc:.1f}%", _RESP_COL, border=False)
-        + f'</div></div>'
-
-        + f'</div>'
+        f'<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); background: {card_bg}; border: 1px solid {card_border}; border-radius: 8px; padding: 20px; margin-bottom: 15px; gap: 10px;">'
+        f'<div style="border-right: 1px solid #222; padding-right: 10px; text-align: center;">'
+        f'<div style="font-size: 0.75rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px;">Total Incidents</div>'
+        f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{call_str}</div>'
+        f'</div>'
+        f'<div style="border-right: 1px solid #222; padding-right: 10px; text-align: center;">'
+        f'<div style="font-size: 0.75rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px;">Call Coverage</div>'
+        f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{calls_covered_perc:.1f}%</div>'
+        f'</div>'
+        f'<div style="border-right: 1px solid #222; padding-right: 10px; text-align: center;">'
+        f'<div style="font-size: 0.75rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px;">Land Covered</div>'
+        f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{area_covered_perc:.1f}%</div>'
+        f'</div>'
+        f'<div style="border-right: 1px solid #222; padding-right: 10px; text-align: center;">'
+        f'<div style="font-size: 0.75rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px;">Overlap</div>'
+        f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{overlap_perc:.1f}%</div>'
+        f'</div>'
+        f'<div style="text-align: center;">'
+        f'<div style="font-size: 0.75rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px;">Est. Avg Response</div>'
+        f'{resp_content}'
+        f'</div>'
+        f'</div>'
     )
     
     st.markdown(kpi_html, unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div style="display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:10px; margin-top:8px; margin-bottom:12px;">
+            <div style="background:{card_bg}; border:1px solid {card_border}; padding:10px; border-radius:6px;">
+                <div style="font-size:0.62rem; color:{text_muted}; text-transform:uppercase;">Responder Calls</div>
+                <div style="font-size:1.1rem; color:{accent_color}; font-weight:800;">{responder_calls_covered_perc:.1f}%</div>
+            </div>
+            <div style="background:{card_bg}; border:1px solid {card_border}; padding:10px; border-radius:6px;">
+                <div style="font-size:0.62rem; color:{text_muted}; text-transform:uppercase;">Guardian Calls</div>
+                <div style="font-size:1.1rem; color:{accent_color}; font-weight:800;">{guardian_calls_covered_perc:.1f}%</div>
+            </div>
+            <div style="background:{card_bg}; border:1px solid {card_border}; padding:10px; border-radius:6px;">
+                <div style="font-size:0.62rem; color:{text_muted}; text-transform:uppercase;">Responder Area</div>
+                <div style="font-size:1.1rem; color:{card_title}; font-weight:800;">{responder_area_covered_perc:.1f}%</div>
+            </div>
+            <div style="background:{card_bg}; border:1px solid {card_border}; padding:10px; border-radius:6px;">
+                <div style="font-size:0.62rem; color:{text_muted}; text-transform:uppercase;">Guardian Area</div>
+                <div style="font-size:1.1rem; color:{card_title}; font-weight:800;">{guardian_area_covered_perc:.1f}%</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
     if orig_calls != modeled_calls:
         model_note = f"Optimization modeled via {modeled_calls:,} representative CAD samples from {orig_calls:,} total incidents."
     else:
@@ -4385,79 +4468,55 @@ if st.session_state['csvs_ready']:
             st.info("Run optimization to generate coverage curve.")
 
     with _ring_col:
-        # Split ring: outer ring = Guardians (gold), inner ring = Responders (cyan)
+        # Dynamic ring: each slice = one active drone, sized by calls it handles
         if active_drones and total_calls > 0:
-            _g_drones = [d for d in active_drones if d['type'] == 'GUARDIAN']
-            _r_drones = [d for d in active_drones if d['type'] == 'RESPONDER']
+            _ring_labels, _ring_values, _ring_colors, _ring_text = [], [], [], []
+            _uncovered = total_calls
+            for d in active_drones:
+                _marginal = int(d.get('marginal_perc', 0) * total_calls)
+                if _marginal > 0:
+                    _short = d['name'].split(',')[0][:22]
+                    _ring_labels.append(_short)
+                    _ring_values.append(_marginal)
+                    _ring_colors.append(d['color'])
+                    _ring_text.append(f"{_marginal:,} calls<br>{d['type'][:4]}")
+                    _uncovered -= _marginal
+            if _uncovered > 0:
+                _ring_labels.append("Uncovered")
+                _ring_values.append(max(0, _uncovered))
+                _ring_colors.append("#222222")
+                _ring_text.append(f"{max(0,_uncovered):,} calls<br>not reached")
 
-            def _build_ring_data(drones, fleet_cov_mask):
-                """Build labels/values/colors for one fleet's ring slices."""
-                labels, values, colors = [], [], []
-                remaining = int(fleet_cov_mask.sum()) if fleet_cov_mask is not None else 0
-                for d in drones:
-                    _m = int(d.get('marginal_perc', 0) * total_calls)
-                    if _m > 0:
-                        labels.append(d['name'].split(',')[0][:18])
-                        values.append(_m)
-                        colors.append(d['color'])
-                        remaining = max(0, remaining - _m)
-                return labels, values, colors
-
-            _g_labels, _g_vals, _g_cols = _build_ring_data(_g_drones, cov_g)
-            _r_labels, _r_vals, _r_cols = _build_ring_data(_r_drones, cov_r)
-
-            # Uncovered slice for combined view
-            _combined_covered = int(np.logical_or(cov_r, cov_g).sum()) if total_calls > 0 else 0
-            _uncovered = max(0, total_calls - _combined_covered)
-
-            # Build a single donut: Guardian slices (gold ring) + Responder slices (cyan ring)
-            # separated by a small "uncovered" gap
-            all_labels = _g_labels + _r_labels + (["Uncovered"] if _uncovered > 0 else [])
-            all_values = _g_vals   + _r_vals   + ([_uncovered] if _uncovered > 0 else [])
-            all_colors = _g_cols   + _r_cols   + (["#1a1a1a"] if _uncovered > 0 else [])
-
-            if all_values:
-                fig_ring = go.Figure(go.Pie(
-                    labels=all_labels,
-                    values=all_values,
-                    hole=0.58,
-                    marker=dict(colors=all_colors, line=dict(color='#000', width=1.5)),
-                    textinfo='none',
-                    hovertemplate='<b>%{label}</b><br>%{value:,} calls (%{percent})<extra></extra>',
-                    sort=False,
-                ))
-                _cov_pct = round(_combined_covered / total_calls * 100, 1)
-                _mode_short = "▶◀" if complement_mode else "↔" if shared_mode else "⊕"
-                fig_ring.update_layout(
-                    annotations=[dict(
-                        text=f"<b>{_cov_pct}%</b><br><span style='font-size:9px'>{_mode_short} combined</span>",
-                        x=0.5, y=0.5, font_size=15, showarrow=False,
-                        font=dict(color=text_main)
-                    )],
-                    showlegend=True,
-                    legend=dict(
-                        orientation='v', x=1.02, y=0.5,
-                        font=dict(size=9, color=text_muted),
-                        bgcolor='rgba(0,0,0,0)',
-                        groupclick='toggleitem',
-                    ),
-                    margin=dict(l=0, r=0, t=10, b=10),
-                    height=320,
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    hoverlabel=dict(bgcolor=card_bg, font_size=12, font_color=text_main),
-                )
-                st.plotly_chart(fig_ring, use_container_width=True, config={'displayModeBar':False})
-
-                # Mode legend below the ring
-                _mode_label = {
-                    "Complement — push apart": "▶◀ Complement — Responders fill Guardian gaps",
-                    "Independent — each maximises own area": "⊕ Independent — each fleet optimised separately",
-                    "Shared — allow full overlap": "↔ Shared — both fleets maximise same call set",
-                }.get(deployment_mode, "")
-                st.markdown(
-                    f"<div style='font-size:0.65rem; color:{text_muted}; text-align:center; margin-top:-8px;'>{_mode_label}</div>",
-                    unsafe_allow_html=True
-                )
+            fig_ring = go.Figure(go.Pie(
+                labels=_ring_labels,
+                values=_ring_values,
+                hole=0.58,
+                marker=dict(colors=_ring_colors, line=dict(color='#000', width=1.5)),
+                textinfo='none',
+                hovertemplate='<b>%{label}</b><br>%{value:,} calls (%{percent})<extra></extra>',
+                sort=False,
+            ))
+            # Centre annotation: total covered calls
+            _covered_cnt = sum(int(d.get('marginal_perc',0)*total_calls) for d in active_drones)
+            _cov_pct = round(_covered_cnt / total_calls * 100, 1) if total_calls else 0
+            fig_ring.update_layout(
+                annotations=[dict(
+                    text=f"<b>{_cov_pct}%</b><br><span style='font-size:10px'>covered</span>",
+                    x=0.5, y=0.5, font_size=16, showarrow=False,
+                    font=dict(color=text_main)
+                )],
+                showlegend=True,
+                legend=dict(
+                    orientation='v', x=1.02, y=0.5,
+                    font=dict(size=9, color=text_muted),
+                    bgcolor='rgba(0,0,0,0)',
+                ),
+                margin=dict(l=0, r=0, t=10, b=10),
+                height=320,
+                paper_bgcolor='rgba(0,0,0,0)',
+                hoverlabel=dict(bgcolor=card_bg, font_size=12, font_color=text_main),
+            )
+            st.plotly_chart(fig_ring, use_container_width=True, config={'displayModeBar':False})
         else:
             st.markdown(
                 f"<div style='color:{text_muted}; font-size:0.8rem; padding:40px 0; text-align:center;'>Deploy drones to see call distribution ring.</div>",
@@ -4721,7 +4780,11 @@ if st.session_state['csvs_ready']:
             # Financials
             "opt_strategy":          opt_strategy,
             "incremental_build":     incremental_build,
-            "allow_redundancy":      allow_redundancy,
+            "fleet_interaction_mode": fleet_interaction_mode,
+            "resp_goal":             resp_goal,
+            "guard_goal":            guard_goal,
+            "resp_demand_mode":      resp_demand_mode,
+            "guard_demand_mode":     guard_demand_mode,
             "dfr_rate":              int(dfr_dispatch_rate*100),
             "deflect_rate":          int(deflection_rate*100),
             "fleet_capex":           fleet_capex,

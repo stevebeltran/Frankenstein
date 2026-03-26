@@ -394,11 +394,12 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
         
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:5px; padding-top:15px; border-top:1px solid #1a1a26;">
             <div style="font-size:14px; font-weight:800; color:#fff; letter-spacing:1px; text-transform:uppercase;">DFR Deployment Calendar</div>
-            <div style="display:flex; gap:12px; font-family:monospace; font-size:9px; color:#7777a0;">
-                <div style="display:flex; align-items:center; gap:5px;"><div style="width:8px; height:8px; background:#2ecc71; border-radius:2px;"></div>LOW</div>
-                <div style="display:flex; align-items:center; gap:5px;"><div style="width:8px; height:8px; background:#d4c000; border-radius:2px;"></div>MED</div>
-                <div style="display:flex; align-items:center; gap:5px;"><div style="width:8px; height:8px; background:#ff8c00; border-radius:2px;"></div>HIGH</div>
-                <div style="display:flex; align-items:center; gap:5px;"><div style="width:8px; height:8px; background:#ff4444; border-radius:2px;"></div>PEAK</div>
+            <div style="display:flex; gap:12px; font-family:monospace; font-size:9px; color:#8d93b8; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:5px;"><div style="width:9px; height:9px; background:#59B7FF; border:1px solid #1E5D91; border-radius:2px; box-shadow:0 0 6px rgba(89,183,255,0.18);"></div>VERY LOW</div>
+                <div style="display:flex; align-items:center; gap:5px;"><div style="width:9px; height:9px; background:#45E28A; border:1px solid #1D7D49; border-radius:2px; box-shadow:0 0 6px rgba(69,226,138,0.18);"></div>LOW</div>
+                <div style="display:flex; align-items:center; gap:5px;"><div style="width:9px; height:9px; background:#FFD84D; border:1px solid #8A6F00; border-radius:2px; box-shadow:0 0 6px rgba(255,216,77,0.18);"></div>MEDIUM</div>
+                <div style="display:flex; align-items:center; gap:5px;"><div style="width:9px; height:9px; background:#FF9F43; border:1px solid #9A4F00; border-radius:2px; box-shadow:0 0 6px rgba(255,159,67,0.18);"></div>HIGH</div>
+                <div style="display:flex; align-items:center; gap:5px;"><div style="width:9px; height:9px; background:#FF5B6E; border:1px solid #A51F2D; border-radius:2px; box-shadow:0 0 8px rgba(255,91,110,0.24);"></div>PEAK</div>
             </div>
         </div>
         
@@ -545,10 +546,11 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
                 const dow = parseInt(el.getAttribute('data-dow'));
                 
                 let loadText = '';
-                if (ratio >= 0.85) loadText = '<span style="color:#ff4444">■ PEAK</span> — Full crew';
-                else if (ratio >= 0.55) loadText = '<span style="color:#ff8c00">■ HIGH</span> — Priority deploy';
-                else if (ratio >= 0.25) loadText = '<span style="color:#d4c000">■ MEDIUM</span> — Standard ops';
-                else loadText = '<span style="color:#2ecc71">■ LOW</span> — Light staffing';
+                if (ratio >= 0.85) loadText = '<span style="color:#FF5B6E">■ PEAK</span> — Full crew';
+                else if (ratio >= 0.65) loadText = '<span style="color:#FF9F43">■ HIGH</span> — Priority deploy';
+                else if (ratio >= 0.45) loadText = '<span style="color:#FFD84D">■ MEDIUM</span> — Standard ops';
+                else if (ratio >= 0.25) loadText = '<span style="color:#45E28A">■ LOW</span> — Light staffing';
+                else loadText = '<span style="color:#59B7FF">■ VERY LOW</span> — Opportunistic coverage';
                 
                 const hrArr = window.dateHourly[dk] || Array(24).fill(0);
                 let bestV = 0, bestS = 0;
@@ -4097,19 +4099,25 @@ if st.session_state['csvs_ready']:
     # ── COMMAND CENTER ANALYTICS DASHBOARD ──
     st.markdown("---")
     st.markdown(f"<h3 style='color:{text_main};'>📊 CAD Ingestion Analytics</h3>", unsafe_allow_html=True)
-    st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Temporal patterns derived from your uploaded CAD data — hourly volumes, day-of-week distribution, optimal DFR shift windows, and an interactive call-volume calendar.</div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Temporal patterns derived from your uploaded CAD data — hourly volumes, day-of-week distribution, optimal DFR shift windows, and a higher-contrast 5-band call-volume calendar.</div>", unsafe_allow_html=True)
 
     show_cad_analytics = st.toggle("📈 Show Data Analytics Heatmaps", value=False)
     
     if show_cad_analytics:
+        st.markdown(f"<h4 style='color:{text_main}; margin-top:10px; margin-bottom:6px;'>Incident Data Analysis</h4>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:12px;'>"
+            f"Interactive temporal analysis from your uploaded CAD data — total incident counts, day-of-week patterns, optimized shift windows, and a call-volume deployment calendar styled after your Command Center reference."
+            f"</div>",
+            unsafe_allow_html=True
+        )
         analytics_html_block = generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls))
-        components.html(analytics_html_block, height=1600, scrolling=False)
+        components.html(analytics_html_block, height=1725, scrolling=False)
 
         if _has_real_calls and df_calls is not None and not df_calls.empty:
-            st.markdown(f"<h4 style='color:{text_main}; margin-top:14px;'>Incident Data Analysis</h4>", unsafe_allow_html=True)
             st.markdown(
-                f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:12px;'>"
-                f"Nested detailed CAD analytics from your uploaded data — priority mix, top call types, and hotspot concentration."
+                f"<div style='font-size:0.82rem; color:{text_muted}; margin-top:8px; margin-bottom:12px;'>"
+                f"Detailed CAD breakdowns below use the full uploaded dataset for priority mix, top call types, and hotspot concentration."
                 f"</div>",
                 unsafe_allow_html=True
             )

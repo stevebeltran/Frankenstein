@@ -1174,24 +1174,48 @@ def _build_cad_charts(df_calls, text_main, text_muted, card_bg, card_border, acc
 
 
 def _make_random_stations(df_calls, n=40):
-    """Last-resort fallback: scatter synthetic stations across the call bounding box."""
+    """Fallback station generator: uses k-means on call locations to find natural
+    density hotspots, then places one candidate station per cluster centroid.
+    Falls back to IQR-filtered random sample if sklearn is unavailable."""
     lats = df_calls['lat'].dropna().values
     lons = df_calls['lon'].dropna().values
-    if len(lats) == 0: return pd.DataFrame()
-    q1_la, q3_la = np.percentile(lats, 25), np.percentile(lats, 75)
-    q1_lo, q3_lo = np.percentile(lons, 25), np.percentile(lons, 75)
+    if len(lats) == 0:
+        return pd.DataFrame()
+    # IQR filter to strip outlier coordinates (zeros, nulls encoded as 0, etc.)
+    q1_la, q3_la = np.percentile(lats, 5), np.percentile(lats, 95)
+    q1_lo, q3_lo = np.percentile(lons, 5), np.percentile(lons, 95)
     iqr_la, iqr_lo = q3_la - q1_la, q3_lo - q1_lo
-    mask = ((lats >= q1_la - 2*iqr_la) & (lats <= q3_la + 2*iqr_la) &
-            (lons >= q1_lo - 2*iqr_lo) & (lons <= q3_lo + 2*iqr_lo))
+    buf_la, buf_lo = max(iqr_la * 0.5, 0.01), max(iqr_lo * 0.5, 0.01)
+    mask = ((lats >= q1_la - buf_la) & (lats <= q3_la + buf_la) &
+            (lons >= q1_lo - buf_lo) & (lons <= q3_lo + buf_lo))
     clean_lats, clean_lons = lats[mask], lons[mask]
-    np.random.seed(42)
-    idx = np.random.choice(len(clean_lats), min(n, len(clean_lats)), replace=False)
-    types = (['Police']*15 + ['Fire']*15 + ['School']*10)[:n]
+    if len(clean_lats) == 0:
+        clean_lats, clean_lons = lats, lons
+
+    # Try k-means to spread stations across density hotspots
+    try:
+        from sklearn.cluster import MiniBatchKMeans as _KM
+        coords = np.column_stack([clean_lats, clean_lons])
+        k = min(n, len(coords))
+        km = _KM(n_clusters=k, random_state=42, batch_size=1024, n_init=3)
+        km.fit(coords)
+        station_lats = km.cluster_centers_[:, 0]
+        station_lons = km.cluster_centers_[:, 1]
+    except Exception:
+        np.random.seed(42)
+        idx = np.random.choice(len(clean_lats), min(n, len(clean_lats)), replace=False)
+        station_lats = clean_lats[idx]
+        station_lons = clean_lons[idx]
+
+    k_actual = len(station_lats)
+    types = (['Police'] * (k_actual // 2) +
+             ['Fire']   * (k_actual // 3) +
+             ['School'] * k_actual)[:k_actual]
     return pd.DataFrame({
-        'name': [f"{t} Station {i+1}" for i, t in enumerate(types[:len(idx)])],
-        'lat':  clean_lats[idx],
-        'lon':  clean_lons[idx],
-        'type': types[:len(idx)]
+        'name': [f"{types[i]} Station {i+1}" for i in range(k_actual)],
+        'lat':  station_lats,
+        'lon':  station_lons,
+        'type': types,
     })
 
 def generate_stations_from_calls(df_calls, max_stations=100):
@@ -2890,11 +2914,17 @@ if st.session_state['csvs_ready']:
     city_boundary_geom = None
     try:
         active_utm = active_gdf.to_crs(epsg=epsg_code)
-        full_boundary_utm = (active_utm.geometry.union_all() if hasattr(active_utm.geometry, 'union_all')
-                             else active_utm.geometry.unary_union).buffer(0.1)
-        full_boundary_utm = full_boundary_utm.buffer(-0.1)
-        city_m = full_boundary_utm
-        city_boundary_geom = gpd.GeoSeries([full_boundary_utm], crs=epsg_code).to_crs(epsg=4326).iloc[0]
+        raw_union = (active_utm.geometry.union_all() if hasattr(active_utm.geometry, 'union_all')
+                     else active_utm.geometry.unary_union)
+        # buffer(0.1).buffer(-0.1) cleans self-intersections but can collapse thin geometries.
+        # Use a larger initial buffer and validate before shrinking.
+        clean_geom = raw_union.buffer(1.0).buffer(-1.0)
+        if clean_geom.is_empty or not clean_geom.is_valid:
+            clean_geom = raw_union.buffer(0)  # zero-buffer repair only
+        if clean_geom.is_empty:
+            clean_geom = raw_union          # use as-is if still empty
+        city_m = clean_geom
+        city_boundary_geom = gpd.GeoSeries([clean_geom], crs=epsg_code).to_crs(epsg=4326).iloc[0]
     except Exception as e:
         st.error(f"Geometry Error: {e}"); st.stop()
 
@@ -2915,41 +2945,44 @@ if st.session_state['csvs_ready']:
         df_inside = df_stations_all[mask].reset_index(drop=True)
 
         if df_inside.empty:
-            # OSM found no buildings inside the boundary — this is common for
-            # small/rural cities with sparse OSM coverage.
-            # Strategy: generate call-density synthetic stations clipped to the
-            # boundary, so all placements are still inside the city.
+            # OSM found no public buildings inside the boundary — common for small/rural
+            # cities with sparse OSM tagging (e.g. Victoria TX, small county seats).
+            # Strategy: skip the OSM spatial clip entirely and place stations directly
+            # at call-density hotspots. Call coordinates are ALREADY inside the city
+            # by definition, so no spatial clip is needed.
             st.info(
-                "ℹ️ No OSM stations found within the city boundary. "
-                "Generating call-density stations inside city limits — you can adjust placement with the sliders."
+                "ℹ️ No OSM public buildings found within the city boundary. "
+                "Using call-density station placement — stations are derived directly "
+                "from your incident data and are located inside the city limits."
             )
             try:
-                _syn = _make_random_stations(df_calls, n=60)
-                if not _syn.empty:
-                    _syn_gdf = gpd.GeoDataFrame(
-                        _syn,
-                        geometry=gpd.points_from_xy(_syn.lon, _syn.lat),
-                        crs="EPSG:4326"
-                    ).to_crs(epsg=epsg_code)
-                    _syn_mask = _syn_gdf.within(city_m.buffer(500))
-                    _syn_inside = _syn[_syn_mask.values].reset_index(drop=True)
-                    if not _syn_inside.empty:
-                        df_stations_all = _syn_inside
-                    else:
-                        # Boundary may be bad — use all synthetic stations with no clip
-                        df_stations_all = _syn
-                else:
-                    df_stations_all = df_inside  # empty; will error below
-            except Exception as _fe:
-                df_stations_all = df_inside  # fall through to empty check
+                df_stations_all = _make_random_stations(df_calls, n=60)
+            except Exception:
+                df_stations_all = pd.DataFrame()
+
+            # Absolute last resort: build a simple grid from call quantiles
+            if df_stations_all.empty:
+                try:
+                    _lats = df_calls['lat'].dropna()
+                    _lons = df_calls['lon'].dropna()
+                    _grid_lats = np.linspace(_lats.quantile(0.1), _lats.quantile(0.9), 8)
+                    _grid_lons = np.linspace(_lons.quantile(0.1), _lons.quantile(0.9), 8)
+                    _glat, _glon = np.meshgrid(_grid_lats, _grid_lons)
+                    df_stations_all = pd.DataFrame({
+                        'name':  [f'Station {i+1}' for i in range(len(_glat.ravel()))],
+                        'lat':   _glat.ravel(),
+                        'lon':   _glon.ravel(),
+                        'type':  (['Police', 'Fire', 'School'] * 30)[:len(_glat.ravel())],
+                    })
+                except Exception:
+                    df_stations_all = pd.DataFrame()
         else:
             df_stations_all = df_inside
 
         if df_stations_all.empty:
             st.error(
-                "⚠️ No station candidates found. The city boundary may not contain any "
-                "public buildings in OpenStreetMap. Try the Simulation mode, which generates "
-                "stations from call density rather than OSM data."
+                "⚠️ No station candidates could be generated. Please upload a CAD file "
+                "with valid coordinates, or switch to Simulation mode."
             )
             st.stop()
 

@@ -3552,7 +3552,7 @@ if st.session_state['csvs_ready']:
         if show_cards:
             st.markdown(f"""
             <h4 style='margin-top:8px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>
-            <div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:8px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>
+            <div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:8px;'>SIMULATOR DISCLAIMER: All outputs are model estimates based on user inputs.</div>
             <style>
             .unit-card {{ transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; }}
             .unit-card:hover {{ transform: scale(1.02); box-shadow: 0 8px 20px rgba(0,210,255,0.12); }}

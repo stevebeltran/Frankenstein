@@ -1425,6 +1425,22 @@ def _build_cad_charts(df_calls, text_main, text_muted, card_bg, card_border, acc
 
 
 
+def _safe_df_to_records(df):
+    """Safely serialize a DataFrame to a JSON-safe list of records.
+    Returns an empty list if df is None, empty, or serialization fails."""
+    if df is None:
+        return []
+    try:
+        if hasattr(df, 'empty') and df.empty:
+            return []
+        return json.loads(df.replace({float('nan'): None}).to_json(orient='records'))
+    except Exception:
+        try:
+            return json.loads(df.fillna('').to_json(orient='records'))
+        except Exception:
+            return []
+
+
 def _make_random_stations(df_calls, n=40, boundary_geom=None, epsg_code=None):
     """Fallback station generator based on call-density hotspots.
 
@@ -4341,23 +4357,29 @@ if st.session_state['csvs_ready']:
     if _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
         _build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
 
-    # ── EXPORT BUTTONS ──
+    # ── EXPORT BUTTONS — always visible in sidebar ──
+    st.sidebar.markdown("---")
+
+    brinc_user = st.sidebar.text_input("BRINC Email Prefix (first.last)", value=st.session_state.get('brinc_user', 'steven.beltran'), key='brinc_user', help="Enter 'first.last' to auto-generate your name and @brincdrones.com email address.")
+    st.sidebar.caption("*(Press **Enter** after typing to apply changes)*")
+
+    user_clean = brinc_user.strip()
+    if not user_clean: user_clean = "steven.beltran"
+
+    # Police dept fields removed from sidebar — read from session state defaults
+    pd_chief_name = st.session_state.get('pd_chief_name', '')
+    pd_dept_name  = st.session_state.get('pd_dept_name', '')
+    pd_dept_email = st.session_state.get('pd_dept_email', '')
+    pd_dept_phone = st.session_state.get('pd_dept_phone', '')
+    prop_email = f"{user_clean}@brincdrones.com"
+    prop_name = " ".join([word.capitalize() for word in user_clean.split('.')])
+
+    # Always define these so download buttons work regardless of fleet_capex
+    prop_city  = st.session_state.get('active_city', 'City')
+    prop_state = st.session_state.get('active_state', 'FL')
+    _safe_city_base = prop_city.replace(" ", "_").replace("/", "_")
+
     if fleet_capex > 0:
-        st.sidebar.markdown("---")
-        
-        brinc_user = st.sidebar.text_input("BRINC Email Prefix (first.last)", value=st.session_state.get('brinc_user', 'steven.beltran'), key='brinc_user', help="Enter 'first.last' to auto-generate your name and @brincdrones.com email address.")
-        st.sidebar.caption("*(Press **Enter** after typing to apply changes)*")
-
-        user_clean = brinc_user.strip()
-        if not user_clean: user_clean = "steven.beltran"
-
-        # Police dept fields removed from sidebar — read from session state defaults
-        pd_chief_name = st.session_state.get('pd_chief_name', '')
-        pd_dept_name  = st.session_state.get('pd_dept_name', '')
-        pd_dept_email = st.session_state.get('pd_dept_email', '')
-        pd_dept_phone = st.session_state.get('pd_dept_phone', '')
-        prop_email = f"{user_clean}@brincdrones.com"
-        prop_name = " ".join([word.capitalize() for word in user_clean.split('.')])
 
         prop_city  = st.session_state.get('active_city', 'City')
         prop_state = st.session_state.get('active_state', 'FL')
@@ -4687,9 +4709,21 @@ if st.session_state['csvs_ready']:
 
         export_html = export_html.replace("[ANALYTICS_HTML_EXPORT]", analytics_html_export)
 
-        if st.sidebar.download_button("💾 Save Deployment Plan", data=json.dumps(export_dict),
-                                      file_name=f"Brinc_{safe_city}_{current_time_str}.brinc",
-                                      mime="application/json", use_container_width=True):
+    # ── Download buttons — always rendered so they're visible in the sidebar ──
+    _safe_city   = _safe_city_base
+    _ts          = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+    # 1. Save Deployment Plan (.brinc) — always available
+    _brinc_data = json.dumps(export_dict) if fleet_capex > 0 else json.dumps({
+        "city": st.session_state.get('active_city', ''), "state": st.session_state.get('active_state', ''),
+        "_disclaimer": "No drones deployed yet.", "k_resp": 0, "k_guard": 0,
+        "calls_data": _safe_df_to_records(st.session_state.get('df_calls_full') or st.session_state.get('df_calls')),
+        "stations_data": _safe_df_to_records(st.session_state.get('df_stations')),
+    })
+    if st.sidebar.download_button("💾 Save Deployment Plan", data=_brinc_data,
+                                  file_name=f"Brinc_{_safe_city}_{_ts}.brinc",
+                                  mime="application/json", use_container_width=True):
+        if fleet_capex > 0:
             _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                           "BRINC", k_responder, k_guardian, calls_covered_perc,
                           prop_name, prop_email, details=export_details)
@@ -4697,8 +4731,10 @@ if st.session_state['csvs_ready']:
                            "BRINC", k_responder, k_guardian, calls_covered_perc,
                            prop_name, prop_email, details=export_details)
 
+    # 2. Executive Summary HTML — only meaningful when drones are deployed
+    if fleet_capex > 0:
         if st.sidebar.download_button("📄 Executive Summary (HTML)", data=export_html,
-                                      file_name=f"Brinc_{safe_city}_Proposal_{current_time_str}.html",
+                                      file_name=f"Brinc_{_safe_city}_Proposal_{_ts}.html",
                                       mime="text/html", use_container_width=True):
             _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                           "HTML", k_responder, k_guardian, calls_covered_perc,
@@ -4706,14 +4742,25 @@ if st.session_state['csvs_ready']:
             _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                            "HTML", k_responder, k_guardian, calls_covered_perc,
                            prop_name, prop_email, details=export_details)
+    else:
+        st.sidebar.button("📄 Executive Summary (HTML)", disabled=True,
+                          use_container_width=True,
+                          help="Deploy at least one drone to generate the proposal document.")
 
-        if active_drones:
-            if st.sidebar.download_button("🌏 Google Earth Briefing File", data=generate_kml(active_gdf, active_drones, calls_in_city),
-                                          file_name="drone_deployment.kml", mime="application/vnd.google-earth.kml+xml",
-                                          use_container_width=True):
-                _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                              "KML", k_responder, k_guardian, calls_covered_perc,
-                              prop_name, prop_email, details=export_details)
-                _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                               "KML", k_responder, k_guardian, calls_covered_perc,
-                               prop_name, prop_email, details=export_details)
+    # 3. Google Earth KML — only when drones are placed
+    if active_drones:
+        if st.sidebar.download_button("🌏 Google Earth Briefing File",
+                                      data=generate_kml(active_gdf, active_drones, calls_in_city),
+                                      file_name="drone_deployment.kml",
+                                      mime="application/vnd.google-earth.kml+xml",
+                                      use_container_width=True):
+            _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                          "KML", k_responder, k_guardian, calls_covered_perc,
+                          prop_name, prop_email, details=export_details)
+            _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                           "KML", k_responder, k_guardian, calls_covered_perc,
+                           prop_name, prop_email, details=export_details)
+    else:
+        st.sidebar.button("🌏 Google Earth Briefing File", disabled=True,
+                          use_container_width=True,
+                          help="Deploy at least one drone to generate the KML file.")

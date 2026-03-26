@@ -3853,7 +3853,9 @@ if st.session_state['csvs_ready']:
             stage_bar.info("🦅 Optimising Guardian fleet…")
             if k_guardian > 0:
                 if guard_strategy == "Maximize Call Coverage":
-                    g_best, _, chrono_g, _ = solve_mclp(
+                    # solve_mclp returns (r_best, g_best, chrono_r, chrono_g)
+                    # Pass 1 runs Guardians only (num_resp=0) so r_best=[] and g_best has the result
+                    _, g_best, _, chrono_g = solve_mclp(
                         resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g,
                         0, k_guardian, True, incremental=incremental_build,
                         forced_r=[], forced_g=locked_g_pins

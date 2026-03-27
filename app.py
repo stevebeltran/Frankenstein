@@ -5211,7 +5211,7 @@ if st.session_state['csvs_ready']:
     components.html(analytics_html_block, height=_analytics_height, scrolling=False)
 
     if _analytics_unavailable:
-        # Remove the large dead gap when the analytics component only contains a short fallback message.
+        # Remove the dead gap when the analytics component only contains a short fallback message.
         st.markdown("<div style='margin-top:-6px;'></div>", unsafe_allow_html=True)
     elif _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
         # Collapse gap between components.html block and the plotly charts below

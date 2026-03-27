@@ -2250,7 +2250,7 @@ def format_3_lines(name_str):
             return f"{parts[0].strip()},<br>{parts[1].strip()},<br>{','.join(parts[2:]).strip()}"
     return name_str
 
-def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=4):
+def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2):
     if not active_drones:
         return ""
     # Per-type daily airtime budgets derived from CONFIG duty cycles:
@@ -2260,7 +2260,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     _GUARDIAN_DAILY_HOURS = CONFIG["GUARDIAN_PATROL_HOURS"]        # ~22.86
     _RESPONDER_DAILY_MINS  = CONFIG["RESPONDER_PATROL_HOURS"] * 60 # 11.6 * 60 = 696
     _RESPONDER_DAILY_HOURS = CONFIG["RESPONDER_PATROL_HOURS"]      # 11.6
-    columns_per_row = max(4, int(columns_per_row))
+    columns_per_row = max(1, int(columns_per_row))
 
     cards_html = []
     for d in active_drones:
@@ -2315,7 +2315,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             cap_note = f" (max {max_single_flight}min)" if capped else ""
             patrol_time_line = (
                 f'<div style="border-top:1px dashed rgba(255,255,255,0.15); margin-top:5px; '
-                f'padding-top:6px; font-size:0.7rem; color:{text_muted};" '
+                f'padding-top:5px; font-size:0.58rem; color:{text_muted};" '
                 f'title="{uptime_tooltip}">'
                 f'{total_daily_flights:.1f} flights ÷ {max_patrol_hours:.2f}hr max = '
                 f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight{cap_note}</span></div>'
@@ -2340,42 +2340,42 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             _conc_str = ""
 
         cards_html.append(f'''
-<div class="unit-card" style="background:{card_bg}; border-top:3px solid {d_color}; border:1px solid {card_border}; border-top:3px solid {d_color}; border-radius:8px; padding:14px; display:flex; flex-direction:column; box-sizing:border-box; min-height:480px; height:100%;">
+<div class="unit-card" style="background:{card_bg}; border-top:3px solid {d_color}; border:1px solid {card_border}; border-top:3px solid {d_color}; border-radius:6px; padding:10px; display:flex; flex-direction:column; box-sizing:border-box; min-height:440px; height:100%;">
   <!-- Header: name + type badge -->
   <div style="margin-bottom:6px; min-height:82px;">
-    <div style="font-weight:800; font-size:0.92rem; color:{card_title}; line-height:1.3; margin-bottom:1px;">{short_name}</div>
-    <div style="font-size:0.68rem; color:#777; text-transform:uppercase; letter-spacing:0.5px;">{"🔒 " if d.get("pinned") else ""}{d_type} · Phase #{d_step}</div>
-    <div style="font-size:0.72rem; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+    <div style="font-weight:700; font-size:0.72rem; color:{card_title}; line-height:1.3; margin-bottom:1px;">{short_name}</div>
+    <div style="font-size:0.55rem; color:#777; text-transform:uppercase; letter-spacing:0.5px;">{"🔒 " if d.get("pinned") else ""}{d_type} · Phase #{d_step}</div>
+    <div style="font-size:0.6rem; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
       <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
     </div>
   </div>
 
   <!-- Annual value box -->
-  <div style="background:rgba(0,210,255,0.07); border:1px solid rgba(0,210,255,0.15); border-radius:4px; padding:10px 10px; text-align:center; margin-bottom:6px;">
-    <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.7px; margin-bottom:3px;">Annual Value</div>
-    <div style="font-size:1.45rem; font-weight:900; color:{accent_color}; line-height:1.1;">${d_best:,.0f}</div>
+  <div style="background:rgba(0,210,255,0.07); border:1px solid rgba(0,210,255,0.15); border-radius:4px; padding:6px 8px; text-align:center; margin-bottom:4px;">
+    <div style="font-size:0.55rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:1px;">Annual Value</div>
+    <div style="font-size:1.1rem; font-weight:900; color:{accent_color}; line-height:1.1;">${d_best:,.0f}</div>
     {patrol_time_line}
   </div>
 
   <!-- Value breakdown box -->
-  <div style="border:1px solid rgba(57,255,20,0.18); border-radius:4px; padding:8px 8px; text-align:center; margin-bottom:8px; background:rgba(57,255,20,0.04);"
+  <div style="border:1px solid rgba(57,255,20,0.18); border-radius:4px; padding:4px 6px; text-align:center; margin-bottom:6px; background:rgba(57,255,20,0.04);"
        title="Exclusive: calls only this drone covers. Concurrent: calls handled while partner is airborne.">
-    <div style="display:flex; justify-content:space-around; font-size:0.72rem; margin-bottom:3px;">
+    <div style="display:flex; justify-content:space-around; font-size:0.57rem; margin-bottom:1px;">
       <div style="text-align:center;">
         <div style="color:{accent_color}; font-weight:700;">${d_base_annual:,.0f}</div>
-        <div style="color:{text_muted}; font-size:0.6rem;">exclusive</div>
+        <div style="color:{text_muted}; font-size:0.48rem;">exclusive</div>
       </div>
-      <div style="color:{text_muted}; font-size:0.78rem; opacity:0.5; padding-top:2px;">+</div>
+      <div style="color:{text_muted}; font-size:0.65rem; opacity:0.5; padding-top:2px;">+</div>
       <div style="text-align:center;">
         <div style="color:#39FF14; font-weight:700;">${d_conc_annual:,.0f}</div>
-        <div style="color:{text_muted}; font-size:0.6rem;">concurrent</div>
+        <div style="color:{text_muted}; font-size:0.48rem;">concurrent</div>
       </div>
     </div>
-    <div style="font-size:0.6rem; color:{text_muted}; opacity:0.65;">{util_pct} util · ROI {d_best_be}</div>
+    <div style="font-size:0.48rem; color:{text_muted}; opacity:0.65;">{util_pct} util · ROI {d_best_be}</div>
   </div>
 
   <!-- Stats grid -->
-  <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 8px; font-size:0.74rem; flex:1; margin-bottom:6px; align-content:start;">
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:2px 6px; font-size:0.59rem; flex:1; margin-bottom:6px; align-content:start;">
     <div style="color:{text_muted};">Zone Flights/day</div>
     <div style="text-align:right; font-weight:700; color:{accent_color};">{d.get("zone_flights",d_flights):.1f}</div>
     <div style="color:{text_muted};">Shared Flights</div>
@@ -2388,12 +2388,12 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     <div style="text-align:right; font-weight:700; color:{card_title};">{d_time:.1f} min</div>
     <div style="color:{text_muted};">FAA Ceiling</div>
     <div style="text-align:right; font-weight:700; color:{card_title};">{d_faa}</div>
-    <div style="color:{text_muted}; font-size:0.68rem;">Airfield</div>
-    <div style="text-align:right; font-weight:600; color:{card_title}; font-size:0.66rem; word-break:break-word;">{d_airport}</div>
+    <div style="color:{text_muted}; font-size:0.54rem;">Airfield</div>
+    <div style="text-align:right; font-weight:600; color:{card_title}; font-size:0.52rem; word-break:break-word;">{d_airport}</div>
   </div>
 
   <!-- CapEx + ROI footer -->
-  <div style="border-top:1px solid {card_border}; padding-top:5px; display:grid; grid-template-columns:1fr 1fr; gap:4px 8px; font-size:0.74rem; margin-bottom:6px;">
+  <div style="border-top:1px solid {card_border}; padding-top:5px; display:grid; grid-template-columns:1fr 1fr; gap:2px 6px; font-size:0.59rem; margin-bottom:6px;">
     <div style="color:{text_muted};">CapEx</div>
     <div style="text-align:right; font-weight:700; color:{card_title};">${d_cost:,.0f}</div>
     <div style="color:{text_muted};">Base ROI</div>
@@ -2401,9 +2401,9 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   </div>
 
   <!-- Pin buttons — rendered via session_state keys set by JS postMessage -->
-  <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-    {"'''<div style=\'background:rgba(255,215,0,0.15); border:1px solid rgba(255,215,0,0.4); border-radius:4px; padding:6px 8px; font-size:0.68rem; font-weight:700; color:#FFD700; text-align:center; cursor:pointer;\'>&nbsp;🔒 GUARDIAN LOCKED</div>'''" if d.get("pinned") and d_type=="GUARDIAN" else "'''<div style=\'border:1px dashed rgba(255,215,0,0.25); border-radius:4px; padding:6px 8px; font-size:0.68rem; color:rgba(255,215,0,0.5); text-align:center;\'><span style=\'opacity:0.6\'>🦅 lock as guard</span></div>'''" }
-    {"'''<div style=\'background:rgba(0,210,255,0.15); border:1px solid rgba(0,210,255,0.4); border-radius:4px; padding:6px 8px; font-size:0.68rem; font-weight:700; color:#00D2FF; text-align:center; cursor:pointer;\'>&nbsp;🔒 RESPONDER LOCKED</div>'''" if d.get("pinned") and d_type=="RESPONDER" else "'''<div style=\'border:1px dashed rgba(0,210,255,0.25); border-radius:4px; padding:6px 8px; font-size:0.68rem; color:rgba(0,210,255,0.5); text-align:center;\'><span style=\'opacity:0.6\'>🚁 lock as resp</span></div>'''" }
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+    {"'''<div style=\'background:rgba(255,215,0,0.15); border:1px solid rgba(255,215,0,0.4); border-radius:4px; padding:3px 6px; font-size:0.55rem; font-weight:700; color:#FFD700; text-align:center; cursor:pointer;\'>&nbsp;🔒 GUARDIAN LOCKED</div>'''" if d.get("pinned") and d_type=="GUARDIAN" else "'''<div style=\'border:1px dashed rgba(255,215,0,0.25); border-radius:4px; padding:3px 6px; font-size:0.55rem; color:rgba(255,215,0,0.5); text-align:center;\'><span style=\'opacity:0.6\'>🦅 lock as guard</span></div>'''" }
+    {"'''<div style=\'background:rgba(0,210,255,0.15); border:1px solid rgba(0,210,255,0.4); border-radius:4px; padding:3px 6px; font-size:0.55rem; font-weight:700; color:#00D2FF; text-align:center; cursor:pointer;\'>&nbsp;🔒 RESPONDER LOCKED</div>'''" if d.get("pinned") and d_type=="RESPONDER" else "'''<div style=\'border:1px dashed rgba(0,210,255,0.25); border-radius:4px; padding:3px 6px; font-size:0.55rem; color:rgba(0,210,255,0.5); text-align:center;\'><span style=\'opacity:0.6\'>🚁 lock as resp</span></div>'''" }
   </div>
 </div>''')
 
@@ -2416,7 +2416,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     # Wrap in a style-scoped div to prevent Streamlit container from collapsing width
     return (
         '<style>'
-        '.unit-card-grid { display:grid; gap:12px; align-items:stretch; width:100%; box-sizing:border-box; }'
+        '.unit-card-grid { display:grid; gap:10px; align-items:stretch; width:100%; box-sizing:border-box; }'
         '.unit-card-grid > .unit-card { min-width:0; height:100%; }'
         '</style>'
         '<div class="unit-card-grid" style="grid-template-columns:repeat(' + str(columns_per_row) + ', minmax(0,1fr));">'

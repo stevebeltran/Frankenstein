@@ -461,6 +461,71 @@ def estimate_high_activity_overtime(df_calls_full, state_abbr, calls_covered_per
     except Exception:
         return None
 
+
+def build_high_activity_staffing_html(overtime_stats, dark=True, compact=False):
+    """Return an HTML block for the High-Activity Staffing Pressure section."""
+    if overtime_stats is None:
+        return ""
+    bg = "#06060a" if dark else "#ffffff"
+    card = "#0c0c12" if dark else "#ffffff"
+    border = "#1a1a26" if dark else "#e5e7eb"
+    text_main = "#e8e8f2" if dark else "#111118"
+    text_muted = "#7777a0" if dark else "#6b7280"
+    accent = "#00D2FF"
+    title_size = "13px" if compact else "0.95rem"
+    body_size = "11px" if compact else "0.72rem"
+    metric_size = "24px" if compact else "1.45rem"
+    monthly_rows_html = "".join([
+        f"<tr><td style='padding:6px 8px; border-top:1px solid {border}; color:{text_main};'>{row.month}</td>"
+        f"<td style='padding:6px 8px; border-top:1px solid {border}; text-align:right; color:{text_main};'>{int(row.busy_hours):,}</td>"
+        f"<td style='padding:6px 8px; border-top:1px solid {border}; text-align:right; color:{text_main};'>{row.ot_hours:,.0f}</td>"
+        f"<td style='padding:6px 8px; border-top:1px solid {border}; text-align:right; color:{accent};'>${row.ot_cost:,.0f}</td></tr>"
+        for row in overtime_stats['monthly'].itertuples(index=False)
+    ])
+    return f"""
+    <div style="background:{bg}; border:1px solid {border}; border-radius:8px; padding:16px 18px; margin:14px 0 14px 0;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
+            <div>
+                <div style="font-size:10px; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">High-Activity Staffing Pressure</div>
+                <div style="font-size:{title_size}; color:{text_main}; font-weight:800;">Estimated officer overtime needed to cover residual peak demand</div>
+            </div>
+            <div style="font-size:10px; color:{text_muted};">Officer wage basis: <span style="color:{text_main};">{overtime_stats['wage_source']}</span></div>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:12px;">
+            <div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">
+                <div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg High-Activity Hours / Mo</div>
+                <div style="font-size:{metric_size}; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{overtime_stats['avg_busy_hours']:.0f}</div>
+            </div>
+            <div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">
+                <div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg OT Hours Needed / Mo</div>
+                <div style="font-size:{metric_size}; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{overtime_stats['avg_ot_hours']:.0f}</div>
+            </div>
+            <div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">
+                <div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg OT Cost / Mo</div>
+                <div style="font-size:{metric_size}; font-weight:800; color:{accent}; font-family:'IBM Plex Mono', monospace;">${overtime_stats['avg_ot_cost']:,.0f}</div>
+            </div>
+            <div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">
+                <div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg OT Hourly Rate</div>
+                <div style="font-size:{metric_size}; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">${overtime_stats['ot_hourly']:.2f}</div>
+            </div>
+        </div>
+        <div style="font-size:{body_size}; color:{text_muted}; margin-bottom:10px;">Peak month: <span style="color:{text_main}; font-weight:700;">{overtime_stats['peak_month']}</span> · estimated OT spend <span style="color:{accent}; font-weight:700;">${overtime_stats['peak_ot_cost']:,.0f}</span></div>
+        <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:{body_size};">
+                <thead>
+                    <tr>
+                        <th style="text-align:left; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">Month</th>
+                        <th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">High-Activity Hours</th>
+                        <th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">OT Hours</th>
+                        <th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">OT Cost</th>
+                    </tr>
+                </thead>
+                <tbody>{monthly_rows_html}</tbody>
+            </table>
+        </div>
+    </div>
+    """
+
 def generate_command_center_html(df, total_orig_calls, export_mode=False):
     """Generates the full Command Center visual suite with interactive Javascript filtering."""
     if df is None or df.empty:
@@ -4696,117 +4761,51 @@ if st.session_state['csvs_ready']:
         deflection_rate,
     )
 
-    _exec_col, _ot_col = st.columns([1.05, 1.35], gap="medium")
-
-    with _exec_col:
-        _total_units = actual_k_responder + actual_k_guardian
-        _exec_html = f"""
-        <div style="background:{card_bg}; border:1px solid {card_border}; border-radius:8px; padding:16px 18px; margin:8px 0 14px 0; min-height:100%;">
-            <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
-                <div>
-                    <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Executive Summary</div>
-                    <div style="font-size:0.95rem; color:{text_main}; font-weight:800;">Recommended deployment and economic outcome</div>
-                </div>
-                <div style="font-size:0.66rem; color:{text_muted};">Data period: <span style="color:{text_main};">{date_range_str}</span></div>
+    _total_units = actual_k_responder + actual_k_guardian
+    _exec_html = f"""
+    <div style="background:{card_bg}; border:1px solid {card_border}; border-radius:8px; padding:16px 18px; margin:8px 0 14px 0; min-height:100%;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
+            <div>
+                <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Executive Summary</div>
+                <div style="font-size:0.95rem; color:{text_main}; font-weight:800;">Recommended deployment and economic outcome</div>
             </div>
-            <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:12px;">
-                <div style="border:1px solid {card_border}; border-radius:6px; padding:10px;">
-                    <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Recommended Fleet</div>
-                    <div style="font-size:1.45rem; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{_total_units}</div>
-                    <div style="font-size:0.72rem; color:{text_muted};">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div>
-                </div>
-                <div style="border:1px solid {card_border}; border-radius:6px; padding:10px;">
-                    <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Annual Capacity Value</div>
-                    <div style="font-size:1.45rem; font-weight:800; color:{accent_color}; font-family:'IBM Plex Mono', monospace;">${annual_savings:,.0f}</div>
-                    <div style="font-size:0.72rem; color:{text_muted};">Break-even {break_even_text}</div>
-                </div>
-                <div style="border:1px solid {card_border}; border-radius:6px; padding:10px;">
-                    <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Call Coverage</div>
-                    <div style="font-size:1.45rem; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{calls_covered_perc:.1f}%</div>
-                    <div style="font-size:0.72rem; color:{text_muted};">{covered_daily_calls:.1f} calls/day in range</div>
-                </div>
-                <div style="border:1px solid {card_border}; border-radius:6px; padding:10px;">
-                    <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Avg Response / Time Saved</div>
-                    <div style="font-size:1.45rem; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{avg_resp_time:.1f}m</div>
-                    <div style="font-size:0.72rem; color:{text_muted};">{avg_time_saved:.1f}m faster than patrol</div>
-                </div>
+            <div style="font-size:0.66rem; color:{text_muted};">Data period: <span style="color:{text_main};">{date_range_str}</span></div>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:12px;">
+            <div style="border:1px solid {card_border}; border-radius:6px; padding:10px;">
+                <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Recommended Fleet</div>
+                <div style="font-size:1.45rem; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{_total_units}</div>
+                <div style="font-size:0.72rem; color:{text_muted};">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div>
             </div>
-            <div style="font-size:0.78rem; color:{text_main}; line-height:1.7;">
-                This plan recommends <span style="font-weight:800; color:{accent_color};">{actual_k_responder} Responders</span>
-                and <span style="font-weight:800; color:#FFD700;">{actual_k_guardian} Guardians</span> to cover
-                <span style="font-weight:800;">{calls_covered_perc:.1f}%</span> of modeled incidents across
-                approximately <span style="font-weight:800;">{area_sq_mi:,.0f} sq mi</span>. At
-                <span style="font-weight:800;">{int(dfr_dispatch_rate*100)}%</span> DFR dispatch and
-                <span style="font-weight:800;">{int(deflection_rate*100)}%</span> field resolution, the fleet supports
-                about <span style="font-weight:800;">{daily_drone_only_calls:.1f} dispatch-free resolutions per day</span>
-                and an estimated <span style="font-weight:800; color:{accent_color};">${annual_savings:,.0f}</span> in annual capacity value.
+            <div style="border:1px solid {card_border}; border-radius:6px; padding:10px;">
+                <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Annual Capacity Value</div>
+                <div style="font-size:1.45rem; font-weight:800; color:{accent_color}; font-family:'IBM Plex Mono', monospace;">${annual_savings:,.0f}</div>
+                <div style="font-size:0.72rem; color:{text_muted};">Break-even {break_even_text}</div>
+            </div>
+            <div style="border:1px solid {card_border}; border-radius:6px; padding:10px;">
+                <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Call Coverage</div>
+                <div style="font-size:1.45rem; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{calls_covered_perc:.1f}%</div>
+                <div style="font-size:0.72rem; color:{text_muted};">{covered_daily_calls:.1f} calls/day in range</div>
+            </div>
+            <div style="border:1px solid {card_border}; border-radius:6px; padding:10px;">
+                <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Avg Response / Time Saved</div>
+                <div style="font-size:1.45rem; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{avg_resp_time:.1f}m</div>
+                <div style="font-size:0.72rem; color:{text_muted};">{avg_time_saved:.1f}m faster than patrol</div>
             </div>
         </div>
-        """
-        st.markdown(_exec_html, unsafe_allow_html=True)
-
-    with _ot_col:
-        if overtime_stats is not None:
-            monthly_rows_html = ''.join([
-                f"<tr><td style='padding:6px 8px; border-top:1px solid {card_border}; color:{text_main};'>{row.month}</td>"
-                f"<td style='padding:6px 8px; border-top:1px solid {card_border}; text-align:right; color:{text_main};'>{int(row.busy_hours):,}</td>"
-                f"<td style='padding:6px 8px; border-top:1px solid {card_border}; text-align:right; color:{text_main};'>{row.ot_hours:,.0f}</td>"
-                f"<td style='padding:6px 8px; border-top:1px solid {card_border}; text-align:right; color:{accent_color};'>${row.ot_cost:,.0f}</td></tr>"
-                for row in overtime_stats['monthly'].itertuples(index=False)
-            ])
-            ot_html = f"""
-            <div style="background:{card_bg}; border:1px solid {card_border}; border-radius:8px; padding:16px 18px; margin:8px 0 14px 0;">
-                <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
-                    <div>
-                        <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">High-Activity Staffing Pressure</div>
-                        <div style="font-size:0.95rem; color:{text_main}; font-weight:800;">Estimated officer overtime needed to cover residual peak demand</div>
-                    </div>
-                    <div style="font-size:0.66rem; color:{text_muted};">Officer wage basis: <span style="color:{text_main};">{overtime_stats['wage_source']}</span></div>
-                </div>
-                <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:12px;">
-                    <div style="border:1px solid {card_border}; border-radius:6px; padding:10px; text-align:center;">
-                        <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Avg High-Activity Hours / Mo</div>
-                        <div style="font-size:1.6rem; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{overtime_stats['avg_busy_hours']:.0f}</div>
-                    </div>
-                    <div style="border:1px solid {card_border}; border-radius:6px; padding:10px; text-align:center;">
-                        <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Avg OT Hours Needed / Mo</div>
-                        <div style="font-size:1.6rem; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{overtime_stats['avg_ot_hours']:.0f}</div>
-                    </div>
-                    <div style="border:1px solid {card_border}; border-radius:6px; padding:10px; text-align:center;">
-                        <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Avg OT Cost / Mo</div>
-                        <div style="font-size:1.6rem; font-weight:800; color:{accent_color}; font-family:'IBM Plex Mono', monospace;">${overtime_stats['avg_ot_cost']:,.0f}</div>
-                    </div>
-                    <div style="border:1px solid {card_border}; border-radius:6px; padding:10px; text-align:center;">
-                        <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Avg OT Hourly Rate</div>
-                        <div style="font-size:1.6rem; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">${overtime_stats['ot_hourly']:.2f}</div>
-                    </div>
-                </div>
-                <div style="font-size:0.7rem; color:{text_muted}; margin-bottom:10px;">Peak month: <span style="color:{text_main}; font-weight:700;">{overtime_stats['peak_month']}</span> · estimated OT spend <span style="color:{accent_color}; font-weight:700;">${overtime_stats['peak_ot_cost']:,.0f}</span></div>
-                <div style="overflow-x:auto;">
-                  <table style="width:100%; border-collapse:collapse; font-size:0.72rem;">
-                    <thead>
-                      <tr>
-                        <th style="text-align:left; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {card_border};">Month</th>
-                        <th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {card_border};">High-Activity Hours</th>
-                        <th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {card_border};">OT Hours</th>
-                        <th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {card_border};">OT Cost</th>
-                      </tr>
-                    </thead>
-                    <tbody>{monthly_rows_html}</tbody>
-                  </table>
-                </div>
-            </div>
-            """
-            st.markdown(ot_html, unsafe_allow_html=True)
-        else:
-            st.markdown(
-                f"""<div style="background:{card_bg}; border:1px solid {card_border}; border-radius:8px; padding:16px 18px; margin:8px 0 14px 0;">
-                <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">High-Activity Staffing Pressure</div>
-                <div style="font-size:0.9rem; color:{text_main}; font-weight:700; margin-bottom:6px;">Overtime model unavailable for this dataset</div>
-                <div style="font-size:0.76rem; color:{text_muted}; line-height:1.6;">Load a CAD dataset with valid date fields to populate monthly high-activity hours, overtime demand, and cost estimates.</div>
-                </div>""",
-                unsafe_allow_html=True
-            )
+        <div style="font-size:0.78rem; color:{text_main}; line-height:1.7;">
+            This plan recommends <span style="font-weight:800; color:{accent_color};">{actual_k_responder} Responders</span>
+            and <span style="font-weight:800; color:#FFD700;">{actual_k_guardian} Guardians</span> to cover
+            <span style="font-weight:800;">{calls_covered_perc:.1f}%</span> of modeled incidents across
+            approximately <span style="font-weight:800;">{area_sq_mi:,.0f} sq mi</span>. At
+            <span style="font-weight:800;">{int(dfr_dispatch_rate*100)}%</span> DFR dispatch and
+            <span style="font-weight:800;">{int(deflection_rate*100)}%</span> field resolution, the fleet supports
+            about <span style="font-weight:800;">{daily_drone_only_calls:.1f} dispatch-free resolutions per day</span>
+            and an estimated <span style="font-weight:800; color:{accent_color};">${annual_savings:,.0f}</span> in annual capacity value.
+        </div>
+    </div>
+    """
+    st.markdown(_exec_html, unsafe_allow_html=True)
 
     cards_below_map = bool(show_cards)
     map_col = st.container()
@@ -5335,6 +5334,12 @@ if st.session_state['csvs_ready']:
         st.markdown("<div style='margin-top:-32px;'></div>", unsafe_allow_html=True)
         _build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
 
+    if overtime_stats is not None and not _analytics_unavailable:
+        st.markdown(
+            build_high_activity_staffing_html(overtime_stats, dark=True, compact=False),
+            unsafe_allow_html=True
+        )
+
     # ── EXPORT BUTTONS — always visible in sidebar ──
     st.sidebar.markdown("---")
 
@@ -5511,6 +5516,7 @@ if st.session_state['csvs_ready']:
         total_fleet = actual_k_responder + actual_k_guardian
         analytics_html_export = generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls), export_mode=True)
         cad_charts_html_export = _build_cad_charts_html(df_calls_full if df_calls_full is not None else df_calls)
+        staffing_pressure_html_export = build_high_activity_staffing_html(overtime_stats, dark=False, compact=True) if overtime_stats is not None else ""
 
         prepared_for_city = st.session_state.get('active_city', prop_city) or prop_city
         prepared_by_name = prop_name
@@ -5941,6 +5947,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 <section class="doc-section" id="incident-data">
   <div class="section-eyebrow"><span class="pg-num">04</span><span class="pg-title">Incident Data Analysis</span></div>
   {cad_charts_html_export}
+  {staffing_pressure_html_export}
 </section>
 
 <!-- ── 05: DEPLOYMENT LOCATIONS ──────────────────────────────── -->

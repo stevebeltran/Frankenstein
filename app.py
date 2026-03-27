@@ -311,6 +311,26 @@ def get_themed_logo_base64(logo_file="logo.png", theme="dark"):
     except Exception:
         return get_base64_of_bin_file(logo_file)
 
+
+def get_transparent_product_base64(image_file="gigs.png", black_threshold=16):
+    """Return product image as base64 PNG with near-black pixels made transparent."""
+    try:
+        with Image.open(image_file).convert('RGBA') as img:
+            px = img.load()
+            w, h = img.size
+            for y in range(h):
+                for x in range(w):
+                    r, g, b, a = px[x, y]
+                    if a == 0:
+                        continue
+                    if r <= black_threshold and g <= black_threshold and b <= black_threshold:
+                        px[x, y] = (r, g, b, 0)
+            buffer = io.BytesIO()
+            img.save(buffer, format='PNG')
+            return base64.b64encode(buffer.getvalue()).decode()
+    except Exception:
+        return get_base64_of_bin_file(image_file)
+
 # ============================================================
 # COMMAND CENTER ANALYTICS GENERATOR
 # ============================================================

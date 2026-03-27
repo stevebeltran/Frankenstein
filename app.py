@@ -4771,37 +4771,8 @@ if st.session_state['csvs_ready']:
             </div>
             <div style="font-size:0.66rem; color:{text_muted};">Data period: <span style="color:{text_main};">{date_range_str}</span></div>
         </div>
-        <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:12px;">
-            <div style="border:1px solid {card_border}; border-radius:6px; padding:10px;">
-                <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Recommended Fleet</div>
-                <div style="font-size:1.45rem; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{_total_units}</div>
-                <div style="font-size:0.72rem; color:{text_muted};">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div>
-            </div>
-            <div style="border:1px solid {card_border}; border-radius:6px; padding:10px;">
-                <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Annual Capacity Value</div>
-                <div style="font-size:1.45rem; font-weight:800; color:{accent_color}; font-family:'IBM Plex Mono', monospace;">${annual_savings:,.0f}</div>
-                <div style="font-size:0.72rem; color:{text_muted};">Break-even {break_even_text}</div>
-            </div>
-            <div style="border:1px solid {card_border}; border-radius:6px; padding:10px;">
-                <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Call Coverage</div>
-                <div style="font-size:1.45rem; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{calls_covered_perc:.1f}%</div>
-                <div style="font-size:0.72rem; color:{text_muted};">{covered_daily_calls:.1f} calls/day in range</div>
-            </div>
-            <div style="border:1px solid {card_border}; border-radius:6px; padding:10px;">
-                <div style="font-size:0.64rem; color:{text_muted}; text-transform:uppercase;">Avg Response / Time Saved</div>
-                <div style="font-size:1.45rem; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{avg_resp_time:.1f}m</div>
-                <div style="font-size:0.72rem; color:{text_muted};">{avg_time_saved:.1f}m faster than patrol</div>
-            </div>
-        </div>
-        <div style="font-size:0.78rem; color:{text_main}; line-height:1.7;">
-            This plan recommends <span style="font-weight:800; color:{accent_color};">{actual_k_responder} Responders</span>
-            and <span style="font-weight:800; color:#FFD700;">{actual_k_guardian} Guardians</span> to cover
-            <span style="font-weight:800;">{calls_covered_perc:.1f}%</span> of modeled incidents across
-            approximately <span style="font-weight:800;">{area_sq_mi:,.0f} sq mi</span>. At
-            <span style="font-weight:800;">{int(dfr_dispatch_rate*100)}%</span> DFR dispatch and
-            <span style="font-weight:800;">{int(deflection_rate*100)}%</span> field resolution, the fleet supports
-            about <span style="font-weight:800;">{daily_drone_only_calls:.1f} dispatch-free resolutions per day</span>
-            and an estimated <span style="font-weight:800; color:{accent_color};">${annual_savings:,.0f}</span> in annual capacity value.
+        <div style="font-size:0.82rem; color:{text_main}; line-height:1.6; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+            This plan recommends <span style="font-weight:800; color:{accent_color};">{actual_k_responder} Responders</span> and <span style="font-weight:800; color:#FFD700;">{actual_k_guardian} Guardians</span> (<span style="font-weight:800;">{_total_units}</span> total) to cover <span style="font-weight:800;">{calls_covered_perc:.1f}%</span> of modeled incidents across approximately <span style="font-weight:800;">{area_sq_mi:,.0f} sq mi</span>, averaging <span style="font-weight:800;">{avg_resp_time:.1f}m</span> response time, <span style="font-weight:800;">{avg_time_saved:.1f}m</span> faster than patrol, and an estimated <span style="font-weight:800; color:{accent_color};">${annual_savings:,.0f}</span> in annual capacity value with break-even <span style="font-weight:800;">{break_even_text}</span>.
         </div>
     </div>
     """

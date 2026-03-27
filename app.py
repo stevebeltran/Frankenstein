@@ -4582,6 +4582,12 @@ if st.session_state['csvs_ready']:
             pass
 
     avg_resp_time = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
+    # Keep executive-summary time-saved metric available before later export blocks.
+    try:
+        _avg_ground_speed_exec = float(CONFIG["DEFAULT_TRAFFIC_SPEED"]) * (1 - float(traffic_level) / 100.0)
+        avg_time_saved = ((sum((d['radius_m']/1609.34*1.4/_avg_ground_speed_exec)*60 for d in active_drones) / len(active_drones)) - avg_resp_time) if active_drones and _avg_ground_speed_exec > 0 else 0.0
+    except Exception:
+        avg_time_saved = 0.0
 
     # 1. THE SINGLE-LINE EXECUTIVE HEADER
     logo_b64 = get_transparent_product_base64("gigs.png")

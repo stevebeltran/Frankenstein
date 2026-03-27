@@ -291,6 +291,26 @@ def get_base64_of_bin_file(bin_file):
         with open(bin_file, 'rb') as f: return base64.b64encode(f.read()).decode()
     except Exception: return None
 
+
+def get_themed_logo_base64(logo_file="logo.png", theme="dark"):
+    """Return a recolored transparent PNG logo as base64.
+
+    theme='dark'  -> white logo on transparent background
+    theme='light' -> black logo on transparent background
+    Falls back to the raw file if recoloring fails.
+    """
+    try:
+        target_rgb = (255, 255, 255) if str(theme).lower() == 'dark' else (0, 0, 0)
+        with Image.open(logo_file).convert('RGBA') as img:
+            alpha = img.getchannel('A')
+            recolored = Image.new('RGBA', img.size, target_rgb + (0,))
+            recolored.putalpha(alpha)
+            buffer = io.BytesIO()
+            recolored.save(buffer, format='PNG')
+            return base64.b64encode(buffer.getvalue()).decode()
+    except Exception:
+        return get_base64_of_bin_file(logo_file)
+
 # ============================================================
 # COMMAND CENTER ANALYTICS GENERATOR
 # ============================================================

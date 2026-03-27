@@ -17,6 +17,7 @@ from email.mime.multipart import MIMEMultipart
 import gspread
 from google.oauth2.service_account import Credentials
 import pyproj
+from PIL import Image
 
 # --- PAGE CONFIG & INITIALIZE SESSION STATE ---
 st.set_page_config(page_title="BRINC COS Drone Optimizer", layout="wide", initial_sidebar_state="expanded")
@@ -289,6 +290,25 @@ def get_base64_of_bin_file(bin_file):
     try:
         with open(bin_file, 'rb') as f: return base64.b64encode(f.read()).decode()
     except Exception: return None
+
+
+def get_themed_logo_base64(logo_file="logo.png", theme="dark"):
+    """Return the BRINC logo as a white/black transparent PNG for the requested theme.
+
+    theme='dark'  -> white logo on transparent background
+    theme='light' -> black logo on transparent background
+    """
+    try:
+        target_rgb = (255, 255, 255) if str(theme).lower() == 'dark' else (0, 0, 0)
+        with Image.open(logo_file).convert('RGBA') as img:
+            alpha = img.getchannel('A')
+            recolored = Image.new('RGBA', img.size, target_rgb + (0,))
+            recolored.putalpha(alpha)
+            buffer = io.BytesIO()
+            recolored.save(buffer, format='PNG')
+            return base64.b64encode(buffer.getvalue()).decode()
+    except Exception:
+        return None
 
 # ============================================================
 # COMMAND CENTER ANALYTICS GENERATOR
@@ -2555,7 +2575,8 @@ def compute_all_elbow_curves(n_calls, _resp_matrix, _guard_matrix, _geos_r, _geo
 if not st.session_state['csvs_ready']:
 
     # GRAB THE LOGO FOR THE UPLOAD PAGE
-    logo_b64 = get_base64_of_bin_file("gigs.png")
+    logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
+    hero_product_b64 = get_base64_of_bin_file("gigs.png")
     hero_logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:72px; margin-bottom:15px;">' if logo_b64 else f'<div style="font-size:2.5rem; font-weight:900; letter-spacing:4px; color:#ffffff; margin-bottom:15px;">BRINC</div>'
 
     st.markdown(f"""
@@ -2713,7 +2734,7 @@ if not st.session_state['csvs_ready']:
             </div>
         </div>
         <div style="flex:0 0 auto; display:flex; align-items:center; justify-content:center;">
-            <img src="data:image/png;base64,{logo_b64}" style="height:260px; max-width:420px; object-fit:contain; filter: drop-shadow(0 0 32px rgba(0,210,255,0.35)) drop-shadow(0 0 8px rgba(0,150,255,0.2));" alt="BRINC COS Drone Station">
+            <img src="data:image/png;base64,{hero_product_b64}" style="height:260px; max-width:420px; object-fit:contain; filter: drop-shadow(0 0 32px rgba(0,210,255,0.35)) drop-shadow(0 0 8px rgba(0,150,255,0.2));" alt="BRINC COS Drone Station">
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -3439,7 +3460,7 @@ if st.session_state['csvs_ready']:
         master_gdf = gpd.GeoDataFrame({'DISPLAY_NAME':['Auto-Generated Boundary'],'data_count':[len(df_calls)]}, geometry=[poly], crs="EPSG:4326")
 
     # --- DRAW SIDEBAR LOGO FIRST SO IT IS AT THE ABSOLUTE TOP ---
-    logo_b64 = get_base64_of_bin_file("gigs.png")
+    logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
     if logo_b64:
         st.sidebar.markdown(f"""
         <div style="background-color: transparent; padding: 40px 20px 10px 20px; margin: -60px -20px 20px -20px; text-align: center; pointer-events: none;">
@@ -4336,7 +4357,7 @@ if st.session_state['csvs_ready']:
     avg_resp_time = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
 
     # 1. THE SINGLE-LINE EXECUTIVE HEADER
-    logo_b64 = get_base64_of_bin_file("gigs.png")
+    logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
     main_logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:32px; vertical-align:middle; margin-right:15px;">' if logo_b64 else f'<span style="font-size:1.5rem; font-weight:900; letter-spacing:2px; color:#ffffff; margin-right:15px;">BRINC</span>'
 
     header_html = f"""
@@ -5104,7 +5125,7 @@ if st.session_state['csvs_ready']:
                 </div>'''
             )
 
-        logo_b64 = get_base64_of_bin_file("gigs.png")
+        logo_b64 = get_themed_logo_base64("logo.png", theme="light")
         logo_html_str = f'<img src="data:image/png;base64,{logo_b64}" style="height:40px;">' if logo_b64 else '<div style="font-size:24px;font-weight:900;letter-spacing:3px;color:#fff;">BRINC</div>'
 
         jurisdiction_list = ", ".join(selected_names) if selected_names else prop_city
@@ -5428,7 +5449,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 <!-- ── SIDEBAR INDEX ─────────────────────────────────────────── -->
 <nav class="doc-sidebar">
   <div class="sidebar-logo">
-    <div class="brand">BRINC</div>
+    {"<img src='data:image/png;base64," + logo_b64 + "' alt='BRINC'>" if logo_b64 else "<div class='brand'>BRINC</div>"}
   </div>
   <div class="sidebar-city">
     <div class="city-name">{prop_city}, {prop_state}</div>
@@ -5458,7 +5479,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 <!-- ── 00: COVER ─────────────────────────────────────────────── -->
 <section class="cover-page" id="cover">
   <div class="cover-logo">
-    <div class="brand">BRINC</div>
+    {"<img src='data:image/png;base64," + logo_b64 + "' alt='BRINC'>" if logo_b64 else "<div class='brand'>BRINC</div>"}
   </div>
   <div class="cover-body">
     <div class="cover-left">

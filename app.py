@@ -5203,17 +5203,9 @@ if st.session_state['csvs_ready']:
         _analytics_df,
         total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls)
     )
-    _analytics_unavailable = (
-        "Analytics unavailable." in analytics_html_block
-        or "No valid dates found in data." in analytics_html_block
-    )
-    _analytics_height = 180 if _analytics_unavailable else 1700
-    components.html(analytics_html_block, height=_analytics_height, scrolling=False)
+    components.html(analytics_html_block, height=1700, scrolling=False)
 
-    if _analytics_unavailable:
-        # Remove the dead gap when the analytics component only contains a short fallback message.
-        st.markdown("<div style='margin-top:-6px;'></div>", unsafe_allow_html=True)
-    elif _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
+    if _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
         # Collapse gap between components.html block and the plotly charts below
         st.markdown("<div style='margin-top:-32px;'></div>", unsafe_allow_html=True)
         _build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
@@ -5673,28 +5665,17 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 
 /* ── PRINT ───────────────────────────────────────────────────── */
 @media print{{
-  @page{{size:auto;margin:0.45in 0.5in}}
-  html,body{{background:#fff !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-  .doc-sidebar{{display:none !important}}
-  .doc-main{{margin-left:0 !important}}
+  .doc-sidebar{{display:none}}
+  .doc-main{{margin-left:0}}
   .doc-section,.cover-page{{
     page-break-after:always;
     page-break-inside:avoid;
     break-after:page;
     border-bottom:none;
     min-height:0;
-    box-shadow:none !important;
   }}
-  .doc-section{{padding:30px 34px !important}}
-  .cover-page{{padding:38px 40px !important;min-height:auto !important}}
-  .doc-footer{{padding:20px 34px !important}}
   .doc-section:last-child,.cover-page:last-child{{page-break-after:auto;break-after:auto}}
-  .section-eyebrow,.cover-headline,h1,h2,h3,h4{{break-after:avoid-page;page-break-after:avoid}}
-  .metrics-hero,.roi-strip,.grant-layout,.infra-grid,.map-wrap,table,img,svg,canvas{{
-    break-inside:avoid-page;
-    page-break-inside:avoid;
-  }}
-  a{{color:inherit !important;text-decoration:none !important}}
+  body{{background:#fff}}
 }}
 </style>
 </head>

@@ -2062,6 +2062,24 @@ def fetch_census_population(state_fips, place_name, is_county=False):
 SHAPEFILE_DIR = "jurisdiction_data"
 if not os.path.exists(SHAPEFILE_DIR): os.makedirs(SHAPEFILE_DIR)
 
+# Delete any previously saved county-sized shapefiles (>150 sq mi).
+# These were saved by older versions of the app and cause the map to
+# default to county-level zoom. They will be re-fetched as city boundaries.
+try:
+    for _shp in glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp")):
+        try:
+            _gdf = gpd.read_file(_shp)
+            _gdf = _gdf.set_crs(epsg=4269) if _gdf.crs is None else _gdf
+            _sq_mi = _gdf.to_crs(epsg=3857).geometry.area.sum() / 2589988.11
+            if _sq_mi > 150:
+                for _ext in ['.shp', '.dbf', '.shx', '.prj', '.cpg', '.sbn', '.sbx']:
+                    _cf = _shp.replace('.shp', _ext)
+                    if os.path.exists(_cf): os.remove(_cf)
+        except Exception:
+            pass
+except Exception:
+    pass
+
 @st.cache_data
 def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
     # Check if we already downloaded and cached this state's places file
@@ -3344,33 +3362,34 @@ if not st.session_state['csvs_ready']:
 
                     with st.spinner(get_jurisdiction_message()):
                         # ── BOUNDARY LOOKUP: fetch & save shapefile NOW so
-                        # find_relevant_jurisdictions() can use it on the map page ──
+                        # find_relevant_jurisdictions() can use it on the map page.
+                        # IMPORTANT: Only save PLACE (city) boundaries to disk.
+                        # County boundaries are too large and cause the map to zoom
+                        # out to county level. If we only have a county, skip saving
+                        # and let the runtime city_m clipping handle it. ──────────
                         detected_city_for_boundary = st.session_state.get('active_city', '')
                         detected_state_for_boundary = st.session_state.get('active_state', '')
                         if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
-                            # Boundary lookup priority:
-                            # 1. places_lite.parquet  — exact city shape (best)
-                            # 2. counties_lite.parquet — same-name county
-                            # 3. Geocode → find county → counties_lite.parquet
+                            # Delete any previously cached shapefile for this city
+                            # so stale county-sized files don't persist across uploads.
+                            try:
+                                _safe_n_del = detected_city_for_boundary.replace(" ", "_").replace("/", "_")
+                                _old_shp = os.path.join(SHAPEFILE_DIR, f"{_safe_n_del}_{detected_state_for_boundary}.shp")
+                                if os.path.exists(_old_shp):
+                                    for _ext in ['.shp', '.dbf', '.shx', '.prj', '.cpg']:
+                                        _f = _old_shp.replace('.shp', _ext)
+                                        if os.path.exists(_f):
+                                            os.remove(_f)
+                            except Exception:
+                                pass
+
+                            # Try place boundary first (city-level — correct size)
                             b_success, b_gdf = fetch_place_boundary_local(
                                 detected_state_for_boundary, detected_city_for_boundary)
-                            if not b_success:
-                                for name_try in [detected_city_for_boundary,
-                                                 detected_city_for_boundary + " County"]:
-                                    b_success, b_gdf = fetch_county_boundary_local(
-                                        detected_state_for_boundary, name_try)
-                                    if b_success and b_gdf is not None:
-                                        break
-                            if not b_success:
-                                county_name = lookup_county_for_city(
-                                    detected_city_for_boundary, detected_state_for_boundary)
-                                if county_name:
-                                    b_success, b_gdf = fetch_county_boundary_local(
-                                        detected_state_for_boundary, county_name)
-                                    if b_success and b_gdf is not None:
-                                        b_gdf = b_gdf.copy()
-                                        b_gdf['NAME'] = detected_city_for_boundary + " (" + county_name + " County)"
-                            if b_success and b_gdf is not None:
+                            b_is_place = b_success  # track if we got a city-level boundary
+
+                            # Only save if it's a city/place boundary — never save county
+                            if b_success and b_gdf is not None and b_is_place:
                                 try:
                                     safe_n = detected_city_for_boundary.replace(" ", "_").replace("/", "_")
                                     b_gdf.to_file(os.path.join(
@@ -3378,6 +3397,11 @@ if not st.session_state['csvs_ready']:
                                         f"{safe_n}_{detected_state_for_boundary}.shp"))
                                 except Exception:
                                     pass
+                            # If place lookup failed, store the city name so the runtime
+                            # city_m block can fall back to call-hull clipping
+                            if not b_success:
+                                st.session_state['_boundary_fallback_city'] = detected_city_for_boundary
+                            find_relevant_jurisdictions.clear()
 
                     st.session_state['data_source'] = 'cad_upload'
                     st.session_state['map_build_logged'] = False

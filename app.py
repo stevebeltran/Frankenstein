@@ -376,29 +376,32 @@ def _detect_datetime_series_for_labels(df):
 
 @st.cache_data
 def _bls_area_code_for_city(city, state_abbr, api_key):
-    """Resolve city + state to a BLS OEWS MSA 6-digit area code via the BLS Areas API.
-    BLS OEWS area codes for metros are 6-digit strings (e.g. "047020" for Victoria TX).
-    The area list endpoint also returns codes with a type prefix like "M047020";
-    we strip the leading letter when building series IDs.
-    Returns (six_digit_code, area_name) or (None, None).
+    """Resolve city+state to a BLS OEWS 6-digit metro area code.
+    Returns (six_digit_code, area_name, debug_info) or (None, None, debug_info).
     """
+    debug = {}
     try:
-        # GET request — area list endpoint does not require a body
         url = f"https://api.bls.gov/publicAPI/v2/surveys/OE/area?registrationkey={api_key}"
         req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
         with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode())
+            raw = resp.read().decode()
+        data = json.loads(raw)
+        status = data.get('status', '?')
+        debug['area_api_status'] = status
         areas = data.get('Results', {}).get('area', [])
+        debug['area_count'] = len(areas)
+        # Log a sample of raw codes so we can see the format
+        debug['area_sample'] = [(a.get('area_code',''), a.get('area_name','')) for a in areas[:5]]
         city_clean = city.strip().lower()
         state_up = state_abbr.strip().upper()
         best_code, best_name, best_score = None, None, 0
+        candidates = []
         for a in areas:
             name = a.get('area_name', '')
             code = a.get('area_code', '')
             if not code:
                 continue
-            # Strip leading area-type letter (M=metro, N=nonmetro, S=state, 0=national)
-            numeric_code = code.lstrip('MNS0') if not code[0].isdigit() else code
+            numeric_code = code.lstrip('MNS') if not code[0].isdigit() else code
             if not numeric_code or len(numeric_code) < 4:
                 continue
             name_lower = name.lower()
@@ -407,47 +410,39 @@ def _bls_area_code_for_city(city, state_abbr, api_key):
                 score += 10
             if state_up in name.upper():
                 score += 5
+            if score > 0:
+                candidates.append((score, code, numeric_code, name))
             if score > best_score:
                 best_score = score
-                # Pad/trim to exactly 6 digits for series ID
                 best_code = numeric_code.zfill(6)[:6]
                 best_name = name
+        debug['candidates'] = sorted(candidates, reverse=True)[:10]
+        debug['best_code'] = best_code
+        debug['best_name'] = best_name
+        debug['best_score'] = best_score
         if best_code and best_score >= 10:
-            return best_code, best_name
-    except Exception:
-        pass
-    return None, None
+            return best_code, best_name, debug
+    except Exception as ex:
+        debug['area_exception'] = str(ex)
+    return None, None, debug
 
 
 @st.cache_data
 def fetch_area_police_hourly_wage(city, state_abbr, api_key=None):
-    """Mean hourly wage for police/sheriff patrol officers (SOC 33-3051) from BLS OEWS.
+    """Mean hourly wage for SOC 33-3051 from BLS OEWS with full diagnostics stored in st.session_state._bls_debug."""
+    bls_debug = {'city': city, 'state': state_abbr, 'api_key_set': bool(api_key), 'api_key_len': len(api_key or '')}
 
-    BLS OEWS series ID format (24 chars total):
-      OE  (2) survey prefix
-      U   (1) seasonal adjustment (unadjusted)
-      M   (1) area type: M=metro
-      area(6) 6-digit BLS metro area code
-      000000  (6) industry = all industries
-      333051  (6) SOC 33-3051 (no dash)
-      03      (2) datatype = mean hourly wage
-    Example for Victoria TX (area 047020): OEUM04702000000033305103
-
-    Resolution order:
-      1. BLS API v2  — MSA-level series for the specific metro area  (most accurate)
-      2. BLS HTML    — state-level OEWS page                          (state average)
-      3. BLS OOH     — national median                                (national fallback)
-      4. Hardcoded   — $37/hr                                         (last resort)
-
-    Returns (hourly_wage: float, source_label: str).
-    """
-    # ── 1. BLS API v2: MSA-level mean hourly wage ─────────────────────────────
+    # ── 1. BLS API v2: MSA-level ──────────────────────────────────────────────
     if api_key:
         try:
-            area_code, area_name = _bls_area_code_for_city(city, state_abbr, api_key)
+            area_code, area_name, area_debug = _bls_area_code_for_city(city, state_abbr, api_key)
+            bls_debug['area_lookup'] = area_debug
+            bls_debug['area_code'] = area_code
+            bls_debug['area_name'] = area_name
             if area_code:
-                # Correct 24-char series: OE + U + M + 6-digit-area + 000000 + 333051 + 03
                 series_id = f"OEUM{area_code}00000033305103"
+                bls_debug['series_id'] = series_id
+                bls_debug['series_len'] = len(series_id)
                 payload = json.dumps({
                     "seriesid": [series_id],
                     "registrationkey": api_key,
@@ -463,21 +458,37 @@ def fetch_area_police_hourly_wage(city, state_abbr, api_key=None):
                 )
                 with urllib.request.urlopen(req, timeout=15) as resp:
                     result = json.loads(resp.read().decode())
+                bls_debug['timeseries_status'] = result.get('status')
+                bls_debug['timeseries_message'] = result.get('message', [])
                 series_list = result.get('Results', {}).get('series', [])
+                bls_debug['series_returned'] = len(series_list)
                 if series_list:
-                    for pt in series_list[0].get('data', []):
-                        # period A01 = annual; also accept any period with a valid wage
+                    data_pts = series_list[0].get('data', [])
+                    bls_debug['data_points'] = len(data_pts)
+                    bls_debug['data_sample'] = data_pts[:3]
+                    for pt in data_pts:
                         val_str = str(pt.get('value', '-')).replace(',', '')
-                        if val_str == '-' or not val_str:
+                        if val_str in ('-', ''):
                             continue
                         try:
                             val = float(val_str)
                         except ValueError:
                             continue
                         if 15 <= val <= 150:
+                            bls_debug['result'] = f'API success: ${val:.2f}/hr'
+                            try:
+                                st.session_state['_bls_debug'] = bls_debug
+                            except Exception:
+                                pass
                             return val, f"BLS OEWS API — {area_name or area_code}"
-        except Exception:
-            pass
+                    bls_debug['api_fail_reason'] = 'no data points in valid $15–$150 range'
+                else:
+                    bls_debug['api_fail_reason'] = 'no series in Results'
+            else:
+                bls_debug['api_fail_reason'] = 'area code not resolved'
+        except Exception as ex:
+            bls_debug['api_exception'] = str(ex)
+
     # ── 2. BLS state HTML scrape ──────────────────────────────────────────────
     try:
         state_code = str(state_abbr).strip().lower()
@@ -493,9 +504,15 @@ def fetch_area_police_hourly_wage(city, state_abbr, api_key=None):
         if m:
             mean_hourly = float(m.group(2).replace(',', ''))
             if 15 <= mean_hourly <= 100:
+                bls_debug['result'] = f'State scrape: ${mean_hourly:.2f}/hr'
+                try:
+                    st.session_state['_bls_debug'] = bls_debug
+                except Exception:
+                    pass
                 return mean_hourly, f'BLS state OEWS 2023 ({state_abbr.upper()})'
-    except Exception:
-        pass
+        bls_debug['state_scrape'] = 'no regex match'
+    except Exception as ex:
+        bls_debug['state_scrape_exception'] = str(ex)
 
     # ── 3. BLS national OOH median ────────────────────────────────────────────
     try:
@@ -508,11 +525,22 @@ def fetch_area_police_hourly_wage(city, state_abbr, api_key=None):
         m = re.search(r"Police and sheriff(?:'|\u2019)s patrol officers\s*\|\s*\$([0-9,]+)", html, re.I)
         if m:
             median_annual = float(m.group(1).replace(',', ''))
+            bls_debug['result'] = f'National OOH: ${median_annual/2080:.2f}/hr'
+            try:
+                st.session_state['_bls_debug'] = bls_debug
+            except Exception:
+                pass
             return median_annual / 2080.0, 'BLS national OOH 2024 median'
-    except Exception:
-        pass
+        bls_debug['national_scrape'] = 'no regex match'
+    except Exception as ex:
+        bls_debug['national_scrape_exception'] = str(ex)
 
     # ── 4. Hardcoded fallback ─────────────────────────────────────────────────
+    bls_debug['result'] = 'fallback $37'
+    try:
+        st.session_state['_bls_debug'] = bls_debug
+    except Exception:
+        pass
     return 37.0, 'fallback estimate'
 def estimate_high_activity_overtime(df_calls_full, state_abbr, calls_covered_perc, dfr_dispatch_rate, deflection_rate, city=None, bls_api_key=None):
     """Estimate high-activity monthly staffing pressure and officer overtime replacement cost."""
@@ -5511,6 +5539,12 @@ if st.session_state['csvs_ready']:
             build_high_activity_staffing_html(overtime_stats, dark=True, compact=False),
             unsafe_allow_html=True
         )
+
+    # ── BLS DEBUG PANEL — shows exactly what the API returned ────────────────
+    _bls_dbg = st.session_state.get('_bls_debug')
+    if _bls_dbg:
+        with st.expander("🔍 BLS Wage Lookup Diagnostics", expanded=True):
+            st.json(_bls_dbg)
 
     # ── EXPORT BUTTONS — always visible in sidebar ──
     st.sidebar.markdown("---")

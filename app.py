@@ -30,7 +30,6 @@ defaults = {
     'dfr_rate': 25, 'deflect_rate': 30, 'total_original_calls': 0, 'total_modeled_calls': 0,
     'onboarding_done': False, 'trigger_sim': False, 'city_count': 1,
     'brinc_user': 'steven.beltran',
-    'bls_api_key': '',
     'pd_chief_name': '', 'pd_dept_name': '', 'pd_dept_email': '', 'pd_dept_phone': '',
     'session_start': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
     'session_id': str(uuid.uuid4())[:8],
@@ -43,13 +42,6 @@ for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# Seed BLS API key from Streamlit secrets on first load (before any overtime calculation)
-try:
-    _secrets_bls_key = st.secrets.get("BLS_API_KEY", "").strip().rstrip(".,;")
-    if _secrets_bls_key and not st.session_state.get('bls_api_key', '').strip():
-        st.session_state['bls_api_key'] = _secrets_bls_key
-except Exception:
-    pass
 
 if 'target_cities' not in st.session_state:
     st.session_state['target_cities'] = [{"city": st.session_state.get('active_city', 'Victoria'), "state": st.session_state.get('active_state', 'TX')}]
@@ -374,160 +366,7 @@ def _detect_datetime_series_for_labels(df):
 
 
 
-@st.cache_data
-def _cbsa_code_for_city(city, state_abbr):
-    """Look up Census CBSA code for a city+state using the Census Bureau public API.
-    Returns (cbsa_5digit_str, msa_name) or (None, None).
-    """
-    try:
-        url = (
-            "https://api.census.gov/data/2020/dec/pl"
-            "?get=NAME&for=metropolitan%20statistical%20area"
-            "%2Fmicropolitan%20statistical%20area:*"
-        )
-        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            rows = json.loads(resp.read().decode())
-        city_clean = city.strip().lower()
-        state_up = state_abbr.strip().upper()
-        best_code, best_name, best_score = None, None, 0
-        for row in rows[1:]:
-            name, code = row[0], row[1]
-            name_lower = name.lower()
-            score = 0
-            if city_clean in name_lower:
-                score += 10
-            if f', {state_up}' in name.upper() or f'-{state_up}' in name.upper():
-                score += 5
-            if score > best_score:
-                best_score, best_code, best_name = score, code, name
-        if best_code and best_score >= 10:
-            return best_code.lstrip('0').zfill(5), best_name
-    except Exception:
-        pass
-    return None, None
-
-
-@st.cache_data(ttl=86400*30)
-def _bls_oes_msa_wage(cbsa_5digit, occ_code='33-3051'):
-    """Download BLS OES annual MSA flat file (ZIP) and extract mean hourly wage
-    for a given CBSA and occupation code.
-    BLS publishes: https://www.bls.gov/oes/special.requests/oesm24ma.zip
-    Inside: all_data_M_2024.xlsx  columns include AREA (CBSA), OCC_CODE, H_MEAN
-    Returns (wage_float, year_str) or (None, None).
-    """
-    import io
-    for year in ['2024', '2023', '2022']:
-        try:
-            zip_url = f"https://www.bls.gov/oes/special.requests/oesm{year[2:]}ma.zip"
-            req = urllib.request.Request(zip_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                zip_bytes = resp.read()
-            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-                # Find the all_data_M file (xlsx or csv)
-                candidates = [n for n in zf.namelist()
-                              if 'all_data_M' in n or 'All_Data_M' in n or 'all_data_m' in n]
-                if not candidates:
-                    candidates = [n for n in zf.namelist() if n.endswith('.xlsx') or n.endswith('.csv')]
-                if not candidates:
-                    continue
-                fname = candidates[0]
-                raw = zf.read(fname)
-            if fname.endswith('.xlsx'):
-                df = pd.read_excel(io.BytesIO(raw), dtype=str)
-            else:
-                df = pd.read_csv(io.StringIO(raw.decode('utf-8', errors='ignore')), dtype=str)
-            # Normalize column names
-            df.columns = [c.strip().upper() for c in df.columns]
-            area_col = next((c for c in df.columns if c in ('AREA', 'AREA_CODE')), None)
-            occ_col  = next((c for c in df.columns if c in ('OCC_CODE',)), None)
-            wage_col = next((c for c in df.columns if c in ('H_MEAN',)), None)
-            if not all([area_col, occ_col, wage_col]):
-                continue
-            # Dump diagnostics so we can see real values
-            import streamlit as _st
-            _st.session_state['_oes_diag'] = {
-                'year': year,
-                'fname': fname,
-                'columns': list(df.columns),
-                'area_col': area_col,
-                'occ_col': occ_col,
-                'wage_col': wage_col,
-                'area_sample': df[area_col].dropna().unique()[:20].tolist(),
-                'occ_sample': df[occ_col].dropna().unique()[:10].tolist(),
-                'cbsa_5digit': cbsa_5digit,
-                'cbsa_int': str(int(cbsa_5digit)),
-            }
-            # Match CBSA — BLS stores it as integer string e.g. "31140" or "31140.0"
-            cbsa_int = str(int(cbsa_5digit))
-            mask = (
-                df[area_col].str.strip().str.lstrip('0').str.split('.').str[0] == cbsa_int
-            ) & (
-                df[occ_col].str.strip() == occ_code
-            )
-            match = df[mask]
-            if match.empty:
-                continue
-            wage_str = match.iloc[0][wage_col]
-            if str(wage_str).strip() in ('*', '#', '', 'nan'):
-                continue
-            wage = float(str(wage_str).replace(',', ''))
-            if 15 <= wage <= 150:
-                return wage, year
-        except Exception:
-            continue
-    return None, None
-
-
-@st.cache_data
-def fetch_area_police_hourly_wage(city, state_abbr, api_key=None):
-    """Mean hourly wage for SOC 33-3051 (police patrol officers) from BLS OES MSA data.
-
-    Strategy:
-      1. Census API -> CBSA code -> BLS OES MSA annual ZIP file (most accurate, MSA-level)
-      2. Hardcoded $37/hr fallback
-
-    Stores diagnostic info in st.session_state['_bls_debug'].
-    Returns (hourly_wage: float, source_label: str).
-    """
-    bls_debug = {
-        'city': city,
-        'state': state_abbr,
-        'api_key_set': bool(api_key),
-    }
-
-    try:
-        # Step 1: CBSA code from Census
-        cbsa_code, msa_name = _cbsa_code_for_city(city, state_abbr)
-        bls_debug['cbsa_code'] = cbsa_code
-        bls_debug['msa_name'] = msa_name
-
-        if cbsa_code:
-            # Step 2: BLS OES MSA flat file
-            wage, year = _bls_oes_msa_wage(cbsa_code)
-            bls_debug['oes_wage'] = wage
-            bls_debug['oes_year'] = year
-            if wage:
-                bls_debug['result'] = f'BLS OES {year} MSA: ${wage:.2f}/hr — {msa_name}'
-                try:
-                    st.session_state['_bls_debug'] = bls_debug
-                except Exception:
-                    pass
-                return wage, f'BLS OES {year} — {msa_name}'
-            else:
-                bls_debug['fail_reason'] = f'No OES MSA wage found for CBSA {cbsa_code}'
-        else:
-            bls_debug['fail_reason'] = f'Census CBSA lookup found no MSA for {city}, {state_abbr}'
-    except Exception as ex:
-        bls_debug['exception'] = str(ex)
-
-    bls_debug['result'] = 'fallback $37/hr'
-    try:
-        st.session_state['_bls_debug'] = bls_debug
-    except Exception:
-        pass
-    return 37.0, 'fallback estimate'
-def estimate_high_activity_overtime(df_calls_full, state_abbr, calls_covered_perc, dfr_dispatch_rate, deflection_rate, city=None, bls_api_key=None):
+def estimate_high_activity_overtime(df_calls_full, state_abbr, calls_covered_perc, dfr_dispatch_rate, deflection_rate):
     """Estimate high-activity monthly staffing pressure and officer overtime replacement cost."""
     if df_calls_full is None or len(df_calls_full) == 0:
         return None
@@ -559,7 +398,7 @@ def estimate_high_activity_overtime(df_calls_full, state_abbr, calls_covered_per
             if busy_hours <= 0:
                 continue
 
-            officer_hourly, wage_source = fetch_area_police_hourly_wage(city or '', state_abbr, bls_api_key)
+            officer_hourly, wage_source = 37.0, 'estimate'
             overtime_hourly = officer_hourly * 1.5
 
             drone_relief_share = (calls_covered_perc / 100.0) * dfr_dispatch_rate * deflection_rate
@@ -4958,19 +4797,12 @@ if st.session_state['csvs_ready']:
         note_bits.append(full_daily_note)
     st.markdown(f"<div style='font-size:0.65rem;color:gray;margin-top:-10px;margin-bottom:12px;text-align:right;'>{' '.join(note_bits)}</div>", unsafe_allow_html=True)
 
-    # Resolve BLS key: secrets take priority, then whatever the user typed in the sidebar
-    try:
-        _ot_bls_key = st.secrets.get("BLS_API_KEY", "").strip().rstrip(".,;") or st.session_state.get('bls_api_key', '').strip().rstrip(".,;")
-    except Exception:
-        _ot_bls_key = st.session_state.get('bls_api_key', '').strip()
     overtime_stats = estimate_high_activity_overtime(
         df_calls_full if df_calls_full is not None else df_calls,
         st.session_state.get('active_state', 'TX'),
         calls_covered_perc,
         dfr_dispatch_rate,
         deflection_rate,
-        city=st.session_state.get('active_city', ''),
-        bls_api_key=_ot_bls_key,
     )
     cards_below_map = bool(show_cards)
     map_col = st.container()
@@ -5519,21 +5351,7 @@ if st.session_state['csvs_ready']:
         st.markdown("<div style='margin-top:-48px;'></div>", unsafe_allow_html=True)
         _build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
 
-    if overtime_stats is not None and not _analytics_unavailable:
-        st.markdown(
-            build_high_activity_staffing_html(overtime_stats, dark=True, compact=False),
-            unsafe_allow_html=True
-        )
 
-    # ── BLS DEBUG PANEL — shows exactly what the API returned ────────────────
-    _bls_dbg = st.session_state.get('_bls_debug')
-    if _bls_dbg:
-        with st.expander("🔍 BLS Wage Lookup Diagnostics", expanded=True):
-            st.json(_bls_dbg)
-    _oes_diag = st.session_state.get('_oes_diag')
-    if _oes_diag:
-        with st.expander("🔍 OES File Diagnostics", expanded=True):
-            st.json(_oes_diag)
 
     # ── EXPORT BUTTONS — always visible in sidebar ──
     st.sidebar.markdown("---")
@@ -5541,31 +5359,6 @@ if st.session_state['csvs_ready']:
     brinc_user = st.sidebar.text_input("BRINC Email Prefix (first.last)", value=st.session_state.get('brinc_user', 'steven.beltran'), key='brinc_user', help="Enter 'first.last' to auto-generate your name and @brincdrones.com email address.")
     st.sidebar.caption("*(Press **Enter** after typing to apply changes)*")
 
-    # ── BLS API key (area-specific officer wage lookup) ───────────────────────
-    _bls_key_from_secrets = ""
-    try:
-        _bls_key_from_secrets = st.secrets.get("BLS_API_KEY", "")
-    except Exception:
-        pass
-    _bls_key_default = _bls_key_from_secrets or st.session_state.get('bls_api_key', '')
-    with st.sidebar.expander("🔑 BLS API Key (Officer Wage)", expanded=not bool(_bls_key_default)):
-        bls_api_key_input = st.text_input(
-            "BLS Registration Key",
-            value=_bls_key_default,
-            type="password",
-            key='bls_api_key',
-            help=(
-                "Enter your BLS Public Data API v2 key to pull exact MSA-level officer wages "
-                "for the active jurisdiction. Register free at bls.gov/developers. "
-                "Without a key the app falls back to the state-level OEWS page."
-            ),
-        )
-        if bls_api_key_input:
-            st.caption("✅ Key set — wage lookup will use BLS OEWS API for the active metro area.")
-        else:
-            st.caption("No key set — falling back to state-level BLS scrape or national median.")
-    # Ensure session state stays in sync (key widget already writes to 'bls_api_key')
-    _effective_bls_key = bls_api_key_input or _bls_key_from_secrets
 
     user_clean = brinc_user.strip()
     if not user_clean: user_clean = "steven.beltran"
@@ -5737,7 +5530,7 @@ if st.session_state['csvs_ready']:
         total_fleet = actual_k_responder + actual_k_guardian
         analytics_html_export = generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls), export_mode=True)
         cad_charts_html_export = _build_cad_charts_html(df_calls_full if df_calls_full is not None else df_calls)
-        staffing_pressure_html_export = build_high_activity_staffing_html(overtime_stats, dark=False, compact=True) if overtime_stats is not None else ""
+        staffing_pressure_html_export = ""
 
         prepared_for_city = st.session_state.get('active_city', prop_city) or prop_city
         prepared_by_name = prop_name

@@ -184,6 +184,8 @@ def _build_details_html(details):
             <tr><td style="padding:4px; color:#888;">Deflection Rate</td><td style="padding:4px;">{details.get('deflect_rate', 0)}%</td></tr>
             <tr><td style="padding:4px; color:#888;">Total CapEx</td><td style="padding:4px;">${details.get('fleet_capex', 0):,.0f}</td></tr>
             <tr><td style="padding:4px; color:#888;">Annual Savings</td><td style="padding:4px;">${details.get('annual_savings', 0):,.0f}</td></tr>
+            <tr><td style="padding:4px; color:#888;">Thermal Upside</td><td style="padding:4px;">${details.get('thermal_savings', 0):,.0f}</td></tr>
+            <tr><td style="padding:4px; color:#888;">K-9 Upside</td><td style="padding:4px;">${details.get('k9_savings', 0):,.0f}</td></tr>
             <tr><td style="padding:4px; color:#888;">Break-Even</td><td style="padding:4px;">{be}</td></tr>
             <tr><td style="padding:4px; color:#888;">Avg Response Time</td><td style="padding:4px;">{avg_t:.1f} min</td></tr>
             <tr><td style="padding:4px; color:#888;">Time Saved vs Patrol</td><td style="padding:4px;">{time_saved:.1f} min</td></tr>
@@ -355,38 +357,25 @@ def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, emai
 CONFIG = {
     "RESPONDER_COST": 80000, "GUARDIAN_COST": 160000, "RESPONDER_RANGE_MI": 2.0,
     "OFFICER_COST_PER_CALL": 82, "DRONE_COST_PER_CALL": 6,
+    # Specialty-response upside (conservative defaults; see helper below)
+    "THERMAL_DEFAULT_APPLICABLE_RATE": 0.12,
+    "THERMAL_SAVINGS_PER_CALL": 38,
+    "K9_DEFAULT_APPLICABLE_RATE": 0.03,
+    "K9_SAVINGS_PER_CALL": 155,
     "DEFAULT_TRAFFIC_SPEED": 35.0, "RESPONDER_SPEED": 42.0, "GUARDIAN_SPEED": 60.0,
-    # Guardian duty cycle: 60 min flight + 2 min battery swap = 62 min cycle
-    # Daily airtime = (24*60) / 62 * 60 = 1393.5 min = 23.23 hrs
-    "GUARDIAN_FLIGHT_MIN":  60,   # flight minutes per full cycle
-    "GUARDIAN_CHARGE_MIN":   2,   # battery swap minutes per cycle
-    "GUARDIAN_AVG_SORTIE_MIN": 10,  # assumed avg mission length (min) for sortie-count calc
-    # Responder duty cycle: 30 min max flight + 25 min recharge = 55 min cycle
-    # Avg sortie is 10 min, so effective cycle for capacity = 10 + 25 = 35 min
-    "RESPONDER_FLIGHT_MIN":     30,   # max flight minutes per sortie
-    "RESPONDER_AVG_SORTIE_MIN": 10,   # assumed avg mission length (min) for sortie-count calc
-    "RESPONDER_CHARGE_MIN":     25,   # recharge minutes per cycle
-    "RESPONDER_PATROL_HOURS":   11.6, # legacy — kept for downstream calcs
+    # Guardian duty cycle: 60 min flight + 3 min charge = 63 min cycle
+    # Daily airtime = (24*60) / 63 * 60 = 1371.4 min = 22.86 hrs
+    "GUARDIAN_FLIGHT_MIN":  60,   # flight minutes per cycle
+    "GUARDIAN_CHARGE_MIN":   3,   # charge minutes per cycle
+    # Responder duty cycle: 30-min max flight per sortie, 11.6hr shift
+    "RESPONDER_FLIGHT_MIN":   30,    # max flight minutes per sortie
+    "RESPONDER_PATROL_HOURS": 11.6,
 }
-# Derived: Guardian daily airtime from duty cycle
+# Derived: compute Guardian daily airtime from duty cycle
 CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] = (
     (24 * 60) / (CONFIG["GUARDIAN_FLIGHT_MIN"] + CONFIG["GUARDIAN_CHARGE_MIN"])
 ) * CONFIG["GUARDIAN_FLIGHT_MIN"]
 CONFIG["GUARDIAN_PATROL_HOURS"] = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] / 60
-
-# Derived: max sorties per day — how many avg-length missions fit in a 24-hr cycle
-# Guardian: avg sortie (10 min) + battery swap (2 min) = 12 min per mission window
-CONFIG["GUARDIAN_SORTIES_PER_DAY"] = int(
-    (24 * 60) / (CONFIG["GUARDIAN_AVG_SORTIE_MIN"] + CONFIG["GUARDIAN_CHARGE_MIN"])
-)
-# Responder: avg sortie (10 min) + recharge (25 min) = 35 min per mission window
-CONFIG["RESPONDER_SORTIES_PER_DAY"] = int(
-    (24 * 60) / (CONFIG["RESPONDER_AVG_SORTIE_MIN"] + CONFIG["RESPONDER_CHARGE_MIN"])
-)
-# Responder daily flight budget (avg sortie × sorties per day)
-CONFIG["RESPONDER_DAILY_FLIGHT_MIN"] = (
-    CONFIG["RESPONDER_SORTIES_PER_DAY"] * CONFIG["RESPONDER_AVG_SORTIE_MIN"]
-)
 STATE_FIPS = {"AL": "01", "AK": "02", "AZ": "04", "AR": "05", "CA": "06", "CO": "08", "CT": "09", "DE": "10", "FL": "12", "GA": "13", "HI": "15", "ID": "16", "IL": "17", "IN": "18", "IA": "19", "KS": "20", "KY": "21", "LA": "22", "ME": "23", "MD": "24", "MA": "25", "MI": "26", "MN": "27", "MS": "28", "MO": "29", "MT": "30", "NE": "31", "NV": "32", "NH": "33", "NJ": "34", "NM": "35", "NY": "36", "NC": "37", "ND": "38", "OH": "39", "OK": "40", "OR": "41", "PA": "42", "RI": "44", "SC": "45", "SD": "46", "TN": "47", "TX": "48", "UT": "49", "VT": "50", "VA": "51", "WA": "53", "WV": "54", "WI": "55", "WY": "56"}
 US_STATES_ABBR = {"Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA", "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL", "Indiana": "IN", "Iowa": "IA", "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA", "Maine": "ME", "Maryland": "MD", "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN", "Mississippi": "MS", "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV", "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK", "Oregon": "OR", "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD", "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT", "Virginia": "VA", "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY"}
 KNOWN_POPULATIONS = {"Victoria": 65534, "New York": 8336817, "Los Angeles": 3822238, "Chicago": 2665039, "Houston": 1304379, "Phoenix": 1644409, "Philadelphia": 1567258, "San Antonio": 2302878, "San Diego": 1472530, "Dallas": 1299544, "San Jose": 1381162, "Austin": 974447, "Jacksonville": 971319, "Fort Worth": 956709, "Columbus": 907971, "Indianapolis": 880621, "Charlotte": 897720, "San Francisco": 971233, "Seattle": 749256, "Denver": 713252, "Washington": 678972, "Nashville": 683622, "Oklahoma City": 694800, "El Paso": 694553, "Boston": 650706, "Portland": 635067, "Las Vegas": 656274, "Detroit": 620376, "Memphis": 633104, "Louisville": 628594, "Baltimore": 620961, "Milwaukee": 620251, "Albuquerque": 677122, "Tucson": 564559, "Fresno": 677102, "Sacramento": 808418, "Kansas City": 697738, "Mesa": 504258, "Atlanta": 499127, "Omaha": 508901, "Colorado Springs": 483956, "Raleigh": 476587, "Miami": 449514, "Virginia Beach": 455369, "Oakland": 530763, "Minneapolis": 563332, "Tulsa": 547239, "Arlington": 398654, "New Orleans": 562503, "Wichita": 402263, "Cleveland": 900000, "Tampa": 449514, "Orlando": 316081}
@@ -571,6 +560,61 @@ def estimate_high_activity_overtime(df_calls_full, state_abbr, calls_covered_per
     except Exception:
         return None
 
+
+
+def estimate_specialty_response_savings(df_calls_full, total_calls_annual, calls_covered_perc=100.0):
+    """Estimate additional annual savings from thermal-enabled search efficiency and avoided K-9 deployments.
+
+    The model intentionally stays conservative:
+    - Thermal value is applied to a subset of addressable calls that often benefit from search / locate / perimeter support.
+    - K-9 value is applied to a smaller subset of addressable calls that are likely to require tracking or perimeter work.
+    - If CAD call types are available, the function uses them; otherwise it falls back to conservative defaults.
+    """
+    addressable_calls = max(0.0, float(total_calls_annual or 0) * max(0.0, min(1.0, float(calls_covered_perc or 0) / 100.0)))
+    out = {
+        'addressable_calls_annual': addressable_calls,
+        'thermal_rate': float(CONFIG["THERMAL_DEFAULT_APPLICABLE_RATE"]),
+        'k9_rate': float(CONFIG["K9_DEFAULT_APPLICABLE_RATE"]),
+        'thermal_calls_annual': 0.0,
+        'k9_calls_annual': 0.0,
+        'thermal_savings': 0.0,
+        'k9_savings': 0.0,
+        'additional_savings_total': 0.0,
+        'source': 'default_model',
+    }
+    if addressable_calls <= 0:
+        return out
+
+    call_type_col = None
+    if df_calls_full is not None and len(df_calls_full) > 0:
+        for c in ['call_type_desc','agencyeventtypecodedesc','calldesc','description','nature','event_desc']:
+            if c in df_calls_full.columns and df_calls_full[c].dropna().shape[0] > 0:
+                call_type_col = c
+                break
+
+    if call_type_col is not None:
+        s = df_calls_full[call_type_col].fillna('').astype(str).str.lower().str.strip()
+        if not s.empty:
+            thermal_pattern = (
+                r'suspicious|prowler|alarm|burglar|robbery|theft|assault|shots|gun|weapon|person search|search|perimeter|'
+                r'missing|welfare|suicid|disturbance|fight|domestic|trespass|subject check|unknown trouble|wanted'
+            )
+            k9_pattern = (
+                r'k-?9|canine|track|tracking|perimeter|search|search warrant|manhunt|flee|fled|foot pursuit|'
+                r'missing|burglary|robbery|woods|field|suspect search'
+            )
+            thermal_rate_raw = float(s.str.contains(thermal_pattern, regex=True, na=False).mean())
+            k9_rate_raw = float(s.str.contains(k9_pattern, regex=True, na=False).mean())
+            out['thermal_rate'] = min(0.25, max(CONFIG["THERMAL_DEFAULT_APPLICABLE_RATE"] * 0.5, thermal_rate_raw if thermal_rate_raw > 0 else CONFIG["THERMAL_DEFAULT_APPLICABLE_RATE"]))
+            out['k9_rate'] = min(0.08, max(CONFIG["K9_DEFAULT_APPLICABLE_RATE"] * 0.5, k9_rate_raw if k9_rate_raw > 0 else CONFIG["K9_DEFAULT_APPLICABLE_RATE"]))
+            out['source'] = f'cad_call_types:{call_type_col}'
+
+    out['thermal_calls_annual'] = addressable_calls * out['thermal_rate']
+    out['k9_calls_annual'] = addressable_calls * out['k9_rate']
+    out['thermal_savings'] = out['thermal_calls_annual'] * float(CONFIG["THERMAL_SAVINGS_PER_CALL"])
+    out['k9_savings'] = out['k9_calls_annual'] * float(CONFIG["K9_SAVINGS_PER_CALL"])
+    out['additional_savings_total'] = out['thermal_savings'] + out['k9_savings']
+    return out
 
 def build_high_activity_staffing_html(overtime_stats, dark=True, compact=False):
     """Return an HTML block for the High-Activity Staffing Pressure section."""
@@ -2460,19 +2504,10 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     # Per-type daily airtime budgets derived from CONFIG duty cycles:
     #   Guardian: 60 min flight + 3 min charge → (24*60/63)*60 = 1371.4 min = 22.86 hr
     #   Responder: patrol-unit model, 11.6 hr shift equivalent
-    _GUARDIAN_DAILY_MINS  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]   # ~1393.5
-    _GUARDIAN_DAILY_HOURS = CONFIG["GUARDIAN_PATROL_HOURS"]        # ~23.23
-    _RESPONDER_DAILY_MINS  = CONFIG["RESPONDER_DAILY_FLIGHT_MIN"]  # 26 * 30 = 780
-    _RESPONDER_DAILY_HOURS = _RESPONDER_DAILY_MINS / 60
-    # Sortie capacity figures for the card
-    _GUARDIAN_SORTIES  = CONFIG["GUARDIAN_SORTIES_PER_DAY"]   # 120 (10-min avg + 2-min swap)
-    _RESPONDER_SORTIES = CONFIG["RESPONDER_SORTIES_PER_DAY"]  # 41  (10-min avg + 25-min recharge)
-    _GUARDIAN_AVG_MIN  = CONFIG["GUARDIAN_AVG_SORTIE_MIN"]    # 10
-    _RESPONDER_AVG_MIN = CONFIG["RESPONDER_AVG_SORTIE_MIN"]   # 10
-    _GUARDIAN_FL_MIN   = CONFIG["GUARDIAN_FLIGHT_MIN"]        # 60
-    _GUARDIAN_CH_MIN   = CONFIG["GUARDIAN_CHARGE_MIN"]        # 2
-    _RESPONDER_FL_MIN  = CONFIG["RESPONDER_FLIGHT_MIN"]       # 30
-    _RESPONDER_CH_MIN  = CONFIG["RESPONDER_CHARGE_MIN"]       # 25
+    _GUARDIAN_DAILY_MINS  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]   # ~1371.4
+    _GUARDIAN_DAILY_HOURS = CONFIG["GUARDIAN_PATROL_HOURS"]        # ~22.86
+    _RESPONDER_DAILY_MINS  = CONFIG["RESPONDER_PATROL_HOURS"] * 60 # 11.6 * 60 = 696
+    _RESPONDER_DAILY_HOURS = CONFIG["RESPONDER_PATROL_HOURS"]      # 11.6
     columns_per_row = max(1, int(columns_per_row))
 
     cards_html = []
@@ -2499,32 +2534,31 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         is_guardian = (d_type == "GUARDIAN")
         max_patrol_mins  = _GUARDIAN_DAILY_MINS  if is_guardian else _RESPONDER_DAILY_MINS
         max_patrol_hours = _GUARDIAN_DAILY_HOURS if is_guardian else _RESPONDER_DAILY_HOURS
-        sorties_per_day  = _GUARDIAN_SORTIES     if is_guardian else _RESPONDER_SORTIES
 
-        # Duty-cycle spec strings shown in tooltips and on the card
+        # Uptime tooltip: show the duty-cycle breakdown for Guardians
         if is_guardian:
-            cycle_str    = f"{_GUARDIAN_FL_MIN}min flight + {_GUARDIAN_CH_MIN}min battery swap = {_GUARDIAN_FL_MIN + _GUARDIAN_CH_MIN}min cycle"
-            sortie_str   = f"{_GUARDIAN_AVG_MIN}min avg sortie + {_GUARDIAN_CH_MIN}min swap"
+            _g_fl  = CONFIG["GUARDIAN_FLIGHT_MIN"]
+            _g_ch  = CONFIG["GUARDIAN_CHARGE_MIN"]
+            _g_cyc = _g_fl + _g_ch
+            _cycles_per_day = (24 * 60) / _g_cyc
             uptime_tooltip = (
-                f"{cycle_str} · "
-                f"{_GUARDIAN_DAILY_HOURS:.2f}hr airtime/day · "
-                f"{_GUARDIAN_SORTIES} sorties/day @ {_GUARDIAN_AVG_MIN}min avg"
+                f"{_g_fl}min flight + {_g_ch}min charge = {_g_cyc}min cycle · "
+                f"{_cycles_per_day:.1f} cycles/day · "
+                f"{max_patrol_hours:.2f}hr airtime"
             )
         else:
-            cycle_str    = f"{_RESPONDER_FL_MIN}min max flight + {_RESPONDER_CH_MIN}min recharge = {_RESPONDER_FL_MIN + _RESPONDER_CH_MIN}min full cycle"
-            sortie_str   = f"{_RESPONDER_AVG_MIN}min avg sortie + {_RESPONDER_CH_MIN}min recharge"
-            uptime_tooltip = (
-                f"{cycle_str} · avg sortie {_RESPONDER_AVG_MIN}min · "
-                f"{_RESPONDER_SORTIES} sorties/day @ {_RESPONDER_AVG_MIN}min avg"
-            )
+            uptime_tooltip = f"{max_patrol_hours}hr patrol shift"
 
         total_daily_flights = d_flights + d_shared
         patrol_time_line = ""
         if total_daily_flights > 0:
+            # Raw calculation: patrol budget / flights = available min per flight
             raw_mins_per_flight = max_patrol_mins / total_daily_flights
-            max_single_flight = _GUARDIAN_FL_MIN if is_guardian else _RESPONDER_FL_MIN
+            # Cap at drone's physical max flight time
+            max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
             mins_per_flight = min(raw_mins_per_flight, max_single_flight)
             capped = raw_mins_per_flight > max_single_flight
+            # Always show the line so low-volume Responders display correctly
             patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= max_single_flight * 0.9 else "#00D2FF"
             cap_note = f" (max {max_single_flight}min)" if capped else ""
             patrol_time_line = (
@@ -2605,23 +2639,6 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     <div style="text-align:right; font-weight:700; color:{card_title};">{d_faa}</div>
     <div style="color:{text_muted};">Airfield</div>
     <div style="text-align:right; font-weight:600; color:{card_title}; word-break:break-word;">{d_airport}</div>
-  </div>
-
-  <!-- Duty-cycle + sortie capacity block -->
-  <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.10); border-radius:6px; padding:7px 10px; margin-bottom:8px;" title="{uptime_tooltip}">
-    <div style="font-size:0.63rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px;">Duty Cycle &amp; Sortie Capacity</div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:3px 8px; font-size:0.68rem;">
-      <div style="color:{text_muted};">{"Max flight time" if is_guardian else "Max flight time"}</div>
-      <div style="text-align:right; font-weight:700; color:{card_title};">{"60 min" if is_guardian else "30 min"}</div>
-      <div style="color:{text_muted};">Avg sortie</div>
-      <div style="text-align:right; font-weight:700; color:{card_title};">{"10 min" if is_guardian else "10 min"}</div>
-      <div style="color:{text_muted};">{"Battery swap" if is_guardian else "Recharge"}</div>
-      <div style="text-align:right; font-weight:700; color:{card_title};">{"2 min" if is_guardian else "25 min"}</div>
-      <div style="color:{text_muted}; padding-top:3px; border-top:1px dashed rgba(255,255,255,0.10);">Eff. cycle (avg)</div>
-      <div style="text-align:right; font-weight:700; color:{card_title}; padding-top:3px; border-top:1px dashed rgba(255,255,255,0.10);">{"12 min" if is_guardian else "35 min"}</div>
-      <div style="color:{text_muted};">Sorties/day</div>
-      <div style="text-align:right; font-weight:800; font-size:0.80rem; color:#F0B429;">{sorties_per_day}</div>
-    </div>
   </div>
 
   <!-- CapEx + ROI footer -->
@@ -4684,12 +4701,31 @@ if st.session_state['csvs_ready']:
             annual_savings  = monthly_savings * 12
             break_even_text = f"{fleet_capex / monthly_savings:.1f} MONTHS"
 
+    specialty_savings = estimate_specialty_response_savings(
+        st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None else st.session_state.get('df_calls'),
+        st.session_state.get('total_original_calls', total_calls),
+        calls_covered_perc=calls_covered_perc
+    )
+    thermal_savings = float(specialty_savings.get('thermal_savings', 0) or 0)
+    k9_savings = float(specialty_savings.get('k9_savings', 0) or 0)
+    possible_additional_savings = float(specialty_savings.get('additional_savings_total', 0) or 0)
+
     if fleet_capex > 0:
         st.sidebar.markdown(f"""
         <div style="background:{budget_box_bg}; border:1px solid {budget_box_border}; padding:12px; border-radius:4px;
              text-align:center; margin:8px 0 12px 0; box-shadow:0 2px 5px {budget_box_shadow};">
             <div style="font-size:0.7rem; color:{text_muted}; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
             <div style="font-size:1.8rem; font-weight:900; color:{budget_box_border}; font-family:monospace;">${annual_savings:,.0f}</div>
+            <div style="font-size:0.68rem; color:{text_muted}; margin-top:4px;">+ possible specialty upside</div>
+            <div style="font-size:1.05rem; font-weight:800; color:#39FF14; font-family:monospace; margin-top:2px;">${possible_additional_savings:,.0f}</div>
+            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-top:6px;">
+                <span style="color:{text_muted};">Thermal:</span>
+                <span style="color:{text_main}; font-weight:700;">${thermal_savings:,.0f}/yr</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-bottom:2px;">
+                <span style="color:{text_muted};">K-9 avoided:</span>
+                <span style="color:{text_main}; font-weight:700;">${k9_savings:,.0f}/yr</span>
+            </div>
             <div style="border-top:1px solid {card_border}; margin:8px 0;"></div>
             <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
                 <span style="color:{text_muted};">Calls in range:</span>
@@ -5693,6 +5729,9 @@ if st.session_state['csvs_ready']:
             "deflect_rate":          int(deflection_rate*100),
             "fleet_capex":           fleet_capex,
             "annual_savings":        annual_savings,
+            "thermal_savings":       thermal_savings,
+            "k9_savings":            k9_savings,
+            "possible_additional_savings": possible_additional_savings,
             "break_even":            break_even_text,
             # Operational
             "avg_response_min":      round(avg_resp_time, 2),
@@ -5968,7 +6007,7 @@ body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text)
 
 /* ── METRICS SECTION ─────────────────────────────────────────── */
 .metrics-hero{{
-  display:grid;grid-template-columns:repeat(3,1fr);gap:1px;
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1px;
   background:var(--border);border-radius:12px;overflow:hidden;
   margin-bottom:40px;box-shadow:0 1px 3px rgba(0,0,0,0.04);
 }}
@@ -6165,6 +6204,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
       <div class="cover-meta">
         <div class="cover-meta-cell"><div class="label">Fleet CapEx</div><div class="value accent">${fleet_capex:,.0f}</div></div>
         <div class="cover-meta-cell"><div class="label">Annual Savings</div><div class="value gold">${annual_savings:,.0f}</div></div>
+        <div class="cover-meta-cell"><div class="label">Add'l Thermal + K-9</div><div class="value accent">${possible_additional_savings:,.0f}</div></div>
         <div class="cover-meta-cell"><div class="label">Break-Even</div><div class="value">{break_even_text}</div></div>
         <div class="cover-meta-cell"><div class="label">Call Coverage</div><div class="value accent">{calls_covered_perc:.1f}%</div></div>
         <div class="cover-meta-cell"><div class="label">Avg Response</div><div class="value">{avg_resp_time:.1f} min</div></div>
@@ -6187,6 +6227,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
   <div class="metrics-hero">
     <div class="metric-cell"><div class="m-label">Fleet Capital Expenditure</div><div class="m-value cyan">${fleet_capex:,.0f}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
     <div class="metric-cell"><div class="m-label">Annual Savings Capacity</div><div class="m-value gold">${annual_savings:,.0f}</div><div class="m-sub">At {int(dfr_dispatch_rate*100)}% dispatch · {int(deflection_rate*100)}% resolution</div></div>
+    <div class="metric-cell"><div class="m-label">Possible Add'l Thermal + K-9</div><div class="m-value green">${possible_additional_savings:,.0f}</div><div class="m-sub">Thermal ${thermal_savings:,.0f} · K-9 ${k9_savings:,.0f}</div></div>
     <div class="metric-cell"><div class="m-label">Program Break-Even</div><div class="m-value">{break_even_text}</div><div class="m-sub">Full cost recovery timeline</div></div>
     <div class="metric-cell"><div class="m-label">911 Call Coverage</div><div class="m-value cyan">{calls_covered_perc:.1f}%</div><div class="m-sub">of {st.session_state.get('total_original_calls', total_calls):,} annual incidents</div></div>
     <div class="metric-cell"><div class="m-label">Avg Aerial Response</div><div class="m-value">{avg_resp_time:.1f} min</div><div class="m-sub">vs. ground patrol baseline</div></div>
@@ -6262,7 +6303,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
   <div class="grant-body">
     <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — {prepared_for_city}, {prop_state}</p>
 
-    <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully requests funding to establish a Drone as a First Responder (DFR) program deploying {actual_k_responder + actual_k_guardian} purpose-built BRINC aerial units — {actual_k_responder} BRINC Responder and {actual_k_guardian} BRINC Guardian — across {dept_summary} serving {pop_metric:,} residents. Modeled against {st.session_state.get('total_original_calls', total_calls):,} historical incidents from {_exp_date_range}, the program is projected to cover <strong>{calls_covered_perc:.1f}%</strong> of calls for service, arrive an average of <strong>{avg_time_saved:.1f} minutes faster</strong> than ground patrol, and generate <strong>${annual_savings:,.0f} in annual operational savings</strong>, reaching full cost recovery in <strong>{break_even_text.lower()}</strong>.</p>
+    <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully requests funding to establish a Drone as a First Responder (DFR) program deploying {actual_k_responder + actual_k_guardian} purpose-built BRINC aerial units — {actual_k_responder} BRINC Responder and {actual_k_guardian} BRINC Guardian — across {dept_summary} serving {pop_metric:,} residents. Modeled against {st.session_state.get('total_original_calls', total_calls):,} historical incidents from {_exp_date_range}, the program is projected to cover <strong>{calls_covered_perc:.1f}%</strong> of calls for service, arrive an average of <strong>{avg_time_saved:.1f} minutes faster</strong> than ground patrol, and generate <strong>${annual_savings:,.0f} in annual operational savings</strong>, with an additional modeled specialty-response upside of <strong>${possible_additional_savings:,.0f}</strong> from thermal-supported searches and avoided K-9 deployments, reaching full cost recovery in <strong>{break_even_text.lower()}</strong>.</p>
 
     <p><strong>Statement of Need:</strong> {jurisdiction_list} currently responds to an estimated {st.session_state.get('total_original_calls', total_calls):,} calls for service annually — approximately {max(1,int(st.session_state.get('total_original_calls',total_calls)/365)):,} calls per day. Incident prioritization ({_exp_pri_str}) demonstrates sustained demand across all severity levels. Ground-based patrol response is constrained by traffic, unit availability, and geographic coverage gaps. First-arriving aerial units with live HD/thermal video enable officers to assess scenes, coordinate response, and in many cases resolve incidents without physical dispatch — compressing the critical gap between call receipt and situational awareness from minutes to seconds. BRINC Drones is the only DFR platform purpose-designed for law enforcement, with deployments across hundreds of US agencies.</p>
 
@@ -6272,7 +6313,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 
     <p><strong>Technology Platform:</strong> BRINC Drones provides fully automated launch-on-dispatch, live-streaming HD and thermal video to dispatch and responding officers, FAA-compliant Beyond Visual Line of Sight (BVLOS) operations, chain-of-custody flight logging, and integrated data analytics. All hardware is manufactured in the United States. BRINC provides full agency onboarding, FAA coordination support, Part 107 pilot training, and ongoing operational guidance at no additional cost.</p>
 
-    <p><strong>Fiscal Impact &amp; Return on Investment:</strong> Total program capital expenditure is <strong>${fleet_capex:,.0f}</strong> ({actual_k_responder} Responder × ${CONFIG["RESPONDER_COST"]:,} + {actual_k_guardian} Guardian × ${CONFIG["GUARDIAN_COST"]:,}). At a <strong>{int(dfr_dispatch_rate*100)}% DFR dispatch rate</strong> and <strong>{int(deflection_rate*100)}% call resolution rate</strong> (no officer dispatch required), the program is projected to generate <strong>${annual_savings:,.0f} per year</strong> in operational savings, reaching break-even in <strong>{break_even_text.lower()}</strong>. Cost per drone response is ${CONFIG["DRONE_COST_PER_CALL"]} versus ${CONFIG["OFFICER_COST_PER_CALL"]} for a ground patrol dispatch — a <strong>{int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}% cost reduction</strong> per incident. The program also reduces officer exposure to unknown-risk calls, decreasing liability and improving officer retention outcomes.</p>
+    <p><strong>Fiscal Impact &amp; Return on Investment:</strong> Total program capital expenditure is <strong>${fleet_capex:,.0f}</strong> ({actual_k_responder} Responder × ${CONFIG["RESPONDER_COST"]:,} + {actual_k_guardian} Guardian × ${CONFIG["GUARDIAN_COST"]:,}). At a <strong>{int(dfr_dispatch_rate*100)}% DFR dispatch rate</strong> and <strong>{int(deflection_rate*100)}% call resolution rate</strong> (no officer dispatch required), the program is projected to generate <strong>${annual_savings:,.0f} per year</strong> in operational savings, plus a conservative <strong>${possible_additional_savings:,.0f}</strong> in possible additional thermal and K-9 related savings, reaching break-even in <strong>{break_even_text.lower()}</strong>. Cost per drone response is ${CONFIG["DRONE_COST_PER_CALL"]} versus ${CONFIG["OFFICER_COST_PER_CALL"]} for a ground patrol dispatch — a <strong>{int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}% cost reduction</strong> per incident. The program also reduces officer exposure to unknown-risk calls, decreasing liability and improving officer retention outcomes.</p>
 
     <p><strong>Evaluation Plan:</strong> Program outcomes will be tracked quarterly across four dimensions: (1) response time comparison vs. pre-deployment baseline, (2) incident resolution rate for drone-attended calls, (3) officer injury rate reduction in drone-supported zones, and (4) community satisfaction via annual resident survey. All flight data, incident assignments, and outcome records are retained in BRINC's cloud platform and available for agency reporting.</p>
 

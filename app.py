@@ -1901,10 +1901,152 @@ def _normalize_place_name(name):
     if name is None:
         return ""
     value = str(name).lower().strip()
-    value = re.sub(r'\b(city|town|village|borough|township|cdp|municipality)\b', '', value)
+    value = value.replace('&', ' and ')
+    value = re.sub(r'st\.?', 'saint', value)
+    value = re.sub(r'ft\.?', 'fort', value)
+    value = re.sub(r'mt\.?', 'mount', value)
+    value = re.sub(r'(city|town|village|borough|township|cdp|municipality|county|parish|census area)', '', value)
     value = re.sub(r'[^a-z0-9 ]', ' ', value)
     value = re.sub(r'\s+', ' ', value).strip()
     return value
+
+
+def _normalize_county_name(name):
+    if name is None:
+        return ""
+    value = str(name).lower().strip()
+    value = re.sub(r'(county|parish|borough|census area|municipality)', '', value)
+    value = re.sub(r'[^a-z0-9 ]', ' ', value)
+    value = re.sub(r'\s+', ' ', value).strip()
+    return value
+
+
+def _safe_boundary_key(name):
+    value = str(name or '').strip()
+    value = re.sub(r'[^A-Za-z0-9]+', '_', value)
+    value = re.sub(r'_+', '_', value).strip('_')
+    return value or 'unknown'
+
+
+def _boundary_cache_paths(name, state_abbr, kind):
+    safe_name = _safe_boundary_key(name)
+    safe_state = _safe_boundary_key(state_abbr)
+    stem = f"{kind}__{safe_name}_{safe_state}"
+    base = os.path.join(SHAPEFILE_DIR, stem)
+    return {
+        'stem': stem,
+        'shp': base + '.shp',
+        'shx': base + '.shx',
+        'dbf': base + '.dbf',
+        'prj': base + '.prj',
+        'cpg': base + '.cpg',
+    }
+
+
+def _remove_boundary_cache(name, state_abbr, kind=None):
+    if not os.path.exists(SHAPEFILE_DIR):
+        return
+    safe_name = _safe_boundary_key(name)
+    safe_state = _safe_boundary_key(state_abbr)
+    prefixes = []
+    if kind:
+        prefixes.append(f"{kind}__{safe_name}_{safe_state}")
+    else:
+        prefixes.extend([
+            f"place__{safe_name}_{safe_state}",
+            f"county__{safe_name}_{safe_state}",
+            f"{safe_name}_{safe_state}",
+        ])
+    for prefix in prefixes:
+        for ext in ['.shp', '.shx', '.dbf', '.prj', '.cpg']:
+            fp = os.path.join(SHAPEFILE_DIR, prefix + ext)
+            try:
+                if os.path.exists(fp):
+                    os.remove(fp)
+            except Exception:
+                pass
+
+
+def _save_boundary_cache(boundary_gdf, name, state_abbr, kind):
+    if boundary_gdf is None or boundary_gdf.empty:
+        return
+    os.makedirs(SHAPEFILE_DIR, exist_ok=True)
+    if kind == 'place':
+        _remove_boundary_cache(name, state_abbr, kind='place')
+        _remove_boundary_cache(name, state_abbr, kind=None)
+    else:
+        _remove_boundary_cache(name, state_abbr, kind='county')
+    cache_paths = _boundary_cache_paths(name, state_abbr, kind)
+    boundary_gdf.to_file(cache_paths['shp'])
+
+
+def _read_cached_boundary(name, state_abbr, preferred_kind=None):
+    if not os.path.exists(SHAPEFILE_DIR):
+        return None, None
+    if preferred_kind == 'county':
+        order = ['county', 'place']
+    else:
+        order = ['place', 'county']
+    for kind in order:
+        shp_path = _boundary_cache_paths(name, state_abbr, kind)['shp']
+        if os.path.exists(shp_path):
+            try:
+                gdf = gpd.read_file(shp_path)
+                if gdf is None or gdf.empty:
+                    continue
+                if gdf.crs is None:
+                    gdf = gdf.set_crs(epsg=4269)
+                gdf = gdf.to_crs(epsg=4326)
+                return kind, gdf
+            except Exception:
+                continue
+    legacy = os.path.join(SHAPEFILE_DIR, f"{_safe_boundary_key(name)}_{_safe_boundary_key(state_abbr)}.shp")
+    if os.path.exists(legacy):
+        try:
+            gdf = gpd.read_file(legacy)
+            if gdf is not None and not gdf.empty:
+                if gdf.crs is None:
+                    gdf = gdf.set_crs(epsg=4269)
+                gdf = gdf.to_crs(epsg=4326)
+                return None, gdf
+        except Exception:
+            pass
+    return None, None
+
+
+def resolve_boundary(state_abbr, city_name=None, county_name=None, place_code=None, mode='auto'):
+    city_name = str(city_name or '').strip()
+    county_name = str(county_name or '').strip()
+    mode = str(mode or 'auto').lower()
+
+    if mode == 'county' and county_name:
+        ok, gdf = fetch_county_boundary_local(state_abbr, county_name)
+        if ok and gdf is not None:
+            return 'county', gdf
+        return None, None
+
+    if mode in ('place', 'auto') and city_name:
+        ok, gdf = fetch_place_boundary_local(state_abbr, city_name, place_code=place_code)
+        if ok and gdf is not None:
+            return 'place', gdf
+        if mode == 'place':
+            return None, None
+
+    if mode in ('county', 'auto') and county_name:
+        ok, gdf = fetch_county_boundary_local(state_abbr, county_name)
+        if ok and gdf is not None:
+            return 'county', gdf
+
+    if mode == 'auto' and city_name:
+        county_guess = lookup_county_for_city(city_name, state_abbr)
+        if county_guess:
+            ok, gdf = fetch_county_boundary_local(state_abbr, county_guess)
+            if ok and gdf is not None:
+                gdf = gdf.copy()
+                gdf['NAME'] = city_name + " (" + county_guess + " County)"
+                return 'county', gdf
+
+    return None, None
 
 
 def _extract_place_code_from_raw_df(raw_df, inferred_state_abbr=None):
@@ -1953,18 +2095,33 @@ def _extract_place_code_from_raw_df(raw_df, inferred_state_abbr=None):
 
 @st.cache_data
 def fetch_county_boundary_local(state_abbr, county_name_input):
-    # 1. Clean the input
-    search_name = county_name_input.lower().strip()
-    if search_name.endswith(" county"):
-        search_name = search_name.replace(" county", "").strip()
-        
+    search_name = _normalize_county_name(county_name_input)
+
     state_fips = STATE_FIPS.get(state_abbr)
-    if not state_fips: return False, None
-    
-    # 2. Look for our new ultra-compressed parquet file
+    if not state_fips:
+        return False, None
+
     local_file = "counties_lite.parquet"
     if not os.path.exists(local_file):
         st.error(f"Missing {local_file}! Please ensure it is uploaded to your repository.")
+        return False, None
+
+    try:
+        gdf = gpd.read_parquet(local_file)
+        state_rows = gdf[gdf['STATEFP'].astype(str) == str(state_fips)].copy()
+        if state_rows.empty:
+            return False, None
+
+        match = state_rows[state_rows['NAME'].astype(str).map(_normalize_county_name) == search_name].copy()
+        if match.empty and 'NAMELSAD' in state_rows.columns:
+            match = state_rows[state_rows['NAMELSAD'].astype(str).map(_normalize_county_name) == search_name].copy()
+        if match.empty:
+            return False, None
+
+        match['NAME'] = match['NAME'].astype(str) + " County"
+        return True, match[['NAME', 'geometry']]
+    except Exception as e:
+        st.error(f"Error reading local database: {e}")
         return False, None
                 
     # 3. Read directly from the Parquet file instantly
@@ -2578,9 +2735,12 @@ def generate_kml(active_gdf, active_drones, calls_gdf):
 @st.cache_data
 def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir):
     points_list = []
-    if calls_df is not None: points_list.append(calls_df[['lat', 'lon']])
-    if stations_df is not None: points_list.append(stations_df[['lat', 'lon']])
-    if not points_list: return None
+    if calls_df is not None:
+        points_list.append(calls_df[['lat', 'lon']])
+    if stations_df is not None:
+        points_list.append(stations_df[['lat', 'lon']])
+    if not points_list:
+        return None
     full_points = pd.concat(points_list)
     full_points = full_points[(full_points.lat.abs() > 1) & (full_points.lon.abs() > 1)]
     scan_points = full_points.sample(50000, random_state=42) if len(full_points) > 50000 else full_points
@@ -2591,21 +2751,34 @@ def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir):
     for shp_path in shp_files:
         try:
             gdf_chunk = gpd.read_file(shp_path, bbox=tuple(total_bounds))
-            if not gdf_chunk.empty:
-                if gdf_chunk.crs is None: gdf_chunk.set_crs(epsg=4269, inplace=True)
-                gdf_chunk = gdf_chunk.to_crs(epsg=4326)
-                hits = gpd.sjoin(gdf_chunk, points_gdf, how="inner", predicate="intersects")
-                if not hits.empty:
-                    subset = gdf_chunk.loc[hits.index.unique()].copy()
-                    subset['data_count'] = hits.index.value_counts()
-                    name_col = next((c for c in ['NAME','DISTRICT','NAMELSAD'] if c in subset.columns), subset.columns[0])
-                    subset['DISPLAY_NAME'] = subset[name_col].astype(str)
-                    relevant_polys.append(subset)
-        except Exception: continue
-    if not relevant_polys: return None
-    master_gdf = pd.concat(relevant_polys, ignore_index=True).sort_values(by='data_count', ascending=False)
-    master_gdf = master_gdf.dissolve(by='DISPLAY_NAME', aggfunc={'data_count': 'sum'}).reset_index()
-    master_gdf = master_gdf.sort_values(by='data_count', ascending=False)
+            if gdf_chunk.empty:
+                continue
+            if gdf_chunk.crs is None:
+                gdf_chunk.set_crs(epsg=4269, inplace=True)
+            gdf_chunk = gdf_chunk.to_crs(epsg=4326)
+            hits = gpd.sjoin(gdf_chunk, points_gdf, how="inner", predicate="intersects")
+            if hits.empty:
+                continue
+            subset = gdf_chunk.loc[hits.index.unique()].copy()
+            subset['data_count'] = hits.index.value_counts()
+            name_col = next((c for c in ['NAME','DISTRICT','NAMELSAD'] if c in subset.columns), subset.columns[0])
+            subset['DISPLAY_NAME'] = subset[name_col].astype(str)
+            file_name = os.path.basename(shp_path).lower()
+            if file_name.startswith('place__'):
+                subset['_boundary_priority'] = 0
+            elif file_name.startswith('county__'):
+                subset['_boundary_priority'] = 1
+            else:
+                subset['_boundary_priority'] = 2
+            relevant_polys.append(subset)
+        except Exception:
+            continue
+    if not relevant_polys:
+        return None
+    master_gdf = pd.concat(relevant_polys, ignore_index=True)
+    master_gdf = master_gdf.sort_values(by=['_boundary_priority', 'data_count'], ascending=[True, False])
+    master_gdf = master_gdf.dissolve(by='DISPLAY_NAME', aggfunc={'data_count': 'sum', '_boundary_priority': 'min'}).reset_index()
+    master_gdf = master_gdf.sort_values(by=['_boundary_priority', 'data_count'], ascending=[True, False])
     if master_gdf['data_count'].sum() > 0:
         master_gdf['pct_share'] = master_gdf['data_count'] / master_gdf['data_count'].sum()
         master_gdf['cum_share'] = master_gdf['pct_share'].cumsum()
@@ -3385,30 +3558,19 @@ if not st.session_state['csvs_ready']:
                         detected_city_for_boundary = st.session_state.get('active_city', '')
                         detected_state_for_boundary = st.session_state.get('active_state', '')
                         if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
-                            # Boundary lookup priority:
-                            # 1. places_lite.parquet  — exact city shape (best)
-                            # 2. counties_lite.parquet — same-name county
-                            # 3. Geocode → find county → counties_lite.parquet
-                            b_success, b_gdf = fetch_place_boundary_local(
+                            boundary_mode = 'county' if detected_city_for_boundary.lower().endswith(' county') else 'auto'
+                            county_hint = detected_city_for_boundary if boundary_mode == 'county' else None
+                            b_kind, b_gdf = resolve_boundary(
                                 detected_state_for_boundary,
-                                detected_city_for_boundary,
-                                place_code=detected_placefp
+                                city_name=detected_city_for_boundary,
+                                county_name=county_hint,
+                                place_code=detected_placefp,
+                                mode=boundary_mode,
                             )
-                            if not b_success:
-                                county_name = lookup_county_for_city(
-                                    detected_city_for_boundary, detected_state_for_boundary)
-                                if county_name:
-                                    b_success, b_gdf = fetch_county_boundary_local(
-                                        detected_state_for_boundary, county_name)
-                                    if b_success and b_gdf is not None:
-                                        b_gdf = b_gdf.copy()
-                                        b_gdf['NAME'] = detected_city_for_boundary + " (" + county_name + " County)"
-                            if b_success and b_gdf is not None:
+                            if b_kind and b_gdf is not None:
                                 try:
-                                    safe_n = detected_city_for_boundary.replace(" ", "_").replace("/", "_")
-                                    b_gdf.to_file(os.path.join(
-                                        SHAPEFILE_DIR,
-                                        f"{safe_n}_{detected_state_for_boundary}.shp"))
+                                    _save_boundary_cache(b_gdf, detected_city_for_boundary, detected_state_for_boundary, b_kind)
+                                    st.session_state['_active_boundary_kind'] = b_kind
                                 except Exception:
                                     pass
 
@@ -3494,39 +3656,24 @@ if not st.session_state['csvs_ready']:
             prog.progress(10 + int((i / len(active_targets)) * 20),
                           text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
             
-            # Boundary lookup priority:
-            # 1. places_lite.parquet  — exact city/town shape (best)
-            # 2. counties_lite.parquet — county that shares the city name
-            # 3. Geocode city → find its county → counties_lite.parquet
-            success, temp_gdf = fetch_place_boundary_local(s_name, c_name)
-            if success:
-                boundary_kind = 'place'
-            if not success:
-                # City doesn't share its county's name — geocode to find the county
-                county_name = lookup_county_for_city(c_name, s_name)
-                if county_name:
-                    success, temp_gdf = fetch_county_boundary_local(s_name, county_name)
-                    if success and temp_gdf is not None:
-                        boundary_kind = 'county'
-                        temp_gdf = temp_gdf.copy()
-                        temp_gdf['NAME'] = c_name + " (" + county_name + " County)"
-            if not success and c_name.lower().endswith(' county'):
-                success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
-                if success:
-                    boundary_kind = 'county'
+            place_code = None
+            mode = 'county' if c_name.lower().endswith(' county') else 'auto'
+            county_hint = c_name if mode == 'county' else None
+            boundary_kind, temp_gdf = resolve_boundary(
+                s_name,
+                city_name=c_name,
+                county_name=county_hint,
+                place_code=place_code,
+                mode=mode,
+            )
+            success = boundary_kind is not None and temp_gdf is not None
             is_county = (boundary_kind == 'county')
 
-            # County boundaries come from the parquet, not from TIGER, so they are
-            # never written to SHAPEFILE_DIR. find_relevant_jurisdictions() only scans
-            # that directory, so without this save it always falls back to
-            # "Auto-Generated Boundary". Save any successfully loaded county GDF now.
-            if success and is_county and temp_gdf is not None:
+            if success and temp_gdf is not None:
                 try:
-                    safe_name = c_name.replace(" ", "_").replace("/", "_")
-                    county_shp_path = os.path.join(SHAPEFILE_DIR, f"{safe_name}_{s_name}.shp")
-                    temp_gdf.to_file(county_shp_path)
+                    _save_boundary_cache(temp_gdf, c_name, s_name, boundary_kind)
                 except Exception:
-                    pass  # If save fails, fall back gracefully
+                    pass
 
             if success:
                 all_gdfs.append(temp_gdf)
@@ -3739,24 +3886,12 @@ if st.session_state['csvs_ready']:
         master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR)
 
     if master_gdf is None or master_gdf.empty:
-        # ── Fallback 1: load any saved shapefile directly (spatial join may have
-        #    failed if coordinate conversion was imperfect, but the shapefile exists) ──
-        shp_files = glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp"))
-        if shp_files:
+        active_city = st.session_state.get('active_city', '')
+        active_state = st.session_state.get('active_state', '')
+        preferred_kind = 'county' if str(active_city).lower().endswith(' county') else 'place'
+        _, fallback_gdf = _read_cached_boundary(active_city, active_state, preferred_kind=preferred_kind)
+        if fallback_gdf is not None and not fallback_gdf.empty:
             try:
-                # Pick the shapefile whose name best matches active_city
-                active_city_key = st.session_state.get('active_city', '').replace(' ', '_').lower()
-                best = None
-                for sf in shp_files:
-                    if active_city_key and active_city_key in os.path.basename(sf).lower():
-                        best = sf
-                        break
-                if best is None:
-                    best = shp_files[0]  # just use the first one
-                fallback_gdf = gpd.read_file(best)
-                if fallback_gdf.crs is None:
-                    fallback_gdf = fallback_gdf.set_crs(epsg=4269)
-                fallback_gdf = fallback_gdf.to_crs(epsg=4326)
                 name_col = next((c for c in ['NAME', 'DISTRICT', 'NAMELSAD'] if c in fallback_gdf.columns), fallback_gdf.columns[0])
                 fallback_gdf['DISPLAY_NAME'] = fallback_gdf[name_col].astype(str)
                 fallback_gdf['data_count'] = len(df_calls)

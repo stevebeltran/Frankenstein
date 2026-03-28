@@ -2981,6 +2981,8 @@ if not st.session_state['csvs_ready']:
     # GRAB THE LOGO FOR THE UPLOAD PAGE
     logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
     hero_logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:72px; margin-bottom:15px;">' if logo_b64 else f'<div style="font-size:2.5rem; font-weight:900; letter-spacing:4px; color:#ffffff; margin-bottom:15px;">BRINC</div>'
+    # Upper-right hero image uses gigs.png (the drone product shot)
+    gigs_b64 = get_transparent_product_base64("gigs.png")
 
     st.markdown(f"""
     <style>
@@ -3137,7 +3139,7 @@ if not st.session_state['csvs_ready']:
             </div>
         </div>
         <div style="flex:0 0 auto; display:flex; align-items:center; justify-content:center;">
-            <img src="data:image/png;base64,{logo_b64}" style="height:260px; max-width:420px; object-fit:contain; filter: drop-shadow(0 0 32px rgba(0,210,255,0.35)) drop-shadow(0 0 8px rgba(0,150,255,0.2));" alt="BRINC COS Drone Station">
+            <img src="data:image/png;base64,{gigs_b64}" style="height:260px; max-width:420px; object-fit:contain; filter: drop-shadow(0 0 32px rgba(0,210,255,0.35)) drop-shadow(0 0 8px rgba(0,150,255,0.2));" alt="BRINC COS Drone Station">
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -3175,7 +3177,7 @@ if not st.session_state['csvs_ready']:
 
             col_zip, col_city, col_state = st.columns([1, 3, 1])
 
-            # ── ZIP input ──
+            # ── ZIP input — auto-fills city/state when 5 digits entered ──
             zip_val = col_zip.text_input(
                 f"zip_{i}", value="", max_chars=5,
                 placeholder="ZIP",
@@ -3183,10 +3185,18 @@ if not st.session_state['csvs_ready']:
                 key=f"zip_{i}",
                 help="Enter a 5-digit ZIP to auto-fill city & state."
             )
-            # Auto-lookup as soon as 5 digits are entered (no button needed)
+            # As soon as 5 digits are typed, look up and write back to session_state, then rerun
             if re.match(r'^\d{5}$', zip_val.strip()):
                 _z_city, _z_state, _ = lookup_zip_code(zip_val.strip())
                 if _z_city and _z_state:
+                    _entry = {"city": _z_city, "state": _z_state}
+                    if i < len(st.session_state['target_cities']):
+                        st.session_state['target_cities'][i] = _entry
+                    else:
+                        st.session_state['target_cities'].append(_entry)
+                    # Clear the ZIP field value by resetting its key, then rerun
+                    st.session_state[f"zip_{i}"] = ""
+                    st.rerun()
                     c_val = _z_city
                     s_val = _z_state
 
@@ -3210,7 +3220,6 @@ if not st.session_state['csvs_ready']:
             # Normalize: uppercase, must be a valid abbreviation
             s_name = raw_state.strip().upper()
             if s_name not in STATE_FIPS:
-                # Fall back to previous valid value so the session stays clean
                 s_name = s_val if s_val in STATE_FIPS else "TX"
 
             if i < len(st.session_state['target_cities']):

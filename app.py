@@ -50,7 +50,22 @@ for k, v in defaults.items():
 
 
 if 'target_cities' not in st.session_state:
-    st.session_state['target_cities'] = [{"city": st.session_state.get('active_city', 'Victoria'), "state": st.session_state.get('active_state', 'TX')}]
+    st.session_state['target_cities'] = [{"city": "", "state": "TX"}]
+
+# Fresh sessions should start blank in the simulator instead of inheriting the
+# demo default city (Victoria, TX). Otherwise the city picker can appear to
+# revert to Victoria before the user makes a real selection.
+if (
+    st.session_state.get('data_source', 'unknown') == 'unknown'
+    and not st.session_state.get('csvs_ready', False)
+    and st.session_state.get('city_count', 1) == 1
+    and isinstance(st.session_state.get('target_cities'), list)
+    and len(st.session_state['target_cities']) == 1
+):
+    _seed_city = str(st.session_state['target_cities'][0].get('city', '') or '').strip()
+    _seed_state = str(st.session_state['target_cities'][0].get('state', '') or '').strip().upper()
+    if _seed_city == 'Victoria' and _seed_state == 'TX':
+        st.session_state['target_cities'] = [{"city": "", "state": "TX"}]
 
 
 GUARDIAN_FLIGHT_HOURS_PER_DAY = 23.5
@@ -2003,6 +2018,52 @@ def get_state_city_suggestions(state_abbr, existing_targets=None):
 
     return sorted(suggestions, key=lambda s: s.lower())
 
+@st.cache_data(show_spinner=False)
+def search_city_suggestions(query_text, state_abbr):
+    """Best-effort live city/county suggestions for a state.
+
+    Combines the built-in demo catalog with Nominatim place search so users can
+    type arbitrary cities such as Rockford and immediately get a sensible
+    suggestion without falling back to stale defaults.
+    """
+    query_text = str(query_text or '').strip()
+    state_abbr = str(state_abbr or '').strip().upper()
+    suggestions = []
+    seen = set()
+
+    def _add(name):
+        cleaned = str(name or '').strip()
+        if not cleaned:
+            return
+        key = cleaned.lower()
+        if key not in seen:
+            seen.add(key)
+            suggestions.append(cleaned)
+
+    for city in get_state_city_suggestions(state_abbr, []):
+        if not query_text or city.lower().startswith(query_text.lower()):
+            _add(city)
+
+    if query_text:
+        try:
+            q = f"{query_text}, {state_abbr}, USA" if state_abbr else f"{query_text}, USA"
+            url = f"https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=us&limit=8&q={urllib.parse.quote(q)}"
+            req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode('utf-8'))
+            for item in data:
+                display_name = str(item.get('display_name', '') or '')
+                parts = [p.strip() for p in display_name.split(',') if p.strip()]
+                if not parts:
+                    continue
+                candidate = parts[0]
+                if candidate:
+                    _add(candidate)
+        except Exception:
+            pass
+
+    return suggestions[:8]
+
 @st.cache_data
 def normalize_jurisdiction_name(name):
     if not name:
@@ -3160,7 +3221,7 @@ if not st.session_state['csvs_ready']:
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-        # ── CITY / STATE — ZIP removed, searchable picker + manual fallback ──
+        # ── CITY / STATE — typed entry with live suggestions ──────────────────
         _state_keys = sorted(STATE_FIPS.keys())
 
         _h_city, _h_state = st.columns([3, 1])
@@ -3189,36 +3250,44 @@ if not st.session_state['csvs_ready']:
                 help="Two-letter state abbreviation (e.g. TX, FL, CA)."
             )
 
-            city_options = get_state_city_suggestions(s_name, st.session_state.get('target_cities', []))
-            custom_choice = "Custom / type manually…"
-            city_picker_options = city_options + [custom_choice]
-            city_picker_default = c_val if c_val in city_options else custom_choice
-            picker_index = city_picker_options.index(city_picker_default)
+            # Start clean when the previous placeholder/default city belongs to a
+            # different state selection. This prevents Victoria, TX from
+            # reappearing when the user switches to Illinois and types Rockford.
+            prev_state = st.session_state.get(f"_city_state_{i}", s_val)
+            city_seed = c_val
+            if prev_state != s_name and c_val and c_val not in get_state_city_suggestions(s_name, st.session_state.get('target_cities', [])):
+                preserved_manual = str(st.session_state.get(f"city_query_{i}", '') or '').strip()
+                city_seed = preserved_manual if preserved_manual and preserved_manual.lower() != c_val.lower() else ''
 
-            selected_city = col_city.selectbox(
-                f"city_picker_{i}",
-                options=city_picker_options,
-                index=picker_index,
+            typed_city = col_city.text_input(
+                f"city_{i}",
+                value=city_seed,
+                placeholder="e.g. Rockford or Winnebago County",
                 label_visibility="collapsed",
-                key=f"city_picker_{i}",
-                help="Search the built-in city list for this state, or choose Custom to type any city or county."
-            )
+                key=f"city_query_{i}",
+                help="Type a city or county. Matching suggestions will appear below."
+            ).strip()
 
-            if selected_city == custom_choice:
-                c_name = col_city.text_input(
-                    f"city_custom_{i}",
-                    value=c_val,
-                    placeholder="e.g. Orlando or Orange County",
+            suggestions = search_city_suggestions(typed_city, s_name) if typed_city else get_state_city_suggestions(s_name, st.session_state.get('target_cities', []))[:8]
+            final_city = typed_city
+            if suggestions:
+                suggestion_options = ["Keep typed entry"] + suggestions
+                current_choice = st.session_state.get(f"city_suggestion_{i}", "Keep typed entry")
+                if current_choice not in suggestion_options:
+                    current_choice = "Keep typed entry"
+                picked = col_city.selectbox(
+                    f"city_suggestion_{i}",
+                    options=suggestion_options,
+                    index=suggestion_options.index(current_choice),
                     label_visibility="collapsed",
-                    key=f"city_custom_{i}",
-                    help="Official municipality or county name. Counties should include the word County."
-                ).strip()
-            else:
-                c_name = selected_city
-                if st.session_state.get(f"city_custom_{i}", "") != c_name:
-                    st.session_state[f"city_custom_{i}"] = c_name
+                    key=f"city_suggestion_{i}",
+                    help="Optional: choose a suggested match, or keep your typed entry."
+                )
+                if picked != "Keep typed entry":
+                    final_city = picked
 
-            st.session_state['target_cities'][i] = {"city": c_name, "state": s_name}
+            st.session_state[f"_city_state_{i}"] = s_name
+            st.session_state['target_cities'][i] = {"city": final_city, "state": s_name}
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
         st.file_uploader(

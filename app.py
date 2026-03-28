@@ -3899,12 +3899,12 @@ def generate_community_impact_dashboard_html(
     daily_dfr_responses, daily_drone_only_calls,
     active_drones,
     df_calls_full,
+    theme='dark',
 ):
     """
-    Generate a clean, professional Community Impact Dashboard HTML string
-    suitable for embedding via st.components.v1.html().
-    Covers: Flight Hours & Uptime, Response Time vs Ground, 4th Amendment Safeguards,
-    Lives Saved / Outcomes, Call Type Breakdown, Equity Note, and Taxpayer ROI.
+    Generate a Community Impact Dashboard HTML string.
+    theme='dark'  -- black background, for in-app Streamlit embed.
+    theme='light' -- white/off-white background, for HTML export / print.
     """
     import json as _json
 
@@ -3988,6 +3988,58 @@ def generate_community_impact_dashboard_html(
     no_facial_recog  = True
     warrant_transit  = True  # camera forward-facing in transit
 
+    # ── Theme CSS variables ──────────────────────────────────────────────────
+    if theme == 'dark':
+        _css_vars = """
+    --bg-page:      #000000;
+    --bg-card:      #111111;
+    --bg-inset:     #0a0a0a;
+    --ink:          #f0f0f0;
+    --ink-mid:      #bbbbbb;
+    --ink-light:    #888888;
+    --rule:         #2a2a2a;
+    --accent-blue:  #00D2FF;
+    --accent-blue-lt: rgba(0,210,255,0.12);
+    --accent-green: #39FF14;
+    --accent-green-lt: rgba(57,255,20,0.10);
+    --accent-gold:  #FFD700;
+    --accent-gold-lt: rgba(255,215,0,0.10);
+    --accent-red:   #ff4b4b;
+    --accent-red-lt: rgba(255,75,75,0.12);
+    --accent-slate: #888888;
+    --shadow-sm: 0 1px 4px rgba(0,0,0,0.6);
+    --shadow-md: 0 4px 16px rgba(0,210,255,0.10), 0 2px 6px rgba(0,0,0,0.5);
+    --header-border: 2px solid #333333;
+    --card-hover-shadow: 0 0 0 1px #00D2FF44, 0 8px 24px rgba(0,210,255,0.12);
+"""
+        _body_bg = '#000000'
+        _body_color = '#f0f0f0'
+    else:
+        _css_vars = """
+    --bg-page:      #f8f7f4;
+    --bg-card:      #ffffff;
+    --bg-inset:     #f8f7f4;
+    --ink:          #1a1a2e;
+    --ink-mid:      #3d3d5c;
+    --ink-light:    #6b6b8a;
+    --rule:         #e2e0da;
+    --accent-blue:  #1a56db;
+    --accent-blue-lt: #dbeafe;
+    --accent-green: #0d9e6e;
+    --accent-green-lt: #d1fae5;
+    --accent-gold:  #b45309;
+    --accent-gold-lt: #fef3c7;
+    --accent-red:   #be123c;
+    --accent-red-lt: #ffe4e6;
+    --accent-slate: #475569;
+    --shadow-sm: 0 1px 3px rgba(26,22,46,0.06), 0 1px 2px rgba(26,22,46,0.04);
+    --shadow-md: 0 4px 12px rgba(26,22,46,0.08), 0 2px 4px rgba(26,22,46,0.04);
+    --header-border: 2px solid #1a1a2e;
+    --card-hover-shadow: var(--shadow-md);
+"""
+        _body_bg = '#f8f7f4'
+        _body_color = '#1a1a2e'
+
     # Build HTML ─────────────────────────────────────────────────────────────
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -3997,30 +4049,12 @@ def generate_community_impact_dashboard_html(
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root {{
-    --white: #ffffff;
-    --off-white: #f8f7f4;
-    --ink: #1a1a2e;
-    --ink-mid: #3d3d5c;
-    --ink-light: #6b6b8a;
-    --rule: #e2e0da;
-    --accent-blue: #1a56db;
-    --accent-blue-lt: #dbeafe;
-    --accent-green: #0d9e6e;
-    --accent-green-lt: #d1fae5;
-    --accent-gold: #b45309;
-    --accent-gold-lt: #fef3c7;
-    --accent-red: #be123c;
-    --accent-red-lt: #ffe4e6;
-    --accent-slate: #475569;
-    --shadow-sm: 0 1px 3px rgba(26,22,46,0.06), 0 1px 2px rgba(26,22,46,0.04);
-    --shadow-md: 0 4px 12px rgba(26,22,46,0.08), 0 2px 4px rgba(26,22,46,0.04);
-  }}
+  :root {{{_css_vars}  }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{
     font-family: 'DM Sans', sans-serif;
-    background: var(--off-white);
-    color: var(--ink);
+    background: {_body_bg};
+    color: {_body_color};
     font-size: 14px;
     line-height: 1.55;
     padding: 28px 24px 40px;
@@ -4031,7 +4065,7 @@ def generate_community_impact_dashboard_html(
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    border-bottom: 2px solid var(--ink);
+    border-bottom: var(--header-border);
     padding-bottom: 14px;
     margin-bottom: 28px;
     gap: 16px;
@@ -4081,7 +4115,7 @@ def generate_community_impact_dashboard_html(
 
   /* ── Stat card ── */
   .stat-card {{
-    background: var(--white);
+    background: var(--bg-card);
     border: 1px solid var(--rule);
     border-radius: 10px;
     padding: 18px 20px 16px;
@@ -4090,7 +4124,7 @@ def generate_community_impact_dashboard_html(
     overflow: hidden;
     transition: box-shadow 0.2s;
   }}
-  .stat-card:hover {{ box-shadow: var(--shadow-md); }}
+  .stat-card:hover {{ box-shadow: var(--card-hover-shadow); }}
   .stat-card .accent-bar {{
     position: absolute;
     top: 0; left: 0; right: 0;
@@ -4149,7 +4183,7 @@ def generate_community_impact_dashboard_html(
 
   /* ── Response time comparison ── */
   .rt-compare {{
-    background: var(--white);
+    background: var(--bg-card);
     border: 1px solid var(--rule);
     border-radius: 10px;
     padding: 20px;
@@ -4189,7 +4223,7 @@ def generate_community_impact_dashboard_html(
 
   /* ── 4th Amendment panel ── */
   .amend-panel {{
-    background: var(--white);
+    background: var(--bg-card);
     border: 1px solid var(--rule);
     border-left: 4px solid var(--accent-blue);
     border-radius: 10px;
@@ -4210,7 +4244,7 @@ def generate_community_impact_dashboard_html(
   .amend-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; }}
   @media(max-width:700px) {{ .amend-grid {{ grid-template-columns: 1fr 1fr; }} }}
   .amend-item {{
-    background: var(--off-white);
+    background: var(--bg-inset);
     border-radius: 8px;
     padding: 12px 14px;
     display: flex;
@@ -4232,7 +4266,7 @@ def generate_community_impact_dashboard_html(
 
   /* ── Outcomes counters ── */
   .outcome-card {{
-    background: var(--white);
+    background: var(--bg-card);
     border: 1px solid var(--rule);
     border-radius: 10px;
     padding: 18px 16px 14px;
@@ -4254,7 +4288,7 @@ def generate_community_impact_dashboard_html(
 
   /* ── ROI meter ── */
   .roi-panel {{
-    background: var(--white);
+    background: var(--bg-card);
     border: 1px solid var(--rule);
     border-radius: 10px;
     padding: 20px 22px;
@@ -4280,7 +4314,7 @@ def generate_community_impact_dashboard_html(
 
   /* ── Call type bars ── */
   .ct-panel {{
-    background: var(--white);
+    background: var(--bg-card);
     border: 1px solid var(--rule);
     border-radius: 10px;
     padding: 20px 22px;
@@ -4564,11 +4598,11 @@ def generate_community_impact_dashboard_html(
     The {city} DFR program explicitly tracks deployment patterns by district to ensure equitable coverage.
   </p>
   <div style="display:flex;gap:12px;flex-wrap:wrap;">
-    <div style="flex:1;min-width:180px;background:var(--off-white);border-radius:8px;padding:12px 14px;">
+    <div style="flex:1;min-width:180px;background:var(--bg-inset);border-radius:8px;padding:12px 14px;">
       <div style="font-size:11px;font-weight:700;color:var(--accent-gold);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Deployed Stations</div>
       <div id="stationList" style="font-size:11.5px;color:var(--ink-mid);line-height:1.8;"></div>
     </div>
-    <div style="flex:2;min-width:200px;background:var(--off-white);border-radius:8px;padding:12px 14px;">
+    <div style="flex:2;min-width:200px;background:var(--bg-inset);border-radius:8px;padding:12px 14px;">
       <div style="font-size:11px;font-weight:700;color:var(--accent-gold);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Equity Safeguards</div>
       <ul style="font-size:11.5px;color:var(--ink-mid);padding-left:16px;line-height:2.0;">
         <li>Coverage zones set by call-volume density, not demographic profile</li>
@@ -7329,6 +7363,12 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
   [ANALYTICS_HTML_EXPORT]
 </section>
 
+<!-- ── 10: COMMUNITY IMPACT DASHBOARD ────────────────────────── -->
+<section class="doc-section" id="community-impact">
+  <div class="section-eyebrow"><span class="pg-num">10</span><span class="pg-title">Community Impact &amp; Transparency</span></div>
+  [COMMUNITY_IMPACT_HTML_EXPORT]
+</section>
+
 <!-- ── DISCLAIMER ─────────────────────────────────────────────── -->
 <div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:20px 60px;margin:0;font-size:11px;color:#7a5a00;line-height:1.7">
   <strong>&#9888; SIMULATION TOOL DISCLAIMER</strong> — All figures are model estimates based on user inputs and publicly available data. Not a legal recommendation, binding proposal, contract, or guarantee. Deployments require FAA authorization and formal procurement.
@@ -7360,6 +7400,35 @@ sections.forEach(s=>obs.observe(s));
 </body></html>"""
 
         export_html = export_html.replace("[ANALYTICS_HTML_EXPORT]", analytics_html_export)
+
+        # ── Community Impact Dashboard (light theme for print/export) ────────
+        _cid_export_html = generate_community_impact_dashboard_html(
+            city=prop_city,
+            state=prop_state,
+            population=int(pop_metric or 65000),
+            total_calls=int(st.session_state.get('total_original_calls', 0) or 0),
+            calls_covered_perc=float(calls_covered_perc or 0),
+            area_covered_perc=float(area_covered_perc or 0),
+            avg_resp_time_min=float(avg_resp_time or 0),
+            avg_time_saved_min=float(avg_time_saved or 0),
+            fleet_capex=float(fleet_capex or 0),
+            annual_savings=float(annual_savings or 0),
+            break_even_text=str(break_even_text or 'N/A'),
+            actual_k_responder=int(actual_k_responder or 0),
+            actual_k_guardian=int(actual_k_guardian or 0),
+            dfr_dispatch_rate=float(dfr_dispatch_rate or 0.25),
+            deflection_rate=float(deflection_rate or 0.30),
+            daily_dfr_responses=float(daily_dfr_responses or 0),
+            daily_drone_only_calls=float(daily_drone_only_calls or 0),
+            active_drones=active_drones or [],
+            df_calls_full=df_calls_full,
+            theme='light',
+        )
+        # Strip the outer <html>/<head>/<body> tags so it embeds cleanly inline
+        import re as _re
+        _cid_inner = _re.sub(r'(?s)<!DOCTYPE.*?<body[^>]*>', '', _cid_export_html)
+        _cid_inner = _re.sub(r'</body>\s*</html>\s*$', '', _cid_inner).strip()
+        export_html = export_html.replace("[COMMUNITY_IMPACT_HTML_EXPORT]", _cid_inner)
 
     # ── Download buttons — always rendered so they're visible in the sidebar ──
     _safe_city   = _safe_city_base

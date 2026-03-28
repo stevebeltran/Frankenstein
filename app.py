@@ -3206,19 +3206,17 @@ if not st.session_state['csvs_ready']:
             help="Include 'lat'/'lon' OR 'address' columns. Max ~20 locations for auto-geocoding."
         )
 
-        station_template_path = "stations.csv"
-        if os.path.exists(station_template_path):
-            try:
-                with open(station_template_path, "rb") as f:
-                    st.download_button(
-                        label="⬇️ Download sample stations.csv",
-                        data=f.read(),
-                        file_name="stations.csv",
-                        mime="text/csv; charset=utf-8",
-                        key="download_station_template_btn",
-                    )
-            except Exception:
-                pass
+        station_template_bytes = base64.b64decode(
+            "77u/c3RhdGlvbl9pZCxuYW1lLGxhdCxsb24NCjEsIlBvbGljZSAxMjMgUyBFYXN0IFN0LCBCZW50b24sIEFSIDcyMDE1IiwzNC41NjI4NzIyMiwtOTIuNTg1MDM3MDQNCjIsIlNjaG9vbCAgMTIzIFMgRWFzdCBTdCwgQmVudG9uLCBBUiA3MjAxNiIsMzQuNTgxNDAzNDEsLTkyLjU4MjA4MTA5DQo0LCJGaXJlICAxMjMgUyBFYXN0IFN0LCBCZW50b24sIEFSIDcyMDE3IiwzNC42MDkzNDY3OSwtOTIuNTM3MDUyNTkNCjUsIlB1YmxpYyBXb3JrcyAxMjMgUyBFYXN0IFN0LCBCZW50b24sIEFSIDcyMDE4IiwzNC41NjM3NTMzOSwtOTIuNTcyODcyMzENCjYsIlByaXZhdGUgIDEyMyBTIEVhc3QgU3QsIEJlbnRvbiwgQVIgNzIwMTkiLDM0LjU0OTc0ODcxLC05Mi42MDcxMjMyNQ0K"
+        )
+        st.download_button(
+            label="⬇️ Download sample stations.csv",
+            data=station_template_bytes,
+            file_name="stations.csv",
+            mime="text/csv; charset=utf-8",
+            key="download_station_template_btn",
+            use_container_width=True,
+        )
 
         st.caption("Upload your own stations file if you have one, or download the sample template. If no file is uploaded, stations will be auto-generated from call data.")
 

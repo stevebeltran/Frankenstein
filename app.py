@@ -2510,11 +2510,13 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     _RESPONDER_DAILY_HOURS = CONFIG["RESPONDER_PATROL_HOURS"]      # 11.6
     columns_per_row = max(1, int(columns_per_row))
 
-    # Fixed modeled specialty-response upside to allocate across unit cards by
-    # each unit's share of daily flights.
-    _THERMAL_TOTAL = 65586.0
-    _K9_TOTAL = 66881.0
-    _total_card_flights = sum(max(0.0, float((d.get("marginal_flights", 0) or 0) + (d.get("shared_flights", 0) or 0))) for d in active_drones)
+    # Specialty-response values are independent from Annual Capacity Value.
+    # They are modeled per station from that station's own calls-in-range and
+    # resulting drone flights, not allocated as a share of fleet totals.
+    _THERMAL_RATE = float(CONFIG.get("THERMAL_DEFAULT_APPLICABLE_RATE", 0.12) or 0)
+    _THERMAL_PER_CALL = float(CONFIG.get("THERMAL_SAVINGS_PER_CALL", 38) or 0)
+    _K9_RATE = float(CONFIG.get("K9_DEFAULT_APPLICABLE_RATE", 0.03) or 0)
+    _K9_PER_CALL = float(CONFIG.get("K9_SAVINGS_PER_CALL", 155) or 0)
 
     cards_html = []
     for d in active_drones:
@@ -2556,9 +2558,12 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             uptime_tooltip = f"{max_patrol_hours}hr patrol shift"
 
         total_daily_flights = d_flights + d_shared
-        _flight_ratio = (float(total_daily_flights) / _total_card_flights) if _total_card_flights > 0 else 0.0
-        d_thermal = _THERMAL_TOTAL * _flight_ratio
-        d_k9 = _K9_TOTAL * _flight_ratio
+        d_zone_calls = float(d.get("zone_calls_annual", 0) or 0)
+        d_zone_flights_annual = float(d.get("zone_flights_annual", total_daily_flights * 365.0) or 0)
+        d_thermal_calls = d_zone_flights_annual * _THERMAL_RATE
+        d_k9_calls = d_zone_flights_annual * _K9_RATE
+        d_thermal = d_thermal_calls * _THERMAL_PER_CALL
+        d_k9 = d_k9_calls * _K9_PER_CALL
         patrol_time_line = ""
         if total_daily_flights > 0:
             # Raw calculation: patrol budget / flights = available min per flight
@@ -2584,7 +2589,6 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_conc_annual  = d.get('concurrent_annual', 0)
         d_best         = d.get('best_case_annual', d_savings)
         d_best_be      = d.get('best_be_text', d_be)
-        d_total_capacity_value = d_best + d_thermal + d_k9
         util_pct       = f"{d_util*100:.1f}%"
         util_color     = "#dc3545" if d_util > 0.75 else "#F0B429" if d_util > 0.4 else "#2ecc71"
         has_concurrent = d_shared > 0.1 and d_conc_annual > 0
@@ -2609,23 +2613,25 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
   <!-- Annual capacity value box -->
   <div style="background:rgba(0,210,255,0.07); border:1px solid rgba(0,210,255,0.15); border-radius:6px; padding:8px 10px; margin-bottom:6px;"
-       title="Annual Capacity Value = base annual value + allocated thermal upside + allocated avoided K-9 upside.">
+       title="Annual Capacity Value is based on calls handled without sending a squad.">
     <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Annual Capacity Value</div>
     <div style="display:flex; align-items:baseline; justify-content:space-between; gap:6px;">
       <div>
-        <div style="font-size:1.3rem; font-weight:900; color:{accent_color}; line-height:1.1;">${d_total_capacity_value:,.0f}</div>
-        <div style="font-size:0.60rem; color:{text_muted}; margin-top:2px;">base ${d_best:,.0f} + specialty ${d_thermal + d_k9:,.0f}</div>
+        <div style="font-size:1.3rem; font-weight:900; color:{accent_color}; line-height:1.1;">${d_best:,.0f}</div>
+        <div style="font-size:0.60rem; color:{text_muted}; margin-top:2px;">calls handled without sending a squad</div>
       </div>
       {patrol_time_line}
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:7px;">
-      <div title="Allocated from $65,586/yr total thermal upside based on this unit's share of daily flights." style="background:rgba(251,191,36,0.08); border:1px solid rgba(251,191,36,0.22); border-radius:6px; padding:6px 8px;">
-        <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:1px;">🔥 Thermal</div>
-        <div style="font-size:0.85rem; font-weight:800; color:#fbbf24; line-height:1.1;">${d_thermal:,.0f}/yr</div>
+      <div title="Calls assisted by thermal are modeled from this station's own flights and calls for service in range." style="background:rgba(251,191,36,0.08); border:1px solid rgba(251,191,36,0.22); border-radius:6px; padding:6px 8px;">
+        <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:1px;">🔥 Calls Assisted by Thermal</div>
+        <div style="font-size:0.72rem; font-weight:700; color:{card_title}; line-height:1.15;">{d_thermal_calls:,.0f} calls assisted</div>
+        <div style="font-size:0.85rem; font-weight:800; color:#fbbf24; line-height:1.1; margin-top:2px;">${d_thermal:,.0f}/yr</div>
       </div>
-      <div title="Allocated from $66,881/yr total avoided K-9 upside based on this unit's share of daily flights." style="background:rgba(57,255,20,0.06); border:1px solid rgba(57,255,20,0.18); border-radius:6px; padding:6px 8px;">
-        <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:1px;">🐕 K-9 Avoided</div>
-        <div style="font-size:0.85rem; font-weight:800; color:#39FF14; line-height:1.1;">${d_k9:,.0f}/yr</div>
+      <div title="K-9 calls assisted are modeled from this station's own flights and calls for service in range." style="background:rgba(57,255,20,0.06); border:1px solid rgba(57,255,20,0.18); border-radius:6px; padding:6px 8px;">
+        <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:1px;">🐕 K-9 Calls Assisted</div>
+        <div style="font-size:0.72rem; font-weight:700; color:{card_title}; line-height:1.15;">{d_k9_calls:,.0f} calls assisted</div>
+        <div style="font-size:0.85rem; font-weight:800; color:#39FF14; line-height:1.1; margin-top:2px;">${d_k9:,.0f}/yr</div>
       </div>
     </div>
   </div>
@@ -4867,6 +4873,8 @@ if st.session_state['csvs_ready']:
             d['marginal_deflected']= _excl_deflected
             d['shared_flights']    = _shared_dfr             # shared zone DFR flights
             d['zone_flights']      = _zone_flights           # total zone flights (for util)
+            d['zone_calls_annual'] = _raw_zone_calls         # annual calls for service in this drone's range
+            d['zone_flights_annual'] = _zone_flights * 365.0 # annual drone flights generated by that zone
             d['utilization']       = _util
             d['blocked_per_day']   = _concurrent_daily
             d['monthly_savings']   = _best_monthly           # headline = best case
@@ -4882,7 +4890,8 @@ if st.session_state['csvs_ready']:
                       'marginal_deflected':0,'shared_flights':0,'be_text':"N/A",
                       'utilization':0,'concurrent_monthly':0,'best_case_annual':0,
                       'blocked_per_day':0,'best_be_text':"N/A",'base_annual':0,
-                      'concurrent_annual':0,'zone_flights':0})
+                      'concurrent_annual':0,'zone_flights':0,'zone_calls_annual':0,
+                      'zone_flights_annual':0})
         active_drones.append(d)
         step += 1
 

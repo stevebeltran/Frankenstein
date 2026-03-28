@@ -2469,6 +2469,23 @@ def calculate_zoom(min_lon, max_lon, min_lat, max_lat):
     if lon_diff <= 0 or lat_diff <= 0: return 12
     return min(max(min(np.log2(360/lon_diff), np.log2(180/lat_diff)) + 1.6, 5), 18)
 
+def calculate_zoom_from_calls(df_calls, pct_lo=5, pct_hi=95):
+    """Calculate map center and zoom from call data percentiles so a handful of
+    outlier incidents on rural roads don't force the map to zoom way out.
+    Returns (center_lat, center_lon, zoom, minx, miny, maxx, maxy)."""
+    lats = pd.to_numeric(df_calls["lat"], errors="coerce").dropna()
+    lons = pd.to_numeric(df_calls["lon"], errors="coerce").dropna()
+    if lats.empty or lons.empty:
+        return None, None, 12, None, None, None, None
+    miny = float(lats.quantile(pct_lo / 100))
+    maxy = float(lats.quantile(pct_hi / 100))
+    minx = float(lons.quantile(pct_lo / 100))
+    maxx = float(lons.quantile(pct_hi / 100))
+    center_lat = float(lats.median())
+    center_lon = float(lons.median())
+    zoom = calculate_zoom(minx, maxx, miny, maxy)
+    return center_lat, center_lon, zoom, minx, miny, maxx, maxy
+
 def generate_kml(active_gdf, active_drones, calls_gdf):
     kml = simplekml.Kml()
     kml.document.name = "BRINC DFR Deployment Plan"
@@ -3844,10 +3861,20 @@ if st.session_state['csvs_ready']:
 
     st.sidebar.markdown('<div class="sidebar-section-header">② Optimize Fleet</div>', unsafe_allow_html=True)
 
-    minx, miny, maxx, maxy = active_gdf.to_crs(epsg=4326).total_bounds
-    center_lon = (minx + maxx) / 2
-    center_lat = (miny + maxy) / 2
-    dynamic_zoom = calculate_zoom(minx, maxx, miny, maxy)
+    # Use boundary total_bounds for UTM zone / epsg only.
+    # Use call-data percentiles for map center + zoom so rural outlier calls
+    # don't force the map to zoom out to show the whole county.
+    _boundary_bounds = active_gdf.to_crs(epsg=4326).total_bounds
+    _cl, _clon, _czoom, _cminx, _cminy, _cmaxx, _cmaxy = calculate_zoom_from_calls(df_calls)
+    if _cl is not None:
+        center_lat, center_lon, dynamic_zoom = _cl, _clon, _czoom
+        # Use call percentile bounds for FAA/airfield queries (tighter area)
+        minx, miny, maxx, maxy = _cminx, _cminy, _cmaxx, _cmaxy
+    else:
+        minx, miny, maxx, maxy = _boundary_bounds
+        center_lon = (minx + maxx) / 2
+        center_lat = (miny + maxy) / 2
+        dynamic_zoom = calculate_zoom(minx, maxx, miny, maxy)
     utm_zone = int((center_lon + 180) / 6) + 1
     epsg_code = int(f"326{utm_zone}") if center_lat > 0 else int(f"327{utm_zone}")
 
@@ -3858,12 +3885,44 @@ if st.session_state['csvs_ready']:
         raw_union = (active_utm.geometry.union_all() if hasattr(active_utm.geometry, 'union_all')
                      else active_utm.geometry.unary_union)
         # buffer(0.1).buffer(-0.1) cleans self-intersections but can collapse thin geometries.
-        # Use a larger initial buffer and validate before shrinking.
         clean_geom = raw_union.buffer(1.0).buffer(-1.0)
         if clean_geom.is_empty or not clean_geom.is_valid:
-            clean_geom = raw_union.buffer(0)  # zero-buffer repair only
+            clean_geom = raw_union.buffer(0)
         if clean_geom.is_empty:
-            clean_geom = raw_union          # use as-is if still empty
+            clean_geom = raw_union
+
+        # ── Sanity-check: if the loaded boundary is more than 3× larger than
+        #    the call data extent (e.g. county loaded instead of city), clip it
+        #    to a buffered convex hull of the actual call coordinates so the map
+        #    and station optimizer stay tight to where calls actually occur. ──
+        try:
+            _call_lats = pd.to_numeric(df_calls["lat"], errors="coerce").dropna()
+            _call_lons = pd.to_numeric(df_calls["lon"], errors="coerce").dropna()
+            if len(_call_lats) > 10:
+                # Build convex hull of calls in UTM, add a 1.5km buffer
+                from shapely.geometry import MultiPoint
+                _call_pts_utm = gpd.GeoSeries(
+                    gpd.points_from_xy(_call_lons, _call_lats), crs="EPSG:4326"
+                ).to_crs(epsg=epsg_code)
+                _call_hull = MultiPoint(list(zip(
+                    _call_pts_utm.geometry.x, _call_pts_utm.geometry.y
+                ))).convex_hull.buffer(1500)  # 1.5 km generous buffer
+
+                # Only clip if the loaded boundary is >2.5x the area of the call hull
+                _boundary_area = clean_geom.area
+                _hull_area     = _call_hull.area
+                if _boundary_area > _hull_area * 2.5:
+                    clipped = clean_geom.intersection(_call_hull)
+                    if not clipped.is_empty and clipped.area > _hull_area * 0.5:
+                        clean_geom = clipped
+                        st.toast(
+                            "📍 Boundary clipped to call data extent "
+                            "(loaded shapefile was larger than the active jurisdiction).",
+                            icon="📍"
+                        )
+        except Exception:
+            pass  # clipping failed — use original boundary as-is
+
         city_m = clean_geom
         city_boundary_geom = gpd.GeoSeries([clean_geom], crs=epsg_code).to_crs(epsg=4326).iloc[0]
     except Exception as e:

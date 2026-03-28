@@ -1371,6 +1371,10 @@ def aggressive_parse_calls(uploaded_files):
             if inferred_state:
                 res["_csv_state"] = inferred_state
 
+            inferred_place_code = _extract_place_code_from_raw_df(raw_df, inferred_state)
+            if inferred_place_code:
+                res["_csv_placefp"] = str(inferred_place_code).zfill(5)
+
             all_calls_list.append(res)
         except: continue
         
@@ -1892,6 +1896,61 @@ def lookup_county_for_city(city_name, state_abbr):
     except Exception:
         return None
 
+
+def _normalize_place_name(name):
+    if name is None:
+        return ""
+    value = str(name).lower().strip()
+    value = re.sub(r'\b(city|town|village|borough|township|cdp|municipality)\b', '', value)
+    value = re.sub(r'[^a-z0-9 ]', ' ', value)
+    value = re.sub(r'\s+', ' ', value).strip()
+    return value
+
+
+def _extract_place_code_from_raw_df(raw_df, inferred_state_abbr=None):
+    """Best-effort extraction of a Census place code from uploaded CAD data."""
+    if raw_df is None or raw_df.empty:
+        return None
+
+    candidates = [
+        'placefp', 'place_fips', 'placefips', 'place code', 'place_code', 'placecode',
+        'city_code', 'city code', 'citycode', 'municipality_code', 'municipality code',
+        'geoid', 'geoid10', 'geoid20', 'place_geoid', 'place geoid'
+    ]
+    col_map = {str(c).strip().lower(): c for c in raw_df.columns}
+
+    def _clean_code(val):
+        if pd.isna(val):
+            return None
+        digits = re.sub(r'\D', '', str(val))
+        if not digits:
+            return None
+        if len(digits) == 5:
+            return digits
+        if len(digits) >= 7:
+            if inferred_state_abbr and inferred_state_abbr in STATE_FIPS:
+                st_fips = STATE_FIPS[inferred_state_abbr]
+                idx = digits.find(st_fips)
+                if idx != -1 and len(digits[idx:]) >= 7:
+                    return digits[idx+2:idx+7]
+            return digits[-5:]
+        return None
+
+    for cand in candidates:
+        col = col_map.get(cand)
+        if col is None:
+            continue
+        vals = raw_df[col].dropna().astype(str).str.strip()
+        if vals.empty:
+            continue
+        cleaned = vals.map(_clean_code).dropna()
+        if cleaned.empty:
+            continue
+        vc = cleaned.value_counts()
+        if not vc.empty:
+            return str(vc.index[0]).zfill(5)
+    return None
+
 @st.cache_data
 def fetch_county_boundary_local(state_abbr, county_name_input):
     # 1. Clean the input
@@ -1928,7 +1987,7 @@ def fetch_county_boundary_local(state_abbr, county_name_input):
     return False, None
 
 @st.cache_data
-def fetch_place_boundary_local(state_abbr, place_name_input):
+def fetch_place_boundary_local(state_abbr, place_name_input, place_code=None):
     """Look up a city/town/CDP boundary from the local places_lite.parquet.
     Returns (True, GeoDataFrame) on success, (False, None) if not found or
     the file doesn't exist yet (falls back to county lookup in caller)."""
@@ -1937,38 +1996,68 @@ def fetch_place_boundary_local(state_abbr, place_name_input):
         return False, None   # file not yet added — caller falls back to county
 
     state_fips = STATE_FIPS.get(state_abbr)
-    if not state_fips: return False, None
+    if not state_fips:
+        return False, None
 
-    search_name = place_name_input.lower().strip()
-    # Strip common suffixes the user might have typed
-    for suffix in [" city", " town", " village", " borough", " township", " cdp"]:
-        if search_name.endswith(suffix):
-            search_name = search_name[:-len(suffix)].strip()
-            break
+    search_name = _normalize_place_name(place_name_input)
 
     try:
         gdf = gpd.read_parquet(local_file)
-        state_rows = gdf[gdf["STATEFP"] == state_fips]
-
-        # Exact match first
-        match = state_rows[state_rows["NAME"].str.lower() == search_name]
-
-        # Partial match fallback (e.g. "Fort Worth" matching "Fort Worth city")
-        if match.empty:
-            match = state_rows[state_rows["NAME"].str.lower().str.startswith(search_name)]
-            if not match.empty:
-                match = match.copy()
-                match["_diff"] = match["NAME"].str.len() - len(search_name)
-                match = match.sort_values("_diff").head(1)
-
-        if match.empty:
+        state_rows = gdf[gdf["STATEFP"].astype(str) == str(state_fips)].copy()
+        if state_rows.empty:
             return False, None
 
-        result = match.copy()
-        # Use NAMELSAD for display if available (e.g. "Rockford city"), else NAME
-        name_col = "NAMELSAD" if "NAMELSAD" in result.columns else "NAME"
-        result["NAME"] = result[name_col].astype(str)
-        return True, result[["NAME", "geometry"]]
+        # Best-case match: explicit Census place code from the uploaded CAD file.
+        if place_code and "PLACEFP" in state_rows.columns:
+            code_match = state_rows[state_rows["PLACEFP"].astype(str).str.zfill(5) == str(place_code).zfill(5)].copy()
+            if not code_match.empty:
+                name_col = "NAMELSAD" if "NAMELSAD" in code_match.columns else "NAME"
+                code_match["NAME"] = code_match[name_col].astype(str)
+                return True, code_match[["NAME", "geometry"]]
+
+        candidate_frames = []
+        for col in [c for c in ["NAME", "NAMELSAD"] if c in state_rows.columns]:
+            tmp = state_rows.copy()
+            tmp["_norm_name"] = tmp[col].astype(str).map(_normalize_place_name)
+
+            exact = tmp[tmp["_norm_name"] == search_name]
+            if not exact.empty:
+                candidate_frames.append(exact)
+
+            starts = tmp[tmp["_norm_name"].str.startswith(search_name, na=False)]
+            if not starts.empty:
+                candidate_frames.append(starts)
+
+            contains = tmp[tmp["_norm_name"].str.contains(rf'\b{re.escape(search_name)}\b', regex=True, na=False)]
+            if not contains.empty:
+                candidate_frames.append(contains)
+
+        if not candidate_frames:
+            return False, None
+
+        match = pd.concat(candidate_frames, ignore_index=False).drop_duplicates().copy()
+        display_col = "NAMELSAD" if "NAMELSAD" in match.columns else "NAME"
+
+        def _rank_row(row):
+            disp = str(row.get(display_col, '')).lower()
+            norm = str(row.get('_norm_name', ''))
+            exact_score = 0 if norm == search_name else 1
+            legal_score = 0
+            if ' city' in disp or ' town' in disp or ' village' in disp:
+                legal_score = 0
+            elif ' borough' in disp or ' municipality' in disp:
+                legal_score = 1
+            elif ' cdp' in disp:
+                legal_score = 2
+            else:
+                legal_score = 3
+            length_score = abs(len(norm) - len(search_name))
+            return (exact_score, legal_score, length_score)
+
+        match['_rank'] = match.apply(_rank_row, axis=1)
+        match = match.sort_values('_rank').head(1).copy()
+        match['NAME'] = match[display_col].astype(str)
+        return True, match[["NAME", "geometry"]]
 
     except Exception:
         return False, None
@@ -1978,13 +2067,20 @@ def reverse_geocode_state(lat, lon):
     url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=10&addressdetails=1"
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=8) as response:
             data = json.loads(response.read().decode('utf-8'))
             address = data.get('address', {})
             state = address.get('state', '')
-            city = address.get('city', address.get('town', address.get('village', address.get('county', 'Unknown City'))))
+            city = (
+                address.get('city')
+                or address.get('town')
+                or address.get('village')
+                or address.get('municipality')
+                or address.get('hamlet')
+            )
             return state, city
-    except Exception: return None, None
+    except Exception:
+        return None, None
 
 @st.cache_data
 def fetch_census_population(state_fips, place_name, is_county=False):
@@ -3204,6 +3300,7 @@ if not st.session_state['csvs_ready']:
 
                     detected_city = None
                     detected_state = None
+                    detected_placefp = None
 
                     with st.spinner(get_jurisdiction_message()):
                         # Priority 1: city/state extracted directly from the CAD export
@@ -3218,6 +3315,12 @@ if not st.session_state['csvs_ready']:
                                 detected_state = state_val
                             elif state_val.title() in US_STATES_ABBR:
                                 detected_state = US_STATES_ABBR[state_val.title()]
+
+                        if '_csv_placefp' in df_c.columns:
+                            place_val = str(df_c['_csv_placefp'].iloc[0]).strip()
+                            place_digits = re.sub(r'\D', '', place_val)
+                            if place_digits:
+                                detected_placefp = place_digits[-5:].zfill(5)
 
                         # If the export gives us a city but not a state, forward-geocode the city name.
                         if detected_city and not detected_state:
@@ -3287,14 +3390,10 @@ if not st.session_state['csvs_ready']:
                             # 2. counties_lite.parquet — same-name county
                             # 3. Geocode → find county → counties_lite.parquet
                             b_success, b_gdf = fetch_place_boundary_local(
-                                detected_state_for_boundary, detected_city_for_boundary)
-                            if not b_success:
-                                for name_try in [detected_city_for_boundary,
-                                                 detected_city_for_boundary + " County"]:
-                                    b_success, b_gdf = fetch_county_boundary_local(
-                                        detected_state_for_boundary, name_try)
-                                    if b_success and b_gdf is not None:
-                                        break
+                                detected_state_for_boundary,
+                                detected_city_for_boundary,
+                                place_code=detected_placefp
+                            )
                             if not b_success:
                                 county_name = lookup_county_for_city(
                                     detected_city_for_boundary, detected_state_for_boundary)
@@ -3403,15 +3502,6 @@ if not st.session_state['csvs_ready']:
             if success:
                 boundary_kind = 'place'
             if not success:
-                # Direct county name match (e.g. "Gilmer County" or "Gilmer")
-                success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
-                if success:
-                    boundary_kind = 'county'
-            if not success:
-                success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
-                if success:
-                    boundary_kind = 'county'
-            if not success:
                 # City doesn't share its county's name — geocode to find the county
                 county_name = lookup_county_for_city(c_name, s_name)
                 if county_name:
@@ -3420,6 +3510,10 @@ if not st.session_state['csvs_ready']:
                         boundary_kind = 'county'
                         temp_gdf = temp_gdf.copy()
                         temp_gdf['NAME'] = c_name + " (" + county_name + " County)"
+            if not success and c_name.lower().endswith(' county'):
+                success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
+                if success:
+                    boundary_kind = 'county'
             is_county = (boundary_kind == 'county')
 
             # County boundaries come from the parquet, not from TIGER, so they are

@@ -2584,6 +2584,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_conc_annual  = d.get('concurrent_annual', 0)
         d_best         = d.get('best_case_annual', d_savings)
         d_best_be      = d.get('best_be_text', d_be)
+        d_total_capacity_value = d_best + d_thermal + d_k9
         util_pct       = f"{d_util*100:.1f}%"
         util_color     = "#dc3545" if d_util > 0.75 else "#F0B429" if d_util > 0.4 else "#2ecc71"
         has_concurrent = d_shared > 0.1 and d_conc_annual > 0
@@ -2606,11 +2607,15 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     </div>
   </div>
 
-  <!-- Annual value box -->
-  <div style="background:rgba(0,210,255,0.07); border:1px solid rgba(0,210,255,0.15); border-radius:6px; padding:8px 10px; margin-bottom:6px;">
-    <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Annual Value</div>
+  <!-- Annual capacity value box -->
+  <div style="background:rgba(0,210,255,0.07); border:1px solid rgba(0,210,255,0.15); border-radius:6px; padding:8px 10px; margin-bottom:6px;"
+       title="Annual Capacity Value = base annual value + allocated thermal upside + allocated avoided K-9 upside.">
+    <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Annual Capacity Value</div>
     <div style="display:flex; align-items:baseline; justify-content:space-between; gap:6px;">
-      <div style="font-size:1.3rem; font-weight:900; color:{accent_color}; line-height:1.1;">${d_best:,.0f}</div>
+      <div>
+        <div style="font-size:1.3rem; font-weight:900; color:{accent_color}; line-height:1.1;">${d_total_capacity_value:,.0f}</div>
+        <div style="font-size:0.60rem; color:{text_muted}; margin-top:2px;">base ${d_best:,.0f} + specialty ${d_thermal + d_k9:,.0f}</div>
+      </div>
       {patrol_time_line}
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:7px;">

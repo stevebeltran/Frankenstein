@@ -376,17 +376,16 @@ def _detect_datetime_series_for_labels(df):
 
 @st.cache_data
 def _bls_area_code_for_city(city, state_abbr, api_key):
-    """Resolve city + state to a BLS OEWS MSA area code via the BLS Areas API.
-    Returns (area_code, area_name) or (None, None) if not found.
+    """Resolve city + state to a BLS OEWS MSA 6-digit area code via the BLS Areas API.
+    BLS OEWS area codes for metros are 6-digit strings (e.g. "047020" for Victoria TX).
+    The area list endpoint also returns codes with a type prefix like "M047020";
+    we strip the leading letter when building series IDs.
+    Returns (six_digit_code, area_name) or (None, None).
     """
     try:
-        url = "https://api.bls.gov/publicAPI/v2/surveys/OE/area"
-        payload = json.dumps({"registrationkey": api_key}).encode()
-        req = urllib.request.Request(
-            url, data=payload,
-            headers={'Content-Type': 'application/json', 'User-Agent': 'BRINC_COS_Optimizer/1.0'},
-            method='POST',
-        )
+        # GET request — area list endpoint does not require a body
+        url = f"https://api.bls.gov/publicAPI/v2/surveys/OE/area?registrationkey={api_key}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode())
         areas = data.get('Results', {}).get('area', [])
@@ -396,7 +395,11 @@ def _bls_area_code_for_city(city, state_abbr, api_key):
         for a in areas:
             name = a.get('area_name', '')
             code = a.get('area_code', '')
-            if not code or not code[0].isdigit():
+            if not code:
+                continue
+            # Strip leading area-type letter (M=metro, N=nonmetro, S=state, 0=national)
+            numeric_code = code.lstrip('MNS0') if not code[0].isdigit() else code
+            if not numeric_code or len(numeric_code) < 4:
                 continue
             name_lower = name.lower()
             score = 0
@@ -405,7 +408,10 @@ def _bls_area_code_for_city(city, state_abbr, api_key):
             if state_up in name.upper():
                 score += 5
             if score > best_score:
-                best_score, best_code, best_name = score, code, name
+                best_score = score
+                # Pad/trim to exactly 6 digits for series ID
+                best_code = numeric_code.zfill(6)[:6]
+                best_name = name
         if best_code and best_score >= 10:
             return best_code, best_name
     except Exception:
@@ -417,6 +423,16 @@ def _bls_area_code_for_city(city, state_abbr, api_key):
 def fetch_area_police_hourly_wage(city, state_abbr, api_key=None):
     """Mean hourly wage for police/sheriff patrol officers (SOC 33-3051) from BLS OEWS.
 
+    BLS OEWS series ID format (24 chars total):
+      OE  (2) survey prefix
+      U   (1) seasonal adjustment (unadjusted)
+      M   (1) area type: M=metro
+      area(6) 6-digit BLS metro area code
+      000000  (6) industry = all industries
+      333051  (6) SOC 33-3051 (no dash)
+      03      (2) datatype = mean hourly wage
+    Example for Victoria TX (area 047020): OEUM04702000000033305103
+
     Resolution order:
       1. BLS API v2  — MSA-level series for the specific metro area  (most accurate)
       2. BLS HTML    — state-level OEWS page                          (state average)
@@ -425,14 +441,13 @@ def fetch_area_police_hourly_wage(city, state_abbr, api_key=None):
 
     Returns (hourly_wage: float, source_label: str).
     """
-    SOC = '33305100'  # SOC 33-3051 in BLS series format (8 chars, no dash)
-
     # ── 1. BLS API v2: MSA-level mean hourly wage ─────────────────────────────
     if api_key:
         try:
             area_code, area_name = _bls_area_code_for_city(city, state_abbr, api_key)
             if area_code:
-                series_id = f"OEUM{area_code}0000000{SOC}"
+                # Correct 24-char series: OE + U + M + 6-digit-area + 000000 + 333051 + 03
+                series_id = f"OEUM{area_code}00000033305103"
                 payload = json.dumps({
                     "seriesid": [series_id],
                     "registrationkey": api_key,
@@ -451,13 +466,18 @@ def fetch_area_police_hourly_wage(city, state_abbr, api_key=None):
                 series_list = result.get('Results', {}).get('series', [])
                 if series_list:
                     for pt in series_list[0].get('data', []):
-                        if pt.get('period') == 'A01' or pt.get('periodName', '').lower() == 'annual':
-                            val = float(str(pt.get('value', '0')).replace(',', ''))
-                            if 15 <= val <= 150:
-                                return val, f"BLS OEWS API \u2014 {area_name or area_code}"
+                        # period A01 = annual; also accept any period with a valid wage
+                        val_str = str(pt.get('value', '-')).replace(',', '')
+                        if val_str == '-' or not val_str:
+                            continue
+                        try:
+                            val = float(val_str)
+                        except ValueError:
+                            continue
+                        if 15 <= val <= 150:
+                            return val, f"BLS OEWS API — {area_name or area_code}"
         except Exception:
             pass
-
     # ── 2. BLS state HTML scrape ──────────────────────────────────────────────
     try:
         state_code = str(state_abbr).strip().lower()

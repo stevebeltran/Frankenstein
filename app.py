@@ -4129,6 +4129,7 @@ if st.session_state['csvs_ready']:
     locked_g_pins = [_name_to_idx[n] for n in pinned_guard_names if n in _name_to_idx]
     locked_r_pins = [_name_to_idx[n] for n in pinned_resp_names  if n in _name_to_idx]
 
+    n = len(df_stations_all)  # refresh after boundary filtering
     bounds_hash = f"{minx}_{miny}_{maxx}_{maxy}_{n}_{resp_radius_mi}_{guard_radius_mi}"
 
     prog2 = st.sidebar.empty()
@@ -4240,7 +4241,7 @@ if st.session_state['csvs_ready']:
                 else:
                     g_best, chrono_g = _greedy_area(
                         guard_matrix,
-                        [station_metadata[i]['clipped_guard'] for i in range(n)],
+                        [station_metadata[i]['clipped_guard'] for i in range(len(station_metadata))],
                         k_guardian, locked_g_pins, set()
                     )
                 g_best = list(g_best)
@@ -4276,14 +4277,14 @@ if st.session_state['csvs_ready']:
                         r_best = [s for s in r_best if s not in set(g_best)]
                         # Pad back to k_responder if exclusion removed some
                         if len(r_best) < k_responder:
-                            remaining = [s for s in range(n)
+                            remaining = [s for s in range(len(station_metadata))
                                          if s not in r_best and s not in set(g_best)]
                             r_best += remaining[:k_responder - len(r_best)]
                 else:
                     _excl_resp = set(g_best) if complement_mode else set()
                     r_best, chrono_r = _greedy_area(
                         resp_matrix_eff,
-                        [station_metadata[i]['clipped_2m'] for i in range(n)],
+                        [station_metadata[i]['clipped_2m'] for i in range(len(station_metadata))],
                         k_responder, locked_r_pins, _excl_resp
                     )
             else:

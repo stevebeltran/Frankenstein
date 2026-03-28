@@ -2510,6 +2510,12 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     _RESPONDER_DAILY_HOURS = CONFIG["RESPONDER_PATROL_HOURS"]      # 11.6
     columns_per_row = max(1, int(columns_per_row))
 
+    # Fixed modeled specialty-response upside to allocate across unit cards by
+    # each unit's share of daily flights.
+    _THERMAL_TOTAL = 65586.0
+    _K9_TOTAL = 66881.0
+    _total_card_flights = sum(max(0.0, float((d.get("marginal_flights", 0) or 0) + (d.get("shared_flights", 0) or 0))) for d in active_drones)
+
     cards_html = []
     for d in active_drones:
         short_name  = format_3_lines(d["name"])
@@ -2550,6 +2556,9 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             uptime_tooltip = f"{max_patrol_hours}hr patrol shift"
 
         total_daily_flights = d_flights + d_shared
+        _flight_ratio = (float(total_daily_flights) / _total_card_flights) if _total_card_flights > 0 else 0.0
+        d_thermal = _THERMAL_TOTAL * _flight_ratio
+        d_k9 = _K9_TOTAL * _flight_ratio
         patrol_time_line = ""
         if total_daily_flights > 0:
             # Raw calculation: patrol budget / flights = available min per flight
@@ -2603,6 +2612,16 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     <div style="display:flex; align-items:baseline; justify-content:space-between; gap:6px;">
       <div style="font-size:1.3rem; font-weight:900; color:{accent_color}; line-height:1.1;">${d_best:,.0f}</div>
       {patrol_time_line}
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:7px;">
+      <div title="Allocated from $65,586/yr total thermal upside based on this unit's share of daily flights." style="background:rgba(251,191,36,0.08); border:1px solid rgba(251,191,36,0.22); border-radius:6px; padding:6px 8px;">
+        <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:1px;">🔥 Thermal</div>
+        <div style="font-size:0.85rem; font-weight:800; color:#fbbf24; line-height:1.1;">${d_thermal:,.0f}/yr</div>
+      </div>
+      <div title="Allocated from $66,881/yr total avoided K-9 upside based on this unit's share of daily flights." style="background:rgba(57,255,20,0.06); border:1px solid rgba(57,255,20,0.18); border-radius:6px; padding:6px 8px;">
+        <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:1px;">🐕 K-9 Avoided</div>
+        <div style="font-size:0.85rem; font-weight:800; color:#39FF14; line-height:1.1;">${d_k9:,.0f}/yr</div>
+      </div>
     </div>
   </div>
 
@@ -5209,7 +5228,7 @@ if st.session_state['csvs_ready']:
             z-index: 1;
         }
         .unit-card:hover {
-            transform: scale(1.5);
+            transform: scale(1.2);
             box-shadow: 0 16px 48px rgba(0,210,255,0.28), 0 4px 16px rgba(0,0,0,0.45);
             z-index: 999;
         }

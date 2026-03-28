@@ -3178,13 +3178,21 @@ if not st.session_state['csvs_ready']:
             col_zip, col_city, col_state = st.columns([1, 3, 1])
 
             # ── ZIP input — auto-fills city/state when 5 digits entered ──
+            # Use a separate buffer key so we never mutate the widget key after
+            # the widget has been instantiated on the current run.
+            _zip_buf_key = f"zip_buf_{i}"
+            if _zip_buf_key not in st.session_state:
+                st.session_state[_zip_buf_key] = ""
+
             zip_val = col_zip.text_input(
-                f"zip_{i}", value="", max_chars=5,
+                f"zip_{i}", value=st.session_state[_zip_buf_key], max_chars=5,
                 placeholder="ZIP",
                 label_visibility="collapsed",
                 key=f"zip_{i}",
                 help="Enter a 5-digit ZIP to auto-fill city & state."
             )
+            st.session_state[_zip_buf_key] = zip_val
+
             # As soon as 5 digits are typed, look up and write back to session_state, then rerun
             if re.match(r'^\d{5}$', zip_val.strip()):
                 _z_city, _z_state, _ = lookup_zip_code(zip_val.strip())
@@ -3194,11 +3202,11 @@ if not st.session_state['csvs_ready']:
                         st.session_state['target_cities'][i] = _entry
                     else:
                         st.session_state['target_cities'].append(_entry)
-                    # Clear the ZIP field value by resetting its key, then rerun
-                    st.session_state[f"zip_{i}"] = ""
-                    st.rerun()
+                    # Clear the ZIP buffer, not the widget key itself.
+                    st.session_state[_zip_buf_key] = ""
                     c_val = _z_city
                     s_val = _z_state
+                    st.rerun()
 
             # ── City / County input ──
             c_name = col_city.text_input(

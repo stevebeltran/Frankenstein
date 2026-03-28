@@ -475,57 +475,92 @@ def build_high_activity_staffing_html(overtime_stats, dark=True, compact=False):
     title_size = "13px" if compact else "0.95rem"
     body_size = "11px" if compact else "0.72rem"
     metric_size = "24px" if compact else "1.45rem"
+
+    # Wage source badge
+    wage_source = overtime_stats.get("wage_source", "unknown")
+    ot_hourly   = overtime_stats.get("ot_hourly", 0.0)
+    base_hourly = ot_hourly / 1.5 if ot_hourly > 0 else 0.0
+
+    if "MSA" in wage_source or "metro" in wage_source.lower():
+        badge_color = "#22c55e"
+        badge_icon  = "📍"
+        badge_label = "LOCAL METRO"
+        badge_tip   = "Pulled from BLS OES for this specific metro area"
+    elif "state" in wage_source.lower():
+        badge_color = "#f59e0b"
+        badge_icon  = "🗺"
+        badge_label = "STATE AVG"
+        badge_tip   = "Metro data unavailable — using statewide BLS OES average"
+    elif "national" in wage_source.lower():
+        badge_color = "#f97316"
+        badge_icon  = "🌐"
+        badge_label = "NATIONAL AVG"
+        badge_tip   = "State data unavailable — using national BLS OES average"
+    else:
+        badge_color = "#6b7280"
+        badge_icon  = "⚠️"
+        badge_label = "ESTIMATE"
+        badge_tip   = "BLS API unavailable — using hardcoded fallback rate"
+
+    badge_bg = (
+        "rgba(34,197,94,0.1)" if ("MSA" in wage_source or "metro" in wage_source.lower())
+        else "rgba(107,114,128,0.15)"
+    )
+
+    wage_badge_html = (
+        f'''<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:6px;">'''
+        f'''<div style="display:inline-flex; align-items:center; gap:5px; '''
+        f'''background:{badge_bg}; border:1px solid {badge_color}; '''
+        f'''border-radius:100px; padding:3px 10px;" title="{badge_tip}">'''
+        f'''<span style="font-size:11px;">{badge_icon}</span>'''
+        f'''<span style="font-size:9px; font-weight:800; letter-spacing:1.2px; '''
+        f'''color:{badge_color}; text-transform:uppercase;">{badge_label}</span></div>'''
+        f'''<span style="font-size:10px; color:{text_muted};">'''
+        f'''Base <span style="color:{text_main}; font-weight:700; font-family:'IBM Plex Mono',monospace;">${base_hourly:.2f}/hr</span>'''
+        f'''&nbsp;·&nbsp;OT <span style="color:{accent}; font-weight:700; font-family:'IBM Plex Mono',monospace;">${ot_hourly:.2f}/hr</span>'''
+        f'''&nbsp;·&nbsp;<span style="color:{text_muted};">{wage_source}</span></span></div>'''
+    )
+
     monthly_rows_html = "".join([
         f"<tr><td style='padding:6px 8px; border-top:1px solid {border}; color:{text_main};'>{row.month}</td>"
         f"<td style='padding:6px 8px; border-top:1px solid {border}; text-align:right; color:{text_main};'>{int(row.busy_hours):,}</td>"
         f"<td style='padding:6px 8px; border-top:1px solid {border}; text-align:right; color:{text_main};'>{row.ot_hours:,.0f}</td>"
         f"<td style='padding:6px 8px; border-top:1px solid {border}; text-align:right; color:{accent};'>${row.ot_cost:,.0f}</td></tr>"
-        for row in overtime_stats['monthly'].itertuples(index=False)
+        for row in overtime_stats["monthly"].itertuples(index=False)
     ])
-    return f"""
-    <div style="background:{bg}; border:1px solid {border}; border-radius:8px; padding:16px 18px; margin:14px 0 14px 0;">
-        <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
-            <div>
-                <div style="font-size:10px; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">High-Activity Staffing Pressure</div>
-                <div style="font-size:{title_size}; color:{text_main}; font-weight:800;">Estimated officer overtime needed to cover residual peak demand</div>
-            </div>
-            <div style="font-size:10px; color:{text_muted};">Officer wage basis: <span style="color:{text_main};">{overtime_stats['wage_source']}</span></div>
-        </div>
-        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:12px;">
-            <div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">
-                <div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg High-Activity Hours / Mo</div>
-                <div style="font-size:{metric_size}; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{overtime_stats['avg_busy_hours']:.0f}</div>
-            </div>
-            <div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">
-                <div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg OT Hours Needed / Mo</div>
-                <div style="font-size:{metric_size}; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{overtime_stats['avg_ot_hours']:.0f}</div>
-            </div>
-            <div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">
-                <div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg OT Cost / Mo</div>
-                <div style="font-size:{metric_size}; font-weight:800; color:{accent}; font-family:'IBM Plex Mono', monospace;">${overtime_stats['avg_ot_cost']:,.0f}</div>
-            </div>
-            <div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">
-                <div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg OT Hourly Rate</div>
-                <div style="font-size:{metric_size}; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">${overtime_stats['ot_hourly']:.2f}</div>
-            </div>
-        </div>
-        <div style="font-size:{body_size}; color:{text_muted}; margin-bottom:10px;">Peak month: <span style="color:{text_main}; font-weight:700;">{overtime_stats['peak_month']}</span> · estimated OT spend <span style="color:{accent}; font-weight:700;">${overtime_stats['peak_ot_cost']:,.0f}</span></div>
-        <div style="overflow-x:auto;">
-            <table style="width:100%; border-collapse:collapse; font-size:{body_size};">
-                <thead>
-                    <tr>
-                        <th style="text-align:left; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">Month</th>
-                        <th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">High-Activity Hours</th>
-                        <th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">OT Hours</th>
-                        <th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">OT Cost</th>
-                    </tr>
-                </thead>
-                <tbody>{monthly_rows_html}</tbody>
-            </table>
-        </div>
-    </div>
-    """
 
+    return (
+        f'''<div style="background:{bg}; border:1px solid {border}; border-radius:8px; padding:16px 18px; margin:14px 0 14px 0;">'''
+        f'''<div style="margin-bottom:12px;">'''
+        f'''<div style="font-size:10px; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">High-Activity Staffing Pressure</div>'''
+        f'''<div style="font-size:{title_size}; color:{text_main}; font-weight:800;">Estimated officer overtime needed to cover residual peak demand</div>'''
+        + wage_badge_html +
+        f'''</div>'''
+        f'''<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:12px;">'''
+        f'''<div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">'''
+        f'''<div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg High-Activity Hours / Mo</div>'''
+        f'''<div style="font-size:{metric_size}; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{overtime_stats["avg_busy_hours"]:.0f}</div></div>'''
+        f'''<div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">'''
+        f'''<div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg OT Hours Needed / Mo</div>'''
+        f'''<div style="font-size:{metric_size}; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{overtime_stats["avg_ot_hours"]:.0f}</div></div>'''
+        f'''<div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">'''
+        f'''<div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg OT Cost / Mo</div>'''
+        f'''<div style="font-size:{metric_size}; font-weight:800; color:{accent}; font-family:'IBM Plex Mono', monospace;">${overtime_stats["avg_ot_cost"]:,.0f}</div></div>'''
+        f'''<div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">'''
+        f'''<div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg OT Hourly Rate</div>'''
+        f'''<div style="font-size:{metric_size}; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">${overtime_stats["ot_hourly"]:.2f}</div>'''
+        f'''<div style="font-size:9px; color:{text_muted}; margin-top:3px;">base ${base_hourly:.2f} x 1.5</div></div></div>'''
+        f'''<div style="font-size:{body_size}; color:{text_muted}; margin-bottom:10px;">Peak month: '''
+        f'''<span style="color:{text_main}; font-weight:700;">{overtime_stats["peak_month"]}</span>'''
+        f'''&nbsp;·&nbsp;estimated OT spend <span style="color:{accent}; font-weight:700;">${overtime_stats["peak_ot_cost"]:,.0f}</span></div>'''
+        f'''<div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:{body_size};">'''
+        f'''<thead><tr>'''
+        f'''<th style="text-align:left; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">Month</th>'''
+        f'''<th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">High-Activity Hours</th>'''
+        f'''<th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">OT Hours</th>'''
+        f'''<th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">OT Cost</th>'''
+        f'''</tr></thead><tbody>{monthly_rows_html}</tbody></table></div></div>'''
+    )
 def generate_command_center_html(df, total_orig_calls, export_mode=False):
     """Generates the full Command Center visual suite with interactive Javascript filtering."""
     if df is None or df.empty:

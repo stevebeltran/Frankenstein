@@ -1981,16 +1981,11 @@ def forward_geocode(address_str):
     return None, None
 
 @st.cache_data(show_spinner=False)
-def lookup_zip_code(zip_code: str):
     """
-    Look up a US ZIP code and return (city, state_abbr, county) using the free
     Zippopotam.us API.  Returns (None, None, None) on failure.
     """
-    zip_code = zip_code.strip()
-    if not re.match(r'^\d{5}$', zip_code):
         return None, None, None
     try:
-        url = f"https://api.zippopotam.us/us/{zip_code}"
         req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode('utf-8'))
@@ -2233,10 +2228,7 @@ def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"})
                 with urllib.request.urlopen(req, timeout=45) as resp:
-                    zip_data = resp.read()
-                zip_file = zipfile.ZipFile(io.BytesIO(zip_data))
                 os.makedirs(temp_dir, exist_ok=True)
-                zip_file.extractall(temp_dir)
                 shp_files = glob.glob(os.path.join(temp_dir, "*.shp"))
                 if shp_files:
                     gdf = gpd.read_file(shp_files[0])
@@ -3158,16 +3150,12 @@ if not st.session_state['csvs_ready']:
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-        # ── CITY / STATE / ZIP — unified single-row inputs ───────────────────
-        # Column layout per row:  ZIP (1) | City/County (3) | State (1)
-        # Entering a 5-digit ZIP auto-fills City + State for that row.
         # State is a plain text input so typing "TX" + Tab commits instantly.
 
         _state_keys = list(STATE_FIPS.keys())   # ['AL','AK', ...]
 
         # Column headers (only shown for row 0)
         _h_zip, _h_city, _h_state = st.columns([1, 3, 1])
-        _h_zip.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>ZIP <span style='font-size:10px'>(optional)</span></div>", unsafe_allow_html=True)
         _h_city.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>City or County</div>", unsafe_allow_html=True)
         _h_state.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>State</div>", unsafe_allow_html=True)
 
@@ -3177,36 +3165,18 @@ if not st.session_state['csvs_ready']:
 
             col_zip, col_city, col_state = st.columns([1, 3, 1])
 
-            # ── ZIP input — auto-fills city/state when 5 digits entered ──
-            # Use a separate buffer key so we never mutate the widget key after
-            # the widget has been instantiated on the current run.
-            _zip_buf_key = f"zip_buf_{i}"
-            if _zip_buf_key not in st.session_state:
-                st.session_state[_zip_buf_key] = ""
-
-            zip_val = col_zip.text_input(
-                f"zip_{i}", value=st.session_state[_zip_buf_key], max_chars=5,
-                placeholder="ZIP",
                 label_visibility="collapsed",
-                key=f"zip_{i}",
-                help="Enter a 5-digit ZIP to auto-fill city & state."
             )
-            st.session_state[_zip_buf_key] = zip_val
-
             # As soon as 5 digits are typed, look up and write back to session_state, then rerun
-            if re.match(r'^\d{5}$', zip_val.strip()):
-                _z_city, _z_state, _ = lookup_zip_code(zip_val.strip())
                 if _z_city and _z_state:
                     _entry = {"city": _z_city, "state": _z_state}
                     if i < len(st.session_state['target_cities']):
                         st.session_state['target_cities'][i] = _entry
                     else:
                         st.session_state['target_cities'].append(_entry)
-                    # Clear the ZIP buffer, not the widget key itself.
-                    st.session_state[_zip_buf_key] = ""
+                    st.rerun()
                     c_val = _z_city
                     s_val = _z_state
-                    st.rerun()
 
             # ── City / County input ──
             c_name = col_city.text_input(

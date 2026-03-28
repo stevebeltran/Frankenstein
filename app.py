@@ -931,6 +931,16 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
 
             // Run once to populate the dashboard on load
             updateDashboard();
+
+            // Report actual content height to Streamlit so the iframe auto-sizes
+            function _sendHeight() {{
+                const h = document.documentElement.scrollHeight || document.body.scrollHeight;
+                window.parent.postMessage({{type: 'streamlit:setFrameHeight', height: h}}, '*');
+            }}
+            // Fire immediately after render, then again after async DOM updates settle
+            _sendHeight();
+            setTimeout(_sendHeight, 300);
+            setTimeout(_sendHeight, 800);
         </script>
     </div>
     """
@@ -5350,7 +5360,9 @@ if st.session_state['csvs_ready']:
         "Analytics unavailable." in analytics_html_block
         or "No valid dates found in data." in analytics_html_block
     )
-    _analytics_height = 180 if _analytics_unavailable else 1700
+    # Height is set generously as a fallback; the iframe's postMessage will
+    # report its actual scrollHeight and Streamlit will resize it automatically.
+    _analytics_height = 180 if _analytics_unavailable else 2400
     components.html(analytics_html_block, height=_analytics_height, scrolling=False)
 
     if _analytics_unavailable:
@@ -5358,7 +5370,7 @@ if st.session_state['csvs_ready']:
         st.markdown("<div style='margin-top:-6px;'></div>", unsafe_allow_html=True)
     elif _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
         # Collapse gap between components.html block and the plotly charts below
-        st.markdown("<div style='margin-top:-32px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='margin-top:-48px;'></div>", unsafe_allow_html=True)
         _build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
 
     if overtime_stats is not None and not _analytics_unavailable:

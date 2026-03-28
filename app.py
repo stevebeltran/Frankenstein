@@ -35,13 +35,8 @@ defaults = {
     'session_id': str(uuid.uuid4())[:8],
     'data_source': 'unknown',   # 'cad_upload' | 'simulation' | 'demo' | 'brinc_file'
     'map_build_logged': False,  # prevent duplicate map-build rows per session
-    'boundary_kind': None,
-    'boundary_path': '',
-    'boundary_label': '',
-    'boundary_mode': 'auto',
-    'boundary_county': '',
+    'boundary_kind': 'place',
 }
-
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -1377,14 +1372,6 @@ def aggressive_parse_calls(uploaded_files):
             if inferred_state:
                 res["_csv_state"] = inferred_state
 
-            inferred_place_code = _extract_place_code_from_raw_df(raw_df, inferred_state)
-            if inferred_place_code:
-                res["_csv_placefp"] = str(inferred_place_code).zfill(5)
-
-            inferred_county = _extract_county_from_raw_df(raw_df)
-            if inferred_county:
-                res["_csv_county"] = inferred_county
-
             all_calls_list.append(res)
         except: continue
         
@@ -1889,6 +1876,20 @@ def forward_geocode(address_str):
     except Exception: pass
     return None, None
 
+@st.cache_data
+def normalize_jurisdiction_name(name):
+    if not name:
+        return ""
+    name = str(name).lower().strip()
+    name = re.sub(r'\bst\b\.?', 'saint', name)
+    name = re.sub(r'[^a-z0-9\s-]', ' ', name)
+    for suffix in [' city', ' town', ' village', ' borough', ' township', ' cdp', ' municipality', ' county', ' parish']:
+        if name.endswith(suffix):
+            name = name[:-len(suffix)].strip()
+            break
+    name = re.sub(r'\s+', ' ', name).strip()
+    return name
+
 def lookup_county_for_city(city_name, state_abbr):
     """Use Nominatim reverse-geocode to find the county name for a city that
     doesn't directly match a county name in the local parquet."""
@@ -1906,69 +1907,10 @@ def lookup_county_for_city(city_name, state_abbr):
     except Exception:
         return None
 
-
-def _normalize_place_name(name):
-    if name is None:
-        return ""
-    value = str(name).lower().strip()
-    value = re.sub(r'\bst\.?\b', 'saint', value)
-    value = re.sub(r'\bmt\.?\b', 'mount', value)
-    value = re.sub(r'\b(city|town|village|borough|township|cdp|municipality)\b', '', value)
-    value = re.sub(r'[^a-z0-9 ]', ' ', value)
-    value = re.sub(r'\s+', ' ', value).strip()
-    return value
-
-
-def _extract_place_code_from_raw_df(raw_df, inferred_state_abbr=None):
-    """Best-effort extraction of a Census place code from uploaded CAD data."""
-    if raw_df is None or raw_df.empty:
-        return None
-
-    candidates = [
-        'placefp', 'place_fips', 'placefips', 'place code', 'place_code', 'placecode',
-        'city_code', 'city code', 'citycode', 'municipality_code', 'municipality code',
-        'geoid', 'geoid10', 'geoid20', 'place_geoid', 'place geoid'
-    ]
-    col_map = {str(c).strip().lower(): c for c in raw_df.columns}
-
-    def _clean_code(val):
-        if pd.isna(val):
-            return None
-        digits = re.sub(r'\D', '', str(val))
-        if not digits:
-            return None
-        if len(digits) == 5:
-            return digits
-        if len(digits) >= 7:
-            if inferred_state_abbr and inferred_state_abbr in STATE_FIPS:
-                st_fips = STATE_FIPS[inferred_state_abbr]
-                idx = digits.find(st_fips)
-                if idx != -1 and len(digits[idx:]) >= 7:
-                    return digits[idx+2:idx+7]
-            return digits[-5:]
-        return None
-
-    for cand in candidates:
-        col = col_map.get(cand)
-        if col is None:
-            continue
-        vals = raw_df[col].dropna().astype(str).str.strip()
-        if vals.empty:
-            continue
-        cleaned = vals.map(_clean_code).dropna()
-        if cleaned.empty:
-            continue
-        vc = cleaned.value_counts()
-        if not vc.empty:
-            return str(vc.index[0]).zfill(5)
-    return None
-
 @st.cache_data
 def fetch_county_boundary_local(state_abbr, county_name_input):
     # 1. Clean the input
-    search_name = county_name_input.lower().strip()
-    if search_name.endswith(" county"):
-        search_name = search_name.replace(" county", "").strip()
+    search_name = normalize_jurisdiction_name(county_name_input)
         
     state_fips = STATE_FIPS.get(state_abbr)
     if not state_fips: return False, None
@@ -1999,7 +1941,7 @@ def fetch_county_boundary_local(state_abbr, county_name_input):
     return False, None
 
 @st.cache_data
-def fetch_place_boundary_local(state_abbr, place_name_input, place_code=None):
+def fetch_place_boundary_local(state_abbr, place_name_input):
     """Look up a city/town/CDP boundary from the local places_lite.parquet.
     Returns (True, GeoDataFrame) on success, (False, None) if not found or
     the file doesn't exist yet (falls back to county lookup in caller)."""
@@ -2008,68 +1950,43 @@ def fetch_place_boundary_local(state_abbr, place_name_input, place_code=None):
         return False, None   # file not yet added — caller falls back to county
 
     state_fips = STATE_FIPS.get(state_abbr)
-    if not state_fips:
-        return False, None
+    if not state_fips: return False, None
 
-    search_name = _normalize_place_name(place_name_input)
+    search_name = normalize_jurisdiction_name(place_name_input)
 
     try:
         gdf = gpd.read_parquet(local_file)
-        state_rows = gdf[gdf["STATEFP"].astype(str) == str(state_fips)].copy()
-        if state_rows.empty:
+        state_rows = gdf[gdf["STATEFP"] == state_fips]
+
+        state_rows = state_rows.copy()
+        state_rows['_norm_name'] = state_rows['NAME'].astype(str).apply(normalize_jurisdiction_name)
+        if 'NAMELSAD' in state_rows.columns:
+            state_rows['_norm_lsad'] = state_rows['NAMELSAD'].astype(str).apply(normalize_jurisdiction_name)
+        else:
+            state_rows['_norm_lsad'] = state_rows['_norm_name']
+
+        # Exact normalized match first
+        match = state_rows[(state_rows['_norm_name'] == search_name) | (state_rows['_norm_lsad'] == search_name)]
+
+        # Partial normalized match fallback (e.g. Fort Worth / Fort Worth city)
+        if match.empty:
+            match = state_rows[
+                state_rows['_norm_name'].str.startswith(search_name) |
+                state_rows['_norm_lsad'].str.startswith(search_name)
+            ]
+            if not match.empty:
+                match = match.copy()
+                match['_diff'] = match['NAME'].astype(str).str.len() - len(search_name)
+                match = match.sort_values('_diff').head(1)
+
+        if match.empty:
             return False, None
 
-        # Best-case match: explicit Census place code from the uploaded CAD file.
-        if place_code and "PLACEFP" in state_rows.columns:
-            code_match = state_rows[state_rows["PLACEFP"].astype(str).str.zfill(5) == str(place_code).zfill(5)].copy()
-            if not code_match.empty:
-                name_col = "NAMELSAD" if "NAMELSAD" in code_match.columns else "NAME"
-                code_match["NAME"] = code_match[name_col].astype(str)
-                return True, code_match[["NAME", "geometry"]]
-
-        candidate_frames = []
-        for col in [c for c in ["NAME", "NAMELSAD"] if c in state_rows.columns]:
-            tmp = state_rows.copy()
-            tmp["_norm_name"] = tmp[col].astype(str).map(_normalize_place_name)
-
-            exact = tmp[tmp["_norm_name"] == search_name]
-            if not exact.empty:
-                candidate_frames.append(exact)
-
-            starts = tmp[tmp["_norm_name"].str.startswith(search_name, na=False)]
-            if not starts.empty:
-                candidate_frames.append(starts)
-
-            contains = tmp[tmp["_norm_name"].str.contains(rf'\b{re.escape(search_name)}\b', regex=True, na=False)]
-            if not contains.empty:
-                candidate_frames.append(contains)
-
-        if not candidate_frames:
-            return False, None
-
-        match = pd.concat(candidate_frames, ignore_index=False).drop_duplicates().copy()
-        display_col = "NAMELSAD" if "NAMELSAD" in match.columns else "NAME"
-
-        def _rank_row(row):
-            disp = str(row.get(display_col, '')).lower()
-            norm = str(row.get('_norm_name', ''))
-            exact_score = 0 if norm == search_name else 1
-            legal_score = 0
-            if ' city' in disp or ' town' in disp or ' village' in disp:
-                legal_score = 0
-            elif ' borough' in disp or ' municipality' in disp:
-                legal_score = 1
-            elif ' cdp' in disp:
-                legal_score = 2
-            else:
-                legal_score = 3
-            length_score = abs(len(norm) - len(search_name))
-            return (exact_score, legal_score, length_score)
-
-        match['_rank'] = match.apply(_rank_row, axis=1)
-        match = match.sort_values('_rank').head(1).copy()
-        match['NAME'] = match[display_col].astype(str)
-        return True, match[["NAME", "geometry"]]
+        result = match.copy()
+        # Use NAMELSAD for display if available (e.g. "Rockford city"), else NAME
+        name_col = "NAMELSAD" if "NAMELSAD" in result.columns else "NAME"
+        result["NAME"] = result[name_col].astype(str)
+        return True, result[["NAME", "geometry"]]
 
     except Exception:
         return False, None
@@ -2093,102 +2010,6 @@ def reverse_geocode_state(lat, lon):
             return state, city
     except Exception:
         return None, None
-
-def _normalize_county_name(name):
-    if name is None:
-        return ""
-    value = str(name).lower().strip()
-    value = re.sub(r'\b(county|parish|borough|census area|municipio)\b', '', value)
-    value = re.sub(r'[^a-z0-9 ]', ' ', value)
-    value = re.sub(r'\s+', ' ', value).strip()
-    return value
-
-
-def _extract_county_from_raw_df(raw_df):
-    if raw_df is None or raw_df.empty:
-        return None
-    county_cols = [
-        'county', 'county_name', 'county name', 'call original address county',
-        'incident county', 'jurisdiction county', 'parish', 'borough'
-    ]
-    col_map = {str(c).strip().lower(): c for c in raw_df.columns}
-    for cand in county_cols:
-        col = col_map.get(cand)
-        if col is None:
-            continue
-        vals = raw_df[col].dropna().astype(str).str.strip()
-        vals = vals[vals.str.lower().ne('nan')]
-        if vals.empty:
-            continue
-        top = vals.value_counts()
-        if not top.empty:
-            return str(top.index[0]).title()
-    return None
-
-
-def _jurisdiction_text_is_county(name):
-    value = str(name or '').strip().lower()
-    return bool(re.search(r'\b(county|parish|borough|census area|municipio)\b', value))
-
-
-def resolve_boundary_selection(state_abbr, place_name=None, county_name=None, place_code=None, mode='auto', allow_county_fallback=True):
-    if not state_abbr or state_abbr not in STATE_FIPS:
-        return None, None, {}
-
-    norm_place = _normalize_place_name(place_name) if place_name else ''
-    norm_county = _normalize_county_name(county_name) if county_name else ''
-
-    if mode == 'county':
-        county_query = county_name or place_name
-        if county_query:
-            ok, gdf = fetch_county_boundary_local(state_abbr, county_query)
-            if ok and gdf is not None:
-                return 'county', gdf, {'resolved_county': county_query, 'display_name': str(gdf.iloc[0].get('NAME', county_query))}
-        return None, None, {}
-
-    if place_name:
-        ok, gdf = fetch_place_boundary_local(state_abbr, place_name, place_code=place_code)
-        if ok and gdf is not None:
-            return 'place', gdf, {'resolved_place': place_name, 'display_name': str(gdf.iloc[0].get('NAME', place_name))}
-
-    if mode == 'place' or not allow_county_fallback:
-        return None, None, {}
-
-    county_query = county_name
-    if not county_query and place_name:
-        county_query = lookup_county_for_city(place_name, state_abbr)
-
-    if county_query:
-        ok, gdf = fetch_county_boundary_local(state_abbr, county_query)
-        if ok and gdf is not None:
-            return 'county', gdf, {'resolved_county': county_query, 'display_name': str(gdf.iloc[0].get('NAME', county_query))}
-
-    return None, None, {}
-
-
-def _ensure_boundary_cache_saved(boundary_gdf, state_abbr, base_name, boundary_kind):
-    if boundary_gdf is None or boundary_gdf.empty or not state_abbr or not base_name:
-        return ''
-    try:
-        os.makedirs(SHAPEFILE_DIR, exist_ok=True)
-        safe_n = str(base_name).replace(' ', '_').replace('/', '_')
-        prefix = 'place' if str(boundary_kind).lower() == 'place' else 'county'
-        shp_base = os.path.join(SHAPEFILE_DIR, f"{prefix}__{safe_n}_{state_abbr}")
-
-        legacy_base = os.path.join(SHAPEFILE_DIR, f"{safe_n}_{state_abbr}")
-        for ext in ['.shp', '.shx', '.dbf', '.prj', '.cpg']:
-            legacy_file = legacy_base + ext
-            if os.path.exists(legacy_file):
-                try:
-                    os.remove(legacy_file)
-                except Exception:
-                    pass
-
-        boundary_gdf.to_file(shp_base + '.shp')
-        return shp_base + '.shp'
-    except Exception:
-        return ''
-
 
 @st.cache_data
 def fetch_census_population(state_fips, place_name, is_county=False):
@@ -2695,7 +2516,6 @@ def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir):
     points_gdf = gpd.GeoDataFrame(scan_points, geometry=gpd.points_from_xy(scan_points.lon, scan_points.lat), crs="EPSG:4326")
     total_bounds = points_gdf.total_bounds
     shp_files = glob.glob(os.path.join(shapefile_dir, "*.shp"))
-    shp_files = sorted(shp_files, key=lambda p: (0 if os.path.basename(p).lower().startswith('place__') else 1, os.path.basename(p).lower()))
     relevant_polys = []
     for shp_path in shp_files:
         try:
@@ -3270,11 +3090,6 @@ if not st.session_state['csvs_ready']:
                         st.session_state['active_state'] = save_data.get('state', 'US')
                         st.session_state['k_resp'] = save_data.get('k_resp', 2)
                         st.session_state['k_guard'] = save_data.get('k_guard', 0)
-                        st.session_state['boundary_kind'] = save_data.get('boundary_kind')
-                        st.session_state['boundary_label'] = save_data.get('boundary_label', '')
-                        st.session_state['boundary_mode'] = save_data.get('boundary_mode', 'auto')
-                        st.session_state['boundary_county'] = save_data.get('boundary_county', '')
-                        st.session_state['boundary_path'] = ''
                         st.session_state['r_resp'] = save_data.get('r_resp', 2.0)
                         st.session_state['r_guard'] = save_data.get('r_guard', 8.0)
                         st.session_state['dfr_rate'] = save_data.get('dfr_rate', 25)
@@ -3414,8 +3229,6 @@ if not st.session_state['csvs_ready']:
 
                     detected_city = None
                     detected_state = None
-                    detected_placefp = None
-                    detected_county = None
 
                     with st.spinner(get_jurisdiction_message()):
                         # Priority 1: city/state extracted directly from the CAD export
@@ -3430,17 +3243,6 @@ if not st.session_state['csvs_ready']:
                                 detected_state = state_val
                             elif state_val.title() in US_STATES_ABBR:
                                 detected_state = US_STATES_ABBR[state_val.title()]
-
-                        if '_csv_placefp' in df_c.columns:
-                            place_val = str(df_c['_csv_placefp'].iloc[0]).strip()
-                            place_digits = re.sub(r'\D', '', place_val)
-                            if place_digits:
-                                detected_placefp = place_digits[-5:].zfill(5)
-
-                        if '_csv_county' in df_c.columns:
-                            county_val = str(df_c['_csv_county'].iloc[0]).strip().title()
-                            if county_val and county_val.lower() not in ('nan', 'none', ''):
-                                detected_county = county_val
 
                         # If the export gives us a city but not a state, forward-geocode the city name.
                         if detected_city and not detected_state:
@@ -3472,22 +3274,10 @@ if not st.session_state['csvs_ready']:
                             except Exception:
                                 pass
 
-                        boundary_mode = 'auto'
-                        if detected_city and _jurisdiction_text_is_county(detected_city):
-                            detected_county = detected_city
-                            boundary_mode = 'county'
-                        elif detected_county and not detected_city:
-                            detected_city = detected_county
-                            boundary_mode = 'county'
-                        elif detected_city:
-                            boundary_mode = 'place'
-
                         if detected_city and detected_state:
                             st.session_state['active_city'] = detected_city
                             st.session_state['active_state'] = detected_state
                             st.session_state['target_cities'] = [{"city": detected_city, "state": detected_state}]
-                            st.session_state['boundary_mode'] = boundary_mode
-                            st.session_state['boundary_county'] = detected_county or ''
                             st.toast(f"📍 Detected: {detected_city}, {detected_state}")
 
                     # Only clip calls to the station bbox once we know the correct jurisdiction.
@@ -3512,35 +3302,32 @@ if not st.session_state['csvs_ready']:
                     st.session_state['total_modeled_calls']  = len(df_c)
 
                     with st.spinner(get_jurisdiction_message()):
-                        # ── BOUNDARY LOOKUP: resolve once, store exact boundary path, and
-                        # force the map page to use that exact geometry. ──
+                        # ── BOUNDARY LOOKUP: fetch & save shapefile NOW so
+                        # find_relevant_jurisdictions() can use it on the map page ──
                         detected_city_for_boundary = st.session_state.get('active_city', '')
                         detected_state_for_boundary = st.session_state.get('active_state', '')
-                        detected_county_for_boundary = st.session_state.get('boundary_county', '')
-                        boundary_mode = st.session_state.get('boundary_mode', 'auto')
-                        st.session_state['boundary_kind'] = None
-                        st.session_state['boundary_path'] = ''
-                        st.session_state['boundary_label'] = ''
                         if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
-                            boundary_kind, boundary_gdf, boundary_meta = resolve_boundary_selection(
-                                detected_state_for_boundary,
-                                place_name=detected_city_for_boundary,
-                                county_name=detected_county_for_boundary,
-                                place_code=detected_placefp,
-                                mode=boundary_mode,
-                                allow_county_fallback=(boundary_mode != 'place')
-                            )
-                            if boundary_kind and boundary_gdf is not None:
-                                cache_name = detected_county_for_boundary if boundary_kind == 'county' and detected_county_for_boundary else detected_city_for_boundary
-                                boundary_path = _ensure_boundary_cache_saved(
-                                    boundary_gdf,
-                                    detected_state_for_boundary,
-                                    cache_name,
-                                    boundary_kind
-                                )
-                                st.session_state['boundary_kind'] = boundary_kind
-                                st.session_state['boundary_path'] = boundary_path
-                                st.session_state['boundary_label'] = boundary_meta.get('display_name', detected_city_for_boundary)
+                            city_text = str(detected_city_for_boundary or '').strip()
+                            is_explicit_county = bool(re.search(r'\b(county|parish|borough)\b', city_text, re.I))
+                            if is_explicit_county:
+                                b_success, b_gdf = fetch_county_boundary_local(
+                                    detected_state_for_boundary, city_text)
+                            else:
+                                # Path 02 rule: uploaded CAD city goes to place lookup only.
+                                # Do not silently convert a city into its county boundary.
+                                b_success, b_gdf = fetch_place_boundary_local(
+                                    detected_state_for_boundary, city_text)
+                                if not b_success:
+                                    st.warning(f"City boundary not found for {city_text}, {detected_state_for_boundary}. County fallback was skipped intentionally.")
+                            if b_success and b_gdf is not None:
+                                st.session_state['boundary_kind'] = 'county' if is_explicit_county else 'place'
+                                try:
+                                    safe_n = detected_city_for_boundary.replace(" ", "_").replace("/", "_")
+                                    b_gdf.to_file(os.path.join(
+                                        SHAPEFILE_DIR,
+                                        f"{safe_n}_{detected_state_for_boundary}.shp"))
+                                except Exception:
+                                    pass
 
                     st.session_state['data_source'] = 'cad_upload'
                     st.session_state['map_build_logged'] = False
@@ -3624,27 +3411,19 @@ if not st.session_state['csvs_ready']:
             prog.progress(10 + int((i / len(active_targets)) * 20),
                           text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
             
-            # Boundary lookup priority:
-            # 1. places_lite.parquet  — exact city/town shape (best)
-            # 2. counties_lite.parquet — county that shares the city name
-            # 3. Geocode city → find its county → counties_lite.parquet
-            success, temp_gdf = fetch_place_boundary_local(s_name, c_name)
-            if success:
-                boundary_kind = 'place'
-            if not success:
-                # City doesn't share its county's name — geocode to find the county
-                county_name = lookup_county_for_city(c_name, s_name)
-                if county_name:
-                    success, temp_gdf = fetch_county_boundary_local(s_name, county_name)
-                    if success and temp_gdf is not None:
-                        boundary_kind = 'county'
-                        temp_gdf = temp_gdf.copy()
-                        temp_gdf['NAME'] = c_name + " (" + county_name + " County)"
-            if not success and c_name.lower().endswith(' county'):
+            if is_county:
                 success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
+                if not success:
+                    success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
                 if success:
                     boundary_kind = 'county'
+            else:
+                # Non-county targets resolve to place only.
+                success, temp_gdf = fetch_place_boundary_local(s_name, c_name)
+                if success:
+                    boundary_kind = 'place' 
             is_county = (boundary_kind == 'county')
+            st.session_state['boundary_kind'] = boundary_kind
 
             # County boundaries come from the parquet, not from TIGER, so they are
             # never written to SHAPEFILE_DIR. find_relevant_jurisdictions() only scans
@@ -3865,24 +3644,8 @@ if st.session_state['csvs_ready']:
         except Exception:
             pass
 
-    master_gdf = None
-    exact_boundary_path = st.session_state.get('boundary_path', '')
-    if exact_boundary_path and os.path.exists(exact_boundary_path):
-        try:
-            master_gdf = gpd.read_file(exact_boundary_path)
-            if master_gdf.crs is None:
-                master_gdf = master_gdf.set_crs(epsg=4269)
-            master_gdf = master_gdf.to_crs(epsg=4326)
-            name_col = next((c for c in ['DISPLAY_NAME', 'NAME', 'DISTRICT', 'NAMELSAD'] if c in master_gdf.columns), master_gdf.columns[0])
-            master_gdf['DISPLAY_NAME'] = master_gdf[name_col].astype(str)
-            master_gdf['data_count'] = len(df_calls)
-            master_gdf = master_gdf[['DISPLAY_NAME', 'data_count', 'geometry']]
-        except Exception:
-            master_gdf = None
-
-    if master_gdf is None or master_gdf.empty:
-        with st.spinner(get_jurisdiction_message()):
-            master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR)
+    with st.spinner(get_jurisdiction_message()):
+        master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR)
 
     if master_gdf is None or master_gdf.empty:
         # ── Fallback 1: load any saved shapefile directly (spatial join may have
@@ -3894,15 +3657,9 @@ if st.session_state['csvs_ready']:
                 active_city_key = st.session_state.get('active_city', '').replace(' ', '_').lower()
                 best = None
                 for sf in shp_files:
-                    base = os.path.basename(sf).lower()
-                    if active_city_key and active_city_key in base and base.startswith('place__'):
+                    if active_city_key and active_city_key in os.path.basename(sf).lower():
                         best = sf
                         break
-                if best is None:
-                    for sf in shp_files:
-                        if active_city_key and active_city_key in os.path.basename(sf).lower():
-                            best = sf
-                            break
                 if best is None:
                     best = shp_files[0]  # just use the first one
                 fallback_gdf = gpd.read_file(best)
@@ -5643,10 +5400,6 @@ if st.session_state['csvs_ready']:
             "k_resp": k_responder, "k_guard": k_guardian,
             "r_resp": resp_radius_mi, "r_guard": guard_radius_mi,
             "dfr_rate": int(dfr_dispatch_rate*100), "deflect_rate": int(deflection_rate*100),
-            "boundary_kind": st.session_state.get('boundary_kind'),
-            "boundary_label": st.session_state.get('boundary_label', ''),
-            "boundary_mode": st.session_state.get('boundary_mode', 'auto'),
-            "boundary_county": st.session_state.get('boundary_county', ''),
             "calls_data": _safe_df_to_records(
                 st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None
                 else st.session_state.get('df_calls')
@@ -6348,10 +6101,6 @@ sections.forEach(s=>obs.observe(s));
     _brinc_data = json.dumps(export_dict) if fleet_capex > 0 else json.dumps({
         "city": st.session_state.get('active_city', ''), "state": st.session_state.get('active_state', ''),
         "_disclaimer": "No drones deployed yet.", "k_resp": 0, "k_guard": 0,
-        "boundary_kind": st.session_state.get('boundary_kind'),
-        "boundary_label": st.session_state.get('boundary_label', ''),
-        "boundary_mode": st.session_state.get('boundary_mode', 'auto'),
-        "boundary_county": st.session_state.get('boundary_county', ''),
         "calls_data": _safe_df_to_records(
             st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None
             else st.session_state.get('df_calls')

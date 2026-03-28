@@ -30,6 +30,7 @@ defaults = {
     'dfr_rate': 25, 'deflect_rate': 30, 'total_original_calls': 0, 'total_modeled_calls': 0,
     'onboarding_done': False, 'trigger_sim': False, 'city_count': 1,
     'brinc_user': 'steven.beltran',
+    'bls_api_key': '',
     'pd_chief_name': '', 'pd_dept_name': '', 'pd_dept_email': '', 'pd_dept_phone': '',
     'session_start': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
     'session_id': str(uuid.uuid4())[:8],
@@ -366,37 +367,126 @@ def _detect_datetime_series_for_labels(df):
 
 
 @st.cache_data
-def fetch_state_police_hourly_wage(state_abbr):
-    """Best-effort mean hourly wage for police and sheriff's patrol officers from BLS.
-    Falls back to the national median-based estimate if the state page cannot be read.
+def _bls_area_code_for_city(city, state_abbr, api_key):
+    """Resolve city + state to a BLS OEWS MSA area code via the BLS Areas API.
+    Returns (area_code, area_name) or (None, None) if not found.
     """
     try:
-        state_code = str(state_abbr).strip().lower()
-        if state_code:
-            url = f"https://www.bls.gov/oes/2023/may/oes_{state_code}.htm"
-            req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                html = resp.read().decode('utf-8', errors='ignore')
-            m = re.search(r"33-3051\s*\|\s*Police and Sheriff(?:&#39;|')?s Patrol Officers\s*\|.*?\|\s*\$([0-9,]+(?:\.[0-9]+)?)\s*\|\s*\$([0-9,]+(?:\.[0-9]+)?)\s*\|\s*\$([0-9,]+(?:\.[0-9]+)?)", html, re.I | re.S)
-            if m:
-                mean_hourly = float(m.group(2).replace(',', ''))
-                if 15 <= mean_hourly <= 100:
-                    return mean_hourly, 'BLS state OEWS 2023'
+        url = "https://api.bls.gov/publicAPI/v2/surveys/OE/area"
+        payload = json.dumps({"registrationkey": api_key}).encode()
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={'Content-Type': 'application/json', 'User-Agent': 'BRINC_COS_Optimizer/1.0'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+        areas = data.get('Results', {}).get('area', [])
+        city_clean = city.strip().lower()
+        state_up = state_abbr.strip().upper()
+        best_code, best_name, best_score = None, None, 0
+        for a in areas:
+            name = a.get('area_name', '')
+            code = a.get('area_code', '')
+            if not code or not code[0].isdigit():
+                continue
+            name_lower = name.lower()
+            score = 0
+            if city_clean in name_lower:
+                score += 10
+            if state_up in name.upper():
+                score += 5
+            if score > best_score:
+                best_score, best_code, best_name = score, code, name
+        if best_code and best_score >= 10:
+            return best_code, best_name
     except Exception:
         pass
+    return None, None
+
+
+@st.cache_data
+def fetch_area_police_hourly_wage(city, state_abbr, api_key=None):
+    """Mean hourly wage for police/sheriff patrol officers (SOC 33-3051) from BLS OEWS.
+
+    Resolution order:
+      1. BLS API v2  — MSA-level series for the specific metro area  (most accurate)
+      2. BLS HTML    — state-level OEWS page                          (state average)
+      3. BLS OOH     — national median                                (national fallback)
+      4. Hardcoded   — $37/hr                                         (last resort)
+
+    Returns (hourly_wage: float, source_label: str).
+    """
+    SOC = '33305100'  # SOC 33-3051 in BLS series format (8 chars, no dash)
+
+    # ── 1. BLS API v2: MSA-level mean hourly wage ─────────────────────────────
+    if api_key:
+        try:
+            area_code, area_name = _bls_area_code_for_city(city, state_abbr, api_key)
+            if area_code:
+                series_id = f"OEUM{area_code}0000000{SOC}"
+                payload = json.dumps({
+                    "seriesid": [series_id],
+                    "registrationkey": api_key,
+                    "catalog": False,
+                    "calculations": False,
+                    "annualaverage": False,
+                }).encode()
+                req = urllib.request.Request(
+                    "https://api.bls.gov/publicAPI/v2/timeseries/data/",
+                    data=payload,
+                    headers={'Content-Type': 'application/json', 'User-Agent': 'BRINC_COS_Optimizer/1.0'},
+                    method='POST',
+                )
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    result = json.loads(resp.read().decode())
+                series_list = result.get('Results', {}).get('series', [])
+                if series_list:
+                    for pt in series_list[0].get('data', []):
+                        if pt.get('period') == 'A01' or pt.get('periodName', '').lower() == 'annual':
+                            val = float(str(pt.get('value', '0')).replace(',', ''))
+                            if 15 <= val <= 150:
+                                return val, f"BLS OEWS API \u2014 {area_name or area_code}"
+        except Exception:
+            pass
+
+    # ── 2. BLS state HTML scrape ──────────────────────────────────────────────
     try:
-        req = urllib.request.Request('https://www.bls.gov/ooh/protective-service/police-and-detectives.htm', headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+        state_code = str(state_abbr).strip().lower()
+        url = f"https://www.bls.gov/oes/2023/may/oes_{state_code}.htm"
+        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
         with urllib.request.urlopen(req, timeout=12) as resp:
             html = resp.read().decode('utf-8', errors='ignore')
-        m = re.search(r"Police and sheriff(?:’|')s patrol officers\s*\|\s*\$([0-9,]+)", html, re.I)
+        m = re.search(
+            r"33-3051\s*\|\s*Police and Sheriff(?:&#39;|')?s Patrol Officers\s*\|.*?"
+            r"\|\s*\$([0-9,]+(?:\.[0-9]+)?)\s*\|\s*\$([0-9,]+(?:\.[0-9]+)?)\s*\|\s*\$([0-9,]+(?:\.[0-9]+)?)",
+            html, re.I | re.S
+        )
+        if m:
+            mean_hourly = float(m.group(2).replace(',', ''))
+            if 15 <= mean_hourly <= 100:
+                return mean_hourly, f'BLS state OEWS 2023 ({state_abbr.upper()})'
+    except Exception:
+        pass
+
+    # ── 3. BLS national OOH median ────────────────────────────────────────────
+    try:
+        req = urllib.request.Request(
+            'https://www.bls.gov/ooh/protective-service/police-and-detectives.htm',
+            headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'}
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            html = resp.read().decode('utf-8', errors='ignore')
+        m = re.search(r"Police and sheriff(?:'|\u2019)s patrol officers\s*\|\s*\$([0-9,]+)", html, re.I)
         if m:
             median_annual = float(m.group(1).replace(',', ''))
             return median_annual / 2080.0, 'BLS national OOH 2024 median'
     except Exception:
         pass
-    return 37.0, 'fallback estimate'
 
-def estimate_high_activity_overtime(df_calls_full, state_abbr, calls_covered_perc, dfr_dispatch_rate, deflection_rate):
+    # ── 4. Hardcoded fallback ─────────────────────────────────────────────────
+    return 37.0, 'fallback estimate'
+def estimate_high_activity_overtime(df_calls_full, state_abbr, calls_covered_perc, dfr_dispatch_rate, deflection_rate, city=None, bls_api_key=None):
     """Estimate high-activity monthly staffing pressure and officer overtime replacement cost."""
     if df_calls_full is None or len(df_calls_full) == 0:
         return None
@@ -428,7 +518,7 @@ def estimate_high_activity_overtime(df_calls_full, state_abbr, calls_covered_per
             if busy_hours <= 0:
                 continue
 
-            officer_hourly, wage_source = fetch_state_police_hourly_wage(state_abbr)
+            officer_hourly, wage_source = fetch_area_police_hourly_wage(city or '', state_abbr, bls_api_key)
             overtime_hourly = officer_hourly * 1.5
 
             drone_relief_share = (calls_covered_perc / 100.0) * dfr_dispatch_rate * deflection_rate
@@ -4833,6 +4923,8 @@ if st.session_state['csvs_ready']:
         calls_covered_perc,
         dfr_dispatch_rate,
         deflection_rate,
+        city=st.session_state.get('active_city', ''),
+        bls_api_key=st.session_state.get('bls_api_key', ''),
     )
     cards_below_map = bool(show_cards)
     map_col = st.container()
@@ -5392,6 +5484,32 @@ if st.session_state['csvs_ready']:
 
     brinc_user = st.sidebar.text_input("BRINC Email Prefix (first.last)", value=st.session_state.get('brinc_user', 'steven.beltran'), key='brinc_user', help="Enter 'first.last' to auto-generate your name and @brincdrones.com email address.")
     st.sidebar.caption("*(Press **Enter** after typing to apply changes)*")
+
+    # ── BLS API key (area-specific officer wage lookup) ───────────────────────
+    _bls_key_from_secrets = ""
+    try:
+        _bls_key_from_secrets = st.secrets.get("BLS_API_KEY", "")
+    except Exception:
+        pass
+    _bls_key_default = _bls_key_from_secrets or st.session_state.get('bls_api_key', '')
+    with st.sidebar.expander("🔑 BLS API Key (Officer Wage)", expanded=not bool(_bls_key_default)):
+        bls_api_key_input = st.text_input(
+            "BLS Registration Key",
+            value=_bls_key_default,
+            type="password",
+            key='bls_api_key',
+            help=(
+                "Enter your BLS Public Data API v2 key to pull exact MSA-level officer wages "
+                "for the active jurisdiction. Register free at bls.gov/developers. "
+                "Without a key the app falls back to the state-level OEWS page."
+            ),
+        )
+        if bls_api_key_input:
+            st.caption("✅ Key set — wage lookup will use BLS OEWS API for the active metro area.")
+        else:
+            st.caption("No key set — falling back to state-level BLS scrape or national median.")
+    # Ensure session state stays in sync (key widget already writes to 'bls_api_key')
+    _effective_bls_key = bls_api_key_input or _bls_key_from_secrets
 
     user_clean = brinc_user.strip()
     if not user_clean: user_clean = "steven.beltran"

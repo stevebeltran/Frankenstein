@@ -43,6 +43,14 @@ for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+# Seed BLS API key from Streamlit secrets on first load (before any overtime calculation)
+try:
+    _secrets_bls_key = st.secrets.get("BLS_API_KEY", "").strip().rstrip(".,;")
+    if _secrets_bls_key and not st.session_state.get('bls_api_key', '').strip():
+        st.session_state['bls_api_key'] = _secrets_bls_key
+except Exception:
+    pass
+
 if 'target_cities' not in st.session_state:
     st.session_state['target_cities'] = [{"city": st.session_state.get('active_city', 'Victoria'), "state": st.session_state.get('active_state', 'TX')}]
 
@@ -4917,6 +4925,11 @@ if st.session_state['csvs_ready']:
         note_bits.append(full_daily_note)
     st.markdown(f"<div style='font-size:0.65rem;color:gray;margin-top:-10px;margin-bottom:12px;text-align:right;'>{' '.join(note_bits)}</div>", unsafe_allow_html=True)
 
+    # Resolve BLS key: secrets take priority, then whatever the user typed in the sidebar
+    try:
+        _ot_bls_key = st.secrets.get("BLS_API_KEY", "").strip().rstrip(".,;") or st.session_state.get('bls_api_key', '').strip().rstrip(".,;")
+    except Exception:
+        _ot_bls_key = st.session_state.get('bls_api_key', '').strip()
     overtime_stats = estimate_high_activity_overtime(
         df_calls_full if df_calls_full is not None else df_calls,
         st.session_state.get('active_state', 'TX'),
@@ -4924,7 +4937,7 @@ if st.session_state['csvs_ready']:
         dfr_dispatch_rate,
         deflection_rate,
         city=st.session_state.get('active_city', ''),
-        bls_api_key=st.session_state.get('bls_api_key', ''),
+        bls_api_key=_ot_bls_key,
     )
     cards_below_map = bool(show_cards)
     map_col = st.container()

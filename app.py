@@ -37,6 +37,7 @@ defaults = {
     'map_build_logged': False,  # prevent duplicate map-build rows per session
     'boundary_kind': 'place',
     'boundary_lookup_mode': 'Places',
+    'boundary_source_path': '',
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -2053,6 +2054,42 @@ def fetch_census_population(state_fips, place_name, is_county=False):
 SHAPEFILE_DIR = "jurisdiction_data"
 if not os.path.exists(SHAPEFILE_DIR): os.makedirs(SHAPEFILE_DIR)
 
+def _sanitize_boundary_token(value):
+    return str(value or "").strip().replace(" ", "_").replace("/", "_")
+
+def _boundary_shp_base(kind, name, state_abbr):
+    return os.path.join(SHAPEFILE_DIR, f"{kind}__{_sanitize_boundary_token(name)}_{state_abbr}")
+
+def save_boundary_gdf(boundary_gdf, kind, name, state_abbr):
+    """Save boundary to a type-specific shapefile base so place/county do not overwrite each other."""
+    try:
+        base = _boundary_shp_base(kind, name, state_abbr)
+        # Remove older files for this exact base so a fresh write wins cleanly
+        for ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
+            fp = base + ext
+            if os.path.exists(fp):
+                try:
+                    os.remove(fp)
+                except Exception:
+                    pass
+        boundary_gdf.to_file(base + ".shp")
+        return base + ".shp"
+    except Exception:
+        return None
+
+def load_saved_boundary(kind, name, state_abbr):
+    """Load a previously saved boundary, preferring the exact typed name."""
+    try:
+        exact = _boundary_shp_base(kind, name, state_abbr) + ".shp"
+        if os.path.exists(exact):
+            gdf = gpd.read_file(exact)
+            if gdf.crs is None:
+                gdf = gdf.set_crs(epsg=4269)
+            return gdf.to_crs(epsg=4326)
+    except Exception:
+        pass
+    return None
+
 @st.cache_data
 def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
     # Check if we already downloaded and cached this state's places file
@@ -3333,13 +3370,13 @@ if not st.session_state['csvs_ready']:
                                     st.warning(f"Place boundary not found for {city_text}, {detected_state_for_boundary}. County fallback was skipped because Boundary lookup mode is set to Places.")
 
                             if b_success and b_gdf is not None:
-                                try:
-                                    safe_n = detected_city_for_boundary.replace(" ", "_").replace("/", "_")
-                                    b_gdf.to_file(os.path.join(
-                                        SHAPEFILE_DIR,
-                                        f"{safe_n}_{detected_state_for_boundary}.shp"))
-                                except Exception:
-                                    pass
+                                _saved = save_boundary_gdf(
+                                    b_gdf,
+                                    st.session_state.get('boundary_kind', 'place'),
+                                    city_text,
+                                    detected_state_for_boundary
+                                )
+                                st.session_state['boundary_source_path'] = _saved or ''
 
                     st.session_state['data_source'] = 'cad_upload'
                     st.session_state['map_build_logged'] = False
@@ -3441,13 +3478,10 @@ if not st.session_state['csvs_ready']:
             # never written to SHAPEFILE_DIR. find_relevant_jurisdictions() only scans
             # that directory, so without this save it always falls back to
             # "Auto-Generated Boundary". Save any successfully loaded county GDF now.
-            if success and is_county and temp_gdf is not None:
-                try:
-                    safe_name = c_name.replace(" ", "_").replace("/", "_")
-                    county_shp_path = os.path.join(SHAPEFILE_DIR, f"{safe_name}_{s_name}.shp")
-                    temp_gdf.to_file(county_shp_path)
-                except Exception:
-                    pass  # If save fails, fall back gracefully
+            if success and temp_gdf is not None:
+                _saved = save_boundary_gdf(temp_gdf, boundary_kind, c_name, s_name)
+                if i == 0:
+                    st.session_state['boundary_source_path'] = _saved or ''
 
             if success:
                 all_gdfs.append(temp_gdf)
@@ -3659,21 +3693,48 @@ if st.session_state['csvs_ready']:
     with st.spinner(get_jurisdiction_message()):
         master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR)
 
+    _boundary_mode_note = st.session_state.get('boundary_lookup_mode', 'Places')
+    _boundary_kind_note = st.session_state.get('boundary_kind', 'place')
+    _boundary_src_note = st.session_state.get('boundary_source_path', '')
+    st.caption(f"Boundary mode: {_boundary_mode_note} | Boundary kind: {_boundary_kind_note} | Source: {_boundary_src_note or 'live lookup / none'}")
+
     if master_gdf is None or master_gdf.empty:
         # ── Fallback 1: load any saved shapefile directly (spatial join may have
         #    failed if coordinate conversion was imperfect, but the shapefile exists) ──
         shp_files = glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp"))
         if shp_files:
             try:
-                # Pick the shapefile whose name best matches active_city
-                active_city_key = st.session_state.get('active_city', '').replace(' ', '_').lower()
-                best = None
-                for sf in shp_files:
-                    if active_city_key and active_city_key in os.path.basename(sf).lower():
-                        best = sf
-                        break
+                lookup_mode = st.session_state.get('boundary_lookup_mode', 'Places')
+                preferred_kind = 'county' if lookup_mode == 'County' else 'place'
+                active_city = st.session_state.get('active_city', '')
+                active_state = st.session_state.get('active_state', '')
+                best = st.session_state.get('boundary_source_path', '') or None
+
+                # Prefer exact typed boundary path first
+                if not best:
+                    exact = _boundary_shp_base(preferred_kind, active_city, active_state) + ".shp"
+                    if os.path.exists(exact):
+                        best = exact
+
+                # Then prefer typed files whose basename matches the active city
+                if not best:
+                    city_key = _sanitize_boundary_token(active_city).lower()
+                    typed = []
+                    other = []
+                    for sf in shp_files:
+                        base = os.path.basename(sf).lower()
+                        if base.startswith(preferred_kind + "__"):
+                            typed.append(sf)
+                        else:
+                            other.append(sf)
+                    for sf in typed + other:
+                        if city_key and city_key in os.path.basename(sf).lower():
+                            best = sf
+                            break
+
                 if best is None:
-                    best = shp_files[0]  # just use the first one
+                    best = shp_files[0]
+
                 fallback_gdf = gpd.read_file(best)
                 if fallback_gdf.crs is None:
                     fallback_gdf = fallback_gdf.set_crs(epsg=4269)
@@ -3682,6 +3743,7 @@ if st.session_state['csvs_ready']:
                 fallback_gdf['DISPLAY_NAME'] = fallback_gdf[name_col].astype(str)
                 fallback_gdf['data_count'] = len(df_calls)
                 master_gdf = fallback_gdf[['DISPLAY_NAME', 'data_count', 'geometry']]
+                st.session_state['boundary_source_path'] = best
             except Exception:
                 master_gdf = None
 

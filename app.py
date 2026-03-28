@@ -4954,7 +4954,7 @@ if st.session_state['csvs_ready']:
         unsafe_allow_html=True
     )
     if active_drones:
-        _n_cols = 4 if len(active_drones) >= 4 else (2 if len(active_drones) > 1 else 1)
+        _n_cols = 4  # always 4 columns — minimum 4 on first row, overflow wraps to next rows
         _saved_gnames = list(st.session_state.get('pinned_guard_names', []))
         _saved_rnames = list(st.session_state.get('pinned_resp_names',  []))
 

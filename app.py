@@ -3156,50 +3156,63 @@ if not st.session_state['csvs_ready']:
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-        # ── ZIP CODE LOOKUP ──────────────────────────────────────────────────
-        with st.expander("🔍 Look up city by ZIP code", expanded=False):
-            zip_col, zip_btn_col = st.columns([2, 1])
-            zip_input = zip_col.text_input(
-                "Enter ZIP code", max_chars=5, placeholder="e.g. 77901",
-                key="zip_lookup_input",
-                help="Enter a 5-digit US ZIP code to auto-fill City and State below."
-            )
-            zip_lookup_clicked = zip_btn_col.button(
-                "Look Up", key="zip_lookup_btn", use_container_width=True
-            )
-            if zip_lookup_clicked:
-                if re.match(r'^\d{5}$', zip_input.strip()):
-                    with st.spinner("Looking up ZIP code…"):
-                        _z_city, _z_state, _z_state_full = lookup_zip_code(zip_input.strip())
-                    if _z_city and _z_state:
-                        # Apply to the first city slot
-                        if st.session_state['target_cities']:
-                            st.session_state['target_cities'][0] = {"city": _z_city, "state": _z_state}
-                        else:
-                            st.session_state['target_cities'] = [{"city": _z_city, "state": _z_state}]
-                        st.success(f"✅ ZIP {zip_input.strip()} → **{_z_city}, {_z_state}** — fields updated below.")
-                        st.rerun()
-                    else:
-                        st.error("❌ ZIP code not found. Please check the number and try again.")
-                else:
-                    st.warning("⚠️ Please enter a valid 5-digit ZIP code.")
-        # ── CITY / STATE INPUTS ──────────────────────────────────────────────
+        # ── CITY / STATE / ZIP — unified single-row inputs ───────────────────
+        # Column layout per row:  ZIP (1) | City/County (3) | State (1)
+        # Entering a 5-digit ZIP auto-fills City + State for that row.
+        # State is a plain text input so typing "TX" + Tab commits instantly.
+
+        _state_keys = list(STATE_FIPS.keys())   # ['AL','AK', ...]
+
+        # Column headers (only shown for row 0)
+        _h_zip, _h_city, _h_state = st.columns([1, 3, 1])
+        _h_zip.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>ZIP <span style='font-size:10px'>(optional)</span></div>", unsafe_allow_html=True)
+        _h_city.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>City or County</div>", unsafe_allow_html=True)
+        _h_state.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>State</div>", unsafe_allow_html=True)
 
         for i in range(st.session_state.city_count):
-            c1, c2 = st.columns([3, 1])
-            c_val = st.session_state['target_cities'][i]['city'] if i < len(st.session_state['target_cities']) else ""
-            s_val = st.session_state['target_cities'][i]['state'] if i < len(st.session_state['target_cities']) else "FL"
-            c_name = c1.text_input(
-                f"City or County {i+1}", value=c_val, key=f"c_{i}",
-                placeholder="e.g. Orlando OR Orange County",
+            c_val = st.session_state['target_cities'][i]['city']  if i < len(st.session_state['target_cities']) else ""
+            s_val = st.session_state['target_cities'][i]['state'] if i < len(st.session_state['target_cities']) else "TX"
+
+            col_zip, col_city, col_state = st.columns([1, 3, 1])
+
+            # ── ZIP input ──
+            zip_val = col_zip.text_input(
+                f"zip_{i}", value="", max_chars=5,
+                placeholder="ZIP",
+                label_visibility="collapsed",
+                key=f"zip_{i}",
+                help="Enter a 5-digit ZIP to auto-fill city & state."
+            )
+            # Auto-lookup as soon as 5 digits are entered (no button needed)
+            if re.match(r'^\d{5}$', zip_val.strip()):
+                _z_city, _z_state, _ = lookup_zip_code(zip_val.strip())
+                if _z_city and _z_state:
+                    c_val = _z_city
+                    s_val = _z_state
+
+            # ── City / County input ──
+            c_name = col_city.text_input(
+                f"city_{i}", value=c_val,
+                placeholder="e.g. Orlando or Orange County",
+                label_visibility="collapsed",
+                key=f"c_{i}",
                 help="Official municipality or county name."
             )
-            state_idx = list(STATE_FIPS.keys()).index(s_val) if s_val in STATE_FIPS else 8
-            s_name = c2.selectbox(
-                f"State {i+1}", list(STATE_FIPS.keys()), index=state_idx,
+
+            # ── State — plain text input so Tab/Enter commits immediately ──
+            raw_state = col_state.text_input(
+                f"state_{i}", value=s_val, max_chars=2,
+                placeholder="TX",
+                label_visibility="collapsed",
                 key=f"s_{i}",
-                label_visibility="collapsed" if i > 0 else "visible"
+                help="Two-letter state abbreviation (e.g. TX, FL, CA)."
             )
+            # Normalize: uppercase, must be a valid abbreviation
+            s_name = raw_state.strip().upper()
+            if s_name not in STATE_FIPS:
+                # Fall back to previous valid value so the session stays clean
+                s_name = s_val if s_val in STATE_FIPS else "TX"
+
             if i < len(st.session_state['target_cities']):
                 st.session_state['target_cities'][i] = {"city": c_name, "state": s_name}
             else:

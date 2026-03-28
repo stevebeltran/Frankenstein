@@ -37,6 +37,12 @@ defaults = {
     'map_build_logged': False,  # prevent duplicate map-build rows per session
     'boundary_kind': 'place',
     'boundary_source_path': '',
+    # ── NEW: file ingestion metadata & engagement tracking ──────────────────
+    'file_meta': {},            # populated by aggressive_parse_calls; see _extract_file_meta()
+    'export_event_log': [],     # ordered list of export types clicked this session
+    'export_count': 0,          # total download button clicks this session
+    'demo_mode_used': False,    # True if any demo city was loaded
+    'sim_mode_used': False,     # True if simulation (not real upload) was run
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -53,6 +59,84 @@ SIMULATOR_DISCLAIMER_SHORT = (
     "Simulation output only. Coverage, station placement, response time, and ROI figures are model estimates based on uploaded data and configuration settings. "
     "They are not guarantees of real-world performance, legal compliance, FAA approval, procurement outcome, or financial results."
 )
+
+def _extract_file_meta(raw_df, res_df, filename=""):
+    """
+    Compute and return a dict of data-matrix statistics from a parsed CAD upload.
+    Call this once per file inside aggressive_parse_calls() and store the result
+    in st.session_state['file_meta'].  All values are JSON-safe scalars or strings.
+    """
+    meta = {}
+    try:
+        meta['uploaded_filename']   = str(filename)
+        meta['file_row_count']      = int(len(raw_df))
+        meta['file_col_count']      = int(len(raw_df.columns))
+        meta['file_col_names']      = json.dumps(list(raw_df.columns))
+
+        # ── City / state inferred from the file ──────────────────────────────
+        meta['file_inferred_city']  = str(res_df['_csv_city'].iloc[0])  if '_csv_city'  in res_df.columns and len(res_df) > 0 else ''
+        meta['file_inferred_state'] = str(res_df['_csv_state'].iloc[0]) if '_csv_state' in res_df.columns and len(res_df) > 0 else ''
+
+        # ── Date range ───────────────────────────────────────────────────────
+        if 'date' in res_df.columns:
+            _dates = pd.to_datetime(res_df['date'], errors='coerce').dropna()
+            if not _dates.empty:
+                meta['file_date_range_start'] = _dates.min().strftime('%Y-%m-%d')
+                meta['file_date_range_end']   = _dates.max().strftime('%Y-%m-%d')
+                meta['file_date_span_days']   = int((_dates.max() - _dates.min()).days)
+                meta['peak_month']            = int(_dates.dt.month.value_counts().idxmax())
+                meta['peak_day_of_week']      = int(_dates.dt.dayofweek.value_counts().idxmax())
+            else:
+                meta['file_date_range_start'] = ''
+                meta['file_date_range_end']   = ''
+                meta['file_date_span_days']   = 0
+                meta['peak_month']            = 0
+                meta['peak_day_of_week']      = 0
+        else:
+            meta['file_date_range_start'] = ''
+            meta['file_date_range_end']   = ''
+            meta['file_date_span_days']   = 0
+            meta['peak_month']            = 0
+            meta['peak_day_of_week']      = 0
+
+        # ── Peak hour ────────────────────────────────────────────────────────
+        if 'time' in res_df.columns:
+            _times = pd.to_datetime(res_df['time'], format='%H:%M:%S', errors='coerce').dropna()
+            meta['peak_hour'] = int(_times.dt.hour.value_counts().idxmax()) if not _times.empty else -1
+        else:
+            meta['peak_hour'] = -1
+
+        # ── Null rate across key CAD fields ──────────────────────────────────
+        _key_fields = [c for c in ['lat', 'lon', 'date', 'time', 'priority', 'call_type_desc'] if c in res_df.columns]
+        if _key_fields:
+            _null_pct = res_df[_key_fields].isnull().values.mean()
+            meta['file_null_rate_pct'] = round(float(_null_pct) * 100, 1)
+        else:
+            meta['file_null_rate_pct'] = 0.0
+
+        # ── Coordinate detection ─────────────────────────────────────────────
+        meta['file_has_lat_lon']  = bool('lat' in res_df.columns and 'lon' in res_df.columns and res_df[['lat','lon']].dropna().shape[0] > 0)
+        meta['file_has_priority'] = bool('priority' in res_df.columns and res_df['priority'].dropna().shape[0] > 0)
+
+        # ── Call-type breakdown (top 10) ─────────────────────────────────────
+        _type_col = next((c for c in ['call_type_desc','agencyeventtypecodedesc','calldesc','description','nature'] if c in res_df.columns), None)
+        if _type_col:
+            _tc = res_df[_type_col].dropna().str.strip().value_counts().head(10)
+            meta['call_type_breakdown'] = json.dumps({str(k): int(v) for k, v in _tc.items()})
+        else:
+            meta['call_type_breakdown'] = ''
+
+        # ── Priority distribution ─────────────────────────────────────────────
+        if 'priority' in res_df.columns:
+            _pc = res_df['priority'].dropna().astype(str).value_counts().sort_index()
+            meta['priority_distribution'] = json.dumps({str(k): int(v) for k, v in _pc.items()})
+        else:
+            meta['priority_distribution'] = ''
+
+    except Exception:
+        pass
+    return meta
+
 
 def _build_details_html(details):
     """Shared HTML block for deployment details used in email notifications."""
@@ -127,6 +211,7 @@ def _build_sheets_row(city, state, event_type, k_resp, k_guard, coverage, name, 
             dur = round((datetime.datetime.now() - start_dt).total_seconds() / 60, 1)
     except Exception:
         dur = ''
+    fm = d.get('file_meta', {})
     return [
         # ── Identity ────────────────────────────────────────────────────────
         now,                                    # A: Timestamp
@@ -141,39 +226,74 @@ def _build_sheets_row(city, state, event_type, k_resp, k_guard, coverage, name, 
         d.get('pd_dept', ''),                  # I: Department Name
         d.get('pd_dept_email', ''),            # J: Department Email
         d.get('pd_dept_phone', ''),            # K: Department Phone
-        # ── Where ───────────────────────────────────────────────────────────
-        city,                                   # L: City
-        state,                                  # M: State
+        # ── Where (user-selected) ────────────────────────────────────────────
+        city,                                   # L: City (user-selected)
+        state,                                  # M: State (user-selected)
         d.get('population', ''),               # N: Population
         d.get('area_sq_mi', ''),               # O: Area (sq mi)
+        # ── Where (file-inferred) ────────────────────────────────────────────
+        fm.get('file_inferred_city', ''),      # P: City inferred from uploaded file
+        fm.get('file_inferred_state', ''),     # Q: State inferred from uploaded file
+        d.get('city_confirmed_match', ''),     # R: File city matched user selection (True/False)
+        d.get('multi_city_targets', ''),       # S: All target cities JSON
+        d.get('num_cities_targeted', ''),      # T: Count of cities analyzed
         # ── Calls ───────────────────────────────────────────────────────────
-        d.get('total_calls', ''),              # P: Total Annual Calls
-        d.get('daily_calls', ''),              # Q: Daily Calls
+        d.get('total_calls', ''),              # U: Total Annual Calls
+        d.get('daily_calls', ''),              # V: Daily Calls
+        d.get('calls_per_capita', ''),         # W: Calls per Capita
         # ── Fleet ───────────────────────────────────────────────────────────
-        event_type,                             # R: Event Type
-        k_resp,                                 # S: Responders
-        k_guard,                                # T: Guardians
-        round(coverage, 1) if coverage else '', # U: Call Coverage %
-        d.get('area_covered_pct', ''),         # V: Area Coverage %
-        d.get('avg_response_min', ''),         # W: Avg Response (min)
-        d.get('avg_time_saved_min', ''),       # X: Time Saved vs Patrol (min)
+        event_type,                             # X: Event Type
+        k_resp,                                 # Y: Responders
+        k_guard,                                # Z: Guardians
+        round(coverage, 1) if coverage else '', # AA: Call Coverage %
+        d.get('area_covered_pct', ''),         # AB: Area Coverage %
+        d.get('avg_response_min', ''),         # AC: Avg Response (min)
+        d.get('avg_time_saved_min', ''),       # AD: Time Saved vs Patrol (min)
         # ── Financials ──────────────────────────────────────────────────────
-        d.get('fleet_capex', ''),              # Y: Fleet CapEx
-        d.get('annual_savings', ''),           # Z: Annual Savings
-        d.get('break_even', ''),               # AA: Break-Even
+        d.get('fleet_capex', ''),              # AE: Fleet CapEx
+        d.get('annual_savings', ''),           # AF: Annual Savings
+        d.get('break_even', ''),               # AG: Break-Even
         # ── Settings ────────────────────────────────────────────────────────
-        d.get('opt_strategy', ''),             # AB: Opt Strategy
-        d.get('dfr_rate', ''),                 # AC: DFR Rate %
-        d.get('deflect_rate', ''),             # AD: Deflection Rate %
-        d.get('incremental_build', ''),        # AE: Incremental Build
-        d.get('allow_redundancy', ''),         # AF: Allow Overlap
+        d.get('opt_strategy', ''),             # AH: Opt Strategy
+        d.get('dfr_rate', ''),                 # AI: DFR Rate %
+        d.get('deflect_rate', ''),             # AJ: Deflection Rate %
+        d.get('incremental_build', ''),        # AK: Incremental Build
+        d.get('allow_redundancy', ''),         # AL: Allow Overlap
+        d.get('r_resp_radius', ''),            # AM: Responder Radius (mi)
+        d.get('r_guard_radius', ''),           # AN: Guardian Radius (mi)
+        d.get('estimated_pop_input', ''),      # AO: Population input by user
+        # ── File Data Matrix ─────────────────────────────────────────────────
+        fm.get('uploaded_filename', ''),       # AP: Uploaded filename(s)
+        fm.get('file_row_count', ''),          # AQ: Raw file row count
+        fm.get('file_col_count', ''),          # AR: Column count
+        fm.get('file_col_names', ''),          # AS: Column names JSON
+        fm.get('file_date_range_start', ''),   # AT: Earliest date in data
+        fm.get('file_date_range_end', ''),     # AU: Latest date in data
+        fm.get('file_date_span_days', ''),     # AV: Days of history in file
+        fm.get('file_null_rate_pct', ''),      # AW: Null rate % across key fields
+        fm.get('file_has_lat_lon', ''),        # AX: Lat/lon detected (True/False)
+        fm.get('file_has_priority', ''),       # AY: Priority col detected (True/False)
+        fm.get('call_type_breakdown', ''),     # AZ: Top call types JSON
+        fm.get('priority_distribution', ''),   # BA: Priority counts JSON
+        fm.get('peak_hour', ''),               # BB: Peak hour of day (0-23)
+        fm.get('peak_day_of_week', ''),        # BC: Peak day of week (0=Mon)
+        fm.get('peak_month', ''),              # BD: Peak month (1-12)
+        # ── User Interaction Signals ─────────────────────────────────────────
+        d.get('boundary_kind', ''),            # BE: Boundary type (place/county)
+        d.get('boundary_source_path', ''),     # BF: Shapefile path used
+        d.get('sim_or_upload', ''),            # BG: simulation vs cad_upload
+        d.get('onboarding_completed', ''),     # BH: Onboarding finished (True/False)
+        d.get('demo_mode_used', ''),           # BI: Demo city loaded (True/False)
+        d.get('export_type_sequence', ''),     # BJ: Ordered export clicks (JSON list)
+        d.get('total_exports_in_session', ''),# BK: Total export clicks
+        d.get('map_viewed', ''),               # BL: Map rendered this session
         # ── Drones detail (JSON) ─────────────────────────────────────────────
         json.dumps([{"name": dr.get("name"), "type": dr.get("type"),
                      "lat": dr.get("lat"), "lon": dr.get("lon"),
                      "avg_time_min": dr.get("avg_time_min"),
                      "faa_ceiling": dr.get("faa_ceiling"),
                      "annual_savings": dr.get("annual_savings")}
-                    for dr in d.get('active_drones', [])]),  # AG: Drone JSON
+                    for dr in d.get('active_drones', [])]),  # BM: Drone JSON
     ]
 
 def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email, details=None):
@@ -1342,6 +1462,19 @@ def aggressive_parse_calls(uploaded_files):
             inferred_state = _infer_state_from_text(raw_df, top_city_name)
             if inferred_state:
                 res["_csv_state"] = inferred_state
+
+            # ── Capture file data matrix for Sheets/email logging ────────────
+            try:
+                _meta = _extract_file_meta(raw_df, res, filename=cfile.name)
+                # Merge into session-level file_meta (last file wins for per-field values;
+                # accumulate filenames if multiple files are uploaded at once)
+                _existing = st.session_state.get('file_meta', {})
+                _existing_names = _existing.get('uploaded_filename', '')
+                if _existing_names and _meta.get('uploaded_filename','') and _meta['uploaded_filename'] not in _existing_names:
+                    _meta['uploaded_filename'] = _existing_names + ' | ' + _meta['uploaded_filename']
+                st.session_state['file_meta'] = {**_existing, **_meta}
+            except Exception:
+                pass
 
             all_calls_list.append(res)
         except: continue
@@ -3124,6 +3257,8 @@ if not st.session_state['csvs_ready']:
                             st.session_state['df_stations'] = df_s
                             
                         st.session_state['data_source'] = 'brinc_file'
+                        st.session_state['demo_mode_used'] = False
+                        st.session_state['sim_mode_used'] = False
                         st.session_state['map_build_logged'] = False
                         st.session_state['csvs_ready'] = True
                         st.toast("✅ Deployment restored successfully!")
@@ -3341,6 +3476,8 @@ if not st.session_state['csvs_ready']:
                                 st.session_state['boundary_source_path'] = _saved or ''
 
                     st.session_state['data_source'] = 'cad_upload'
+                    st.session_state['demo_mode_used'] = False
+                    st.session_state['sim_mode_used'] = False
                     st.session_state['map_build_logged'] = False
                     st.session_state['csvs_ready'] = True
                     st.rerun()
@@ -3369,6 +3506,7 @@ if not st.session_state['csvs_ready']:
                 st.session_state.pop(f"c_{i}", None)
                 st.session_state.pop(f"s_{i}", None)
             st.session_state['trigger_sim'] = True
+            st.session_state['demo_mode_used'] = True
             st.rerun()
 
         city_chips = "  ·  ".join([f"{c}" for c, _ in DEMO_CITIES[:12]]) + "  · and more…"
@@ -3396,6 +3534,9 @@ if not st.session_state['csvs_ready']:
     if submit_demo or st.session_state.get('trigger_sim', False):
         if st.session_state.get('trigger_sim', False):
             st.session_state['trigger_sim'] = False
+            # trigger_sim is set by the demo button — mark accordingly
+            if not st.session_state.get('demo_mode_used', False):
+                st.session_state['demo_mode_used'] = True
 
         active_targets = [loc for loc in st.session_state['target_cities'] if loc['city'].strip()]
         if not active_targets:
@@ -3588,6 +3729,7 @@ if not st.session_state['csvs_ready']:
         prog.progress(100, text="✅ Ready — built for the communities they protect and serve.")
         st.session_state['inferred_daily_calls_override'] = int(annual_cfs / 365)
         st.session_state['data_source'] = 'simulation'
+        st.session_state['sim_mode_used'] = True
         st.session_state['map_build_logged'] = False
         st.session_state['csvs_ready'] = True
         st.rerun()
@@ -5415,11 +5557,19 @@ if st.session_state['csvs_ready']:
             "session_start":         _session_start,
             "session_duration_min":  _dur_min,
             "data_source":           st.session_state.get('data_source', 'unknown'),
-            # Jurisdiction
+            # Jurisdiction (user-selected)
             "population":            pop_metric,
             "total_calls":           st.session_state.get('total_original_calls', 0),
             "daily_calls":           max(1, int(st.session_state.get('total_original_calls', 0) / 365)),
             "area_sq_mi":            area_sq_mi_est,
+            # City/state enrichment
+            "city_confirmed_match":  (
+                st.session_state.get('file_meta', {}).get('file_inferred_city', '').lower().strip() ==
+                prop_city.lower().strip()
+                if st.session_state.get('file_meta', {}).get('file_inferred_city', '') else ''
+            ),
+            "multi_city_targets":    json.dumps(st.session_state.get('target_cities', [])),
+            "num_cities_targeted":   len(st.session_state.get('target_cities', [])),
             # Financials
             "opt_strategy":          opt_strategy,
             "incremental_build":     incremental_build,
@@ -5433,6 +5583,21 @@ if st.session_state['csvs_ready']:
             "avg_response_min":      round(avg_resp_time, 2),
             "avg_time_saved_min":    round(avg_time_saved, 2),
             "area_covered_pct":      round(area_covered_perc, 1),
+            "calls_per_capita":      round(st.session_state.get('total_original_calls', 0) / max(pop_metric, 1), 4),
+            # Engagement / depth signals
+            "r_resp_radius":         st.session_state.get('r_resp', ''),
+            "r_guard_radius":        st.session_state.get('r_guard', ''),
+            "estimated_pop_input":   pop_metric,
+            "boundary_kind":         st.session_state.get('boundary_kind', ''),
+            "boundary_source_path":  st.session_state.get('boundary_source_path', ''),
+            "sim_or_upload":         st.session_state.get('data_source', 'unknown'),
+            "onboarding_completed":  st.session_state.get('onboarding_done', False),
+            "demo_mode_used":        st.session_state.get('demo_mode_used', False),
+            "map_viewed":            st.session_state.get('map_build_logged', False),
+            "export_type_sequence":  json.dumps(st.session_state.get('export_event_log', [])),
+            "total_exports_in_session": st.session_state.get('export_count', 0),
+            # File data matrix (populated by aggressive_parse_calls → _extract_file_meta)
+            "file_meta":             st.session_state.get('file_meta', {}),
             # PD Contact
             "pd_chief":              st.session_state.get('pd_chief_name', ''),
             "pd_dept":               st.session_state.get('pd_dept_name', ''),
@@ -6168,6 +6333,9 @@ sections.forEach(s=>obs.observe(s));
     if st.sidebar.download_button("💾 Save Deployment Plan", data=_brinc_data,
                                   file_name=f"Brinc_{_safe_city}_{_ts}.brinc",
                                   mime="application/json", use_container_width=True):
+        # ── Track export event ───────────────────────────────────────────────
+        st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['BRINC']
+        st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
         if fleet_capex > 0:
             _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                           "BRINC", k_responder, k_guardian, calls_covered_perc,
@@ -6182,6 +6350,9 @@ sections.forEach(s=>obs.observe(s));
                                       file_name=f"BRINC_Executive_Summary_{_safe_city}_{_ts}.html",
                                       mime="text/html",
                                       use_container_width=True):
+            # ── Track export event ───────────────────────────────────────────
+            st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['HTML']
+            st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
             _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                           "HTML", k_responder, k_guardian, calls_covered_perc,
                           prop_name, prop_email, details=export_details)
@@ -6197,6 +6368,9 @@ sections.forEach(s=>obs.observe(s));
                                       file_name="drone_deployment.kml",
                                       mime="application/vnd.google-earth.kml+xml",
                                       use_container_width=True):
+            # ── Track export event ───────────────────────────────────────────
+            st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['KML']
+            st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
             _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                           "KML", k_responder, k_guardian, calls_covered_perc,
                           prop_name, prop_email, details=export_details)

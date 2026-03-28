@@ -36,6 +36,7 @@ defaults = {
     'data_source': 'unknown',   # 'cad_upload' | 'simulation' | 'demo' | 'brinc_file'
     'map_build_logged': False,  # prevent duplicate map-build rows per session
     'boundary_kind': 'place',
+    'boundary_lookup_mode': 'Places',
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -3041,6 +3042,14 @@ if not st.session_state['csvs_ready']:
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
+        st.radio(
+            "Boundary lookup mode",
+            ["Places", "County"],
+            key="boundary_lookup_mode",
+            horizontal=True,
+            help="Force jurisdiction matching to places or counties. Default is Places."
+        )
+
         uploaded_files = st.file_uploader(
             "Drop your CAD export (+ optional stations CSV)",
             accept_multiple_files=True,
@@ -3308,19 +3317,22 @@ if not st.session_state['csvs_ready']:
                         detected_state_for_boundary = st.session_state.get('active_state', '')
                         if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
                             city_text = str(detected_city_for_boundary or '').strip()
-                            is_explicit_county = bool(re.search(r'\b(county|parish|borough)\b', city_text, re.I))
-                            if is_explicit_county:
+                            lookup_mode = st.session_state.get('boundary_lookup_mode', 'Places')
+
+                            if lookup_mode == 'County':
                                 b_success, b_gdf = fetch_county_boundary_local(
                                     detected_state_for_boundary, city_text)
+                                st.session_state['boundary_kind'] = 'county'
+                                if not b_success:
+                                    st.warning(f"County boundary not found for {city_text}, {detected_state_for_boundary}.")
                             else:
-                                # Path 02 rule: uploaded CAD city goes to place lookup only.
-                                # Do not silently convert a city into its county boundary.
                                 b_success, b_gdf = fetch_place_boundary_local(
                                     detected_state_for_boundary, city_text)
+                                st.session_state['boundary_kind'] = 'place'
                                 if not b_success:
-                                    st.warning(f"City boundary not found for {city_text}, {detected_state_for_boundary}. County fallback was skipped intentionally.")
+                                    st.warning(f"Place boundary not found for {city_text}, {detected_state_for_boundary}. County fallback was skipped because Boundary lookup mode is set to Places.")
+
                             if b_success and b_gdf is not None:
-                                st.session_state['boundary_kind'] = 'county' if is_explicit_county else 'place'
                                 try:
                                     safe_n = detected_city_for_boundary.replace(" ", "_").replace("/", "_")
                                     b_gdf.to_file(os.path.join(
@@ -3411,17 +3423,17 @@ if not st.session_state['csvs_ready']:
             prog.progress(10 + int((i / len(active_targets)) * 20),
                           text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
             
-            if is_county:
+            lookup_mode = st.session_state.get('boundary_lookup_mode', 'Places')
+            if lookup_mode == 'County' or is_county:
                 success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
                 if not success:
                     success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
                 if success:
                     boundary_kind = 'county'
             else:
-                # Non-county targets resolve to place only.
                 success, temp_gdf = fetch_place_boundary_local(s_name, c_name)
                 if success:
-                    boundary_kind = 'place' 
+                    boundary_kind = 'place'
             is_county = (boundary_kind == 'county')
             st.session_state['boundary_kind'] = boundary_kind
 

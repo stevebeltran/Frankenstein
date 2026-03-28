@@ -5452,10 +5452,48 @@ if st.session_state['csvs_ready']:
             ))
         fig_for_export.update_layout(
             mapbox=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
-            margin=dict(l=0,r=0,t=0,b=0), height=500, showlegend=True,
-            legend=dict(bgcolor=legend_bg, font=dict(color=legend_text, size=11))
+            margin=dict(l=0,r=0,t=0,b=0), height=460, showlegend=False,
         )
-        map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
+        _export_map_config = {
+            "scrollZoom": False,
+            "displayModeBar": True,
+            "modeBarButtonsToRemove": ["toImage", "sendDataToCloud"],
+            "displaylogo": False,
+        }
+        # Build a standalone legend table from active_drones so it renders
+        # below the map — outside Plotly — avoiding overlap with zoom controls.
+        _legend_rows = "".join([
+            f'''<div style="display:flex;align-items:center;gap:8px;padding:5px 10px;
+                           background:#fff;border:1px solid #e4e6ea;border-radius:6px;
+                           font-size:12px;color:#111;white-space:nowrap;overflow:hidden;
+                           text-overflow:ellipsis;max-width:260px;"
+                 title="{d["name"]}">
+                <span style="display:inline-block;width:12px;height:12px;border-radius:50%;
+                             background:{d["color"]};flex-shrink:0;"></span>
+                <span style="overflow:hidden;text-overflow:ellipsis;">{d["name"][:35]}{"…" if len(d["name"])>35 else ""}</span>
+                <span style="font-size:10px;color:#888;flex-shrink:0;">
+                  {"Resp" if d["type"]=="RESPONDER" else "Guard"}</span>
+            </div>'''
+            for d in active_drones
+        ])
+        _legend_html = (
+            f'''<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;
+                           padding:12px 14px;background:#f7f8fa;border:1px solid #e4e6ea;
+                           border-radius:8px;">
+                <div style="width:100%;font-size:10px;font-weight:700;color:#6b7280;
+                            text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">
+                    Deployed Units</div>'''
+            + _legend_rows +
+            f'''</div>'''
+        )
+        map_html_str = (
+            fig_for_export.to_html(
+                full_html=False, include_plotlyjs="cdn",
+                default_height="460px", default_width="100%",
+                config=_export_map_config,
+            )
+            + _legend_html
+        )
         station_rows = "".join(f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>" for d in active_drones)
 
         all_bldgs_rows = ""
@@ -5712,7 +5750,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 .tag-guard{{background:rgba(255,215,0,0.15);color:#8a6a00;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}}
 
 /* ── MAP ─────────────────────────────────────────────────────── */
-.map-wrap{{border-radius:12px;overflow:hidden;border:1px solid var(--border);box-shadow:0 4px 20px rgba(0,0,0,0.06);margin-bottom:32px}}
+.map-wrap{{border-radius:12px;overflow:hidden;border:1px solid var(--border);box-shadow:0 4px 20px rgba(0,0,0,0.06);margin-bottom:16px;max-width:820px}}
 
 /* ── DISCLAIMER ──────────────────────────────────────────────── */
 .disc{{background:#fffbeb;border-left:4px solid var(--amber);padding:16px 20px;border-radius:0 8px 8px 0;font-size:12px;color:#7a5a00;margin-bottom:24px}}
@@ -5929,6 +5967,9 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 <!-- ── 03: COVERAGE MAP ───────────────────────────────────────── -->
 <section class="doc-section" id="map">
   <div class="section-eyebrow"><span class="pg-num">03</span><span class="pg-title">Coverage Map</span></div>
+  <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">
+    Use the <strong>+&nbsp;/&nbsp;−</strong> buttons on the map to zoom in. Hover over any circle for station details.
+  </p>
   <div class="map-wrap">{map_html_str}</div>
 </section>
 

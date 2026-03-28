@@ -444,6 +444,20 @@ def _bls_oes_msa_wage(cbsa_5digit, occ_code='33-3051'):
             wage_col = next((c for c in df.columns if c in ('H_MEAN',)), None)
             if not all([area_col, occ_col, wage_col]):
                 continue
+            # Dump diagnostics so we can see real values
+            import streamlit as _st
+            _st.session_state['_oes_diag'] = {
+                'year': year,
+                'fname': fname,
+                'columns': list(df.columns),
+                'area_col': area_col,
+                'occ_col': occ_col,
+                'wage_col': wage_col,
+                'area_sample': df[area_col].dropna().unique()[:20].tolist(),
+                'occ_sample': df[occ_col].dropna().unique()[:10].tolist(),
+                'cbsa_5digit': cbsa_5digit,
+                'cbsa_int': str(int(cbsa_5digit)),
+            }
             # Match CBSA — BLS stores it as integer string e.g. "31140" or "31140.0"
             cbsa_int = str(int(cbsa_5digit))
             mask = (
@@ -5516,6 +5530,10 @@ if st.session_state['csvs_ready']:
     if _bls_dbg:
         with st.expander("🔍 BLS Wage Lookup Diagnostics", expanded=True):
             st.json(_bls_dbg)
+    _oes_diag = st.session_state.get('_oes_diag')
+    if _oes_diag:
+        with st.expander("🔍 OES File Diagnostics", expanded=True):
+            st.json(_oes_diag)
 
     # ── EXPORT BUTTONS — always visible in sidebar ──
     st.sidebar.markdown("---")

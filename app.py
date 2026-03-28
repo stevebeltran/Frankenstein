@@ -6923,7 +6923,7 @@ body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text)
   background:var(--ink);padding:20px 24px;
 }}
 .cover-meta-cell .label{{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#555;margin-bottom:6px}}
-.cover-meta-cell .value{{font-size:15px;font-weight:700;color:#fff}}
+.cover-meta-cell .value{{font-size:clamp(12px,1.4vw,15px);font-weight:700;color:#fff;word-break:break-word;overflow-wrap:anywhere}}
 .cover-meta-cell .value.accent{{color:var(--cyan)}}
 .cover-meta-cell .value.gold{{color:var(--gold)}}
 .cover-bottom{{margin-top:40px;font-size:12px;color:#444;border-top:1px solid #1a1a2a;padding-top:24px;display:flex;justify-content:space-between}}
@@ -6938,7 +6938,7 @@ body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text)
   background:#fff;padding:28px 24px;text-align:center;
 }}
 .metric-cell .m-label{{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}}
-.metric-cell .m-value{{font-size:36px;font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1;color:var(--text)}}
+.metric-cell .m-value{{font-size:clamp(18px,2.4vw,36px);font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1.1;color:var(--text);word-break:break-word;overflow-wrap:anywhere}}
 .metric-cell .m-value.cyan{{color:var(--cyan)}}
 .metric-cell .m-value.gold{{color:var(--gold)}}
 .metric-cell .m-value.green{{color:var(--green)}}
@@ -7102,6 +7102,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
     <a href="#infrastructure"><span class="nav-num">07</span>Infrastructure Directory</a>
     <a href="#community"><span class="nav-num">08</span>Community Partnership</a>
     <a href="#analytics"><span class="nav-num">09</span>Analytics Dashboard</a>
+    <a href="#community-impact"><span class="nav-num">10</span>Community Impact</a>
   </nav>
   <div class="sidebar-footer">
     Prepared {datetime.datetime.now().strftime("%b %d, %Y")}<br>
@@ -7424,11 +7425,45 @@ sections.forEach(s=>obs.observe(s));
             df_calls_full=df_calls_full,
             theme='light',
         )
-        # Strip the outer <html>/<head>/<body> tags so it embeds cleanly inline
+        # Extract <style> block and body content separately, then scope the styles
+        # with a .cid-wrap prefix so they don't collide with the export document's CSS.
         import re as _re
-        _cid_inner = _re.sub(r'(?s)<!DOCTYPE.*?<body[^>]*>', '', _cid_export_html)
-        _cid_inner = _re.sub(r'</body>\s*</html>\s*$', '', _cid_inner).strip()
-        export_html = export_html.replace("[COMMUNITY_IMPACT_HTML_EXPORT]", _cid_inner)
+        _style_match = _re.search(r'<style>(.*?)</style>', _cid_export_html, _re.DOTALL)
+        _cid_style = _style_match.group(1) if _style_match else ''
+        # Scope every CSS rule inside the style block by prefixing with .cid-wrap
+        # Simple approach: wrap rules that start at column 0 (non-nested)
+        def _scope_css(raw_css):
+            # Replace :root { with .cid-wrap { so vars apply within scope
+            raw_css = raw_css.replace(':root {', '.cid-wrap {')
+            # Prepend .cid-wrap to each rule selector (lines that end with {)
+            lines = raw_css.split('\n')
+            scoped = []
+            for line in lines:
+                stripped = line.strip()
+                # Skip empty, @-rules, closing braces, and already-scoped lines
+                if (stripped.startswith('@') or stripped == '}' or stripped == ''
+                        or stripped.startswith('/*') or stripped.startswith('*')
+                        or stripped.startswith('.cid-wrap {')):
+                    scoped.append(line)
+                elif stripped.endswith('{') and not stripped.startswith('.cid-wrap'):
+                    # It's a selector line — prefix it
+                    selector = stripped[:-1].strip()
+                    # Don't double-scope :root replacement or @keyframes internals
+                    if selector and not selector.startswith('.cid-wrap') and not selector.startswith('from') and not selector.startswith('to') and not selector.startswith('0%') and not selector.startswith('50%') and not selector.startswith('100%'):
+                        scoped.append(f'  .cid-wrap {selector} {{')
+                    else:
+                        scoped.append(line)
+                else:
+                    scoped.append(line)
+            return '\n'.join(scoped)
+
+        _scoped_style = _scope_css(_cid_style)
+        # Extract body content (between <body> and </body>)
+        _body_match = _re.search(r'<body[^>]*>(.*?)</body>', _cid_export_html, _re.DOTALL)
+        _cid_body = _body_match.group(1).strip() if _body_match else _cid_export_html
+        # Build the scoped embed: scoped <style> + wrapper div
+        _cid_embed = f'<style>{_scoped_style}</style>\n<div class="cid-wrap" style="font-family:\'DM Sans\',sans-serif;background:#f8f7f4;border-radius:10px;overflow:hidden;">{_cid_body}</div>'
+        export_html = export_html.replace("[COMMUNITY_IMPACT_HTML_EXPORT]", _cid_embed)
 
     # ── Download buttons — always rendered so they're visible in the sidebar ──
     _safe_city   = _safe_city_base

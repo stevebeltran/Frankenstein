@@ -1980,6 +1980,27 @@ def forward_geocode(address_str):
     except Exception: pass
     return None, None
 
+@st.cache_data(show_spinner=False)
+def lookup_zip_code(zip_code: str):
+    """
+    Look up a US ZIP code and return (city, state_abbr, county) using the free
+    Zippopotam.us API.  Returns (None, None, None) on failure.
+    """
+    zip_code = zip_code.strip()
+    if not re.match(r'^\d{5}$', zip_code):
+        return None, None, None
+    try:
+        url = f"https://api.zippopotam.us/us/{zip_code}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        place = data['places'][0]
+        city  = place['place name']
+        state = place['state abbreviation']
+        return city, state, place.get('state', '')
+    except Exception:
+        return None, None, None
+
 @st.cache_data
 def normalize_jurisdiction_name(name):
     if not name:
@@ -3134,6 +3155,35 @@ if not st.session_state['csvs_ready']:
         """, unsafe_allow_html=True)
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+        # ── ZIP CODE LOOKUP ──────────────────────────────────────────────────
+        with st.expander("🔍 Look up city by ZIP code", expanded=False):
+            zip_col, zip_btn_col = st.columns([2, 1])
+            zip_input = zip_col.text_input(
+                "Enter ZIP code", max_chars=5, placeholder="e.g. 77901",
+                key="zip_lookup_input",
+                help="Enter a 5-digit US ZIP code to auto-fill City and State below."
+            )
+            zip_lookup_clicked = zip_btn_col.button(
+                "Look Up", key="zip_lookup_btn", use_container_width=True
+            )
+            if zip_lookup_clicked:
+                if re.match(r'^\d{5}$', zip_input.strip()):
+                    with st.spinner("Looking up ZIP code…"):
+                        _z_city, _z_state, _z_state_full = lookup_zip_code(zip_input.strip())
+                    if _z_city and _z_state:
+                        # Apply to the first city slot
+                        if st.session_state['target_cities']:
+                            st.session_state['target_cities'][0] = {"city": _z_city, "state": _z_state}
+                        else:
+                            st.session_state['target_cities'] = [{"city": _z_city, "state": _z_state}]
+                        st.success(f"✅ ZIP {zip_input.strip()} → **{_z_city}, {_z_state}** — fields updated below.")
+                        st.rerun()
+                    else:
+                        st.error("❌ ZIP code not found. Please check the number and try again.")
+                else:
+                    st.warning("⚠️ Please enter a valid 5-digit ZIP code.")
+        # ── CITY / STATE INPUTS ──────────────────────────────────────────────
 
         for i in range(st.session_state.city_count):
             c1, c2 = st.columns([3, 1])

@@ -931,16 +931,6 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
 
             // Run once to populate the dashboard on load
             updateDashboard();
-
-            // Report actual content height to Streamlit so the iframe auto-sizes
-            function _sendHeight() {{
-                const h = document.documentElement.scrollHeight || document.body.scrollHeight;
-                window.parent.postMessage({{type: 'streamlit:setFrameHeight', height: h}}, '*');
-            }}
-            // Fire immediately after render, then again after async DOM updates settle
-            _sendHeight();
-            setTimeout(_sendHeight, 300);
-            setTimeout(_sendHeight, 800);
         </script>
     </div>
     """
@@ -5360,9 +5350,27 @@ if st.session_state['csvs_ready']:
         "Analytics unavailable." in analytics_html_block
         or "No valid dates found in data." in analytics_html_block
     )
-    # Height is set generously as a fallback; the iframe's postMessage will
-    # report its actual scrollHeight and Streamlit will resize it automatically.
-    _analytics_height = 180 if _analytics_unavailable else 2400
+    if _analytics_unavailable:
+        _analytics_height = 180
+    else:
+        # Compute height from actual data so the iframe fits exactly with no dead space.
+        # Calendar grid is auto-fill / minmax(250px, 1fr). At typical Streamlit content
+        # width (~900px with sidebar open) that yields 3 columns.
+        import math as _math
+        try:
+            _n_months = int(_analytics_df['date'].astype(str).str[:7].nunique()) if (
+                _analytics_df is not None and not _analytics_df.empty and 'date' in _analytics_df.columns
+            ) else 6
+        except Exception:
+            _n_months = 6
+        _n_months = max(1, min(_n_months, 12))
+        _cal_cols = 3                        # columns at typical sidebar-open viewport
+        _cal_rows = _math.ceil(_n_months / _cal_cols)
+        _cal_px   = _cal_rows * 290          # ~290px per calendar row (header + up to 6 week rows + gap)
+        # Fixed chrome above the calendar:
+        #   section header 60 + controls bar 70 + KPI cards 110 + shift/dow panel 210 + legend+label 55
+        _fixed_px = 505
+        _analytics_height = _fixed_px + _cal_px
     components.html(analytics_html_block, height=_analytics_height, scrolling=False)
 
     if _analytics_unavailable:

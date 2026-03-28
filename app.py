@@ -1981,20 +1981,27 @@ def forward_geocode(address_str):
     return None, None
 
 @st.cache_data(show_spinner=False)
+def get_state_city_suggestions(state_abbr, existing_targets=None):
+    """Return sorted searchable city suggestions for a state.
+
+    Suggestions are seeded from the app's built-in demo/fast-demo catalog and
+    any cities the user has already entered in this session. Counties are left
+    to manual entry via the paired text box.
     """
-    Zippopotam.us API.  Returns (None, None, None) on failure.
-    """
-        return None, None, None
-    try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-        place = data['places'][0]
-        city  = place['place name']
-        state = place['state abbreviation']
-        return city, state, place.get('state', '')
-    except Exception:
-        return None, None, None
+    suggestions = set()
+    state_abbr = str(state_abbr or '').strip().upper()
+
+    for city, st_abbr in DEMO_CITIES + FAST_DEMO_CITIES:
+        if st_abbr == state_abbr:
+            suggestions.add(city)
+
+    for item in existing_targets or []:
+        if str(item.get('state', '')).strip().upper() == state_abbr:
+            city_name = str(item.get('city', '')).strip()
+            if city_name and not city_name.lower().endswith(' county'):
+                suggestions.add(city_name)
+
+    return sorted(suggestions, key=lambda s: s.lower())
 
 @st.cache_data
 def normalize_jurisdiction_name(name):
@@ -2228,7 +2235,10 @@ def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"})
                 with urllib.request.urlopen(req, timeout=45) as resp:
+                    zip_data = resp.read()
+                zip_file = zipfile.ZipFile(io.BytesIO(zip_data))
                 os.makedirs(temp_dir, exist_ok=True)
+                zip_file.extractall(temp_dir)
                 shp_files = glob.glob(os.path.join(temp_dir, "*.shp"))
                 if shp_files:
                     gdf = gpd.read_file(shp_files[0])
@@ -3150,60 +3160,65 @@ if not st.session_state['csvs_ready']:
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-        # State is a plain text input so typing "TX" + Tab commits instantly.
+        # ── CITY / STATE — ZIP removed, searchable picker + manual fallback ──
+        _state_keys = sorted(STATE_FIPS.keys())
 
-        _state_keys = list(STATE_FIPS.keys())   # ['AL','AK', ...]
-
-        # Column headers (only shown for row 0)
-        _h_zip, _h_city, _h_state = st.columns([1, 3, 1])
+        _h_city, _h_state = st.columns([3, 1])
         _h_city.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>City or County</div>", unsafe_allow_html=True)
         _h_state.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>State</div>", unsafe_allow_html=True)
 
+        while len(st.session_state['target_cities']) < st.session_state.city_count:
+            st.session_state['target_cities'].append({"city": "", "state": "TX"})
+
         for i in range(st.session_state.city_count):
-            c_val = st.session_state['target_cities'][i]['city']  if i < len(st.session_state['target_cities']) else ""
-            s_val = st.session_state['target_cities'][i]['state'] if i < len(st.session_state['target_cities']) else "TX"
+            current_entry = st.session_state['target_cities'][i] if i < len(st.session_state['target_cities']) else {"city": "", "state": "TX"}
+            c_val = str(current_entry.get('city', '') or '').strip()
+            s_val = str(current_entry.get('state', 'TX') or 'TX').strip().upper()
+            if s_val not in STATE_FIPS:
+                s_val = 'TX'
 
-            col_zip, col_city, col_state = st.columns([1, 3, 1])
+            col_city, col_state = st.columns([3, 1])
 
-                label_visibility="collapsed",
-            )
-            # As soon as 5 digits are typed, look up and write back to session_state, then rerun
-                if _z_city and _z_state:
-                    _entry = {"city": _z_city, "state": _z_state}
-                    if i < len(st.session_state['target_cities']):
-                        st.session_state['target_cities'][i] = _entry
-                    else:
-                        st.session_state['target_cities'].append(_entry)
-                    st.rerun()
-                    c_val = _z_city
-                    s_val = _z_state
-
-            # ── City / County input ──
-            c_name = col_city.text_input(
-                f"city_{i}", value=c_val,
-                placeholder="e.g. Orlando or Orange County",
-                label_visibility="collapsed",
-                key=f"c_{i}",
-                help="Official municipality or county name."
-            )
-
-            # ── State — plain text input so Tab/Enter commits immediately ──
-            raw_state = col_state.text_input(
-                f"state_{i}", value=s_val, max_chars=2,
-                placeholder="TX",
+            s_index = _state_keys.index(s_val) if s_val in _state_keys else _state_keys.index('TX')
+            s_name = col_state.selectbox(
+                f"state_{i}",
+                options=_state_keys,
+                index=s_index,
                 label_visibility="collapsed",
                 key=f"s_{i}",
                 help="Two-letter state abbreviation (e.g. TX, FL, CA)."
             )
-            # Normalize: uppercase, must be a valid abbreviation
-            s_name = raw_state.strip().upper()
-            if s_name not in STATE_FIPS:
-                s_name = s_val if s_val in STATE_FIPS else "TX"
 
-            if i < len(st.session_state['target_cities']):
-                st.session_state['target_cities'][i] = {"city": c_name, "state": s_name}
+            city_options = get_state_city_suggestions(s_name, st.session_state.get('target_cities', []))
+            custom_choice = "Custom / type manually…"
+            city_picker_options = city_options + [custom_choice]
+            city_picker_default = c_val if c_val in city_options else custom_choice
+            picker_index = city_picker_options.index(city_picker_default)
+
+            selected_city = col_city.selectbox(
+                f"city_picker_{i}",
+                options=city_picker_options,
+                index=picker_index,
+                label_visibility="collapsed",
+                key=f"city_picker_{i}",
+                help="Search the built-in city list for this state, or choose Custom to type any city or county."
+            )
+
+            if selected_city == custom_choice:
+                c_name = col_city.text_input(
+                    f"city_custom_{i}",
+                    value=c_val,
+                    placeholder="e.g. Orlando or Orange County",
+                    label_visibility="collapsed",
+                    key=f"city_custom_{i}",
+                    help="Official municipality or county name. Counties should include the word County."
+                ).strip()
             else:
-                st.session_state['target_cities'].append({"city": c_name, "state": s_name})
+                c_name = selected_city
+                if st.session_state.get(f"city_custom_{i}", "") != c_name:
+                    st.session_state[f"city_custom_{i}"] = c_name
+
+            st.session_state['target_cities'][i] = {"city": c_name, "state": s_name}
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
         st.file_uploader(
@@ -3555,6 +3570,8 @@ if not st.session_state['csvs_ready']:
             for i in range(10):
                 st.session_state.pop(f"c_{i}", None)
                 st.session_state.pop(f"s_{i}", None)
+                st.session_state.pop(f"city_picker_{i}", None)
+                st.session_state.pop(f"city_custom_{i}", None)
             st.session_state['trigger_sim'] = True
             st.session_state['demo_mode_used'] = True
             st.rerun()
@@ -3665,6 +3682,8 @@ if not st.session_state['csvs_ready']:
                     for j in range(10):
                         st.session_state.pop(f"c_{j}", None)
                         st.session_state.pop(f"s_{j}", None)
+                        st.session_state.pop(f"city_picker_{j}", None)
+                        st.session_state.pop(f"city_custom_{j}", None)
                     st.rerun()
 
         if not all_gdfs:

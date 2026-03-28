@@ -475,92 +475,57 @@ def build_high_activity_staffing_html(overtime_stats, dark=True, compact=False):
     title_size = "13px" if compact else "0.95rem"
     body_size = "11px" if compact else "0.72rem"
     metric_size = "24px" if compact else "1.45rem"
-
-    # Wage source badge
-    wage_source = overtime_stats.get("wage_source", "unknown")
-    ot_hourly   = overtime_stats.get("ot_hourly", 0.0)
-    base_hourly = ot_hourly / 1.5 if ot_hourly > 0 else 0.0
-
-    if "MSA" in wage_source or "metro" in wage_source.lower():
-        badge_color = "#22c55e"
-        badge_icon  = "📍"
-        badge_label = "LOCAL METRO"
-        badge_tip   = "Pulled from BLS OES for this specific metro area"
-    elif "state" in wage_source.lower():
-        badge_color = "#f59e0b"
-        badge_icon  = "🗺"
-        badge_label = "STATE AVG"
-        badge_tip   = "Metro data unavailable — using statewide BLS OES average"
-    elif "national" in wage_source.lower():
-        badge_color = "#f97316"
-        badge_icon  = "🌐"
-        badge_label = "NATIONAL AVG"
-        badge_tip   = "State data unavailable — using national BLS OES average"
-    else:
-        badge_color = "#6b7280"
-        badge_icon  = "⚠️"
-        badge_label = "ESTIMATE"
-        badge_tip   = "BLS API unavailable — using hardcoded fallback rate"
-
-    badge_bg = (
-        "rgba(34,197,94,0.1)" if ("MSA" in wage_source or "metro" in wage_source.lower())
-        else "rgba(107,114,128,0.15)"
-    )
-
-    wage_badge_html = (
-        f'''<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:6px;">'''
-        f'''<div style="display:inline-flex; align-items:center; gap:5px; '''
-        f'''background:{badge_bg}; border:1px solid {badge_color}; '''
-        f'''border-radius:100px; padding:3px 10px;" title="{badge_tip}">'''
-        f'''<span style="font-size:11px;">{badge_icon}</span>'''
-        f'''<span style="font-size:9px; font-weight:800; letter-spacing:1.2px; '''
-        f'''color:{badge_color}; text-transform:uppercase;">{badge_label}</span></div>'''
-        f'''<span style="font-size:10px; color:{text_muted};">'''
-        f'''Base <span style="color:{text_main}; font-weight:700; font-family:'IBM Plex Mono',monospace;">${base_hourly:.2f}/hr</span>'''
-        f'''&nbsp;·&nbsp;OT <span style="color:{accent}; font-weight:700; font-family:'IBM Plex Mono',monospace;">${ot_hourly:.2f}/hr</span>'''
-        f'''&nbsp;·&nbsp;<span style="color:{text_muted};">{wage_source}</span></span></div>'''
-    )
-
     monthly_rows_html = "".join([
         f"<tr><td style='padding:6px 8px; border-top:1px solid {border}; color:{text_main};'>{row.month}</td>"
         f"<td style='padding:6px 8px; border-top:1px solid {border}; text-align:right; color:{text_main};'>{int(row.busy_hours):,}</td>"
         f"<td style='padding:6px 8px; border-top:1px solid {border}; text-align:right; color:{text_main};'>{row.ot_hours:,.0f}</td>"
         f"<td style='padding:6px 8px; border-top:1px solid {border}; text-align:right; color:{accent};'>${row.ot_cost:,.0f}</td></tr>"
-        for row in overtime_stats["monthly"].itertuples(index=False)
+        for row in overtime_stats['monthly'].itertuples(index=False)
     ])
+    return f"""
+    <div style="background:{bg}; border:1px solid {border}; border-radius:8px; padding:16px 18px; margin:14px 0 14px 0;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
+            <div>
+                <div style="font-size:10px; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">High-Activity Staffing Pressure</div>
+                <div style="font-size:{title_size}; color:{text_main}; font-weight:800;">Estimated officer overtime needed to cover residual peak demand</div>
+            </div>
+            <div style="font-size:10px; color:{text_muted};">Officer wage basis: <span style="color:{text_main};">{overtime_stats['wage_source']}</span></div>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:12px;">
+            <div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">
+                <div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg High-Activity Hours / Mo</div>
+                <div style="font-size:{metric_size}; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{overtime_stats['avg_busy_hours']:.0f}</div>
+            </div>
+            <div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">
+                <div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg OT Hours Needed / Mo</div>
+                <div style="font-size:{metric_size}; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{overtime_stats['avg_ot_hours']:.0f}</div>
+            </div>
+            <div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">
+                <div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg OT Cost / Mo</div>
+                <div style="font-size:{metric_size}; font-weight:800; color:{accent}; font-family:'IBM Plex Mono', monospace;">${overtime_stats['avg_ot_cost']:,.0f}</div>
+            </div>
+            <div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">
+                <div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg OT Hourly Rate</div>
+                <div style="font-size:{metric_size}; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">${overtime_stats['ot_hourly']:.2f}</div>
+            </div>
+        </div>
+        <div style="font-size:{body_size}; color:{text_muted}; margin-bottom:10px;">Peak month: <span style="color:{text_main}; font-weight:700;">{overtime_stats['peak_month']}</span> · estimated OT spend <span style="color:{accent}; font-weight:700;">${overtime_stats['peak_ot_cost']:,.0f}</span></div>
+        <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:{body_size};">
+                <thead>
+                    <tr>
+                        <th style="text-align:left; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">Month</th>
+                        <th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">High-Activity Hours</th>
+                        <th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">OT Hours</th>
+                        <th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">OT Cost</th>
+                    </tr>
+                </thead>
+                <tbody>{monthly_rows_html}</tbody>
+            </table>
+        </div>
+    </div>
+    """
 
-    return (
-        f'''<div style="background:{bg}; border:1px solid {border}; border-radius:8px; padding:16px 18px; margin:14px 0 14px 0;">'''
-        f'''<div style="margin-bottom:12px;">'''
-        f'''<div style="font-size:10px; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">High-Activity Staffing Pressure</div>'''
-        f'''<div style="font-size:{title_size}; color:{text_main}; font-weight:800;">Estimated officer overtime needed to cover residual peak demand</div>'''
-        + wage_badge_html +
-        f'''</div>'''
-        f'''<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:12px;">'''
-        f'''<div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">'''
-        f'''<div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg High-Activity Hours / Mo</div>'''
-        f'''<div style="font-size:{metric_size}; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{overtime_stats["avg_busy_hours"]:.0f}</div></div>'''
-        f'''<div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">'''
-        f'''<div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg OT Hours Needed / Mo</div>'''
-        f'''<div style="font-size:{metric_size}; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">{overtime_stats["avg_ot_hours"]:.0f}</div></div>'''
-        f'''<div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">'''
-        f'''<div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg OT Cost / Mo</div>'''
-        f'''<div style="font-size:{metric_size}; font-weight:800; color:{accent}; font-family:'IBM Plex Mono', monospace;">${overtime_stats["avg_ot_cost"]:,.0f}</div></div>'''
-        f'''<div style="background:{card}; border:1px solid {border}; border-radius:6px; padding:10px; text-align:center;">'''
-        f'''<div style="font-size:10px; color:{text_muted}; text-transform:uppercase;">Avg OT Hourly Rate</div>'''
-        f'''<div style="font-size:{metric_size}; font-weight:800; color:{text_main}; font-family:'IBM Plex Mono', monospace;">${overtime_stats["ot_hourly"]:.2f}</div>'''
-        f'''<div style="font-size:9px; color:{text_muted}; margin-top:3px;">base ${base_hourly:.2f} x 1.5</div></div></div>'''
-        f'''<div style="font-size:{body_size}; color:{text_muted}; margin-bottom:10px;">Peak month: '''
-        f'''<span style="color:{text_main}; font-weight:700;">{overtime_stats["peak_month"]}</span>'''
-        f'''&nbsp;·&nbsp;estimated OT spend <span style="color:{accent}; font-weight:700;">${overtime_stats["peak_ot_cost"]:,.0f}</span></div>'''
-        f'''<div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:{body_size};">'''
-        f'''<thead><tr>'''
-        f'''<th style="text-align:left; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">Month</th>'''
-        f'''<th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">High-Activity Hours</th>'''
-        f'''<th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">OT Hours</th>'''
-        f'''<th style="text-align:right; padding:6px 8px; color:{text_muted}; font-weight:700; border-bottom:1px solid {border};">OT Cost</th>'''
-        f'''</tr></thead><tbody>{monthly_rows_html}</tbody></table></div></div>'''
-    )
 def generate_command_center_html(df, total_orig_calls, export_mode=False):
     """Generates the full Command Center visual suite with interactive Javascript filtering."""
     if df is None or df.empty:
@@ -2062,24 +2027,6 @@ def fetch_census_population(state_fips, place_name, is_county=False):
 SHAPEFILE_DIR = "jurisdiction_data"
 if not os.path.exists(SHAPEFILE_DIR): os.makedirs(SHAPEFILE_DIR)
 
-# Delete any previously saved county-sized shapefiles (>150 sq mi).
-# These were saved by older versions of the app and cause the map to
-# default to county-level zoom. They will be re-fetched as city boundaries.
-try:
-    for _shp in glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp")):
-        try:
-            _gdf = gpd.read_file(_shp)
-            _gdf = _gdf.set_crs(epsg=4269) if _gdf.crs is None else _gdf
-            _sq_mi = _gdf.to_crs(epsg=3857).geometry.area.sum() / 2589988.11
-            if _sq_mi > 150:
-                for _ext in ['.shp', '.dbf', '.shx', '.prj', '.cpg', '.sbn', '.sbx']:
-                    _cf = _shp.replace('.shp', _ext)
-                    if os.path.exists(_cf): os.remove(_cf)
-        except Exception:
-            pass
-except Exception:
-    pass
-
 @st.cache_data
 def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
     # Check if we already downloaded and cached this state's places file
@@ -2487,23 +2434,6 @@ def calculate_zoom(min_lon, max_lon, min_lat, max_lat):
     if lon_diff <= 0 or lat_diff <= 0: return 12
     return min(max(min(np.log2(360/lon_diff), np.log2(180/lat_diff)) + 1.6, 5), 18)
 
-def calculate_zoom_from_calls(df_calls, pct_lo=5, pct_hi=95):
-    """Calculate map center and zoom from call data percentiles so a handful of
-    outlier incidents on rural roads don't force the map to zoom way out.
-    Returns (center_lat, center_lon, zoom, minx, miny, maxx, maxy)."""
-    lats = pd.to_numeric(df_calls["lat"], errors="coerce").dropna()
-    lons = pd.to_numeric(df_calls["lon"], errors="coerce").dropna()
-    if lats.empty or lons.empty:
-        return None, None, 12, None, None, None, None
-    miny = float(lats.quantile(pct_lo / 100))
-    maxy = float(lats.quantile(pct_hi / 100))
-    minx = float(lons.quantile(pct_lo / 100))
-    maxx = float(lons.quantile(pct_hi / 100))
-    center_lat = float(lats.median())
-    center_lon = float(lons.median())
-    zoom = calculate_zoom(minx, maxx, miny, maxy)
-    return center_lat, center_lon, zoom, minx, miny, maxx, maxy
-
 def generate_kml(active_gdf, active_drones, calls_gdf):
     kml = simplekml.Kml()
     kml.document.name = "BRINC DFR Deployment Plan"
@@ -2559,21 +2489,7 @@ def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir):
     full_points = full_points[(full_points.lat.abs() > 1) & (full_points.lon.abs() > 1)]
     scan_points = full_points.sample(50000, random_state=42) if len(full_points) > 50000 else full_points
     points_gdf = gpd.GeoDataFrame(scan_points, geometry=gpd.points_from_xy(scan_points.lon, scan_points.lat), crs="EPSG:4326")
-    # Use 2nd-98th percentile bounds instead of raw min/max so a handful of
-    # rural outlier calls don't expand the bbox to match a county shapefile
-    # when the actual jurisdiction is a much smaller city.
-    _lats = scan_points['lat'].dropna()
-    _lons = scan_points['lon'].dropna()
-    if len(_lats) > 20:
-        _pad = 0.02  # ~1.5 miles of extra padding
-        total_bounds = (
-            float(_lons.quantile(0.02)) - _pad,
-            float(_lats.quantile(0.02)) - _pad,
-            float(_lons.quantile(0.98)) + _pad,
-            float(_lats.quantile(0.98)) + _pad,
-        )
-    else:
-        total_bounds = points_gdf.total_bounds
+    total_bounds = points_gdf.total_bounds
     shp_files = glob.glob(os.path.join(shapefile_dir, "*.shp"))
     relevant_polys = []
     for shp_path in shp_files:
@@ -3362,34 +3278,33 @@ if not st.session_state['csvs_ready']:
 
                     with st.spinner(get_jurisdiction_message()):
                         # ── BOUNDARY LOOKUP: fetch & save shapefile NOW so
-                        # find_relevant_jurisdictions() can use it on the map page.
-                        # IMPORTANT: Only save PLACE (city) boundaries to disk.
-                        # County boundaries are too large and cause the map to zoom
-                        # out to county level. If we only have a county, skip saving
-                        # and let the runtime city_m clipping handle it. ──────────
+                        # find_relevant_jurisdictions() can use it on the map page ──
                         detected_city_for_boundary = st.session_state.get('active_city', '')
                         detected_state_for_boundary = st.session_state.get('active_state', '')
                         if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
-                            # Delete any previously cached shapefile for this city
-                            # so stale county-sized files don't persist across uploads.
-                            try:
-                                _safe_n_del = detected_city_for_boundary.replace(" ", "_").replace("/", "_")
-                                _old_shp = os.path.join(SHAPEFILE_DIR, f"{_safe_n_del}_{detected_state_for_boundary}.shp")
-                                if os.path.exists(_old_shp):
-                                    for _ext in ['.shp', '.dbf', '.shx', '.prj', '.cpg']:
-                                        _f = _old_shp.replace('.shp', _ext)
-                                        if os.path.exists(_f):
-                                            os.remove(_f)
-                            except Exception:
-                                pass
-
-                            # Try place boundary first (city-level — correct size)
+                            # Boundary lookup priority:
+                            # 1. places_lite.parquet  — exact city shape (best)
+                            # 2. counties_lite.parquet — same-name county
+                            # 3. Geocode → find county → counties_lite.parquet
                             b_success, b_gdf = fetch_place_boundary_local(
                                 detected_state_for_boundary, detected_city_for_boundary)
-                            b_is_place = b_success  # track if we got a city-level boundary
-
-                            # Only save if it's a city/place boundary — never save county
-                            if b_success and b_gdf is not None and b_is_place:
+                            if not b_success:
+                                for name_try in [detected_city_for_boundary,
+                                                 detected_city_for_boundary + " County"]:
+                                    b_success, b_gdf = fetch_county_boundary_local(
+                                        detected_state_for_boundary, name_try)
+                                    if b_success and b_gdf is not None:
+                                        break
+                            if not b_success:
+                                county_name = lookup_county_for_city(
+                                    detected_city_for_boundary, detected_state_for_boundary)
+                                if county_name:
+                                    b_success, b_gdf = fetch_county_boundary_local(
+                                        detected_state_for_boundary, county_name)
+                                    if b_success and b_gdf is not None:
+                                        b_gdf = b_gdf.copy()
+                                        b_gdf['NAME'] = detected_city_for_boundary + " (" + county_name + " County)"
+                            if b_success and b_gdf is not None:
                                 try:
                                     safe_n = detected_city_for_boundary.replace(" ", "_").replace("/", "_")
                                     b_gdf.to_file(os.path.join(
@@ -3397,11 +3312,6 @@ if not st.session_state['csvs_ready']:
                                         f"{safe_n}_{detected_state_for_boundary}.shp"))
                                 except Exception:
                                     pass
-                            # If place lookup failed, store the city name so the runtime
-                            # city_m block can fall back to call-hull clipping
-                            if not b_success:
-                                st.session_state['_boundary_fallback_city'] = detected_city_for_boundary
-                            find_relevant_jurisdictions.clear()
 
                     st.session_state['data_source'] = 'cad_upload'
                     st.session_state['map_build_logged'] = False
@@ -3761,19 +3671,11 @@ if st.session_state['csvs_ready']:
                 master_gdf = None
 
     if master_gdf is None or master_gdf.empty:
-        # ── Fallback 2: bounding box around call points (percentile-based) ──
-        _fb_lats = pd.to_numeric(df_calls['lat'], errors='coerce').dropna()
-        _fb_lons = pd.to_numeric(df_calls['lon'], errors='coerce').dropna()
-        if len(_fb_lats) > 20:
-            min_lon = float(_fb_lons.quantile(0.02))
-            max_lon = float(_fb_lons.quantile(0.98))
-            min_lat = float(_fb_lats.quantile(0.02))
-            max_lat = float(_fb_lats.quantile(0.98))
-        else:
-            min_lon, min_lat = float(_fb_lons.min()), float(_fb_lats.min())
-            max_lon, max_lat = float(_fb_lons.max()), float(_fb_lats.max())
-        lon_pad = (max_lon - min_lon) * 0.05
-        lat_pad = (max_lat - min_lat) * 0.05
+        # ── Fallback 2: bounding box around call points ──
+        min_lon, min_lat = df_calls['lon'].min(), df_calls['lat'].min()
+        max_lon, max_lat = df_calls['lon'].max(), df_calls['lat'].max()
+        lon_pad = (max_lon - min_lon) * 0.1
+        lat_pad = (max_lat - min_lat) * 0.1
         poly = box(min_lon-lon_pad, min_lat-lat_pad, max_lon+lon_pad, max_lat+lat_pad)
         master_gdf = gpd.GeoDataFrame({'DISPLAY_NAME':['Auto-Generated Boundary'],'data_count':[len(df_calls)]}, geometry=[poly], crs="EPSG:4326")
 
@@ -3811,19 +3713,6 @@ if st.session_state['csvs_ready']:
     active_gdf = master_gdf[master_gdf['DISPLAY_NAME'].isin(selected_names)]
     if selected_names and st.session_state.get('active_city') == "Orlando":
         st.session_state['active_city'] = selected_names[0]
-    # Show what boundary was loaded so the user can spot county-vs-city mismatches
-    if selected_names:
-        _bn = selected_names[0]
-        _is_county = any(w in _bn.lower() for w in ['county', 'parish', 'borough'])
-        _badge = "⚠️ County boundary" if _is_county else "✅ City boundary"
-        _badge_color = "#f59e0b" if _is_county else "#22c55e"
-        st.sidebar.markdown(
-            f'''<div style="font-size:0.65rem; padding:4px 8px; border-radius:4px;
-                          border-left:3px solid {_badge_color}; background:rgba(0,0,0,0.2);
-                          margin-bottom:8px; color:{_badge_color};">
-                {_badge}: <b>{_bn}</b></div>''',
-            unsafe_allow_html=True
-        )
 
     filter_expander = st.sidebar.expander("⚙️ Data Filters", expanded=False)
     with filter_expander:
@@ -3920,20 +3809,10 @@ if st.session_state['csvs_ready']:
 
     st.sidebar.markdown('<div class="sidebar-section-header">② Optimize Fleet</div>', unsafe_allow_html=True)
 
-    # Use boundary total_bounds for UTM zone / epsg only.
-    # Use call-data percentiles for map center + zoom so rural outlier calls
-    # don't force the map to zoom out to show the whole county.
-    _boundary_bounds = active_gdf.to_crs(epsg=4326).total_bounds
-    _cl, _clon, _czoom, _cminx, _cminy, _cmaxx, _cmaxy = calculate_zoom_from_calls(df_calls)
-    if _cl is not None:
-        center_lat, center_lon, dynamic_zoom = _cl, _clon, _czoom
-        # Use call percentile bounds for FAA/airfield queries (tighter area)
-        minx, miny, maxx, maxy = _cminx, _cminy, _cmaxx, _cmaxy
-    else:
-        minx, miny, maxx, maxy = _boundary_bounds
-        center_lon = (minx + maxx) / 2
-        center_lat = (miny + maxy) / 2
-        dynamic_zoom = calculate_zoom(minx, maxx, miny, maxy)
+    minx, miny, maxx, maxy = active_gdf.to_crs(epsg=4326).total_bounds
+    center_lon = (minx + maxx) / 2
+    center_lat = (miny + maxy) / 2
+    dynamic_zoom = calculate_zoom(minx, maxx, miny, maxy)
     utm_zone = int((center_lon + 180) / 6) + 1
     epsg_code = int(f"326{utm_zone}") if center_lat > 0 else int(f"327{utm_zone}")
 
@@ -3944,44 +3823,12 @@ if st.session_state['csvs_ready']:
         raw_union = (active_utm.geometry.union_all() if hasattr(active_utm.geometry, 'union_all')
                      else active_utm.geometry.unary_union)
         # buffer(0.1).buffer(-0.1) cleans self-intersections but can collapse thin geometries.
+        # Use a larger initial buffer and validate before shrinking.
         clean_geom = raw_union.buffer(1.0).buffer(-1.0)
         if clean_geom.is_empty or not clean_geom.is_valid:
-            clean_geom = raw_union.buffer(0)
+            clean_geom = raw_union.buffer(0)  # zero-buffer repair only
         if clean_geom.is_empty:
-            clean_geom = raw_union
-
-        # ── Sanity-check: if the loaded boundary is more than 3× larger than
-        #    the call data extent (e.g. county loaded instead of city), clip it
-        #    to a buffered convex hull of the actual call coordinates so the map
-        #    and station optimizer stay tight to where calls actually occur. ──
-        try:
-            _call_lats = pd.to_numeric(df_calls["lat"], errors="coerce").dropna()
-            _call_lons = pd.to_numeric(df_calls["lon"], errors="coerce").dropna()
-            if len(_call_lats) > 10:
-                # Build convex hull of calls in UTM, add a 1.5km buffer
-                from shapely.geometry import MultiPoint
-                _call_pts_utm = gpd.GeoSeries(
-                    gpd.points_from_xy(_call_lons, _call_lats), crs="EPSG:4326"
-                ).to_crs(epsg=epsg_code)
-                _call_hull = MultiPoint(list(zip(
-                    _call_pts_utm.geometry.x, _call_pts_utm.geometry.y
-                ))).convex_hull.buffer(1500)  # 1.5 km generous buffer
-
-                # Only clip if the loaded boundary is >2.5x the area of the call hull
-                _boundary_area = clean_geom.area
-                _hull_area     = _call_hull.area
-                if _boundary_area > _hull_area * 2.5:
-                    clipped = clean_geom.intersection(_call_hull)
-                    if not clipped.is_empty and clipped.area > _hull_area * 0.5:
-                        clean_geom = clipped
-                        st.toast(
-                            "📍 Boundary clipped to call data extent "
-                            "(loaded shapefile was larger than the active jurisdiction).",
-                            icon="📍"
-                        )
-        except Exception:
-            pass  # clipping failed — use original boundary as-is
-
+            clean_geom = raw_union          # use as-is if still empty
         city_m = clean_geom
         city_boundary_geom = gpd.GeoSeries([clean_geom], crs=epsg_code).to_crs(epsg=4326).iloc[0]
     except Exception as e:
@@ -4282,7 +4129,6 @@ if st.session_state['csvs_ready']:
     locked_g_pins = [_name_to_idx[n] for n in pinned_guard_names if n in _name_to_idx]
     locked_r_pins = [_name_to_idx[n] for n in pinned_resp_names  if n in _name_to_idx]
 
-    n = len(df_stations_all)  # refresh after boundary filtering
     bounds_hash = f"{minx}_{miny}_{maxx}_{maxy}_{n}_{resp_radius_mi}_{guard_radius_mi}"
 
     prog2 = st.sidebar.empty()
@@ -4394,7 +4240,7 @@ if st.session_state['csvs_ready']:
                 else:
                     g_best, chrono_g = _greedy_area(
                         guard_matrix,
-                        [station_metadata[i]['clipped_guard'] for i in range(len(station_metadata))],
+                        [station_metadata[i]['clipped_guard'] for i in range(n)],
                         k_guardian, locked_g_pins, set()
                     )
                 g_best = list(g_best)
@@ -4430,14 +4276,14 @@ if st.session_state['csvs_ready']:
                         r_best = [s for s in r_best if s not in set(g_best)]
                         # Pad back to k_responder if exclusion removed some
                         if len(r_best) < k_responder:
-                            remaining = [s for s in range(len(station_metadata))
+                            remaining = [s for s in range(n)
                                          if s not in r_best and s not in set(g_best)]
                             r_best += remaining[:k_responder - len(r_best)]
                 else:
                     _excl_resp = set(g_best) if complement_mode else set()
                     r_best, chrono_r = _greedy_area(
                         resp_matrix_eff,
-                        [station_metadata[i]['clipped_2m'] for i in range(len(station_metadata))],
+                        [station_metadata[i]['clipped_2m'] for i in range(n)],
                         k_responder, locked_r_pins, _excl_resp
                     )
             else:
@@ -5570,48 +5416,10 @@ if st.session_state['csvs_ready']:
             ))
         fig_for_export.update_layout(
             mapbox=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
-            margin=dict(l=0,r=0,t=0,b=0), height=460, showlegend=False,
+            margin=dict(l=0,r=0,t=0,b=0), height=500, showlegend=True,
+            legend=dict(bgcolor=legend_bg, font=dict(color=legend_text, size=11))
         )
-        _export_map_config = {
-            "scrollZoom": False,
-            "displayModeBar": True,
-            "modeBarButtonsToRemove": ["toImage", "sendDataToCloud"],
-            "displaylogo": False,
-        }
-        # Build a standalone legend table from active_drones so it renders
-        # below the map — outside Plotly — avoiding overlap with zoom controls.
-        _legend_rows = "".join([
-            f'''<div style="display:flex;align-items:center;gap:8px;padding:5px 10px;
-                           background:#fff;border:1px solid #e4e6ea;border-radius:6px;
-                           font-size:12px;color:#111;white-space:nowrap;overflow:hidden;
-                           text-overflow:ellipsis;max-width:260px;"
-                 title="{d["name"]}">
-                <span style="display:inline-block;width:12px;height:12px;border-radius:50%;
-                             background:{d["color"]};flex-shrink:0;"></span>
-                <span style="overflow:hidden;text-overflow:ellipsis;">{d["name"][:35]}{"…" if len(d["name"])>35 else ""}</span>
-                <span style="font-size:10px;color:#888;flex-shrink:0;">
-                  {"Resp" if d["type"]=="RESPONDER" else "Guard"}</span>
-            </div>'''
-            for d in active_drones
-        ])
-        _legend_html = (
-            f'''<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;
-                           padding:12px 14px;background:#f7f8fa;border:1px solid #e4e6ea;
-                           border-radius:8px;">
-                <div style="width:100%;font-size:10px;font-weight:700;color:#6b7280;
-                            text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">
-                    Deployed Units</div>'''
-            + _legend_rows +
-            f'''</div>'''
-        )
-        map_html_str = (
-            fig_for_export.to_html(
-                full_html=False, include_plotlyjs="cdn",
-                default_height="460px", default_width="100%",
-                config=_export_map_config,
-            )
-            + _legend_html
-        )
+        map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
         station_rows = "".join(f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>" for d in active_drones)
 
         all_bldgs_rows = ""
@@ -5868,7 +5676,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 .tag-guard{{background:rgba(255,215,0,0.15);color:#8a6a00;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}}
 
 /* ── MAP ─────────────────────────────────────────────────────── */
-.map-wrap{{border-radius:12px;overflow:hidden;border:1px solid var(--border);box-shadow:0 4px 20px rgba(0,0,0,0.06);margin-bottom:16px;max-width:820px}}
+.map-wrap{{border-radius:12px;overflow:hidden;border:1px solid var(--border);box-shadow:0 4px 20px rgba(0,0,0,0.06);margin-bottom:32px}}
 
 /* ── DISCLAIMER ──────────────────────────────────────────────── */
 .disc{{background:#fffbeb;border-left:4px solid var(--amber);padding:16px 20px;border-radius:0 8px 8px 0;font-size:12px;color:#7a5a00;margin-bottom:24px}}
@@ -6085,9 +5893,6 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 <!-- ── 03: COVERAGE MAP ───────────────────────────────────────── -->
 <section class="doc-section" id="map">
   <div class="section-eyebrow"><span class="pg-num">03</span><span class="pg-title">Coverage Map</span></div>
-  <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">
-    Use the <strong>+&nbsp;/&nbsp;−</strong> buttons on the map to zoom in. Hover over any circle for station details.
-  </p>
   <div class="map-wrap">{map_html_str}</div>
 </section>
 

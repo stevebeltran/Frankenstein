@@ -3221,7 +3221,7 @@ if not st.session_state['csvs_ready']:
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-        # ── CITY / STATE — single-box searchable autocomplete ─────────────────
+        # ── CITY / STATE — typed entry with live suggestions ──────────────────
         _state_keys = sorted(STATE_FIPS.keys())
 
         _h_city, _h_state = st.columns([3, 1])
@@ -3250,43 +3250,47 @@ if not st.session_state['csvs_ready']:
                 help="Two-letter state abbreviation (e.g. TX, FL, CA)."
             )
 
-            # Build a single searchable dropdown for the selected state. Users
-            # can either pick a suggested match or type a brand-new city/county
-            # directly into the same control.
+            # Start clean when the previous placeholder/default city belongs to a
+            # different state selection. This prevents Victoria, TX from
+            # reappearing when the user switches to Illinois and types Rockford.
             prev_state = st.session_state.get(f"_city_state_{i}", s_val)
-            if prev_state != s_name:
-                suggestion_seed = []
-                if c_val and c_val.lower() not in {x.lower() for x in get_state_city_suggestions(s_name, st.session_state.get('target_cities', []))}:
-                    c_val = ""
-            else:
-                suggestion_seed = search_city_suggestions(c_val, s_name) if c_val else []
+            city_seed = c_val
+            if prev_state != s_name and c_val and c_val not in get_state_city_suggestions(s_name, st.session_state.get('target_cities', [])):
+                preserved_manual = str(st.session_state.get(f"city_query_{i}", '') or '').strip()
+                city_seed = preserved_manual if preserved_manual and preserved_manual.lower() != c_val.lower() else ''
 
-            suggestions = suggestion_seed or get_state_city_suggestions(s_name, st.session_state.get('target_cities', []))
-            suggestions = [x for x in suggestions if str(x).strip()]
-            deduped = []
-            seen = set()
-            for item in suggestions:
-                key = str(item).strip().lower()
-                if key not in seen:
-                    seen.add(key)
-                    deduped.append(str(item).strip())
-
-            if c_val and c_val.lower() not in seen:
-                deduped = [c_val] + deduped
-            deduped = deduped[:100]
-
-            city_value = col_city.selectbox(
+            typed_city = col_city.text_input(
                 f"city_{i}",
-                options=deduped,
-                index=(deduped.index(c_val) if c_val in deduped else None),
-                placeholder="Type or choose a city/county",
+                value=city_seed,
+                placeholder="e.g. Rockford or Winnebago County",
                 label_visibility="collapsed",
-                key=f"city_pick_{i}",
-                accept_new_options=True,
-                help="Start typing to filter suggestions, or type a brand-new city/county and press Enter."
-            )
+                key=f"city_query_{i}",
+                help="Type a city or county. Matching suggestions will appear below."
+            ).strip()
 
-            final_city = str(city_value or '').strip()
+            suggestions = search_city_suggestions(typed_city, s_name) if typed_city else get_state_city_suggestions(s_name, st.session_state.get('target_cities', []))[:8]
+            final_city = typed_city
+            if suggestions:
+                suggestion_options = ["Keep typed entry"] + suggestions
+                # Use a separate tracking key (prefixed with _) to avoid
+                # DuplicateWidgetID — the widget key and session_state lookup
+                # must not be the same string.
+                _track_key = f"_city_suggestion_prev_{i}"
+                current_choice = st.session_state.get(_track_key, "Keep typed entry")
+                if current_choice not in suggestion_options:
+                    current_choice = "Keep typed entry"
+                picked = col_city.selectbox(
+                    "Suggested matches",
+                    options=suggestion_options,
+                    index=suggestion_options.index(current_choice),
+                    label_visibility="collapsed",
+                    key=f"city_suggestion_{i}",
+                    help="Optional: choose a suggested match, or keep your typed entry."
+                )
+                st.session_state[_track_key] = picked
+                if picked != "Keep typed entry":
+                    final_city = picked
+
             st.session_state[f"_city_state_{i}"] = s_name
             st.session_state['target_cities'][i] = {"city": final_city, "state": s_name}
 
@@ -3640,8 +3644,8 @@ if not st.session_state['csvs_ready']:
             for i in range(10):
                 st.session_state.pop(f"c_{i}", None)
                 st.session_state.pop(f"s_{i}", None)
-                st.session_state.pop(f"city_pick_{i}", None)
-                st.session_state.pop(f"_city_state_{i}", None)
+                st.session_state.pop(f"city_picker_{i}", None)
+                st.session_state.pop(f"city_custom_{i}", None)
             st.session_state['trigger_sim'] = True
             st.session_state['demo_mode_used'] = True
             st.rerun()
@@ -3752,8 +3756,8 @@ if not st.session_state['csvs_ready']:
                     for j in range(10):
                         st.session_state.pop(f"c_{j}", None)
                         st.session_state.pop(f"s_{j}", None)
-                        st.session_state.pop(f"city_pick_{j}", None)
-                        st.session_state.pop(f"_city_state_{j}", None)
+                        st.session_state.pop(f"city_picker_{j}", None)
+                        st.session_state.pop(f"city_custom_{j}", None)
                     st.rerun()
 
         if not all_gdfs:

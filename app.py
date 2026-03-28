@@ -2541,7 +2541,21 @@ def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir):
     full_points = full_points[(full_points.lat.abs() > 1) & (full_points.lon.abs() > 1)]
     scan_points = full_points.sample(50000, random_state=42) if len(full_points) > 50000 else full_points
     points_gdf = gpd.GeoDataFrame(scan_points, geometry=gpd.points_from_xy(scan_points.lon, scan_points.lat), crs="EPSG:4326")
-    total_bounds = points_gdf.total_bounds
+    # Use 2nd-98th percentile bounds instead of raw min/max so a handful of
+    # rural outlier calls don't expand the bbox to match a county shapefile
+    # when the actual jurisdiction is a much smaller city.
+    _lats = scan_points['lat'].dropna()
+    _lons = scan_points['lon'].dropna()
+    if len(_lats) > 20:
+        _pad = 0.02  # ~1.5 miles of extra padding
+        total_bounds = (
+            float(_lons.quantile(0.02)) - _pad,
+            float(_lats.quantile(0.02)) - _pad,
+            float(_lons.quantile(0.98)) + _pad,
+            float(_lats.quantile(0.98)) + _pad,
+        )
+    else:
+        total_bounds = points_gdf.total_bounds
     shp_files = glob.glob(os.path.join(shapefile_dir, "*.shp"))
     relevant_polys = []
     for shp_path in shp_files:
@@ -3723,11 +3737,19 @@ if st.session_state['csvs_ready']:
                 master_gdf = None
 
     if master_gdf is None or master_gdf.empty:
-        # ── Fallback 2: bounding box around call points ──
-        min_lon, min_lat = df_calls['lon'].min(), df_calls['lat'].min()
-        max_lon, max_lat = df_calls['lon'].max(), df_calls['lat'].max()
-        lon_pad = (max_lon - min_lon) * 0.1
-        lat_pad = (max_lat - min_lat) * 0.1
+        # ── Fallback 2: bounding box around call points (percentile-based) ──
+        _fb_lats = pd.to_numeric(df_calls['lat'], errors='coerce').dropna()
+        _fb_lons = pd.to_numeric(df_calls['lon'], errors='coerce').dropna()
+        if len(_fb_lats) > 20:
+            min_lon = float(_fb_lons.quantile(0.02))
+            max_lon = float(_fb_lons.quantile(0.98))
+            min_lat = float(_fb_lats.quantile(0.02))
+            max_lat = float(_fb_lats.quantile(0.98))
+        else:
+            min_lon, min_lat = float(_fb_lons.min()), float(_fb_lats.min())
+            max_lon, max_lat = float(_fb_lons.max()), float(_fb_lats.max())
+        lon_pad = (max_lon - min_lon) * 0.05
+        lat_pad = (max_lat - min_lat) * 0.05
         poly = box(min_lon-lon_pad, min_lat-lat_pad, max_lon+lon_pad, max_lat+lat_pad)
         master_gdf = gpd.GeoDataFrame({'DISPLAY_NAME':['Auto-Generated Boundary'],'data_count':[len(df_calls)]}, geometry=[poly], crs="EPSG:4326")
 
@@ -3765,6 +3787,19 @@ if st.session_state['csvs_ready']:
     active_gdf = master_gdf[master_gdf['DISPLAY_NAME'].isin(selected_names)]
     if selected_names and st.session_state.get('active_city') == "Orlando":
         st.session_state['active_city'] = selected_names[0]
+    # Show what boundary was loaded so the user can spot county-vs-city mismatches
+    if selected_names:
+        _bn = selected_names[0]
+        _is_county = any(w in _bn.lower() for w in ['county', 'parish', 'borough'])
+        _badge = "⚠️ County boundary" if _is_county else "✅ City boundary"
+        _badge_color = "#f59e0b" if _is_county else "#22c55e"
+        st.sidebar.markdown(
+            f'''<div style="font-size:0.65rem; padding:4px 8px; border-radius:4px;
+                          border-left:3px solid {_badge_color}; background:rgba(0,0,0,0.2);
+                          margin-bottom:8px; color:{_badge_color};">
+                {_badge}: <b>{_bn}</b></div>''',
+            unsafe_allow_html=True
+        )
 
     filter_expander = st.sidebar.expander("⚙️ Data Filters", expanded=False)
     with filter_expander:

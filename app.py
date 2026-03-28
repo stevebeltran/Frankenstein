@@ -36,7 +36,6 @@ defaults = {
     'data_source': 'unknown',   # 'cad_upload' | 'simulation' | 'demo' | 'brinc_file'
     'map_build_logged': False,  # prevent duplicate map-build rows per session
     'boundary_kind': 'place',
-    'boundary_lookup_mode': 'Places',
     'boundary_source_path': '',
 }
 for k, v in defaults.items():
@@ -2543,7 +2542,7 @@ def generate_kml(active_gdf, active_drones, calls_gdf):
     return kml.kml()
 
 @st.cache_data
-def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir):
+def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir, preferred_shp=None):
     points_list = []
     if calls_df is not None: points_list.append(calls_df[['lat', 'lon']])
     if stations_df is not None: points_list.append(stations_df[['lat', 'lon']])
@@ -2553,7 +2552,12 @@ def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir):
     scan_points = full_points.sample(50000, random_state=42) if len(full_points) > 50000 else full_points
     points_gdf = gpd.GeoDataFrame(scan_points, geometry=gpd.points_from_xy(scan_points.lon, scan_points.lat), crs="EPSG:4326")
     total_bounds = points_gdf.total_bounds
-    shp_files = glob.glob(os.path.join(shapefile_dir, "*.shp"))
+    # If a specific boundary was already fetched and saved, use ONLY that file.
+    # This prevents a leftover county .shp from overriding the desired city/place shape.
+    if preferred_shp and os.path.exists(preferred_shp):
+        shp_files = [preferred_shp]
+    else:
+        shp_files = glob.glob(os.path.join(shapefile_dir, "*.shp"))
     relevant_polys = []
     for shp_path in shp_files:
         try:
@@ -3079,14 +3083,6 @@ if not st.session_state['csvs_ready']:
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-        st.radio(
-            "Boundary lookup mode",
-            ["Places", "County"],
-            key="boundary_lookup_mode",
-            horizontal=True,
-            help="Force jurisdiction matching to places or counties. Default is Places."
-        )
-
         uploaded_files = st.file_uploader(
             "Drop your CAD export (+ optional stations CSV)",
             accept_multiple_files=True,
@@ -3349,33 +3345,29 @@ if not st.session_state['csvs_ready']:
 
                     with st.spinner(get_jurisdiction_message()):
                         # ── BOUNDARY LOOKUP: fetch & save shapefile NOW so
-                        # find_relevant_jurisdictions() can use it on the map page ──
+                        # find_relevant_jurisdictions() can use it on the map page.
+                        # Auto-detect: try place first, fall back to county automatically.
                         detected_city_for_boundary = st.session_state.get('active_city', '')
                         detected_state_for_boundary = st.session_state.get('active_state', '')
                         if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
                             city_text = str(detected_city_for_boundary or '').strip()
-                            lookup_mode = st.session_state.get('boundary_lookup_mode', 'Places')
-
-                            if lookup_mode == 'County':
-                                b_success, b_gdf = fetch_county_boundary_local(
-                                    detected_state_for_boundary, city_text)
-                                st.session_state['boundary_kind'] = 'county'
-                                if not b_success:
-                                    st.warning(f"County boundary not found for {city_text}, {detected_state_for_boundary}.")
+                            is_county_name = city_text.lower().endswith(" county")
+                            if is_county_name:
+                                b_success, b_gdf = fetch_county_boundary_local(detected_state_for_boundary, city_text)
+                                b_kind = 'county'
                             else:
-                                b_success, b_gdf = fetch_place_boundary_local(
-                                    detected_state_for_boundary, city_text)
-                                st.session_state['boundary_kind'] = 'place'
+                                b_success, b_gdf = fetch_place_boundary_local(detected_state_for_boundary, city_text)
+                                b_kind = 'place'
                                 if not b_success:
-                                    st.warning(f"Place boundary not found for {city_text}, {detected_state_for_boundary}. County fallback was skipped because Boundary lookup mode is set to Places.")
-
+                                    b_success, b_gdf = fetch_county_boundary_local(detected_state_for_boundary, city_text)
+                                    if not b_success:
+                                        b_success, b_gdf = fetch_county_boundary_local(detected_state_for_boundary, city_text + " County")
+                                    b_kind = 'county' if b_success else 'place'
+                            st.session_state['boundary_kind'] = b_kind
+                            if not b_success:
+                                st.warning(f"Boundary not found for {city_text}, {detected_state_for_boundary}.")
                             if b_success and b_gdf is not None:
-                                _saved = save_boundary_gdf(
-                                    b_gdf,
-                                    st.session_state.get('boundary_kind', 'place'),
-                                    city_text,
-                                    detected_state_for_boundary
-                                )
+                                _saved = save_boundary_gdf(b_gdf, b_kind, city_text, detected_state_for_boundary)
                                 st.session_state['boundary_source_path'] = _saved or ''
 
                     st.session_state['data_source'] = 'cad_upload'
@@ -3460,17 +3452,23 @@ if not st.session_state['csvs_ready']:
             prog.progress(10 + int((i / len(active_targets)) * 20),
                           text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
             
-            lookup_mode = st.session_state.get('boundary_lookup_mode', 'Places')
-            if lookup_mode == 'County' or is_county:
+            if is_county:
                 success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
                 if not success:
                     success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
                 if success:
                     boundary_kind = 'county'
             else:
+                # Try place first, auto-fall back to county if not found
                 success, temp_gdf = fetch_place_boundary_local(s_name, c_name)
                 if success:
                     boundary_kind = 'place'
+                else:
+                    success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
+                    if not success:
+                        success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
+                    if success:
+                        boundary_kind = 'county'
             is_county = (boundary_kind == 'county')
             st.session_state['boundary_kind'] = boundary_kind
 
@@ -3691,12 +3689,12 @@ if st.session_state['csvs_ready']:
             pass
 
     with st.spinner(get_jurisdiction_message()):
-        master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR)
+        _preferred_shp = st.session_state.get('boundary_source_path', '') or None
+        master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
 
-    _boundary_mode_note = st.session_state.get('boundary_lookup_mode', 'Places')
     _boundary_kind_note = st.session_state.get('boundary_kind', 'place')
     _boundary_src_note = st.session_state.get('boundary_source_path', '')
-    st.caption(f"Boundary mode: {_boundary_mode_note} | Boundary kind: {_boundary_kind_note} | Source: {_boundary_src_note or 'live lookup / none'}")
+    st.caption(f"Boundary kind: {_boundary_kind_note} | Source: {_boundary_src_note or 'live lookup / none'}")
 
     if master_gdf is None or master_gdf.empty:
         # ── Fallback 1: load any saved shapefile directly (spatial join may have
@@ -3704,8 +3702,7 @@ if st.session_state['csvs_ready']:
         shp_files = glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp"))
         if shp_files:
             try:
-                lookup_mode = st.session_state.get('boundary_lookup_mode', 'Places')
-                preferred_kind = 'county' if lookup_mode == 'County' else 'place'
+                preferred_kind = st.session_state.get('boundary_kind', 'place')
                 active_city = st.session_state.get('active_city', '')
                 active_state = st.session_state.get('active_state', '')
                 best = st.session_state.get('boundary_source_path', '') or None

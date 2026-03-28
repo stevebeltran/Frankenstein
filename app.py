@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from shapely.geometry import Point, Polygon, MultiPolygon, box, shape
 from shapely.ops import unary_union
 import os, itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib, uuid
+import threading, weakref, atexit
 from concurrent.futures import ThreadPoolExecutor
 import pulp
 import urllib.request
@@ -19,7 +20,177 @@ from google.oauth2.service_account import Credentials
 import pyproj
 from PIL import Image
 
-# --- PAGE CONFIG & INITIALIZE SESSION STATE ---
+# ============================================================
+# SESSION-CLOSE LOGGING
+# Fires _notify_email + _log_to_sheets when a session ends
+# (tab close, timeout, or server restart).  Uses a weakref
+# finalizer on the session state object — Streamlit GCs it
+# when the session is torn down.
+# ============================================================
+
+# Global registry: session_id → snapshot dict
+# Populated/updated every run; cleaned up by finalizer.
+_SESSION_REGISTRY: dict[str, dict] = {}
+_REGISTRY_LOCK = threading.Lock()
+
+
+def _flush_session(snapshot: dict) -> None:
+    """Run in a background thread so it never blocks the UI."""
+    try:
+        city     = snapshot.get("active_city", "")
+        state    = snapshot.get("active_state", "")
+        name     = snapshot.get("brinc_user", "")
+        email_to = snapshot.get("brinc_email", "")
+        details  = snapshot.get("export_details", {})
+        coverage = float(details.get("area_covered_pct", 0) or 0)
+        k_resp   = int(details.get("k_resp", 0) or 0)
+        k_guard  = int(details.get("k_guard", 0) or 0)
+
+        # Compute final session duration
+        try:
+            start_str = snapshot.get("session_start", "")
+            if start_str:
+                start_dt = datetime.datetime.strptime(start_str, "%Y-%m-%d %H:%M:%S")
+                details["session_duration_min"] = round(
+                    (datetime.datetime.now() - start_dt).total_seconds() / 60, 1
+                )
+        except Exception:
+            pass
+
+        # Tag this row so you can tell it's a session-close event
+        details["log_trigger"] = "session_close"
+
+        _notify_email(city, state, "SESSION_CLOSE", k_resp, k_guard,
+                      coverage, name, email_to, details=details)
+        _log_to_sheets(city, state, "SESSION_CLOSE", k_resp, k_guard,
+                       coverage, name, email_to, details=details)
+    except Exception:
+        pass
+
+
+def _make_session_finalizer(session_id: str) -> None:
+    """
+    Attach a weakref finalizer to the session state mapping object.
+    When Streamlit destroys the session, the finalizer fires _flush_session
+    in a daemon thread (won't block server shutdown).
+    """
+    try:
+        # st.session_state._state is the underlying dict-like object.
+        # We weakref it; when it's GC'd the callback fires.
+        target = st.session_state._state  # internal attr, stable across versions
+    except AttributeError:
+        # Fallback: weakref the session_state proxy itself
+        target = st.session_state
+
+    def _on_gc(sid):
+        with _REGISTRY_LOCK:
+            snap = _SESSION_REGISTRY.pop(sid, None)
+        if snap:
+            t = threading.Thread(target=_flush_session, args=(snap,), daemon=True)
+            t.start()
+
+    weakref.finalize(target, _on_gc, session_id)
+
+
+def _update_session_snapshot() -> None:
+    """
+    Call once per run (after session state is populated) to keep the
+    registry snapshot current.  The finalizer will use the last snapshot
+    written before the session dies.
+    """
+    sid = st.session_state.get("session_id", "")
+    if not sid:
+        return
+
+    # Build a lean export_details snapshot from current session state
+    # (mirrors the logic in the main export block but without needing
+    #  active_drones / optimizer output — those will be empty if the
+    #  user never deployed, which is fine; we still want the session logged).
+    try:
+        _session_start = st.session_state.get("session_start", "")
+        try:
+            _start_dt = datetime.datetime.strptime(_session_start, "%Y-%m-%d %H:%M:%S")
+            _dur = round((datetime.datetime.now() - _start_dt).total_seconds() / 60, 1)
+        except Exception:
+            _dur = ""
+
+        snap_details = {
+            # Session
+            "session_id":               sid,
+            "session_start":            _session_start,
+            "session_duration_min":     _dur,
+            "data_source":              st.session_state.get("data_source", "unknown"),
+            # Who
+            "pd_chief":                 st.session_state.get("pd_chief_name", ""),
+            "pd_dept":                  st.session_state.get("pd_dept_name", ""),
+            "pd_dept_email":            st.session_state.get("pd_dept_email", ""),
+            "pd_dept_phone":            st.session_state.get("pd_dept_phone", ""),
+            # Where
+            "population":               st.session_state.get("estimated_pop", 0),
+            "total_calls":              st.session_state.get("total_original_calls", 0),
+            "daily_calls":              max(1, int(st.session_state.get("total_original_calls", 0) / 365)),
+            "area_sq_mi":               0,
+            # City / state enrichment
+            "city_confirmed_match":     "",
+            "multi_city_targets":       json.dumps(st.session_state.get("target_cities", [])),
+            "num_cities_targeted":      len(st.session_state.get("target_cities", [])),
+            "calls_per_capita":         round(
+                st.session_state.get("total_original_calls", 0) /
+                max(st.session_state.get("estimated_pop", 1), 1), 4
+            ),
+            # Settings
+            "dfr_rate":                 st.session_state.get("dfr_rate", 0),
+            "deflect_rate":             st.session_state.get("deflect_rate", 0),
+            "r_resp_radius":            st.session_state.get("r_resp", ""),
+            "r_guard_radius":           st.session_state.get("r_guard", ""),
+            "estimated_pop_input":      st.session_state.get("estimated_pop", 0),
+            "boundary_kind":            st.session_state.get("boundary_kind", ""),
+            "boundary_source_path":     st.session_state.get("boundary_source_path", ""),
+            "sim_or_upload":            st.session_state.get("data_source", "unknown"),
+            "onboarding_completed":     st.session_state.get("onboarding_done", False),
+            "demo_mode_used":           st.session_state.get("demo_mode_used", False),
+            "map_viewed":               st.session_state.get("map_build_logged", False),
+            "export_type_sequence":     json.dumps(st.session_state.get("export_event_log", [])),
+            "total_exports_in_session": st.session_state.get("export_count", 0),
+            # Fleet (empty until drones are placed)
+            "fleet_capex":              0,
+            "annual_savings":           0,
+            "break_even":               "",
+            "avg_response_min":         0,
+            "avg_time_saved_min":       0,
+            "area_covered_pct":         0,
+            "k_resp":                   st.session_state.get("k_resp", 0),
+            "k_guard":                  st.session_state.get("k_guard", 0),
+            "opt_strategy":             "",
+            "incremental_build":        False,
+            "allow_redundancy":         False,
+            "active_drones":            [],
+            # File data matrix
+            "file_meta":                st.session_state.get("file_meta", {}),
+        }
+
+        snapshot = {
+            "session_id":    sid,
+            "active_city":   st.session_state.get("active_city", ""),
+            "active_state":  st.session_state.get("active_state", ""),
+            "brinc_user":    st.session_state.get("_prop_name", st.session_state.get("brinc_user", "")),
+            "brinc_email":   st.session_state.get("_prop_email", ""),
+            "session_start": _session_start,
+            "export_details": snap_details,
+        }
+
+        with _REGISTRY_LOCK:
+            _SESSION_REGISTRY[sid] = snapshot
+
+    except Exception:
+        pass
+
+
+# ============================================================
+# END SESSION-CLOSE LOGGING SETUP
+# ============================================================
+
+
 st.set_page_config(page_title="BRINC COS Drone Optimizer", layout="wide", initial_sidebar_state="expanded")
 
 # This MUST run before any st.session_state checks to prevent KeyError
@@ -41,6 +212,13 @@ defaults = {
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+# ── Session-close logging: register finalizer once, update snapshot every run ─
+if '_session_finalizer_registered' not in st.session_state:
+    _make_session_finalizer(st.session_state['session_id'])
+    st.session_state['_session_finalizer_registered'] = True
+
+_update_session_snapshot()
 
 
 if 'target_cities' not in st.session_state:
@@ -182,7 +360,7 @@ def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email
         app_password   = st.secrets.get("GMAIL_APP_PASSWORD", "")
         notify_address = st.secrets.get("NOTIFY_EMAIL", gmail_address)
         if not gmail_address or not app_password: return
-        emoji = {"HTML": "📄", "KML": "🌏", "BRINC": "💾", "MAP_BUILD": "🗺️"}.get(file_type, "📥")
+        emoji = {"HTML": "📄", "KML": "🌏", "BRINC": "💾", "MAP_BUILD": "🗺️", "SESSION_CLOSE": "🔚"}.get(file_type, "📥")
         subject = f"{emoji} BRINC {file_type.replace('_',' ').title()} — {city}, {state}"
         details_html = _build_details_html(details)
         d = details or {}
@@ -5370,6 +5548,9 @@ if st.session_state['csvs_ready']:
     pd_dept_phone = st.session_state.get('pd_dept_phone', '')
     prop_email = f"{user_clean}@brincdrones.com"
     prop_name = " ".join([word.capitalize() for word in user_clean.split('.')])
+    # Persist so session-close snapshot can read them without needing sidebar locals
+    st.session_state['_prop_email'] = prop_email
+    st.session_state['_prop_name']  = prop_name
 
     # Always define these so download buttons work regardless of fleet_capex
     prop_city  = st.session_state.get('active_city', 'City')
@@ -5447,6 +5628,19 @@ if st.session_state['csvs_ready']:
                 "annual_savings":  d.get('annual_savings', 0),
             } for d in active_drones],
         }
+
+        # ── Push the full export_details into the session registry snapshot ──
+        # so the session-close flush has drone/financial data even if the user
+        # never clicks a download button.
+        _sid = st.session_state.get('session_id', '')
+        if _sid:
+            with _REGISTRY_LOCK:
+                if _sid in _SESSION_REGISTRY:
+                    _SESSION_REGISTRY[_sid]['export_details'] = export_details
+                    _SESSION_REGISTRY[_sid]['active_city']    = prop_city
+                    _SESSION_REGISTRY[_sid]['active_state']   = prop_state
+                    _SESSION_REGISTRY[_sid]['brinc_user']     = prop_name
+                    _SESSION_REGISTRY[_sid]['brinc_email']    = prop_email
 
         export_dict = {
             "city": prop_city, "state": prop_state,

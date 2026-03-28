@@ -3178,6 +3178,11 @@ if not st.session_state['csvs_ready']:
             col_zip, col_city, col_state = st.columns([1, 3, 1])
 
             # ── ZIP input — auto-fills city/state when 5 digits entered ──
+            # If a ZIP was successfully looked up on the previous rerun, clear the field now
+            # (must happen before the widget is instantiated — Streamlit forbids setting a
+            # widget's key after it has been created in the same script run)
+            if st.session_state.pop(f"_clear_zip_{i}", False):
+                st.session_state[f"zip_{i}"] = ""
             zip_val = col_zip.text_input(
                 f"zip_{i}", value="", max_chars=5,
                 placeholder="ZIP",
@@ -3194,8 +3199,8 @@ if not st.session_state['csvs_ready']:
                         st.session_state['target_cities'][i] = _entry
                     else:
                         st.session_state['target_cities'].append(_entry)
-                    # Clear the ZIP field value by resetting its key, then rerun
-                    st.session_state[f"zip_{i}"] = ""
+                    # Flag the field to be cleared on the next rerun, then trigger that rerun
+                    st.session_state[f"_clear_zip_{i}"] = True
                     st.rerun()
                     c_val = _z_city
                     s_val = _z_state

@@ -378,7 +378,6 @@ def _detect_datetime_series_for_labels(df):
 def _cbsa_code_for_city(city, state_abbr):
     """Look up Census CBSA code for a city+state using the Census Bureau public API.
     Returns (cbsa_5digit_str, msa_name) or (None, None).
-    No API key required — Census data is open.
     """
     try:
         url = (
@@ -389,7 +388,6 @@ def _cbsa_code_for_city(city, state_abbr):
         req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
         with urllib.request.urlopen(req, timeout=20) as resp:
             rows = json.loads(resp.read().decode())
-        # rows[0] is header; rows[1:] are [name, cbsa_code]
         city_clean = city.strip().lower()
         state_up = state_abbr.strip().upper()
         best_code, best_name, best_score = None, None, 0
@@ -404,23 +402,76 @@ def _cbsa_code_for_city(city, state_abbr):
             if score > best_score:
                 best_score, best_code, best_name = score, code, name
         if best_code and best_score >= 10:
-            return best_code.zfill(6), best_name
+            return best_code.lstrip('0').zfill(5), best_name
     except Exception:
         pass
     return None, None
 
 
+@st.cache_data(ttl=86400*30)
+def _bls_oes_msa_wage(cbsa_5digit, occ_code='33-3051'):
+    """Download BLS OES annual MSA flat file (ZIP) and extract mean hourly wage
+    for a given CBSA and occupation code.
+    BLS publishes: https://www.bls.gov/oes/special.requests/oesm24ma.zip
+    Inside: all_data_M_2024.xlsx  columns include AREA (CBSA), OCC_CODE, H_MEAN
+    Returns (wage_float, year_str) or (None, None).
+    """
+    import io
+    for year in ['2024', '2023', '2022']:
+        try:
+            zip_url = f"https://www.bls.gov/oes/special.requests/oesm{year[2:]}ma.zip"
+            req = urllib.request.Request(zip_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                zip_bytes = resp.read()
+            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+                # Find the all_data_M file (xlsx or csv)
+                candidates = [n for n in zf.namelist()
+                              if 'all_data_M' in n or 'All_Data_M' in n or 'all_data_m' in n]
+                if not candidates:
+                    candidates = [n for n in zf.namelist() if n.endswith('.xlsx') or n.endswith('.csv')]
+                if not candidates:
+                    continue
+                fname = candidates[0]
+                raw = zf.read(fname)
+            if fname.endswith('.xlsx'):
+                df = pd.read_excel(io.BytesIO(raw), dtype=str)
+            else:
+                df = pd.read_csv(io.StringIO(raw.decode('utf-8', errors='ignore')), dtype=str)
+            # Normalize column names
+            df.columns = [c.strip().upper() for c in df.columns]
+            area_col = next((c for c in df.columns if c in ('AREA', 'AREA_CODE')), None)
+            occ_col  = next((c for c in df.columns if c in ('OCC_CODE',)), None)
+            wage_col = next((c for c in df.columns if c in ('H_MEAN',)), None)
+            if not all([area_col, occ_col, wage_col]):
+                continue
+            # Match CBSA — BLS stores it as integer string e.g. "31140" or "31140.0"
+            cbsa_int = str(int(cbsa_5digit))
+            mask = (
+                df[area_col].str.strip().str.lstrip('0').str.split('.').str[0] == cbsa_int
+            ) & (
+                df[occ_col].str.strip() == occ_code
+            )
+            match = df[mask]
+            if match.empty:
+                continue
+            wage_str = match.iloc[0][wage_col]
+            if str(wage_str).strip() in ('*', '#', '', 'nan'):
+                continue
+            wage = float(str(wage_str).replace(',', ''))
+            if 15 <= wage <= 150:
+                return wage, year
+        except Exception:
+            continue
+    return None, None
+
+
 @st.cache_data
 def fetch_area_police_hourly_wage(city, state_abbr, api_key=None):
-    """Mean hourly wage for SOC 33-3051 (police patrol officers) from BLS OEWS.
+    """Mean hourly wage for SOC 33-3051 (police patrol officers) from BLS OES MSA data.
 
     Strategy:
-      1. Census API -> CBSA code -> BLS OEWS timeseries API (MSA-level, most accurate)
+      1. Census API -> CBSA code -> BLS OES MSA annual ZIP file (most accurate, MSA-level)
       2. Hardcoded $37/hr fallback
-
-    BLS OEWS series format (24 chars):
-      OE(2) + U(1) + M(1) + area_6(6) + 000000(6) + 333051(6) + 03(2)
-      e.g. Madison WI: OEUM03154000000033305103
 
     Stores diagnostic info in st.session_state['_bls_debug'].
     Returns (hourly_wage: float, source_label: str).
@@ -429,79 +480,33 @@ def fetch_area_police_hourly_wage(city, state_abbr, api_key=None):
         'city': city,
         'state': state_abbr,
         'api_key_set': bool(api_key),
-        'api_key_len': len(api_key or ''),
     }
 
-    if api_key:
-        try:
-            # Step 1: get CBSA code from Census
-            cbsa_code, msa_name = _cbsa_code_for_city(city, state_abbr)
-            bls_debug['cbsa_code'] = cbsa_code
-            bls_debug['msa_name'] = msa_name
+    try:
+        # Step 1: CBSA code from Census
+        cbsa_code, msa_name = _cbsa_code_for_city(city, state_abbr)
+        bls_debug['cbsa_code'] = cbsa_code
+        bls_debug['msa_name'] = msa_name
 
-            if cbsa_code:
-                # Step 2: build correct 24-char BLS OEWS series ID
-                # Format: OE(2)+U(1)+area(7)+industry(6)+occ(6)+datatype(2)
-                # Metro area code = M + 5-digit CBSA + trailing 0  e.g. Madison 31540 -> M315400
-                cbsa_5 = str(cbsa_code).lstrip('0').zfill(5)[:5]
-                area_7 = f"M{cbsa_5}0"
-                series_id = f"OEU{area_7}00000033305103"
-                bls_debug['series_id'] = series_id
-                bls_debug['series_len'] = len(series_id)
-
-                # Step 3: call BLS timeseries API
-                payload = json.dumps({
-                    "seriesid": [series_id],
-                    "registrationkey": api_key,
-                    "catalog": False,
-                    "calculations": False,
-                    "annualaverage": False,
-                }).encode()
-                req = urllib.request.Request(
-                    "https://api.bls.gov/publicAPI/v2/timeseries/data/",
-                    data=payload,
-                    headers={
-                        'Content-Type': 'application/json',
-                        'User-Agent': 'BRINC_COS_Optimizer/1.0',
-                    },
-                    method='POST',
-                )
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    result = json.loads(resp.read().decode())
-
-                bls_debug['bls_status'] = result.get('status')
-                bls_debug['bls_message'] = result.get('message', [])
-                series_list = result.get('Results', {}).get('series', [])
-                bls_debug['series_returned'] = len(series_list)
-
-                if series_list:
-                    data_pts = series_list[0].get('data', [])
-                    bls_debug['data_points'] = len(data_pts)
-                    bls_debug['data_sample'] = data_pts[:3]
-                    for pt in data_pts:
-                        val_str = str(pt.get('value', '-')).replace(',', '')
-                        if val_str in ('-', ''):
-                            continue
-                        try:
-                            val = float(val_str)
-                        except ValueError:
-                            continue
-                        if 15 <= val <= 150:
-                            bls_debug['result'] = f'BLS API success: ${val:.2f}/hr — {msa_name}'
-                            try:
-                                st.session_state['_bls_debug'] = bls_debug
-                            except Exception:
-                                pass
-                            return val, f"BLS OEWS API — {msa_name}"
-                    bls_debug['fail_reason'] = f'no data points in $15–$150 range; got {len(data_pts)} points'
-                else:
-                    bls_debug['fail_reason'] = 'BLS returned no series data'
+        if cbsa_code:
+            # Step 2: BLS OES MSA flat file
+            wage, year = _bls_oes_msa_wage(cbsa_code)
+            bls_debug['oes_wage'] = wage
+            bls_debug['oes_year'] = year
+            if wage:
+                bls_debug['result'] = f'BLS OES {year} MSA: ${wage:.2f}/hr — {msa_name}'
+                try:
+                    st.session_state['_bls_debug'] = bls_debug
+                except Exception:
+                    pass
+                return wage, f'BLS OES {year} — {msa_name}'
             else:
-                bls_debug['fail_reason'] = f'Census CBSA lookup found no MSA for {city}, {state_abbr}'
-        except Exception as ex:
-            bls_debug['exception'] = str(ex)
+                bls_debug['fail_reason'] = f'No OES MSA wage found for CBSA {cbsa_code}'
+        else:
+            bls_debug['fail_reason'] = f'Census CBSA lookup found no MSA for {city}, {state_abbr}'
+    except Exception as ex:
+        bls_debug['exception'] = str(ex)
 
-    # Fallback
     bls_debug['result'] = 'fallback $37/hr'
     try:
         st.session_state['_bls_debug'] = bls_debug

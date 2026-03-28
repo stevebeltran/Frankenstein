@@ -50,22 +50,7 @@ for k, v in defaults.items():
 
 
 if 'target_cities' not in st.session_state:
-    st.session_state['target_cities'] = [{"city": "", "state": "TX"}]
-
-# Fresh sessions should start blank in the simulator instead of inheriting the
-# demo default city (Victoria, TX). Otherwise the city picker can appear to
-# revert to Victoria before the user makes a real selection.
-if (
-    st.session_state.get('data_source', 'unknown') == 'unknown'
-    and not st.session_state.get('csvs_ready', False)
-    and st.session_state.get('city_count', 1) == 1
-    and isinstance(st.session_state.get('target_cities'), list)
-    and len(st.session_state['target_cities']) == 1
-):
-    _seed_city = str(st.session_state['target_cities'][0].get('city', '') or '').strip()
-    _seed_state = str(st.session_state['target_cities'][0].get('state', '') or '').strip().upper()
-    if _seed_city == 'Victoria' and _seed_state == 'TX':
-        st.session_state['target_cities'] = [{"city": "", "state": "TX"}]
+    st.session_state['target_cities'] = [{"city": "", "state": st.session_state.get('active_state', 'TX')}]
 
 
 GUARDIAN_FLIGHT_HOURS_PER_DAY = 23.5
@@ -1996,73 +1981,25 @@ def forward_geocode(address_str):
     return None, None
 
 @st.cache_data(show_spinner=False)
-def get_state_city_suggestions(state_abbr, existing_targets=None):
-    """Return sorted searchable city suggestions for a state.
-
-    Suggestions are seeded from the app's built-in demo/fast-demo catalog and
-    any cities the user has already entered in this session. Counties are left
-    to manual entry via the paired text box.
+def lookup_zip_code(zip_code: str):
     """
-    suggestions = set()
-    state_abbr = str(state_abbr or '').strip().upper()
-
-    for city, st_abbr in DEMO_CITIES + FAST_DEMO_CITIES:
-        if st_abbr == state_abbr:
-            suggestions.add(city)
-
-    for item in existing_targets or []:
-        if str(item.get('state', '')).strip().upper() == state_abbr:
-            city_name = str(item.get('city', '')).strip()
-            if city_name and not city_name.lower().endswith(' county'):
-                suggestions.add(city_name)
-
-    return sorted(suggestions, key=lambda s: s.lower())
-
-@st.cache_data(show_spinner=False)
-def search_city_suggestions(query_text, state_abbr):
-    """Best-effort live city/county suggestions for a state.
-
-    Combines the built-in demo catalog with Nominatim place search so users can
-    type arbitrary cities such as Rockford and immediately get a sensible
-    suggestion without falling back to stale defaults.
+    Look up a US ZIP code and return (city, state_abbr, county) using the free
+    Zippopotam.us API.  Returns (None, None, None) on failure.
     """
-    query_text = str(query_text or '').strip()
-    state_abbr = str(state_abbr or '').strip().upper()
-    suggestions = []
-    seen = set()
-
-    def _add(name):
-        cleaned = str(name or '').strip()
-        if not cleaned:
-            return
-        key = cleaned.lower()
-        if key not in seen:
-            seen.add(key)
-            suggestions.append(cleaned)
-
-    for city in get_state_city_suggestions(state_abbr, []):
-        if not query_text or city.lower().startswith(query_text.lower()):
-            _add(city)
-
-    if query_text:
-        try:
-            q = f"{query_text}, {state_abbr}, USA" if state_abbr else f"{query_text}, USA"
-            url = f"https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=us&limit=8&q={urllib.parse.quote(q)}"
-            req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
-            with urllib.request.urlopen(req, timeout=5) as response:
-                data = json.loads(response.read().decode('utf-8'))
-            for item in data:
-                display_name = str(item.get('display_name', '') or '')
-                parts = [p.strip() for p in display_name.split(',') if p.strip()]
-                if not parts:
-                    continue
-                candidate = parts[0]
-                if candidate:
-                    _add(candidate)
-        except Exception:
-            pass
-
-    return suggestions[:8]
+    zip_code = zip_code.strip()
+    if not re.match(r'^\d{5}$', zip_code):
+        return None, None, None
+    try:
+        url = f"https://api.zippopotam.us/us/{zip_code}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        place = data['places'][0]
+        city  = place['place name']
+        state = place['state abbreviation']
+        return city, state, place.get('state', '')
+    except Exception:
+        return None, None, None
 
 @st.cache_data
 def normalize_jurisdiction_name(name):
@@ -3221,45 +3158,45 @@ if not st.session_state['csvs_ready']:
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-        # ── CITY / STATE — simplified and stable ─────────────────────────────
-        _state_keys = sorted(STATE_FIPS.keys())
+        # ── CITY / STATE — simplified single-row inputs ─────────────────────
+        _state_keys = list(STATE_FIPS.keys())
 
+        # Column headers
         _h_city, _h_state = st.columns([3, 1])
         _h_city.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>City or County</div>", unsafe_allow_html=True)
         _h_state.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>State</div>", unsafe_allow_html=True)
 
         while len(st.session_state['target_cities']) < st.session_state.city_count:
-            st.session_state['target_cities'].append({"city": "", "state": "TX"})
+            st.session_state['target_cities'].append({"city": "", "state": st.session_state.get('active_state', 'TX')})
 
         for i in range(st.session_state.city_count):
-            current_entry = st.session_state['target_cities'][i] if i < len(st.session_state['target_cities']) else {"city": "", "state": "TX"}
-            c_val = str(current_entry.get('city', '') or '').strip()
-            s_val = str(current_entry.get('state', 'TX') or 'TX').strip().upper()
-            if s_val not in STATE_FIPS:
-                s_val = 'TX'
+            c_val = st.session_state['target_cities'][i]['city'] if i < len(st.session_state['target_cities']) else ""
+            s_val = st.session_state['target_cities'][i]['state'] if i < len(st.session_state['target_cities']) else "TX"
 
             col_city, col_state = st.columns([3, 1])
 
-            city_value = col_city.text_input(
-                f"city_{i}",
-                value=c_val,
+            c_name = col_city.text_input(
+                f"city_or_county_{i}", value=c_val,
+                placeholder="e.g. Rockford or Winnebago County",
                 label_visibility="collapsed",
-                key=f"city_input_{i}",
-                placeholder="Enter a city or county"
+                key=f"c_{i}",
+                help="Official municipality or county name."
             )
 
-            s_index = _state_keys.index(s_val) if s_val in _state_keys else _state_keys.index('TX')
+            default_state_idx = _state_keys.index(s_val) if s_val in _state_keys else _state_keys.index("TX")
             s_name = col_state.selectbox(
                 f"state_{i}",
                 options=_state_keys,
-                index=s_index,
+                index=default_state_idx,
                 label_visibility="collapsed",
                 key=f"s_{i}",
-                help="Two-letter state abbreviation (e.g. TX, FL, CA)."
+                help="Two-letter state abbreviation."
             )
 
-            final_city = str(city_value or '').strip()
-            st.session_state['target_cities'][i] = {"city": final_city, "state": s_name}
+            if i < len(st.session_state['target_cities']):
+                st.session_state['target_cities'][i] = {"city": c_name, "state": s_name}
+            else:
+                st.session_state['target_cities'].append({"city": c_name, "state": s_name})
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
         st.file_uploader(
@@ -3268,6 +3205,22 @@ if not st.session_state['csvs_ready']:
             key="sim_station_uploader",
             help="Include 'lat'/'lon' OR 'address' columns. Max ~20 locations for auto-geocoding."
         )
+
+        station_template_path = "stations.csv"
+        if os.path.exists(station_template_path):
+            try:
+                with open(station_template_path, "rb") as f:
+                    st.download_button(
+                        label="⬇️ Download sample stations.csv",
+                        data=f.read(),
+                        file_name="stations.csv",
+                        mime="text/csv; charset=utf-8",
+                        key="download_station_template_btn",
+                    )
+            except Exception:
+                pass
+
+        st.caption("Upload your own stations file if you have one, or download the sample template. If no file is uploaded, stations will be auto-generated from call data.")
 
         col_add, col_run = st.columns([1, 1])
         if st.session_state.city_count < 10:
@@ -3611,8 +3564,6 @@ if not st.session_state['csvs_ready']:
             for i in range(10):
                 st.session_state.pop(f"c_{i}", None)
                 st.session_state.pop(f"s_{i}", None)
-                st.session_state.pop(f"city_pick_{i}", None)
-                st.session_state.pop(f"_city_state_{i}", None)
             st.session_state['trigger_sim'] = True
             st.session_state['demo_mode_used'] = True
             st.rerun()
@@ -3723,8 +3674,6 @@ if not st.session_state['csvs_ready']:
                     for j in range(10):
                         st.session_state.pop(f"c_{j}", None)
                         st.session_state.pop(f"s_{j}", None)
-                        st.session_state.pop(f"city_pick_{j}", None)
-                        st.session_state.pop(f"_city_state_{j}", None)
                     st.rerun()
 
         if not all_gdfs:

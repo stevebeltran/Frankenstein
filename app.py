@@ -441,8 +441,11 @@ def fetch_area_police_hourly_wage(city, state_abbr, api_key=None):
 
             if cbsa_code:
                 # Step 2: build correct 24-char BLS OEWS series ID
-                area_6 = cbsa_code.zfill(6)[:6]
-                series_id = f"OEUM{area_6}00000033305103"
+                # Format: OE(2)+U(1)+area(7)+industry(6)+occ(6)+datatype(2)
+                # Metro area code = M + 5-digit CBSA + trailing 0  e.g. Madison 31540 -> M315400
+                cbsa_5 = str(cbsa_code).lstrip('0').zfill(5)[:5]
+                area_7 = f"M{cbsa_5}0"
+                series_id = f"OEU{area_7}00000033305103"
                 bls_debug['series_id'] = series_id
                 bls_debug['series_len'] = len(series_id)
 

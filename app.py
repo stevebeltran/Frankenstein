@@ -2736,30 +2736,31 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         # ── DEFICIT FOOTER (compact strip at card bottom) ─────────────────────────────
         _deficit_banner = ""  # nothing at top of card
         if d_has_deficit:
+            _same_capex_fmt = f"${d_extra_same_capex:,}"
+            _alt_capex_fmt  = f"${d_extra_alt_capex:,}"
             _deficit_footer = (
-                f'  <div style="border-top:1px solid rgba(220,53,69,0.35); margin-top:4px; padding-top:5px;">\n'
-                f'    <div style="font-size:0.62rem; font-weight:800; color:#dc3545; margin-bottom:3px;">⚠️ CAPACITY DEFICIT · {d_on_scene:.1f} min on-scene (min 10)</div>\n'
-                f'    <div style="font-size:0.59rem; color:{text_muted}; margin-bottom:4px;">{d_unserv_day:.0f} calls/day unserviceable · {d_unserv_yr:,.0f}/yr</div>\n'
-                f'    <div style="display:grid; grid-template-columns:1fr 1fr; gap:3px;">\n'
-                f'      <div style="background:rgba(220,53,69,0.08); border:1px solid rgba(220,53,69,0.2); border-radius:4px; padding:3px 6px; font-size:0.59rem;">\n'
-                f'        <div style="color:{text_muted};">+{d_extra_same} {d_same_lbl}</div>\n'
-                f'        <div style="font-weight:700; color:#F0B429;">${{d_extra_same_capex:,}}</div>\n'
-                f'      </div>\n'
-                f'      <div style="background:rgba(220,53,69,0.08); border:1px solid rgba(220,53,69,0.2); border-radius:4px; padding:3px 6px; font-size:0.59rem;">\n'
-                f'        <div style="color:{text_muted};">+{d_extra_alt} {d_alt_lbl}</div>\n'
-                f'        <div style="font-weight:700; color:#F0B429;">${{d_extra_alt_capex:,}}</div>\n'
-                f'      </div>\n'
-                f'    </div>\n'
-                f'  </div>\n'
+                f'  <div style="border-top:1px solid rgba(220,53,69,0.35); margin-top:4px; padding-top:5px;">'
+                f'  <div style="font-size:0.62rem; font-weight:800; color:#dc3545; margin-bottom:3px;">⚠️ CAPACITY DEFICIT · {d_on_scene:.1f} min on-scene (min 10)</div>'
+                f'  <div style="font-size:0.59rem; color:{text_muted}; margin-bottom:4px;">{d_unserv_day:.0f} calls/day unserviceable · {d_unserv_yr:,.0f}/yr</div>'
+                f'  <div style="display:grid; grid-template-columns:1fr 1fr; gap:3px;">'
+                f'    <div style="background:rgba(220,53,69,0.08); border:1px solid rgba(220,53,69,0.2); border-radius:4px; padding:3px 6px; font-size:0.59rem;">'
+                f'      <div style="color:{text_muted};">+{d_extra_same} {d_same_lbl}</div>'
+                f'      <div style="font-weight:700; color:#F0B429;">{_same_capex_fmt}</div>'
+                f'    </div>'
+                f'    <div style="background:rgba(220,53,69,0.08); border:1px solid rgba(220,53,69,0.2); border-radius:4px; padding:3px 6px; font-size:0.59rem;">'
+                f'      <div style="color:{text_muted};">+{d_extra_alt} {d_alt_lbl}</div>'
+                f'      <div style="font-weight:700; color:#F0B429;">{_alt_capex_fmt}</div>'
+                f'    </div>'
+                f'  </div>'
+                f'  </div>'
             )
         else:
             _deficit_footer = (
-                f'  <div style="border-top:1px solid rgba(34,197,94,0.2); margin-top:4px; padding-top:4px; display:flex; align-items:center; gap:5px;">\n'
-                f'    <span style="font-size:0.60rem; color:#2ecc71; font-weight:700;">✓ WITHIN CAPACITY</span>\n'
-                f'    <span style="font-size:0.60rem; color:{scene_color}; font-weight:600;">· {d_on_scene:.1f} min on-scene</span>\n'
-                f'  </div>\n'
+                f'  <div style="border-top:1px solid rgba(34,197,94,0.2); margin-top:4px; padding-top:4px; display:flex; align-items:center; gap:5px;">'
+                f'    <span style="font-size:0.60rem; color:#2ecc71; font-weight:700;">✓ WITHIN CAPACITY</span>'
+                f'    <span style="font-size:0.60rem; color:{scene_color}; font-weight:600;">· {d_on_scene:.1f} min on-scene</span>'
+                f'  </div>'
             )
-
         cards_html.append(f'''
 <div class="unit-card" style="background:{card_bg}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-top:3px solid {d_color}; border-radius:8px; padding:12px; display:flex; flex-direction:column; box-sizing:border-box; min-height:440px; height:100%;">
   <!-- Header: name + type badge -->

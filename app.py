@@ -2733,29 +2733,32 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             _excl_str = "exclusive zone coverage"
             _conc_str = ""
 
-        # ── DEFICIT BANNER HTML ────────────────────────────────────────────────
+        # ── DEFICIT FOOTER (compact strip at card bottom) ─────────────────────────────
+        _deficit_banner = ""  # nothing at top of card
         if d_has_deficit:
-            _deficit_banner = f'''
-  <div style="background:rgba(220,53,69,0.12); border:1.5px solid #dc3545; border-radius:6px; padding:8px 10px; margin-bottom:6px;">
-    <div style="font-size:0.72rem; font-weight:800; color:#dc3545; letter-spacing:0.5px; margin-bottom:4px;">⚠️ CAPACITY DEFICIT</div>
-    <div style="font-size:0.65rem; color:{text_muted}; margin-bottom:5px; line-height:1.5;">
-      <span style="color:#dc3545; font-weight:700;">{d_on_scene:.1f} min on-scene</span> available · minimum 10 min required<br>
-      <span style="font-weight:700; color:#ff6b6b;">{d_deficit_f:.1f} flights/day</span> unserviceable · <span style="font-weight:700; color:#ff6b6b;">{d_unserv_day:.0f} calls/day</span> not covered <span style="color:#888;">({d_unserv_yr:,.0f}/yr)</span>
-    </div>
-    <div style="font-size:0.63rem; color:{text_muted}; border-top:1px dashed rgba(220,53,69,0.3); padding-top:4px; line-height:1.6;">
-      <div style="font-weight:700; color:#aaa; margin-bottom:2px; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.5px;">To resolve deficit:</div>
-      <div>+{d_extra_same} <span style="font-weight:700; color:#fff;">{d_same_lbl}</span> station{"s" if d_extra_same != 1 else ""} &nbsp;<span style="color:#F0B429; font-weight:700;">${d_extra_same_capex:,}</span> add'l CapEx</div>
-      <div>+{d_extra_alt} <span style="font-weight:700; color:#fff;">{d_alt_lbl}</span> station{"s" if d_extra_alt != 1 else ""} &nbsp;<span style="color:#F0B429; font-weight:700;">${d_extra_alt_capex:,}</span> add'l CapEx</div>
-    </div>
-  </div>'''
+            _deficit_footer = (
+                f'  <div style="border-top:1px solid rgba(220,53,69,0.35); margin-top:4px; padding-top:5px;">\n'
+                f'    <div style="font-size:0.62rem; font-weight:800; color:#dc3545; margin-bottom:3px;">⚠️ CAPACITY DEFICIT · {d_on_scene:.1f} min on-scene (min 10)</div>\n'
+                f'    <div style="font-size:0.59rem; color:{text_muted}; margin-bottom:4px;">{d_unserv_day:.0f} calls/day unserviceable · {d_unserv_yr:,.0f}/yr</div>\n'
+                f'    <div style="display:grid; grid-template-columns:1fr 1fr; gap:3px;">\n'
+                f'      <div style="background:rgba(220,53,69,0.08); border:1px solid rgba(220,53,69,0.2); border-radius:4px; padding:3px 6px; font-size:0.59rem;">\n'
+                f'        <div style="color:{text_muted};">+{d_extra_same} {d_same_lbl}</div>\n'
+                f'        <div style="font-weight:700; color:#F0B429;">${{d_extra_same_capex:,}}</div>\n'
+                f'      </div>\n'
+                f'      <div style="background:rgba(220,53,69,0.08); border:1px solid rgba(220,53,69,0.2); border-radius:4px; padding:3px 6px; font-size:0.59rem;">\n'
+                f'        <div style="color:{text_muted};">+{d_extra_alt} {d_alt_lbl}</div>\n'
+                f'        <div style="font-weight:700; color:#F0B429;">${{d_extra_alt_capex:,}}</div>\n'
+                f'      </div>\n'
+                f'    </div>\n'
+                f'  </div>\n'
+            )
         else:
-            _deficit_banner = f'''
-  <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px; padding:5px 8px; background:rgba(34,197,94,0.06); border:1px solid rgba(34,197,94,0.2); border-radius:5px;">
-    <span style="font-size:0.65rem; color:#2ecc71; font-weight:700;">✓ WITHIN CAPACITY</span>
-    <span style="font-size:0.63rem; color:{text_muted};">·</span>
-    <span style="font-size:0.65rem; color:{scene_color}; font-weight:700;">{d_on_scene:.1f} min on-scene</span>
-    <span style="font-size:0.63rem; color:{text_muted};">per flight</span>
-  </div>'''
+            _deficit_footer = (
+                f'  <div style="border-top:1px solid rgba(34,197,94,0.2); margin-top:4px; padding-top:4px; display:flex; align-items:center; gap:5px;">\n'
+                f'    <span style="font-size:0.60rem; color:#2ecc71; font-weight:700;">✓ WITHIN CAPACITY</span>\n'
+                f'    <span style="font-size:0.60rem; color:{scene_color}; font-weight:600;">· {d_on_scene:.1f} min on-scene</span>\n'
+                f'  </div>\n'
+            )
 
         cards_html.append(f'''
 <div class="unit-card" style="background:{card_bg}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-top:3px solid {d_color}; border-radius:8px; padding:12px; display:flex; flex-direction:column; box-sizing:border-box; min-height:440px; height:100%;">
@@ -2767,10 +2770,6 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
       <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
     </div>
   </div>
-
-  <!-- Deficit / Capacity status banner -->
-  {_deficit_banner}
-
   <!-- Annual capacity value box -->
   <div style="background:rgba(0,210,255,0.07); border:1px solid rgba(0,210,255,0.15); border-radius:6px; padding:8px 10px; margin-bottom:6px;"
        title="Annual Capacity Value is based on calls handled without sending a squad.">
@@ -2876,6 +2875,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     <div style="text-align:right; font-weight:800; color:{accent_color};">{d_be}</div>
   </div>
 
+  {_deficit_footer}
   <!-- Pin buttons — rendered via session_state keys set by JS postMessage -->
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
     {"'''<div style=\'background:rgba(255,215,0,0.15); border:1px solid rgba(255,215,0,0.4); border-radius:4px; padding:4px 6px; font-size:0.65rem; font-weight:700; color:#FFD700; text-align:center; cursor:pointer;\'>&nbsp;🔒 GUARDIAN LOCKED</div>'''" if d.get("pinned") and d_type=="GUARDIAN" else "'''<div style=\'border:1px dashed rgba(255,215,0,0.25); border-radius:4px; padding:4px 6px; font-size:0.65rem; color:rgba(255,215,0,0.5); text-align:center;\'><span style=\'opacity:0.6\'>🦅 lock as guard</span></div>'''" }

@@ -4574,10 +4574,10 @@ def generate_community_impact_dashboard_html(
     </div>
     <div class="rt-bar-wrap">
       <div class="rt-bar-outer">
-        <div class="rt-bar-fill" style="height:100%;background:linear-gradient(180deg,#94a3b8,#cbd5e1);"></div>
+        <div class="rt-bar-fill" style="height:100%;background:linear-gradient(180deg,#f59e0b,#d97706);"></div>
       </div>
       <div class="rt-bar-label">🚔 Ground Unit (est.)</div>
-      <div class="rt-bar-value" style="color:var(--ink-mid);">{ground_min:.1f} min</div>
+      <div class="rt-bar-value" style="color:#f59e0b;">{ground_min:.1f} min</div>
     </div>
     <div class="rt-bar-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:28px;">
       <div style="font-family:'DM Mono',monospace;font-size:32px;font-weight:500;color:var(--accent-green);">−{saved_min:.1f}m</div>

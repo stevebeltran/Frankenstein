@@ -363,20 +363,19 @@ CONFIG = {
     "K9_DEFAULT_APPLICABLE_RATE": 0.03,
     "K9_SAVINGS_PER_CALL": 155,
     "DEFAULT_TRAFFIC_SPEED": 35.0, "RESPONDER_SPEED": 42.0, "GUARDIAN_SPEED": 60.0,
-    # Card/service-time model: available airtime per hour × 24 hr day.
-    # Responder: 30 min/hr  ->  720 min/day
-    # Guardian:  58 min/hr  -> 1392 min/day
-    "GUARDIAN_FLIGHT_MIN":  60,   # max single flight minutes shown on card
-    "GUARDIAN_CHARGE_MIN":   3,   # legacy / informational only
-    "GUARDIAN_MIN_PER_HOUR": 58.0,
-    "RESPONDER_FLIGHT_MIN":   30,   # max single flight minutes shown on card
-    "RESPONDER_MIN_PER_HOUR": 30.0,
+    # Guardian duty cycle: 60 min flight + 3 min charge = 63 min cycle
+    # Daily airtime = (24*60) / 63 * 60 = 1371.4 min = 22.86 hrs
+    "GUARDIAN_FLIGHT_MIN":  60,   # flight minutes per cycle
+    "GUARDIAN_CHARGE_MIN":   3,   # charge minutes per cycle
+    # Responder duty cycle: 30-min max flight per sortie, 11.6hr shift
+    "RESPONDER_FLIGHT_MIN":   30,    # max flight minutes per sortie
+    "RESPONDER_PATROL_HOURS": 11.6,
 }
-# Derived: daily airtime budgets used by the station cards
-CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] = CONFIG["GUARDIAN_MIN_PER_HOUR"] * 24.0
-CONFIG["GUARDIAN_PATROL_HOURS"] = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] / 60.0
-CONFIG["RESPONDER_DAILY_FLIGHT_MIN"] = CONFIG["RESPONDER_MIN_PER_HOUR"] * 24.0
-CONFIG["RESPONDER_PATROL_HOURS"] = CONFIG["RESPONDER_DAILY_FLIGHT_MIN"] / 60.0
+# Derived: compute Guardian daily airtime from duty cycle
+CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] = (
+    (24 * 60) / (CONFIG["GUARDIAN_FLIGHT_MIN"] + CONFIG["GUARDIAN_CHARGE_MIN"])
+) * CONFIG["GUARDIAN_FLIGHT_MIN"]
+CONFIG["GUARDIAN_PATROL_HOURS"] = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] / 60
 STATE_FIPS = {"AL": "01", "AK": "02", "AZ": "04", "AR": "05", "CA": "06", "CO": "08", "CT": "09", "DE": "10", "FL": "12", "GA": "13", "HI": "15", "ID": "16", "IL": "17", "IN": "18", "IA": "19", "KS": "20", "KY": "21", "LA": "22", "ME": "23", "MD": "24", "MA": "25", "MI": "26", "MN": "27", "MS": "28", "MO": "29", "MT": "30", "NE": "31", "NV": "32", "NH": "33", "NJ": "34", "NM": "35", "NY": "36", "NC": "37", "ND": "38", "OH": "39", "OK": "40", "OR": "41", "PA": "42", "RI": "44", "SC": "45", "SD": "46", "TN": "47", "TX": "48", "UT": "49", "VT": "50", "VA": "51", "WA": "53", "WV": "54", "WI": "55", "WY": "56"}
 US_STATES_ABBR = {"Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA", "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL", "Indiana": "IN", "Iowa": "IA", "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA", "Maine": "ME", "Maryland": "MD", "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN", "Mississippi": "MS", "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV", "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK", "Oregon": "OR", "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD", "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT", "Virginia": "VA", "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY"}
 KNOWN_POPULATIONS = {"Victoria": 65534, "New York": 8336817, "Los Angeles": 3822238, "Chicago": 2665039, "Houston": 1304379, "Phoenix": 1644409, "Philadelphia": 1567258, "San Antonio": 2302878, "San Diego": 1472530, "Dallas": 1299544, "San Jose": 1381162, "Austin": 974447, "Jacksonville": 971319, "Fort Worth": 956709, "Columbus": 907971, "Indianapolis": 880621, "Charlotte": 897720, "San Francisco": 971233, "Seattle": 749256, "Denver": 713252, "Washington": 678972, "Nashville": 683622, "Oklahoma City": 694800, "El Paso": 694553, "Boston": 650706, "Portland": 635067, "Las Vegas": 656274, "Detroit": 620376, "Memphis": 633104, "Louisville": 628594, "Baltimore": 620961, "Milwaukee": 620251, "Albuquerque": 677122, "Tucson": 564559, "Fresno": 677102, "Sacramento": 808418, "Kansas City": 697738, "Mesa": 504258, "Atlanta": 499127, "Omaha": 508901, "Colorado Springs": 483956, "Raleigh": 476587, "Miami": 449514, "Virginia Beach": 455369, "Oakland": 530763, "Minneapolis": 563332, "Tulsa": 547239, "Arlington": 398654, "New Orleans": 562503, "Wichita": 402263, "Cleveland": 900000, "Tampa": 449514, "Orlando": 316081}
@@ -2608,13 +2607,13 @@ def format_3_lines(name_str):
 def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2):
     if not active_drones:
         return ""
-    # Per-type daily airtime budgets based on user rule:
-    #   Responder: 30 minutes per hour x 24 = 720 min/day
-    #   Guardian:  58 minutes per hour x 24 = 1392 min/day
-    _GUARDIAN_DAILY_MINS  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]
-    _GUARDIAN_DAILY_HOURS = CONFIG["GUARDIAN_PATROL_HOURS"]
-    _RESPONDER_DAILY_MINS  = CONFIG["RESPONDER_DAILY_FLIGHT_MIN"]
-    _RESPONDER_DAILY_HOURS = CONFIG["RESPONDER_PATROL_HOURS"]
+    # Per-type daily airtime budgets derived from CONFIG duty cycles:
+    #   Guardian: 60 min flight + 3 min charge → (24*60/63)*60 = 1371.4 min = 22.86 hr
+    #   Responder: patrol-unit model, 11.6 hr shift equivalent
+    _GUARDIAN_DAILY_MINS  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]   # ~1371.4
+    _GUARDIAN_DAILY_HOURS = CONFIG["GUARDIAN_PATROL_HOURS"]        # ~22.86
+    _RESPONDER_DAILY_MINS  = CONFIG["RESPONDER_PATROL_HOURS"] * 60 # 11.6 * 60 = 696
+    _RESPONDER_DAILY_HOURS = CONFIG["RESPONDER_PATROL_HOURS"]      # 11.6
     columns_per_row = max(1, int(columns_per_row))
 
     # Specialty-response values are independent from Annual Capacity Value.
@@ -2650,95 +2649,83 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         max_patrol_mins  = _GUARDIAN_DAILY_MINS  if is_guardian else _RESPONDER_DAILY_MINS
         max_patrol_hours = _GUARDIAN_DAILY_HOURS if is_guardian else _RESPONDER_DAILY_HOURS
 
-        # Availability tooltip uses the product rule minutes-per-hour budget.
+        # Uptime tooltip: show the duty-cycle breakdown for Guardians
         if is_guardian:
+            _g_fl  = CONFIG["GUARDIAN_FLIGHT_MIN"]
+            _g_ch  = CONFIG["GUARDIAN_CHARGE_MIN"]
+            _g_cyc = _g_fl + _g_ch
+            _cycles_per_day = (24 * 60) / _g_cyc
             uptime_tooltip = (
-                f"Guardian availability model: {CONFIG['GUARDIAN_MIN_PER_HOUR']:.0f} min/hr x 24 hr = "
-                f"{max_patrol_mins:.0f} min/day ({max_patrol_hours:.1f} hr/day)"
+                f"{_g_fl}min flight + {_g_ch}min charge = {_g_cyc}min cycle · "
+                f"{_cycles_per_day:.1f} cycles/day · "
+                f"{max_patrol_hours:.2f}hr airtime"
             )
         else:
-            uptime_tooltip = (
-                f"Responder availability model: {CONFIG['RESPONDER_MIN_PER_HOUR']:.0f} min/hr x 24 hr = "
-                f"{max_patrol_mins:.0f} min/day ({max_patrol_hours:.1f} hr/day)"
-            )
+            uptime_tooltip = f"{max_patrol_hours}hr patrol shift"
 
         total_daily_flights = d_flights + d_shared
         d_zone_calls = float(d.get("zone_calls_annual", 0) or 0)
         d_zone_flights_annual = float(d.get("zone_flights_annual", total_daily_flights * 365.0) or 0)
-        d_thermal_calls = d_zone_flights_annual * _THERMAL_RATE
-        d_k9_calls = d_zone_flights_annual * _K9_RATE
+        # Cap thermal/K9 base to physically serviceable flights (max_flights_cap * 365)
+        # zone_flights_annual is raw DEMANDED flights — thermal/K9 assists can only
+        # happen on flights actually flown within the 10-min scene-floor capacity.
+        _serviceable_annual = float(d.get("max_flights_cap", 0) or 0) * 365.0
+        _flight_base = min(d_zone_flights_annual, _serviceable_annual) if _serviceable_annual > 0 else d_zone_flights_annual
+        # Further cap: assists cannot exceed total zone calls in range
+        _flight_base = min(_flight_base, d_zone_calls) if d_zone_calls > 0 else _flight_base
+        d_thermal_calls = _flight_base * _THERMAL_RATE
+        d_k9_calls      = _flight_base * _K9_RATE
         d_thermal = d_thermal_calls * _THERMAL_PER_CALL
         d_k9 = d_k9_calls * _K9_PER_CALL
-        max_single_flight = float(CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"])
-        min_service_floor = 10.0
-        # Daily service-time model requested by product:
-        #   Responder daily airtime = 30 min/hr x 24 = 720 min/day
-        #   Guardian daily airtime  = 58 min/hr x 24 = 1392 min/day
-        # Per-call time = daily airtime / daily calls in ring.
-        # Show the platform max single-flight window when demand is very light,
-        # but once raw service time drops below the 10-minute floor, clamp the
-        # displayed time to 10 and treat the excess daily calls as deficit.
-        daily_available_mins = max_patrol_mins
-        raw_mins_per_flight = (daily_available_mins / total_daily_flights) if total_daily_flights > 0 else max_single_flight
-        modeled_service_min = max(min_service_floor, min(max_single_flight, raw_mins_per_flight))
-        same_type_capacity = daily_available_mins / min_service_floor
-        responder_station_capacity = float(CONFIG["RESPONDER_DAILY_FLIGHT_MIN"]) / min_service_floor
-        guardian_station_capacity = float(CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]) / min_service_floor
-        flights_over_capacity = max(0.0, total_daily_flights - same_type_capacity)
-        same_type_total_needed = int(math.ceil(total_daily_flights / max(1.0, same_type_capacity))) if total_daily_flights > 0 else 1
-        extra_same_type_needed = max(0, same_type_total_needed - 1)
-        responder_total_needed = int(math.ceil(total_daily_flights / max(1.0, responder_station_capacity))) if total_daily_flights > 0 else 1
-        guardian_total_needed = int(math.ceil(total_daily_flights / max(1.0, guardian_station_capacity))) if total_daily_flights > 0 else 1
-        extra_responders_needed = max(0, responder_total_needed - 1)
-        extra_guardians_needed = max(0, guardian_total_needed - 1)
-        capacity_status_color = "#ff5b6e" if flights_over_capacity > 0 else "#2ecc71"
-        capacity_status_label = "MIN FLOOR HIT" if flights_over_capacity > 0 else "ABOVE MIN FLOOR"
-        capacity_status_html = ""
-        if flights_over_capacity > 0:
-            same_type_label = "guardian" if is_guardian else "responder"
-            capacity_status_html = (
-                f'<div style="margin-bottom:8px; background:rgba(255,91,110,0.08); border:1px solid rgba(255,91,110,0.35); border-radius:6px; padding:8px 10px;">'
-                f'<div style="font-size:0.64rem; color:#ff9aa7; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; font-weight:800;">Additional Stations Needed</div>'
-                f'<div style="font-size:0.82rem; font-weight:800; color:#ffffff; line-height:1.2;">{flights_over_capacity:.1f} flights/day beyond {same_type_capacity:.1f} per-station floor capacity</div>'
-                f'<div style="font-size:0.64rem; color:{text_muted}; margin-top:4px; line-height:1.35;">Demand {total_daily_flights:.1f}/day pushes raw service time below the <span style="color:#ffffff; font-weight:700;">10 min minimum</span>. Add <span style="color:{d_color}; font-weight:800;">{extra_same_type_needed} more {same_type_label}{"s" if extra_same_type_needed != 1 else ""}</span> to keep this ring at the floor, or <span style="color:#00D2FF; font-weight:800;">{extra_responders_needed} responder{"s" if extra_responders_needed != 1 else ""}</span> / <span style="color:#39FF14; font-weight:800;">{extra_guardians_needed} guardian{"s" if extra_guardians_needed != 1 else ""}</span>.</div>'
-                f'</div>'
-            )
-        else:
-            spare_flights = max(0.0, same_type_capacity - total_daily_flights)
-            capacity_status_html = (
-                f'<div style="margin-bottom:8px; background:rgba(46,204,113,0.06); border:1px solid rgba(46,204,113,0.22); border-radius:6px; padding:8px 10px;">'
-                f'<div style="font-size:0.64rem; color:#7ee2a8; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; font-weight:800;">Above Minimum Flight-Time Floor</div>'
-                f'<div style="font-size:0.80rem; font-weight:800; color:#ffffff; line-height:1.2;">{spare_flights:.1f} flights/day before hitting 10 min floor</div>'
-                f'<div style="font-size:0.64rem; color:{text_muted}; margin-top:4px; line-height:1.35;">Demand {total_daily_flights:.1f}/day keeps this station above the 10 min minimum. Ring capacity at floor: {same_type_capacity:.1f} flights/day from {daily_available_mins:.0f} available min/day.</div>'
-                f'</div>'
-            )
         patrol_time_line = ""
         if total_daily_flights > 0:
-            patrol_color = "#ff5b6e" if raw_mins_per_flight < min_service_floor else "#2ecc71" if modeled_service_min >= max_single_flight * 0.9 else "#00D2FF"
-            floor_note = f" (min {min_service_floor:.0f})" if raw_mins_per_flight < min_service_floor else ""
+            # Raw calculation: patrol budget / flights = available min per flight
+            raw_mins_per_flight = max_patrol_mins / total_daily_flights
+            # Cap at drone's physical max flight time
+            max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
+            mins_per_flight = min(raw_mins_per_flight, max_single_flight)
+            capped = raw_mins_per_flight > max_single_flight
+            # Always show the line so low-volume Responders display correctly
+            patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= max_single_flight * 0.9 else "#00D2FF"
+            cap_note = f" (max {max_single_flight}min)" if capped else ""
             patrol_time_line = (
                 f'<div style="font-size:0.65rem; color:{text_muted}; text-align:right; line-height:1.2;" '
                 f'title="{uptime_tooltip}">'
                 f'{total_daily_flights:.1f} flights<br>'
-                f'<span style="font-weight:800; color:{patrol_color};">{modeled_service_min:.1f} min/flight{floor_note}</span></div>'
+                f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight{cap_note}</span></div>'
             )
 
         # Concurrency / value breakdown
-        # Utilization is now aligned to the per-station service-time floor model:
-        # it represents how much of this station's floor capacity is consumed by
-        # the ring's current daily drone-flight demand.
-        daily_capacity = same_type_capacity
-        d_util         = (total_daily_flights / max(1.0, daily_capacity)) if total_daily_flights > 0 else 0.0
+        d_util         = d.get('utilization', 0)
+        d_true_util    = d.get('true_util', d_util)
+        d_on_scene     = d.get('on_scene_min', 99.0)
+        d_max_cap      = d.get('max_flights_cap', 0)
+        d_has_deficit  = d.get('has_deficit', False)
+        d_deficit_f    = d.get('deficit_flights', 0)
+        d_unserv_day   = d.get('unserv_calls_day', 0)
+        d_unserv_yr    = d.get('unserv_calls_yr', 0)
+        d_extra_same   = d.get('extra_same', 0)
+        d_extra_alt    = d.get('extra_alt', 0)
+        d_extra_same_capex = d.get('extra_same_capex', 0)
+        d_extra_alt_capex  = d.get('extra_alt_capex', 0)
+        d_same_lbl     = d.get('same_type_label', d_type.title())
+        d_alt_lbl      = d.get('alt_type_label', 'Guardian' if d_type == 'RESPONDER' else 'Responder')
         d_blocked      = d.get('blocked_per_day', 0)
         d_base_annual  = d.get('base_annual', d_savings)
         d_conc_annual  = d.get('concurrent_annual', 0)
         d_best         = d.get('best_case_annual', d_savings)
         d_best_be      = d.get('best_be_text', d_be)
-        util_pct       = f"{d_util*100:.1f}%"
-        util_color     = "#dc3545" if d_util > 1.0 else "#F0B429" if d_util > 0.75 else "#2ecc71"
-        util_title     = f"{total_daily_flights:.1f} flights/day demand using {daily_available_mins:.0f} available min/day; floor capacity is {daily_capacity:.1f} flights/day at 10 min/flight"
+        # True utilization display — uncapped so it can show > 100% in deficit
+        util_pct       = f"{d_true_util*100:.1f}%"
+        util_color     = "#dc3545" if d_has_deficit or d_true_util > 0.75 else "#F0B429" if d_true_util > 0.4 else "#2ecc71"
+        # On-scene time color coding
+        if d_on_scene < 10.0:
+            scene_color = "#dc3545"
+        elif d_on_scene < 20.0:
+            scene_color = "#F0B429"
+        else:
+            scene_color = "#2ecc71"
         has_concurrent = d_shared > 0.1 and d_conc_annual > 0
-        # Breakdown label for the value box
         if has_concurrent:
             _excl_str = f"${d_base_annual:,.0f} exclusive"
             _conc_str = f"+ ${d_conc_annual:,.0f} concurrent"
@@ -2746,27 +2733,48 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             _excl_str = "exclusive zone coverage"
             _conc_str = ""
 
+        # ── DEFICIT BANNER HTML ────────────────────────────────────────────────
+        if d_has_deficit:
+            _deficit_banner = f'''
+  <div style="background:rgba(220,53,69,0.12); border:1.5px solid #dc3545; border-radius:6px; padding:8px 10px; margin-bottom:6px;">
+    <div style="font-size:0.72rem; font-weight:800; color:#dc3545; letter-spacing:0.5px; margin-bottom:4px;">⚠️ CAPACITY DEFICIT</div>
+    <div style="font-size:0.65rem; color:{text_muted}; margin-bottom:5px; line-height:1.5;">
+      <span style="color:#dc3545; font-weight:700;">{d_on_scene:.1f} min on-scene</span> available · minimum 10 min required<br>
+      <span style="font-weight:700; color:#ff6b6b;">{d_deficit_f:.1f} flights/day</span> unserviceable · <span style="font-weight:700; color:#ff6b6b;">{d_unserv_day:.0f} calls/day</span> not covered <span style="color:#888;">({d_unserv_yr:,.0f}/yr)</span>
+    </div>
+    <div style="font-size:0.63rem; color:{text_muted}; border-top:1px dashed rgba(220,53,69,0.3); padding-top:4px; line-height:1.6;">
+      <div style="font-weight:700; color:#aaa; margin-bottom:2px; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.5px;">To resolve deficit:</div>
+      <div>+{d_extra_same} <span style="font-weight:700; color:#fff;">{d_same_lbl}</span> station{"s" if d_extra_same != 1 else ""} &nbsp;<span style="color:#F0B429; font-weight:700;">${d_extra_same_capex:,}</span> add'l CapEx</div>
+      <div>+{d_extra_alt} <span style="font-weight:700; color:#fff;">{d_alt_lbl}</span> station{"s" if d_extra_alt != 1 else ""} &nbsp;<span style="color:#F0B429; font-weight:700;">${d_extra_alt_capex:,}</span> add'l CapEx</div>
+    </div>
+  </div>'''
+        else:
+            _deficit_banner = f'''
+  <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px; padding:5px 8px; background:rgba(34,197,94,0.06); border:1px solid rgba(34,197,94,0.2); border-radius:5px;">
+    <span style="font-size:0.65rem; color:#2ecc71; font-weight:700;">✓ WITHIN CAPACITY</span>
+    <span style="font-size:0.63rem; color:{text_muted};">·</span>
+    <span style="font-size:0.65rem; color:{scene_color}; font-weight:700;">{d_on_scene:.1f} min on-scene</span>
+    <span style="font-size:0.63rem; color:{text_muted};">per flight</span>
+  </div>'''
+
         cards_html.append(f'''
-<div class="unit-card" style="background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.00)), {card_bg}; border:1px solid {d_color}; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.03), 0 0 0 1px rgba(0,0,0,0.15); border-top:4px solid {d_color}; border-radius:8px; padding:12px; display:flex; flex-direction:column; box-sizing:border-box; min-height:440px; height:100%;">
+<div class="unit-card" style="background:{card_bg}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-top:3px solid {d_color}; border-radius:8px; padding:12px; display:flex; flex-direction:column; box-sizing:border-box; min-height:440px; height:100%;">
   <!-- Header: name + type badge -->
   <div style="margin-bottom:8px; min-height:82px;">
-    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:2px;">
-      <div style="font-weight:700; font-size:0.88rem; color:{card_title}; line-height:1.3;">{short_name}</div>
-      <div style="display:flex; align-items:center; gap:5px; background:rgba(0,0,0,0.22); border:1px solid rgba(255,255,255,0.08); border-radius:999px; padding:2px 7px; flex-shrink:0;">
-        <span style="display:inline-block; width:8px; height:8px; border-radius:999px; background:{d_color}; box-shadow:0 0 8px {d_color};"></span>
-        <span style="font-size:0.58rem; font-weight:800; color:{card_title}; letter-spacing:0.5px; text-transform:uppercase;">Map Ring</span>
-      </div>
-    </div>
+    <div style="font-weight:700; font-size:0.88rem; color:{card_title}; line-height:1.3; margin-bottom:2px;">{short_name}</div>
     <div style="font-size:0.70rem; color:#777; text-transform:uppercase; letter-spacing:0.5px;">{"🔒 " if d.get("pinned") else ""}{d_type} · Phase #{d_step}</div>
     <div style="font-size:0.72rem; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
       <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
     </div>
   </div>
 
+  <!-- Deficit / Capacity status banner -->
+  {_deficit_banner}
+
   <!-- Annual capacity value box -->
   <div style="background:rgba(0,210,255,0.07); border:1px solid rgba(0,210,255,0.15); border-radius:6px; padding:8px 10px; margin-bottom:6px;"
        title="Annual Capacity Value is based on calls handled without sending a squad.">
-    <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Annual Capacity Value</div>
+    <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Annual Capacity Value{"  ⚠️ capped at physical max" if d_has_deficit else ""}</div>
     <div style="display:flex; align-items:baseline; justify-content:space-between; gap:6px;">
       <div>
         <div style="font-size:1.3rem; font-weight:900; color:{accent_color}; line-height:1.1;">${d_best:,.0f}</div>
@@ -2788,8 +2796,6 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     </div>
   </div>
 
-  {capacity_status_html}
-
   <!-- Value breakdown box -->
   <div style="border:1px solid rgba(57,255,20,0.18); border-radius:6px; padding:6px 10px; margin-bottom:8px; background:rgba(57,255,20,0.04);"
        title="Exclusive: calls only this drone covers. Concurrent: calls handled while partner is airborne.">
@@ -2804,7 +2810,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         <div style="color:{text_muted}; font-size:0.63rem;">concurrent</div>
       </div>
     </div>
-    <div style="font-size:0.65rem; color:{text_muted}; opacity:0.8; border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px; text-align:center;">{util_pct} utilization · ROI {d_best_be}</div>
+    <div style="font-size:0.65rem; color:{text_muted}; opacity:0.8; border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px; text-align:center;">{util_pct} utilization{"  ·  ⚠️ over capacity" if d_has_deficit else ""} · ROI {d_best_be}</div>
   </div>
 
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.68rem; flex:1; margin-bottom:8px; align-content:start;">
@@ -2816,13 +2822,13 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Shared Flights</div>
       <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_shared:.1f}</div>
     </div>
-    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
+    <div style="background:{"rgba(220,53,69,0.08)" if d_has_deficit else "rgba(255,255,255,0.04)"}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Utilization</div>
-      <div title="{util_title}" style="font-weight:800; color:{util_color}; font-size:0.82rem;">{util_pct}</div>
+      <div style="font-weight:800; color:{util_color}; font-size:0.82rem;">{util_pct}</div>
     </div>
-    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Daily Capacity</div>
-      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{daily_capacity:.1f}</div>
+    <div style="background:{"rgba(220,53,69,0.08)" if d_has_deficit else "rgba(255,255,255,0.04)"}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">On-Scene / Flight</div>
+      <div style="font-weight:800; color:{scene_color}; font-size:0.82rem;">{d_on_scene:.1f} min</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Resolved/day</div>
@@ -2847,10 +2853,6 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Concurrent/day</div>
       <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_blocked:.1f}</div>
-    </div>
-    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Deficit/day</div>
-      <div style="font-weight:800; color:{capacity_status_color}; font-size:0.82rem;">{flights_over_capacity:.1f}</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Monthly Value</div>
@@ -4630,10 +4632,10 @@ def generate_community_impact_dashboard_html(
     </div>
     <div class="rt-bar-wrap">
       <div class="rt-bar-outer">
-        <div class="rt-bar-fill" style="height:100%;background:linear-gradient(180deg,#94a3b8,#cbd5e1);"></div>
+        <div class="rt-bar-fill" style="height:100%;background:linear-gradient(180deg,#f59e0b,#d97706);"></div>
       </div>
       <div class="rt-bar-label">🚔 Ground Unit (est.)</div>
-      <div class="rt-bar-value" style="color:var(--ink-mid);">{ground_min:.1f} min</div>
+      <div class="rt-bar-value" style="color:#f59e0b;">{ground_min:.1f} min</div>
     </div>
     <div class="rt-bar-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:28px;">
       <div style="font-family:'DM Mono',monospace;font-size:32px;font-weight:500;color:var(--accent-green);">−{saved_min:.1f}m</div>
@@ -5886,67 +5888,118 @@ if st.session_state['csvs_ready']:
             # Responders should reflect how busy they truly are in their patrol zone.
             # daily calls dispatched to this drone = zone calls × dispatch rate
             _is_guard    = (d_type == 'GUARDIAN')
-            _budget_min  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] if _is_guard else CONFIG["RESPONDER_DAILY_FLIGHT_MIN"]
+            _budget_min  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] if _is_guard else (CONFIG["RESPONDER_PATROL_HOURS"] * 60)
             _zone_flights = _raw_zone_perc * calls_per_day * dfr_dispatch_rate
-            # Demand-based utilization against the card floor model (10 min minimum per call).
-            _same_type_capacity = _budget_min / 10.0
-            _util = (_zone_flights / max(1.0, _same_type_capacity)) if _zone_flights > 0 else 0.0
 
-            # ── VALUE MODEL: only served calls create value ──────────────────
-            # Monthly value now uses the fixed cost delta already in CONFIG:
-            # officer call = $82, drone call = $6, so delta = $76/call.
+            # ── CAPACITY MODEL: 10-minute on-scene floor ──────────────────────
+            # Every sortie consumes travel_time + on_scene_time from the daily budget.
+            # We require at least 10 min on-scene so the drone isn't rushing back.
+            # Deficit triggers when available on-scene time per flight drops below 10 min.
             #
-            # Exclusive calls are served first. Shared/concurrent calls only create
-            # additional value if the station still has spare capacity after its
-            # exclusive load has been accounted for.
+            #   max_flights   = budget_min / (avg_time_min + 10)
+            #   on_scene_min  = (budget_min / zone_flights) - avg_time_min   [if zone_flights > 0]
+            #   deficit       = on_scene_min < 10  ↔  zone_flights > max_flights
+            _MIN_SCENE_MIN   = 10.0
+            _g_budget        = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]
+            _r_budget        = CONFIG["RESPONDER_PATROL_HOURS"] * 60
+            _alt_is_guard    = not _is_guard   # cross-type recommendation
+            _alt_budget      = _g_budget if _alt_is_guard else _r_budget
+            _alt_max_single  = CONFIG["GUARDIAN_FLIGHT_MIN"] if _alt_is_guard else CONFIG["RESPONDER_FLIGHT_MIN"]
+
+            # Capacity of THIS drone type (flights/day with 10-min scene floor)
+            _max_flights_cap = _budget_min / (avg_time_min + _MIN_SCENE_MIN)
+            # Capacity of the ALTERNATE drone type (for cross-type recommendation)
+            _alt_max_flights = _alt_budget / (avg_time_min + _MIN_SCENE_MIN)
+
+            # On-scene minutes available per flight given current demand
+            _on_scene_min = (_budget_min / max(_zone_flights, 0.001)) - avg_time_min if _zone_flights > 0 else 99.0
+
+            # True (uncapped) utilization using scene-inclusive budget
+            _true_util = (_zone_flights * (avg_time_min + _MIN_SCENE_MIN)) / max(1.0, _budget_min)
+            # Display util capped at 1.0 (100%) for progress bars; deficit shown separately
+            _util = min(1.0, _true_util)
+
+            # Deficit: flights demanded beyond physical capacity
+            import math as _math
+            _deficit_flights  = max(0.0, _zone_flights - _max_flights_cap)
+            _has_deficit      = _deficit_flights > 0.01
+            _unserv_calls_day = _deficit_flights / max(dfr_dispatch_rate, 0.01) if _has_deficit else 0.0
+            _unserv_calls_yr  = _unserv_calls_day * 365
+
+            # Extra stations needed to clear deficit (same type and alternate type)
+            _extra_same = int(_math.ceil(_deficit_flights / _max_flights_cap)) if _has_deficit else 0
+            _extra_alt  = int(_math.ceil(_deficit_flights / _alt_max_flights))  if _has_deficit else 0
+
+            # CapEx cost of each resolution path
+            _same_type_cost = CONFIG["GUARDIAN_COST"] if _is_guard else CONFIG["RESPONDER_COST"]
+            _alt_type_cost  = CONFIG["RESPONDER_COST"] if _is_guard else CONFIG["GUARDIAN_COST"]
+            _extra_same_capex = _extra_same * _same_type_cost
+            _extra_alt_capex  = _extra_alt  * _alt_type_cost
+            _same_type_label  = "Guardian"  if _is_guard else "Responder"
+            _alt_type_label   = "Responder" if _is_guard else "Guardian"
+
+            # ── BASE VALUE: calls uniquely covered (non-shared zone) ──────────
+            # Cap savings to physically serviceable flights when in deficit
             _excl_daily        = (_excl_calls / total_calls) * calls_per_day
-            _excl_flights      = _excl_daily * dfr_dispatch_rate
-            _shared_daily      = (_shared_calls / total_calls) * calls_per_day
-            _shared_dfr        = _shared_daily * dfr_dispatch_rate
-            _concurrent_daily  = _shared_dfr * min(1.0, _util)
-
-            _served_excl_flights = min(_excl_flights, _same_type_capacity)
-            _remaining_capacity   = max(0.0, _same_type_capacity - _served_excl_flights)
-            _served_concurrent_flights = min(_concurrent_daily, _remaining_capacity)
-            _served_total_flights = _served_excl_flights + _served_concurrent_flights
-
-            _excl_deflected    = _served_excl_flights * deflection_rate
-            _concurrent_deflected = _served_concurrent_flights * deflection_rate
+            _excl_flights_raw  = _excl_daily * dfr_dispatch_rate
+            # Clamp exclusive flights to what the drone can actually serve
+            _excl_flights      = min(_excl_flights_raw, _max_flights_cap) if _has_deficit else _excl_flights_raw
+            _excl_deflected    = _excl_flights * deflection_rate
             _cost_delta        = CONFIG["OFFICER_COST_PER_CALL"] - CONFIG["DRONE_COST_PER_CALL"]
             _base_monthly      = _cost_delta * _excl_deflected * 30.4
             _base_annual       = _base_monthly * 12
-            _concurrent_month  = _cost_delta * _concurrent_deflected * 30.4
+
+            # ── CONCURRENT VALUE: shared-zone calls captured while partner is busy ─
+            _shared_daily      = (_shared_calls / total_calls) * calls_per_day
+            _shared_dfr        = _shared_daily * dfr_dispatch_rate
+            _concurrent_daily  = _shared_dfr * _util
+            _concurrent_month  = _cost_delta * (_concurrent_daily * deflection_rate) * 30.4
             _concurrent_annual = _concurrent_month * 12
 
-            # ── BEST CASE: served exclusive + served concurrent ──────────────
+            # ── BEST CASE: base + full concurrent (partner always available) ──
             _best_monthly  = _base_monthly + _concurrent_month
             _best_annual   = _base_annual  + _concurrent_annual
 
             # ── STORE — use best_case as primary display value ─────────────────
-            # Base (excl-only) is the conservative floor.
-            # Best case is the headline figure shown in the card.
-            d['marginal_perc']     = marginal_historic / total_calls  # for KPI dedup only
-            d['marginal_flights']  = _excl_flights          # exclusive zone flights
-            d['marginal_deflected']= _excl_deflected
-            d['shared_flights']    = _shared_dfr             # shared zone DFR flights
-            d['zone_flights']      = _zone_flights           # total zone flights (for util)
-            d['zone_calls_annual'] = _raw_zone_calls         # annual calls for service in this drone's range
-            d['zone_flights_annual'] = _zone_flights * 365.0 # annual drone flights generated by that zone
-            d['utilization']       = _util
-            d['blocked_per_day']   = max(0.0, _zone_flights - _same_type_capacity)
-            d['served_flights_day'] = _served_total_flights
-            d['monthly_savings']   = _best_monthly           # headline = best case
-            d['annual_savings']    = _best_annual
-            d['base_annual']       = _base_annual            # conservative floor
-            d['concurrent_annual'] = _concurrent_annual
-            d['best_case_annual']  = _best_annual            # same as headline now
-            d['concurrent_monthly']= _concurrent_month
-            d['be_text']   = f"{d['cost']/_best_monthly:.1f} MO" if _best_monthly > 0 else "N/A"
-            d['best_be_text'] = d['be_text']
+            d['marginal_perc']       = marginal_historic / total_calls
+            d['marginal_flights']    = _excl_flights
+            d['marginal_deflected']  = _excl_deflected
+            d['shared_flights']      = _shared_dfr
+            d['zone_flights']        = _zone_flights
+            d['zone_calls_annual']   = _raw_zone_calls
+            d['zone_flights_annual'] = _zone_flights * 365.0
+            d['utilization']         = _util
+            d['true_util']           = _true_util
+            d['on_scene_min']        = _on_scene_min
+            d['max_flights_cap']     = _max_flights_cap
+            d['has_deficit']         = _has_deficit
+            d['deficit_flights']     = _deficit_flights
+            d['unserv_calls_day']    = _unserv_calls_day
+            d['unserv_calls_yr']     = _unserv_calls_yr
+            d['extra_same']          = _extra_same
+            d['extra_alt']           = _extra_alt
+            d['extra_same_capex']    = _extra_same_capex
+            d['extra_alt_capex']     = _extra_alt_capex
+            d['same_type_label']     = _same_type_label
+            d['alt_type_label']      = _alt_type_label
+            d['blocked_per_day']     = _concurrent_daily
+            d['monthly_savings']     = _best_monthly
+            d['annual_savings']      = _best_annual
+            d['base_annual']         = _base_annual
+            d['concurrent_annual']   = _concurrent_annual
+            d['best_case_annual']    = _best_annual
+            d['concurrent_monthly']  = _concurrent_month
+            d['be_text']     = f"{d['cost']/_best_monthly:.1f} MO" if _best_monthly > 0 else "N/A"
+            d['best_be_text']= d['be_text']
         else:
             d.update({'assigned_indices':[],'annual_savings':0,'marginal_flights':0,
                       'marginal_deflected':0,'shared_flights':0,'be_text':"N/A",
-                      'utilization':0,'concurrent_monthly':0,'best_case_annual':0,
+                      'utilization':0,'true_util':0,'on_scene_min':99,'max_flights_cap':0,
+                      'has_deficit':False,'deficit_flights':0,'unserv_calls_day':0,
+                      'unserv_calls_yr':0,'extra_same':0,'extra_alt':0,
+                      'extra_same_capex':0,'extra_alt_capex':0,
+                      'same_type_label':'Responder','alt_type_label':'Guardian',
+                      'concurrent_monthly':0,'best_case_annual':0,
                       'blocked_per_day':0,'best_be_text':"N/A",'base_annual':0,
                       'concurrent_annual':0,'zone_flights':0,'zone_calls_annual':0,
                       'zone_flights_annual':0})
@@ -6723,10 +6776,10 @@ if st.session_state['csvs_ready']:
         _n_months = max(1, min(_n_months, 12))
         _cal_cols = 3                        # columns at typical sidebar-open viewport
         _cal_rows = _math.ceil(_n_months / _cal_cols)
-        _cal_px   = _cal_rows * 290          # ~290px per calendar row (header + up to 6 week rows + gap)
+        _cal_px   = _cal_rows * 260          # ~260px per calendar row (tightened)
         # Fixed chrome above the calendar:
         #   section header 60 + controls bar 70 + KPI cards 110 + shift/dow panel 210 + legend+label 55
-        _fixed_px = 505
+        _fixed_px = 460
         _analytics_height = _fixed_px + _cal_px
     components.html(analytics_html_block, height=_analytics_height, scrolling=False)
 
@@ -6735,7 +6788,7 @@ if st.session_state['csvs_ready']:
         st.markdown("<div style='margin-top:-6px;'></div>", unsafe_allow_html=True)
     elif _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
         # Collapse gap between components.html block and the plotly charts below
-        st.markdown("<div style='margin-top:-48px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='margin-top:-80px;'></div>", unsafe_allow_html=True)
         _build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
 
     # ── COMMUNITY IMPACT DASHBOARD ────────────────────────────────────────────
@@ -7122,29 +7175,30 @@ body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text)
 .cover-headline h1 span{{color:var(--cyan)}}
 .cover-headline p{{font-size:16px;color:#888;max-width:480px;line-height:1.7}}
 .cover-meta{{
-  display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;
+  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
   background:#1a1a2a;border:1px solid #1a1a2a;border-radius:10px;overflow:hidden;
+  margin-top:4px;
 }}
 .cover-meta-cell{{
-  background:var(--ink);padding:20px 24px;
+  background:var(--ink);padding:16px 14px;
 }}
-.cover-meta-cell .label{{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#555;margin-bottom:6px}}
-.cover-meta-cell .value{{font-size:clamp(12px,1.4vw,15px);font-weight:700;color:#fff;word-break:break-word;overflow-wrap:anywhere}}
+.cover-meta-cell .label{{font-size:9px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#555;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.cover-meta-cell .value{{font-size:clamp(11px,1vw,14px);font-weight:800;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'IBM Plex Mono',monospace;letter-spacing:-0.3px}}
 .cover-meta-cell .value.accent{{color:var(--cyan)}}
 .cover-meta-cell .value.gold{{color:var(--gold)}}
 .cover-bottom{{margin-top:40px;font-size:12px;color:#444;border-top:1px solid #1a1a2a;padding-top:24px;display:flex;justify-content:space-between}}
 
 /* ── METRICS SECTION ─────────────────────────────────────────── */
 .metrics-hero{{
-  display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1px;
+  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
   background:var(--border);border-radius:12px;overflow:hidden;
   margin-bottom:40px;box-shadow:0 1px 3px rgba(0,0,0,0.04);
 }}
 .metric-cell{{
-  background:#fff;padding:28px 24px;text-align:center;
+  background:#fff;padding:24px 16px;text-align:center;min-width:0;
 }}
-.metric-cell .m-label{{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}}
-.metric-cell .m-value{{font-size:clamp(18px,2.4vw,36px);font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1.1;color:var(--text);word-break:break-word;overflow-wrap:anywhere}}
+.metric-cell .m-label{{font-size:9px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.metric-cell .m-value{{font-size:clamp(16px,1.8vw,28px);font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1.1;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
 .metric-cell .m-value.cyan{{color:var(--cyan)}}
 .metric-cell .m-value.gold{{color:var(--gold)}}
 .metric-cell .m-value.green{{color:var(--green)}}
@@ -7339,6 +7393,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
         <div class="cover-meta-cell"><div class="label">Call Coverage</div><div class="value accent">{calls_covered_perc:.1f}%</div></div>
         <div class="cover-meta-cell"><div class="label">Avg Response</div><div class="value">{avg_resp_time:.1f} min</div></div>
         <div class="cover-meta-cell"><div class="label">Time Saved</div><div class="value gold">{avg_time_saved:.1f} min</div></div>
+        <div class="cover-meta-cell" style="background:rgba(0,210,255,0.04)"><div class="label" style="color:#1a4a5a">Fleet Size</div><div class="value" style="color:#00a0bf">{actual_k_responder + actual_k_guardian} Units</div></div>
       </div>
     </div>
     <div class="cover-right">
@@ -7357,11 +7412,12 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
   <div class="metrics-hero">
     <div class="metric-cell"><div class="m-label">Fleet Capital Expenditure</div><div class="m-value cyan">${fleet_capex:,.0f}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
     <div class="metric-cell"><div class="m-label">Annual Savings Capacity</div><div class="m-value gold">${annual_savings:,.0f}</div><div class="m-sub">At {int(dfr_dispatch_rate*100)}% dispatch · {int(deflection_rate*100)}% resolution</div></div>
-    <div class="metric-cell"><div class="m-label">Possible Add'l Thermal + K-9</div><div class="m-value green">${possible_additional_savings:,.0f}</div><div class="m-sub">Thermal ${thermal_savings:,.0f} · K-9 ${k9_savings:,.0f}</div></div>
+    <div class="metric-cell"><div class="m-label">Add'l Thermal + K-9 Savings</div><div class="m-value green">${possible_additional_savings:,.0f}</div><div class="m-sub">Thermal ${thermal_savings:,.0f} · K-9 ${k9_savings:,.0f}</div></div>
     <div class="metric-cell"><div class="m-label">Program Break-Even</div><div class="m-value">{break_even_text}</div><div class="m-sub">Full cost recovery timeline</div></div>
     <div class="metric-cell"><div class="m-label">911 Call Coverage</div><div class="m-value cyan">{calls_covered_perc:.1f}%</div><div class="m-sub">of {st.session_state.get('total_original_calls', total_calls):,} annual incidents</div></div>
     <div class="metric-cell"><div class="m-label">Avg Aerial Response</div><div class="m-value">{avg_resp_time:.1f} min</div><div class="m-sub">vs. ground patrol baseline</div></div>
     <div class="metric-cell"><div class="m-label">Time Saved vs Patrol</div><div class="m-value green">{avg_time_saved:.1f} min</div><div class="m-sub">per incident, on average</div></div>
+    <div class="metric-cell" style="background:#fafbfc"><div class="m-label">Total Fleet Units</div><div class="m-value" style="color:#374151">{actual_k_responder + actual_k_guardian}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
   </div>
   <p style="font-size:15px;color:#444;line-height:1.8;max-width:680px">
     The {jurisdiction_list} proposes a BRINC Drones Drone as a First Responder (DFR) program deploying

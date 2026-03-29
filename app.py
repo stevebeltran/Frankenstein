@@ -2670,15 +2670,40 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_k9_calls = d_zone_flights_annual * _K9_RATE
         d_thermal = d_thermal_calls * _THERMAL_PER_CALL
         d_k9 = d_k9_calls * _K9_PER_CALL
+        max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
+        daily_capacity = max_patrol_mins / max(1.0, max_single_flight)
+        annual_capacity = daily_capacity * 365.0
+        flights_over_capacity = max(0.0, total_daily_flights - daily_capacity)
+        annual_over_capacity = flights_over_capacity * 365.0
+        capacity_util = (total_daily_flights / max(1.0, daily_capacity)) if daily_capacity > 0 else 0.0
+        extra_responders_needed = int(math.ceil(flights_over_capacity / max(1.0, _RESPONDER_DAILY_MINS / max(1.0, CONFIG["RESPONDER_FLIGHT_MIN"])))) if flights_over_capacity > 0 else 0
+        extra_guardians_needed = int(math.ceil(flights_over_capacity / max(1.0, _GUARDIAN_DAILY_MINS / max(1.0, CONFIG["GUARDIAN_FLIGHT_MIN"])))) if flights_over_capacity > 0 else 0
+        capacity_status_color = "#ff5b6e" if flights_over_capacity > 0 else "#2ecc71"
+        capacity_status_label = "OVER CAPACITY" if flights_over_capacity > 0 else "WITHIN CAPACITY"
+        capacity_status_html = ""
+        if flights_over_capacity > 0:
+            capacity_status_html = (
+                f'<div style="margin-bottom:8px; background:rgba(255,91,110,0.08); border:1px solid rgba(255,91,110,0.35); border-radius:6px; padding:8px 10px;">'
+                f'<div style="font-size:0.64rem; color:#ff9aa7; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; font-weight:800;">Station Over Capacity</div>'
+                f'<div style="font-size:0.82rem; font-weight:800; color:#ffffff; line-height:1.2;">{flights_over_capacity:.1f} flights/day over limit</div>'
+                f'<div style="font-size:0.64rem; color:{text_muted}; margin-top:4px; line-height:1.35;">Demand {total_daily_flights:.1f}/day vs capacity {daily_capacity:.1f}/day · add <span style="color:#00D2FF; font-weight:800;">{extra_responders_needed} responder{"s" if extra_responders_needed != 1 else ""}</span> or <span style="color:#39FF14; font-weight:800;">{extra_guardians_needed} guardian{"s" if extra_guardians_needed != 1 else ""}</span>.</div>'
+                f'</div>'
+            )
+        else:
+            spare_flights = max(0.0, daily_capacity - total_daily_flights)
+            capacity_status_html = (
+                f'<div style="margin-bottom:8px; background:rgba(46,204,113,0.06); border:1px solid rgba(46,204,113,0.22); border-radius:6px; padding:8px 10px;">'
+                f'<div style="font-size:0.64rem; color:#7ee2a8; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; font-weight:800;">Within Daily Capacity</div>'
+                f'<div style="font-size:0.80rem; font-weight:800; color:#ffffff; line-height:1.2;">{spare_flights:.1f} flights/day spare</div>'
+                f'<div style="font-size:0.64rem; color:{text_muted}; margin-top:4px; line-height:1.35;">Demand {total_daily_flights:.1f}/day vs capacity {daily_capacity:.1f}/day at {max_single_flight:.0f} min/flight max.</div>'
+                f'</div>'
+            )
         patrol_time_line = ""
         if total_daily_flights > 0:
             # Raw calculation: patrol budget / flights = available min per flight
             raw_mins_per_flight = max_patrol_mins / total_daily_flights
-            # Cap at drone's physical max flight time
-            max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
             mins_per_flight = min(raw_mins_per_flight, max_single_flight)
             capped = raw_mins_per_flight > max_single_flight
-            # Always show the line so low-volume Responders display correctly
             patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= max_single_flight * 0.9 else "#00D2FF"
             cap_note = f" (max {max_single_flight}min)" if capped else ""
             patrol_time_line = (
@@ -2742,6 +2767,8 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     </div>
   </div>
 
+  {capacity_status_html}
+
   <!-- Value breakdown box -->
   <div style="border:1px solid rgba(57,255,20,0.18); border-radius:6px; padding:6px 10px; margin-bottom:8px; background:rgba(57,255,20,0.04);"
        title="Exclusive: calls only this drone covers. Concurrent: calls handled while partner is airborne.">
@@ -2773,6 +2800,10 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
       <div style="font-weight:800; color:{util_color}; font-size:0.82rem;">{util_pct}</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Daily Capacity</div>
+      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{daily_capacity:.1f}</div>
+    </div>
+    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Resolved/day</div>
       <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_deflected:.1f}</div>
     </div>
@@ -2795,6 +2826,10 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Concurrent/day</div>
       <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_blocked:.1f}</div>
+    </div>
+    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Deficit/day</div>
+      <div style="font-weight:800; color:{capacity_status_color}; font-size:0.82rem;">{flights_over_capacity:.1f}</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Monthly Value</div>
@@ -4574,10 +4609,10 @@ def generate_community_impact_dashboard_html(
     </div>
     <div class="rt-bar-wrap">
       <div class="rt-bar-outer">
-        <div class="rt-bar-fill" style="height:100%;background:linear-gradient(180deg,#f59e0b,#d97706);"></div>
+        <div class="rt-bar-fill" style="height:100%;background:linear-gradient(180deg,#94a3b8,#cbd5e1);"></div>
       </div>
       <div class="rt-bar-label">🚔 Ground Unit (est.)</div>
-      <div class="rt-bar-value" style="color:#f59e0b;">{ground_min:.1f} min</div>
+      <div class="rt-bar-value" style="color:var(--ink-mid);">{ground_min:.1f} min</div>
     </div>
     <div class="rt-bar-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:28px;">
       <div style="font-family:'DM Mono',monospace;font-size:32px;font-weight:500;color:var(--accent-green);">−{saved_min:.1f}m</div>
@@ -6660,10 +6695,10 @@ if st.session_state['csvs_ready']:
         _n_months = max(1, min(_n_months, 12))
         _cal_cols = 3                        # columns at typical sidebar-open viewport
         _cal_rows = _math.ceil(_n_months / _cal_cols)
-        _cal_px   = _cal_rows * 260          # ~260px per calendar row (tightened)
+        _cal_px   = _cal_rows * 290          # ~290px per calendar row (header + up to 6 week rows + gap)
         # Fixed chrome above the calendar:
         #   section header 60 + controls bar 70 + KPI cards 110 + shift/dow panel 210 + legend+label 55
-        _fixed_px = 460
+        _fixed_px = 505
         _analytics_height = _fixed_px + _cal_px
     components.html(analytics_html_block, height=_analytics_height, scrolling=False)
 
@@ -6672,7 +6707,7 @@ if st.session_state['csvs_ready']:
         st.markdown("<div style='margin-top:-6px;'></div>", unsafe_allow_html=True)
     elif _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
         # Collapse gap between components.html block and the plotly charts below
-        st.markdown("<div style='margin-top:-80px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='margin-top:-48px;'></div>", unsafe_allow_html=True)
         _build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
 
     # ── COMMUNITY IMPACT DASHBOARD ────────────────────────────────────────────
@@ -7059,30 +7094,29 @@ body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text)
 .cover-headline h1 span{{color:var(--cyan)}}
 .cover-headline p{{font-size:16px;color:#888;max-width:480px;line-height:1.7}}
 .cover-meta{{
-  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+  display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;
   background:#1a1a2a;border:1px solid #1a1a2a;border-radius:10px;overflow:hidden;
-  margin-top:4px;
 }}
 .cover-meta-cell{{
-  background:var(--ink);padding:16px 14px;
+  background:var(--ink);padding:20px 24px;
 }}
-.cover-meta-cell .label{{font-size:9px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#555;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-.cover-meta-cell .value{{font-size:clamp(11px,1vw,14px);font-weight:800;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'IBM Plex Mono',monospace;letter-spacing:-0.3px}}
+.cover-meta-cell .label{{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#555;margin-bottom:6px}}
+.cover-meta-cell .value{{font-size:clamp(12px,1.4vw,15px);font-weight:700;color:#fff;word-break:break-word;overflow-wrap:anywhere}}
 .cover-meta-cell .value.accent{{color:var(--cyan)}}
 .cover-meta-cell .value.gold{{color:var(--gold)}}
 .cover-bottom{{margin-top:40px;font-size:12px;color:#444;border-top:1px solid #1a1a2a;padding-top:24px;display:flex;justify-content:space-between}}
 
 /* ── METRICS SECTION ─────────────────────────────────────────── */
 .metrics-hero{{
-  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1px;
   background:var(--border);border-radius:12px;overflow:hidden;
   margin-bottom:40px;box-shadow:0 1px 3px rgba(0,0,0,0.04);
 }}
 .metric-cell{{
-  background:#fff;padding:24px 16px;text-align:center;min-width:0;
+  background:#fff;padding:28px 24px;text-align:center;
 }}
-.metric-cell .m-label{{font-size:9px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-.metric-cell .m-value{{font-size:clamp(16px,1.8vw,28px);font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1.1;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.metric-cell .m-label{{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}}
+.metric-cell .m-value{{font-size:clamp(18px,2.4vw,36px);font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1.1;color:var(--text);word-break:break-word;overflow-wrap:anywhere}}
 .metric-cell .m-value.cyan{{color:var(--cyan)}}
 .metric-cell .m-value.gold{{color:var(--gold)}}
 .metric-cell .m-value.green{{color:var(--green)}}
@@ -7277,7 +7311,6 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
         <div class="cover-meta-cell"><div class="label">Call Coverage</div><div class="value accent">{calls_covered_perc:.1f}%</div></div>
         <div class="cover-meta-cell"><div class="label">Avg Response</div><div class="value">{avg_resp_time:.1f} min</div></div>
         <div class="cover-meta-cell"><div class="label">Time Saved</div><div class="value gold">{avg_time_saved:.1f} min</div></div>
-        <div class="cover-meta-cell" style="background:rgba(0,210,255,0.04)"><div class="label" style="color:#1a4a5a">Fleet Size</div><div class="value" style="color:#00a0bf">{actual_k_responder + actual_k_guardian} Units</div></div>
       </div>
     </div>
     <div class="cover-right">
@@ -7296,12 +7329,11 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
   <div class="metrics-hero">
     <div class="metric-cell"><div class="m-label">Fleet Capital Expenditure</div><div class="m-value cyan">${fleet_capex:,.0f}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
     <div class="metric-cell"><div class="m-label">Annual Savings Capacity</div><div class="m-value gold">${annual_savings:,.0f}</div><div class="m-sub">At {int(dfr_dispatch_rate*100)}% dispatch · {int(deflection_rate*100)}% resolution</div></div>
-    <div class="metric-cell"><div class="m-label">Add'l Thermal + K-9 Savings</div><div class="m-value green">${possible_additional_savings:,.0f}</div><div class="m-sub">Thermal ${thermal_savings:,.0f} · K-9 ${k9_savings:,.0f}</div></div>
+    <div class="metric-cell"><div class="m-label">Possible Add'l Thermal + K-9</div><div class="m-value green">${possible_additional_savings:,.0f}</div><div class="m-sub">Thermal ${thermal_savings:,.0f} · K-9 ${k9_savings:,.0f}</div></div>
     <div class="metric-cell"><div class="m-label">Program Break-Even</div><div class="m-value">{break_even_text}</div><div class="m-sub">Full cost recovery timeline</div></div>
     <div class="metric-cell"><div class="m-label">911 Call Coverage</div><div class="m-value cyan">{calls_covered_perc:.1f}%</div><div class="m-sub">of {st.session_state.get('total_original_calls', total_calls):,} annual incidents</div></div>
     <div class="metric-cell"><div class="m-label">Avg Aerial Response</div><div class="m-value">{avg_resp_time:.1f} min</div><div class="m-sub">vs. ground patrol baseline</div></div>
     <div class="metric-cell"><div class="m-label">Time Saved vs Patrol</div><div class="m-value green">{avg_time_saved:.1f} min</div><div class="m-sub">per incident, on average</div></div>
-    <div class="metric-cell" style="background:#fafbfc"><div class="m-label">Total Fleet Units</div><div class="m-value" style="color:#374151">{actual_k_responder + actual_k_guardian}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
   </div>
   <p style="font-size:15px;color:#444;line-height:1.8;max-width:680px">
     The {jurisdiction_list} proposes a BRINC Drones Drone as a First Responder (DFR) program deploying

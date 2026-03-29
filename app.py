@@ -2759,22 +2759,75 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     <div style="font-size:0.65rem; color:{text_muted}; opacity:0.8; border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px; text-align:center;">{util_pct} utilization · ROI {d_best_be}</div>
   </div>
 
-  <!-- Stats grid -->
-  <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 8px; font-size:0.68rem; flex:1; margin-bottom:8px; align-content:start;">
-    <div style="color:{text_muted};">Zone Flights/day</div>
-    <div style="text-align:right; font-weight:700; color:{accent_color};">{d.get("zone_flights",d_flights):.1f}</div>
-    <div style="color:{text_muted};">Shared Flights</div>
-    <div style="text-align:right; font-weight:700; color:{card_title};">{d_shared:.1f}</div>
-    <div style="color:{text_muted};">Utilization</div>
-    <div style="text-align:right; font-weight:700; color:{util_color};">{util_pct}</div>
-    <div style="color:{text_muted};">Resolved/day</div>
-    <div style="text-align:right; font-weight:700; color:{card_title};">{d_deflected:.1f}</div>
-    <div style="color:{text_muted};">Avg Response</div>
-    <div style="text-align:right; font-weight:700; color:{card_title};">{d_time:.1f} min</div>
-    <div style="color:{text_muted};">FAA Ceiling</div>
-    <div style="text-align:right; font-weight:700; color:{card_title};">{d_faa}</div>
-    <div style="color:{text_muted};">Airfield</div>
-    <div style="text-align:right; font-weight:600; color:{card_title}; word-break:break-word;">{d_airport}</div>
+  <!-- Stats grid: two-column paired mini-cells -->
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.68rem; flex:1; margin-bottom:8px; align-content:start;">
+
+    <!-- Zone Flights/day -->
+    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Zone Flights/day</div>
+      <div style="font-weight:800; color:{accent_color}; font-size:0.82rem;">{d.get("zone_flights",d_flights):.1f}</div>
+    </div>
+    <!-- Shared Flights -->
+    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Shared Flights</div>
+      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_shared:.1f}</div>
+    </div>
+
+    <!-- Utilization -->
+    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Utilization</div>
+      <div style="font-weight:800; color:{util_color}; font-size:0.82rem;">{util_pct}</div>
+    </div>
+    <!-- Resolved/day -->
+    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Resolved/day</div>
+      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_deflected:.1f}</div>
+    </div>
+
+    <!-- Avg Response -->
+    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Avg Response</div>
+      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_time:.1f} min</div>
+    </div>
+    <!-- Zone Calls/yr (total calls in service area) -->
+    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Zone Calls/yr</div>
+      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{int(d_zone_calls):,}</div>
+    </div>
+
+    <!-- Radius -->
+    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Patrol Radius</div>
+      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d.get("radius_m",0)/1609.34:.1f} mi</div>
+    </div>
+    <!-- Speed -->
+    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Speed</div>
+      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d.get("speed_mph",0):.0f} mph</div>
+    </div>
+
+    <!-- Blocked/day (concurrent demand) -->
+    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Concurrent/day</div>
+      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_blocked:.1f}</div>
+    </div>
+    <!-- Monthly savings -->
+    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Monthly Value</div>
+      <div style="font-weight:800; color:{accent_color}; font-size:0.82rem;">${d.get("monthly_savings",0):,.0f}</div>
+    </div>
+
+    <!-- FAA Ceiling — spans full width -->
+    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">FAA Ceiling</div>
+      <div style="font-weight:700; color:{card_title}; font-size:0.72rem; line-height:1.2;">{d_faa}</div>
+    </div>
+    <!-- Airfield -->
+    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Nearest Airfield</div>
+      <div style="font-weight:600; color:{card_title}; font-size:0.68rem; line-height:1.2; word-break:break-word;">{d_airport}</div>
+    </div>
+
   </div>
 
   <!-- CapEx + ROI footer -->

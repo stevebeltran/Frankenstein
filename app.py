@@ -2688,11 +2688,13 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             # Always show the line so low-volume Responders display correctly
             patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= max_single_flight * 0.9 else "#00D2FF"
             cap_note = f" (max {max_single_flight}min)" if capped else ""
+            _annual_flights = total_daily_flights * 365
             patrol_time_line = (
                 f'<div style="font-size:0.65rem; color:{text_muted}; text-align:right; line-height:1.2;" '
                 f'title="{uptime_tooltip}">'
-                f'{total_daily_flights:.1f} flights<br>'
-                f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight{cap_note}</span></div>'
+                f'<span style="font-weight:800; color:{patrol_color};">{total_daily_flights:.1f} flights/day</span> '
+                f'<span style="font-weight:400; color:{text_muted}; font-size:0.60rem;">({_annual_flights:,.0f}/yr)</span><br>'
+                f'<span style="font-weight:600; color:{patrol_color};">{mins_per_flight:.1f} min/flight{cap_note}</span></div>'
             )
 
         # Concurrency / value breakdown
@@ -2798,9 +2800,10 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Shared Flights<span class="tip" data-tip="DFR flights in areas also covered by another drone. These are concurrent backup calls handled when the partner is busy.">?</span></div>
       <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_shared:.1f}</div>
     </div>
-    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Max DFR Rate<span class="tip" data-tip="The highest DFR dispatch rate this station can sustain without hitting a capacity deficit. Above this threshold the drone cannot maintain 10 min on-scene per flight.">?</span></div>
-      <div style="font-weight:800; color:{"#2ecc71" if d_max_cap > 0 and (d_zone_calls/365) > 0 and (d_max_cap/(d_zone_calls/365))*100 >= (dfr_dispatch_rate*100) else "#F0B429"}; font-size:0.82rem;">{min(999, (d_max_cap / max(d_zone_calls/365, 0.01)) * 100):.0f}%</div>
+    <div style="background:{"rgba(220,53,69,0.08)" if d_has_deficit else "rgba(255,255,255,0.04)"}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-radius:5px; padding:5px 7px;">
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Max DFR Rate<span class="tip" data-tip="The DFR dispatch rate at which this drone hits exactly 100% utilization. Reduce the slider to this value or below to clear a deficit. Formula: (max_flights_cap / zone_flights) x current_DFR.">?</span></div>
+      <div style="font-weight:800; color:{"#dc3545" if d_has_deficit else "#2ecc71"}; font-size:0.82rem;">{(d_max_cap / max(d.get("zone_flights", d_flights+d_shared), 0.001)) * dfr_dispatch_rate * 100:.1f}%</div>
+      <div style="font-size:0.59rem; color:{text_muted};">{"▼ reduce to clear" if d_has_deficit else "✓ current rate ok"}</div>
     </div>
     <div style="background:{"rgba(220,53,69,0.08)" if d_has_deficit else "rgba(255,255,255,0.04)"}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Utilization<span class="tip" data-tip="Flight time demanded as % of daily capacity using the 10-min on-scene floor model. Over 100% means this drone cannot serve all calls in its zone.">?</span></div>

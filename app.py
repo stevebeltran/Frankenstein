@@ -2671,13 +2671,16 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_thermal = d_thermal_calls * _THERMAL_PER_CALL
         d_k9 = d_k9_calls * _K9_PER_CALL
         max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
-        daily_capacity = max_patrol_mins / max(1.0, max_single_flight)
+        modeled_service_min = min(10.0, max_single_flight)
+        responder_daily_capacity = _RESPONDER_DAILY_MINS / max(1.0, min(10.0, CONFIG["RESPONDER_FLIGHT_MIN"]))
+        guardian_daily_capacity = _GUARDIAN_DAILY_MINS / max(1.0, min(10.0, CONFIG["GUARDIAN_FLIGHT_MIN"]))
+        daily_capacity = max_patrol_mins / max(1.0, modeled_service_min)
         annual_capacity = daily_capacity * 365.0
         flights_over_capacity = max(0.0, total_daily_flights - daily_capacity)
         annual_over_capacity = flights_over_capacity * 365.0
         capacity_util = (total_daily_flights / max(1.0, daily_capacity)) if daily_capacity > 0 else 0.0
-        extra_responders_needed = int(math.ceil(flights_over_capacity / max(1.0, _RESPONDER_DAILY_MINS / max(1.0, CONFIG["RESPONDER_FLIGHT_MIN"])))) if flights_over_capacity > 0 else 0
-        extra_guardians_needed = int(math.ceil(flights_over_capacity / max(1.0, _GUARDIAN_DAILY_MINS / max(1.0, CONFIG["GUARDIAN_FLIGHT_MIN"])))) if flights_over_capacity > 0 else 0
+        extra_responders_needed = int(math.ceil(flights_over_capacity / max(1.0, responder_daily_capacity))) if flights_over_capacity > 0 else 0
+        extra_guardians_needed = int(math.ceil(flights_over_capacity / max(1.0, guardian_daily_capacity))) if flights_over_capacity > 0 else 0
         capacity_status_color = "#ff5b6e" if flights_over_capacity > 0 else "#2ecc71"
         capacity_status_label = "OVER CAPACITY" if flights_over_capacity > 0 else "WITHIN CAPACITY"
         capacity_status_html = ""
@@ -2686,7 +2689,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
                 f'<div style="margin-bottom:8px; background:rgba(255,91,110,0.08); border:1px solid rgba(255,91,110,0.35); border-radius:6px; padding:8px 10px;">'
                 f'<div style="font-size:0.64rem; color:#ff9aa7; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; font-weight:800;">Station Over Capacity</div>'
                 f'<div style="font-size:0.82rem; font-weight:800; color:#ffffff; line-height:1.2;">{flights_over_capacity:.1f} flights/day over limit</div>'
-                f'<div style="font-size:0.64rem; color:{text_muted}; margin-top:4px; line-height:1.35;">Demand {total_daily_flights:.1f}/day vs capacity {daily_capacity:.1f}/day · add <span style="color:#00D2FF; font-weight:800;">{extra_responders_needed} responder{"s" if extra_responders_needed != 1 else ""}</span> or <span style="color:#39FF14; font-weight:800;">{extra_guardians_needed} guardian{"s" if extra_guardians_needed != 1 else ""}</span>.</div>'
+                f'<div style="font-size:0.64rem; color:{text_muted}; margin-top:4px; line-height:1.35;">Demand {total_daily_flights:.1f}/day vs capacity {daily_capacity:.1f}/day · add <span style="color:#00D2FF; font-weight:800;">{extra_responders_needed} responder{"s" if extra_responders_needed != 1 else ""}</span> or <span style="color:#39FF14; font-weight:800;">{extra_guardians_needed} guardian{"s" if extra_guardians_needed != 1 else ""}</span> at <span style="color:#ffffff; font-weight:700;">{modeled_service_min:.0f} min/flight</span>.</div>'
                 f'</div>'
             )
         else:
@@ -2695,17 +2698,17 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
                 f'<div style="margin-bottom:8px; background:rgba(46,204,113,0.06); border:1px solid rgba(46,204,113,0.22); border-radius:6px; padding:8px 10px;">'
                 f'<div style="font-size:0.64rem; color:#7ee2a8; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; font-weight:800;">Within Daily Capacity</div>'
                 f'<div style="font-size:0.80rem; font-weight:800; color:#ffffff; line-height:1.2;">{spare_flights:.1f} flights/day spare</div>'
-                f'<div style="font-size:0.64rem; color:{text_muted}; margin-top:4px; line-height:1.35;">Demand {total_daily_flights:.1f}/day vs capacity {daily_capacity:.1f}/day at {max_single_flight:.0f} min/flight max.</div>'
+                f'<div style="font-size:0.64rem; color:{text_muted}; margin-top:4px; line-height:1.35;">Demand {total_daily_flights:.1f}/day vs capacity {daily_capacity:.1f}/day using {modeled_service_min:.0f} min/flight modeled service time.</div>'
                 f'</div>'
             )
         patrol_time_line = ""
         if total_daily_flights > 0:
             # Raw calculation: patrol budget / flights = available min per flight
             raw_mins_per_flight = max_patrol_mins / total_daily_flights
-            mins_per_flight = min(raw_mins_per_flight, max_single_flight)
-            capped = raw_mins_per_flight > max_single_flight
-            patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= max_single_flight * 0.9 else "#00D2FF"
-            cap_note = f" (max {max_single_flight}min)" if capped else ""
+            mins_per_flight = min(raw_mins_per_flight, modeled_service_min)
+            capped = raw_mins_per_flight > modeled_service_min
+            patrol_color = "#F0B429" if mins_per_flight < 8 else "#2ecc71" if mins_per_flight >= modeled_service_min * 0.9 else "#00D2FF"
+            cap_note = f" (model {modeled_service_min:.0f}min)" if capped else ""
             patrol_time_line = (
                 f'<div style="font-size:0.65rem; color:{text_muted}; text-align:right; line-height:1.2;" '
                 f'title="{uptime_tooltip}">'
@@ -2732,10 +2735,16 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             _conc_str = ""
 
         cards_html.append(f'''
-<div class="unit-card" style="background:{card_bg}; border-top:3px solid {d_color}; border:1px solid {card_border}; border-top:3px solid {d_color}; border-radius:8px; padding:12px; display:flex; flex-direction:column; box-sizing:border-box; min-height:440px; height:100%;">
+<div class="unit-card" style="background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.00)), {card_bg}; border:1px solid {d_color}; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.03), 0 0 0 1px rgba(0,0,0,0.15); border-top:4px solid {d_color}; border-radius:8px; padding:12px; display:flex; flex-direction:column; box-sizing:border-box; min-height:440px; height:100%;">
   <!-- Header: name + type badge -->
   <div style="margin-bottom:8px; min-height:82px;">
-    <div style="font-weight:700; font-size:0.88rem; color:{card_title}; line-height:1.3; margin-bottom:2px;">{short_name}</div>
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:2px;">
+      <div style="font-weight:700; font-size:0.88rem; color:{card_title}; line-height:1.3;">{short_name}</div>
+      <div style="display:flex; align-items:center; gap:5px; background:rgba(0,0,0,0.22); border:1px solid rgba(255,255,255,0.08); border-radius:999px; padding:2px 7px; flex-shrink:0;">
+        <span style="display:inline-block; width:8px; height:8px; border-radius:999px; background:{d_color}; box-shadow:0 0 8px {d_color};"></span>
+        <span style="font-size:0.58rem; font-weight:800; color:{card_title}; letter-spacing:0.5px; text-transform:uppercase;">Map Ring</span>
+      </div>
+    </div>
     <div style="font-size:0.70rem; color:#777; text-transform:uppercase; letter-spacing:0.5px;">{"🔒 " if d.get("pinned") else ""}{d_type} · Phase #{d_step}</div>
     <div style="font-size:0.72rem; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
       <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>

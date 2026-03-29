@@ -363,19 +363,20 @@ CONFIG = {
     "K9_DEFAULT_APPLICABLE_RATE": 0.03,
     "K9_SAVINGS_PER_CALL": 155,
     "DEFAULT_TRAFFIC_SPEED": 35.0, "RESPONDER_SPEED": 42.0, "GUARDIAN_SPEED": 60.0,
-    # Guardian duty cycle: 60 min flight + 3 min charge = 63 min cycle
-    # Daily airtime = (24*60) / 63 * 60 = 1371.4 min = 22.86 hrs
-    "GUARDIAN_FLIGHT_MIN":  60,   # flight minutes per cycle
-    "GUARDIAN_CHARGE_MIN":   3,   # charge minutes per cycle
-    # Responder duty cycle: 30-min max flight per sortie, 11.6hr shift
-    "RESPONDER_FLIGHT_MIN":   30,    # max flight minutes per sortie
-    "RESPONDER_PATROL_HOURS": 11.6,
+    # Card/service-time model: available airtime per hour × 24 hr day.
+    # Responder: 30 min/hr  ->  720 min/day
+    # Guardian:  58 min/hr  -> 1392 min/day
+    "GUARDIAN_FLIGHT_MIN":  60,   # max single flight minutes shown on card
+    "GUARDIAN_CHARGE_MIN":   3,   # legacy / informational only
+    "GUARDIAN_MIN_PER_HOUR": 58.0,
+    "RESPONDER_FLIGHT_MIN":   30,   # max single flight minutes shown on card
+    "RESPONDER_MIN_PER_HOUR": 30.0,
 }
-# Derived: compute Guardian daily airtime from duty cycle
-CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] = (
-    (24 * 60) / (CONFIG["GUARDIAN_FLIGHT_MIN"] + CONFIG["GUARDIAN_CHARGE_MIN"])
-) * CONFIG["GUARDIAN_FLIGHT_MIN"]
-CONFIG["GUARDIAN_PATROL_HOURS"] = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] / 60
+# Derived: daily airtime budgets used by the station cards
+CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] = CONFIG["GUARDIAN_MIN_PER_HOUR"] * 24.0
+CONFIG["GUARDIAN_PATROL_HOURS"] = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] / 60.0
+CONFIG["RESPONDER_DAILY_FLIGHT_MIN"] = CONFIG["RESPONDER_MIN_PER_HOUR"] * 24.0
+CONFIG["RESPONDER_PATROL_HOURS"] = CONFIG["RESPONDER_DAILY_FLIGHT_MIN"] / 60.0
 STATE_FIPS = {"AL": "01", "AK": "02", "AZ": "04", "AR": "05", "CA": "06", "CO": "08", "CT": "09", "DE": "10", "FL": "12", "GA": "13", "HI": "15", "ID": "16", "IL": "17", "IN": "18", "IA": "19", "KS": "20", "KY": "21", "LA": "22", "ME": "23", "MD": "24", "MA": "25", "MI": "26", "MN": "27", "MS": "28", "MO": "29", "MT": "30", "NE": "31", "NV": "32", "NH": "33", "NJ": "34", "NM": "35", "NY": "36", "NC": "37", "ND": "38", "OH": "39", "OK": "40", "OR": "41", "PA": "42", "RI": "44", "SC": "45", "SD": "46", "TN": "47", "TX": "48", "UT": "49", "VT": "50", "VA": "51", "WA": "53", "WV": "54", "WI": "55", "WY": "56"}
 US_STATES_ABBR = {"Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA", "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL", "Indiana": "IN", "Iowa": "IA", "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA", "Maine": "ME", "Maryland": "MD", "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN", "Mississippi": "MS", "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV", "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK", "Oregon": "OR", "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD", "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT", "Virginia": "VA", "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY"}
 KNOWN_POPULATIONS = {"Victoria": 65534, "New York": 8336817, "Los Angeles": 3822238, "Chicago": 2665039, "Houston": 1304379, "Phoenix": 1644409, "Philadelphia": 1567258, "San Antonio": 2302878, "San Diego": 1472530, "Dallas": 1299544, "San Jose": 1381162, "Austin": 974447, "Jacksonville": 971319, "Fort Worth": 956709, "Columbus": 907971, "Indianapolis": 880621, "Charlotte": 897720, "San Francisco": 971233, "Seattle": 749256, "Denver": 713252, "Washington": 678972, "Nashville": 683622, "Oklahoma City": 694800, "El Paso": 694553, "Boston": 650706, "Portland": 635067, "Las Vegas": 656274, "Detroit": 620376, "Memphis": 633104, "Louisville": 628594, "Baltimore": 620961, "Milwaukee": 620251, "Albuquerque": 677122, "Tucson": 564559, "Fresno": 677102, "Sacramento": 808418, "Kansas City": 697738, "Mesa": 504258, "Atlanta": 499127, "Omaha": 508901, "Colorado Springs": 483956, "Raleigh": 476587, "Miami": 449514, "Virginia Beach": 455369, "Oakland": 530763, "Minneapolis": 563332, "Tulsa": 547239, "Arlington": 398654, "New Orleans": 562503, "Wichita": 402263, "Cleveland": 900000, "Tampa": 449514, "Orlando": 316081}
@@ -2607,13 +2608,13 @@ def format_3_lines(name_str):
 def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2):
     if not active_drones:
         return ""
-    # Per-type daily airtime budgets derived from CONFIG duty cycles:
-    #   Guardian: 60 min flight + 3 min charge → (24*60/63)*60 = 1371.4 min = 22.86 hr
-    #   Responder: patrol-unit model, 11.6 hr shift equivalent
-    _GUARDIAN_DAILY_MINS  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]   # ~1371.4
-    _GUARDIAN_DAILY_HOURS = CONFIG["GUARDIAN_PATROL_HOURS"]        # ~22.86
-    _RESPONDER_DAILY_MINS  = CONFIG["RESPONDER_PATROL_HOURS"] * 60 # 11.6 * 60 = 696
-    _RESPONDER_DAILY_HOURS = CONFIG["RESPONDER_PATROL_HOURS"]      # 11.6
+    # Per-type daily airtime budgets based on user rule:
+    #   Responder: 30 minutes per hour x 24 = 720 min/day
+    #   Guardian:  58 minutes per hour x 24 = 1392 min/day
+    _GUARDIAN_DAILY_MINS  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]
+    _GUARDIAN_DAILY_HOURS = CONFIG["GUARDIAN_PATROL_HOURS"]
+    _RESPONDER_DAILY_MINS  = CONFIG["RESPONDER_DAILY_FLIGHT_MIN"]
+    _RESPONDER_DAILY_HOURS = CONFIG["RESPONDER_PATROL_HOURS"]
     columns_per_row = max(1, int(columns_per_row))
 
     # Specialty-response values are independent from Annual Capacity Value.
@@ -2649,19 +2650,17 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         max_patrol_mins  = _GUARDIAN_DAILY_MINS  if is_guardian else _RESPONDER_DAILY_MINS
         max_patrol_hours = _GUARDIAN_DAILY_HOURS if is_guardian else _RESPONDER_DAILY_HOURS
 
-        # Uptime tooltip: show the duty-cycle breakdown for Guardians
+        # Availability tooltip uses the product rule minutes-per-hour budget.
         if is_guardian:
-            _g_fl  = CONFIG["GUARDIAN_FLIGHT_MIN"]
-            _g_ch  = CONFIG["GUARDIAN_CHARGE_MIN"]
-            _g_cyc = _g_fl + _g_ch
-            _cycles_per_day = (24 * 60) / _g_cyc
             uptime_tooltip = (
-                f"{_g_fl}min flight + {_g_ch}min charge = {_g_cyc}min cycle · "
-                f"{_cycles_per_day:.1f} cycles/day · "
-                f"{max_patrol_hours:.2f}hr airtime"
+                f"Guardian availability model: {CONFIG['GUARDIAN_MIN_PER_HOUR']:.0f} min/hr x 24 hr = "
+                f"{max_patrol_mins:.0f} min/day ({max_patrol_hours:.1f} hr/day)"
             )
         else:
-            uptime_tooltip = f"{max_patrol_hours}hr patrol shift"
+            uptime_tooltip = (
+                f"Responder availability model: {CONFIG['RESPONDER_MIN_PER_HOUR']:.0f} min/hr x 24 hr = "
+                f"{max_patrol_mins:.0f} min/day ({max_patrol_hours:.1f} hr/day)"
+            )
 
         total_daily_flights = d_flights + d_shared
         d_zone_calls = float(d.get("zone_calls_annual", 0) or 0)
@@ -2670,61 +2669,74 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_k9_calls = d_zone_flights_annual * _K9_RATE
         d_thermal = d_thermal_calls * _THERMAL_PER_CALL
         d_k9 = d_k9_calls * _K9_PER_CALL
-        max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
-        modeled_service_min = min(10.0, max_single_flight)
-        responder_daily_capacity = _RESPONDER_DAILY_MINS / max(1.0, min(10.0, CONFIG["RESPONDER_FLIGHT_MIN"]))
-        guardian_daily_capacity = _GUARDIAN_DAILY_MINS / max(1.0, min(10.0, CONFIG["GUARDIAN_FLIGHT_MIN"]))
-        daily_capacity = max_patrol_mins / max(1.0, modeled_service_min)
-        annual_capacity = daily_capacity * 365.0
-        flights_over_capacity = max(0.0, total_daily_flights - daily_capacity)
-        annual_over_capacity = flights_over_capacity * 365.0
-        capacity_util = (total_daily_flights / max(1.0, daily_capacity)) if daily_capacity > 0 else 0.0
-        extra_responders_needed = int(math.ceil(flights_over_capacity / max(1.0, responder_daily_capacity))) if flights_over_capacity > 0 else 0
-        extra_guardians_needed = int(math.ceil(flights_over_capacity / max(1.0, guardian_daily_capacity))) if flights_over_capacity > 0 else 0
+        max_single_flight = float(CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"])
+        min_service_floor = 10.0
+        # Daily service-time model requested by product:
+        #   Responder daily airtime = 30 min/hr x 24 = 720 min/day
+        #   Guardian daily airtime  = 58 min/hr x 24 = 1392 min/day
+        # Per-call time = daily airtime / daily calls in ring.
+        # Show the platform max single-flight window when demand is very light,
+        # but once raw service time drops below the 10-minute floor, clamp the
+        # displayed time to 10 and treat the excess daily calls as deficit.
+        daily_available_mins = max_patrol_mins
+        raw_mins_per_flight = (daily_available_mins / total_daily_flights) if total_daily_flights > 0 else max_single_flight
+        modeled_service_min = max(min_service_floor, min(max_single_flight, raw_mins_per_flight))
+        same_type_capacity = daily_available_mins / min_service_floor
+        responder_station_capacity = float(CONFIG["RESPONDER_DAILY_FLIGHT_MIN"]) / min_service_floor
+        guardian_station_capacity = float(CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]) / min_service_floor
+        flights_over_capacity = max(0.0, total_daily_flights - same_type_capacity)
+        same_type_total_needed = int(math.ceil(total_daily_flights / max(1.0, same_type_capacity))) if total_daily_flights > 0 else 1
+        extra_same_type_needed = max(0, same_type_total_needed - 1)
+        responder_total_needed = int(math.ceil(total_daily_flights / max(1.0, responder_station_capacity))) if total_daily_flights > 0 else 1
+        guardian_total_needed = int(math.ceil(total_daily_flights / max(1.0, guardian_station_capacity))) if total_daily_flights > 0 else 1
+        extra_responders_needed = max(0, responder_total_needed - 1)
+        extra_guardians_needed = max(0, guardian_total_needed - 1)
         capacity_status_color = "#ff5b6e" if flights_over_capacity > 0 else "#2ecc71"
-        capacity_status_label = "OVER CAPACITY" if flights_over_capacity > 0 else "WITHIN CAPACITY"
+        capacity_status_label = "MIN FLOOR HIT" if flights_over_capacity > 0 else "ABOVE MIN FLOOR"
         capacity_status_html = ""
         if flights_over_capacity > 0:
+            same_type_label = "guardian" if is_guardian else "responder"
             capacity_status_html = (
                 f'<div style="margin-bottom:8px; background:rgba(255,91,110,0.08); border:1px solid rgba(255,91,110,0.35); border-radius:6px; padding:8px 10px;">'
-                f'<div style="font-size:0.64rem; color:#ff9aa7; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; font-weight:800;">Station Over Capacity</div>'
-                f'<div style="font-size:0.82rem; font-weight:800; color:#ffffff; line-height:1.2;">{flights_over_capacity:.1f} flights/day over limit</div>'
-                f'<div style="font-size:0.64rem; color:{text_muted}; margin-top:4px; line-height:1.35;">Demand {total_daily_flights:.1f}/day vs capacity {daily_capacity:.1f}/day · add <span style="color:#00D2FF; font-weight:800;">{extra_responders_needed} responder{"s" if extra_responders_needed != 1 else ""}</span> or <span style="color:#39FF14; font-weight:800;">{extra_guardians_needed} guardian{"s" if extra_guardians_needed != 1 else ""}</span> at <span style="color:#ffffff; font-weight:700;">{modeled_service_min:.0f} min/flight</span>.</div>'
+                f'<div style="font-size:0.64rem; color:#ff9aa7; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; font-weight:800;">Additional Stations Needed</div>'
+                f'<div style="font-size:0.82rem; font-weight:800; color:#ffffff; line-height:1.2;">{flights_over_capacity:.1f} flights/day beyond {same_type_capacity:.1f} per-station floor capacity</div>'
+                f'<div style="font-size:0.64rem; color:{text_muted}; margin-top:4px; line-height:1.35;">Demand {total_daily_flights:.1f}/day pushes raw service time below the <span style="color:#ffffff; font-weight:700;">10 min minimum</span>. Add <span style="color:{d_color}; font-weight:800;">{extra_same_type_needed} more {same_type_label}{"s" if extra_same_type_needed != 1 else ""}</span> to keep this ring at the floor, or <span style="color:#00D2FF; font-weight:800;">{extra_responders_needed} responder{"s" if extra_responders_needed != 1 else ""}</span> / <span style="color:#39FF14; font-weight:800;">{extra_guardians_needed} guardian{"s" if extra_guardians_needed != 1 else ""}</span>.</div>'
                 f'</div>'
             )
         else:
-            spare_flights = max(0.0, daily_capacity - total_daily_flights)
+            spare_flights = max(0.0, same_type_capacity - total_daily_flights)
             capacity_status_html = (
                 f'<div style="margin-bottom:8px; background:rgba(46,204,113,0.06); border:1px solid rgba(46,204,113,0.22); border-radius:6px; padding:8px 10px;">'
-                f'<div style="font-size:0.64rem; color:#7ee2a8; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; font-weight:800;">Within Daily Capacity</div>'
-                f'<div style="font-size:0.80rem; font-weight:800; color:#ffffff; line-height:1.2;">{spare_flights:.1f} flights/day spare</div>'
-                f'<div style="font-size:0.64rem; color:{text_muted}; margin-top:4px; line-height:1.35;">Demand {total_daily_flights:.1f}/day vs capacity {daily_capacity:.1f}/day using {modeled_service_min:.0f} min/flight modeled service time.</div>'
+                f'<div style="font-size:0.64rem; color:#7ee2a8; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; font-weight:800;">Above Minimum Flight-Time Floor</div>'
+                f'<div style="font-size:0.80rem; font-weight:800; color:#ffffff; line-height:1.2;">{spare_flights:.1f} flights/day before hitting 10 min floor</div>'
+                f'<div style="font-size:0.64rem; color:{text_muted}; margin-top:4px; line-height:1.35;">Demand {total_daily_flights:.1f}/day keeps this station above the 10 min minimum. Ring capacity at floor: {same_type_capacity:.1f} flights/day from {daily_available_mins:.0f} available min/day.</div>'
                 f'</div>'
             )
         patrol_time_line = ""
         if total_daily_flights > 0:
-            # Raw calculation: patrol budget / flights = available min per flight
-            raw_mins_per_flight = max_patrol_mins / total_daily_flights
-            mins_per_flight = min(raw_mins_per_flight, modeled_service_min)
-            capped = raw_mins_per_flight > modeled_service_min
-            patrol_color = "#F0B429" if mins_per_flight < 8 else "#2ecc71" if mins_per_flight >= modeled_service_min * 0.9 else "#00D2FF"
-            cap_note = f" (model {modeled_service_min:.0f}min)" if capped else ""
+            patrol_color = "#ff5b6e" if raw_mins_per_flight < min_service_floor else "#2ecc71" if modeled_service_min >= max_single_flight * 0.9 else "#00D2FF"
+            floor_note = f" (min {min_service_floor:.0f})" if raw_mins_per_flight < min_service_floor else ""
             patrol_time_line = (
                 f'<div style="font-size:0.65rem; color:{text_muted}; text-align:right; line-height:1.2;" '
                 f'title="{uptime_tooltip}">'
                 f'{total_daily_flights:.1f} flights<br>'
-                f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight{cap_note}</span></div>'
+                f'<span style="font-weight:800; color:{patrol_color};">{modeled_service_min:.1f} min/flight{floor_note}</span></div>'
             )
 
         # Concurrency / value breakdown
-        d_util         = d.get('utilization', 0)
+        # Utilization is now aligned to the per-station service-time floor model:
+        # it represents how much of this station's floor capacity is consumed by
+        # the ring's current daily drone-flight demand.
+        daily_capacity = same_type_capacity
+        d_util         = (total_daily_flights / max(1.0, daily_capacity)) if total_daily_flights > 0 else 0.0
         d_blocked      = d.get('blocked_per_day', 0)
         d_base_annual  = d.get('base_annual', d_savings)
         d_conc_annual  = d.get('concurrent_annual', 0)
         d_best         = d.get('best_case_annual', d_savings)
         d_best_be      = d.get('best_be_text', d_be)
         util_pct       = f"{d_util*100:.1f}%"
-        util_color     = "#dc3545" if d_util > 0.75 else "#F0B429" if d_util > 0.4 else "#2ecc71"
+        util_color     = "#dc3545" if d_util > 1.0 else "#F0B429" if d_util > 0.75 else "#2ecc71"
+        util_title     = f"{total_daily_flights:.1f} flights/day demand using {daily_available_mins:.0f} available min/day; floor capacity is {daily_capacity:.1f} flights/day at 10 min/flight"
         has_concurrent = d_shared > 0.1 and d_conc_annual > 0
         # Breakdown label for the value box
         if has_concurrent:
@@ -2806,7 +2818,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Utilization</div>
-      <div style="font-weight:800; color:{util_color}; font-size:0.82rem;">{util_pct}</div>
+      <div title="{util_title}" style="font-weight:800; color:{util_color}; font-size:0.82rem;">{util_pct}</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Daily Capacity</div>
@@ -5874,7 +5886,7 @@ if st.session_state['csvs_ready']:
             # Responders should reflect how busy they truly are in their patrol zone.
             # daily calls dispatched to this drone = zone calls × dispatch rate
             _is_guard    = (d_type == 'GUARDIAN')
-            _budget_min  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] if _is_guard else (CONFIG["RESPONDER_PATROL_HOURS"] * 60)
+            _budget_min  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] if _is_guard else CONFIG["RESPONDER_DAILY_FLIGHT_MIN"]
             _zone_flights = _raw_zone_perc * calls_per_day * dfr_dispatch_rate
             _util = min(0.99, (_zone_flights * avg_time_min) / max(1.0, _budget_min))
 

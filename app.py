@@ -6660,10 +6660,10 @@ if st.session_state['csvs_ready']:
         _n_months = max(1, min(_n_months, 12))
         _cal_cols = 3                        # columns at typical sidebar-open viewport
         _cal_rows = _math.ceil(_n_months / _cal_cols)
-        _cal_px   = _cal_rows * 290          # ~290px per calendar row (header + up to 6 week rows + gap)
+        _cal_px   = _cal_rows * 260          # ~260px per calendar row (tightened)
         # Fixed chrome above the calendar:
         #   section header 60 + controls bar 70 + KPI cards 110 + shift/dow panel 210 + legend+label 55
-        _fixed_px = 505
+        _fixed_px = 460
         _analytics_height = _fixed_px + _cal_px
     components.html(analytics_html_block, height=_analytics_height, scrolling=False)
 
@@ -6672,7 +6672,7 @@ if st.session_state['csvs_ready']:
         st.markdown("<div style='margin-top:-6px;'></div>", unsafe_allow_html=True)
     elif _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
         # Collapse gap between components.html block and the plotly charts below
-        st.markdown("<div style='margin-top:-48px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='margin-top:-80px;'></div>", unsafe_allow_html=True)
         _build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
 
     # ── COMMUNITY IMPACT DASHBOARD ────────────────────────────────────────────

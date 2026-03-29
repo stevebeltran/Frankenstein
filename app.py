@@ -7005,8 +7005,18 @@ if st.session_state['csvs_ready']:
             ))
         fig_for_export.update_layout(
             mapbox=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
-            margin=dict(l=0,r=0,t=0,b=0), height=500, showlegend=True,
-            legend=dict(bgcolor=legend_bg, font=dict(color=legend_text, size=11))
+            margin=dict(l=0,r=0,t=40,b=0), height=500, showlegend=True,
+legend=dict(
+    bgcolor="rgba(15, 20, 30, 0.97)",   # near-opaque, readable on any background
+    bordercolor="#00D2FF",
+    borderwidth=1,
+    font=dict(color="#ffffff", size=11),
+    yanchor="top",
+    y=1.12,          # floats the legend ABOVE the map — no overlap with controls
+    xanchor="left",
+    x=0.0,
+    orientation="h"  # horizontal row instead of stacked column, saves vertical space
+)
         )
         map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
         station_rows = "".join(f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>" for d in active_drones)

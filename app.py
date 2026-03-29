@@ -5,8 +5,7 @@ import numpy as np
 import plotly.graph_objects as go
 from shapely.geometry import Point, Polygon, MultiPolygon, box, shape
 from shapely.ops import unary_union
-import os, itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib, uuid
-import threading, weakref, atexit
+import os, itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib, uuid, traceback
 from concurrent.futures import ThreadPoolExecutor
 import pulp
 import urllib.request
@@ -20,177 +19,7 @@ from google.oauth2.service_account import Credentials
 import pyproj
 from PIL import Image
 
-# ============================================================
-# SESSION-CLOSE LOGGING
-# Fires _notify_email + _log_to_sheets when a session ends
-# (tab close, timeout, or server restart).  Uses a weakref
-# finalizer on the session state object — Streamlit GCs it
-# when the session is torn down.
-# ============================================================
-
-# Global registry: session_id → snapshot dict
-# Populated/updated every run; cleaned up by finalizer.
-_SESSION_REGISTRY: dict[str, dict] = {}
-_REGISTRY_LOCK = threading.Lock()
-
-
-def _flush_session(snapshot: dict) -> None:
-    """Run in a background thread so it never blocks the UI."""
-    try:
-        city     = snapshot.get("active_city", "")
-        state    = snapshot.get("active_state", "")
-        name     = snapshot.get("brinc_user", "")
-        email_to = snapshot.get("brinc_email", "")
-        details  = snapshot.get("export_details", {})
-        coverage = float(details.get("area_covered_pct", 0) or 0)
-        k_resp   = int(details.get("k_resp", 0) or 0)
-        k_guard  = int(details.get("k_guard", 0) or 0)
-
-        # Compute final session duration
-        try:
-            start_str = snapshot.get("session_start", "")
-            if start_str:
-                start_dt = datetime.datetime.strptime(start_str, "%Y-%m-%d %H:%M:%S")
-                details["session_duration_min"] = round(
-                    (datetime.datetime.now() - start_dt).total_seconds() / 60, 1
-                )
-        except Exception:
-            pass
-
-        # Tag this row so you can tell it's a session-close event
-        details["log_trigger"] = "session_close"
-
-        _notify_email(city, state, "SESSION_CLOSE", k_resp, k_guard,
-                      coverage, name, email_to, details=details)
-        _log_to_sheets(city, state, "SESSION_CLOSE", k_resp, k_guard,
-                       coverage, name, email_to, details=details)
-    except Exception:
-        pass
-
-
-def _make_session_finalizer(session_id: str) -> None:
-    """
-    Attach a weakref finalizer to the session state mapping object.
-    When Streamlit destroys the session, the finalizer fires _flush_session
-    in a daemon thread (won't block server shutdown).
-    """
-    try:
-        # st.session_state._state is the underlying dict-like object.
-        # We weakref it; when it's GC'd the callback fires.
-        target = st.session_state._state  # internal attr, stable across versions
-    except AttributeError:
-        # Fallback: weakref the session_state proxy itself
-        target = st.session_state
-
-    def _on_gc(sid):
-        with _REGISTRY_LOCK:
-            snap = _SESSION_REGISTRY.pop(sid, None)
-        if snap:
-            t = threading.Thread(target=_flush_session, args=(snap,), daemon=True)
-            t.start()
-
-    weakref.finalize(target, _on_gc, session_id)
-
-
-def _update_session_snapshot() -> None:
-    """
-    Call once per run (after session state is populated) to keep the
-    registry snapshot current.  The finalizer will use the last snapshot
-    written before the session dies.
-    """
-    sid = st.session_state.get("session_id", "")
-    if not sid:
-        return
-
-    # Build a lean export_details snapshot from current session state
-    # (mirrors the logic in the main export block but without needing
-    #  active_drones / optimizer output — those will be empty if the
-    #  user never deployed, which is fine; we still want the session logged).
-    try:
-        _session_start = st.session_state.get("session_start", "")
-        try:
-            _start_dt = datetime.datetime.strptime(_session_start, "%Y-%m-%d %H:%M:%S")
-            _dur = round((datetime.datetime.now() - _start_dt).total_seconds() / 60, 1)
-        except Exception:
-            _dur = ""
-
-        snap_details = {
-            # Session
-            "session_id":               sid,
-            "session_start":            _session_start,
-            "session_duration_min":     _dur,
-            "data_source":              st.session_state.get("data_source", "unknown"),
-            # Who
-            "pd_chief":                 st.session_state.get("pd_chief_name", ""),
-            "pd_dept":                  st.session_state.get("pd_dept_name", ""),
-            "pd_dept_email":            st.session_state.get("pd_dept_email", ""),
-            "pd_dept_phone":            st.session_state.get("pd_dept_phone", ""),
-            # Where
-            "population":               st.session_state.get("estimated_pop", 0),
-            "total_calls":              st.session_state.get("total_original_calls", 0),
-            "daily_calls":              max(1, int(st.session_state.get("total_original_calls", 0) / 365)),
-            "area_sq_mi":               0,
-            # City / state enrichment
-            "city_confirmed_match":     "",
-            "multi_city_targets":       json.dumps(st.session_state.get("target_cities", [])),
-            "num_cities_targeted":      len(st.session_state.get("target_cities", [])),
-            "calls_per_capita":         round(
-                st.session_state.get("total_original_calls", 0) /
-                max(st.session_state.get("estimated_pop", 1), 1), 4
-            ),
-            # Settings
-            "dfr_rate":                 st.session_state.get("dfr_rate", 0),
-            "deflect_rate":             st.session_state.get("deflect_rate", 0),
-            "r_resp_radius":            st.session_state.get("r_resp", ""),
-            "r_guard_radius":           st.session_state.get("r_guard", ""),
-            "estimated_pop_input":      st.session_state.get("estimated_pop", 0),
-            "boundary_kind":            st.session_state.get("boundary_kind", ""),
-            "boundary_source_path":     st.session_state.get("boundary_source_path", ""),
-            "sim_or_upload":            st.session_state.get("data_source", "unknown"),
-            "onboarding_completed":     st.session_state.get("onboarding_done", False),
-            "demo_mode_used":           st.session_state.get("demo_mode_used", False),
-            "map_viewed":               st.session_state.get("map_build_logged", False),
-            "export_type_sequence":     json.dumps(st.session_state.get("export_event_log", [])),
-            "total_exports_in_session": st.session_state.get("export_count", 0),
-            # Fleet (empty until drones are placed)
-            "fleet_capex":              0,
-            "annual_savings":           0,
-            "break_even":               "",
-            "avg_response_min":         0,
-            "avg_time_saved_min":       0,
-            "area_covered_pct":         0,
-            "k_resp":                   st.session_state.get("k_resp", 0),
-            "k_guard":                  st.session_state.get("k_guard", 0),
-            "opt_strategy":             "",
-            "incremental_build":        False,
-            "allow_redundancy":         False,
-            "active_drones":            [],
-            # File data matrix
-            "file_meta":                st.session_state.get("file_meta", {}),
-        }
-
-        snapshot = {
-            "session_id":    sid,
-            "active_city":   st.session_state.get("active_city", ""),
-            "active_state":  st.session_state.get("active_state", ""),
-            "brinc_user":    st.session_state.get("_prop_name", st.session_state.get("brinc_user", "")),
-            "brinc_email":   st.session_state.get("_prop_email", ""),
-            "session_start": _session_start,
-            "export_details": snap_details,
-        }
-
-        with _REGISTRY_LOCK:
-            _SESSION_REGISTRY[sid] = snapshot
-
-    except Exception:
-        pass
-
-
-# ============================================================
-# END SESSION-CLOSE LOGGING SETUP
-# ============================================================
-
-
+# --- PAGE CONFIG & INITIALIZE SESSION STATE ---
 st.set_page_config(page_title="BRINC COS Drone Optimizer", layout="wide", initial_sidebar_state="expanded")
 
 # This MUST run before any st.session_state checks to prevent KeyError
@@ -218,13 +47,6 @@ defaults = {
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
-
-# ── Session-close logging: register finalizer once, update snapshot every run ─
-if '_session_finalizer_registered' not in st.session_state:
-    _make_session_finalizer(st.session_state['session_id'])
-    st.session_state['_session_finalizer_registered'] = True
-
-_update_session_snapshot()
 
 
 if 'target_cities' not in st.session_state:
@@ -482,7 +304,7 @@ def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email
         app_password   = st.secrets.get("GMAIL_APP_PASSWORD", "")
         notify_address = st.secrets.get("NOTIFY_EMAIL", gmail_address)
         if not gmail_address or not app_password: return
-        emoji = {"HTML": "📄", "KML": "🌏", "BRINC": "💾", "MAP_BUILD": "🗺️", "SESSION_CLOSE": "🔚"}.get(file_type, "📥")
+        emoji = {"HTML": "📄", "KML": "🌏", "BRINC": "💾", "MAP_BUILD": "🗺️"}.get(file_type, "📥")
         subject = f"{emoji} BRINC {file_type.replace('_',' ').title()} — {city}, {state}"
         details_html = _build_details_html(details)
         d = details or {}
@@ -548,6 +370,16 @@ CONFIG = {
     # Responder duty cycle: 30-min max flight per sortie, 11.6hr shift
     "RESPONDER_FLIGHT_MIN":   30,    # max flight minutes per sortie
     "RESPONDER_PATROL_HOURS": 11.6,
+    # Officer / drone cost model
+    "OFFICER_HOURLY_WAGE": 37.0,     # baseline hourly wage for overtime estimates
+    # Outcome rates (modeled estimates; adjust per-agency as needed)
+    "OUTCOME_ARREST_RATE":      0.043,
+    "OUTCOME_RESCUE_RATE":      0.021,
+    "OUTCOME_DEESCALATION_RATE":0.11,
+    "OUTCOME_MISSING_RATE":     0.008,
+    # drone_wins_pct formula: pct = clamp(calls_covered * WINS_MULTIPLIER, WINS_FLOOR, 99)
+    "DRONE_WINS_MULTIPLIER":    0.72,
+    "DRONE_WINS_FLOOR":         60,
 }
 # Derived: compute Guardian daily airtime from duty cycle
 CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] = (
@@ -623,15 +455,13 @@ def get_transparent_product_base64(image_file="gigs.png", threshold=32):
     """Return product image as transparent PNG by removing near-black background."""
     try:
         with Image.open(image_file).convert('RGBA') as img:
-            px = img.load()
-            w, h = img.size
-            for y in range(h):
-                for x in range(w):
-                    r, g, b, a = px[x, y]
-                    if r <= threshold and g <= threshold and b <= threshold:
-                        px[x, y] = (r, g, b, 0)
+            arr = np.array(img)
+            r, g, b, a = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2], arr[:, :, 3]
+            mask = (r <= threshold) & (g <= threshold) & (b <= threshold)
+            arr[:, :, 3] = np.where(mask, 0, a)
+            result = Image.fromarray(arr, 'RGBA')
             buf = io.BytesIO()
-            img.save(buf, format='PNG')
+            result.save(buf, format='PNG')
             return base64.b64encode(buf.getvalue()).decode()
     except Exception:
         return get_base64_of_bin_file(image_file)
@@ -703,7 +533,7 @@ def estimate_high_activity_overtime(df_calls_full, state_abbr, calls_covered_per
             if busy_hours <= 0:
                 continue
 
-            officer_hourly, wage_source = 37.0, 'estimate'
+            officer_hourly, wage_source = CONFIG['OFFICER_HOURLY_WAGE'], 'estimate'
             overtime_hourly = officer_hourly * 1.5
 
             drone_relief_share = (calls_covered_perc / 100.0) * dfr_dispatch_rate * deflection_rate
@@ -871,11 +701,11 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
     dt_obj = None
     if 'date' in df_ana.columns:
         _date_str = df_ana['date'].astype(str).fillna('')
-        _time_str = df_ana['time'].astype(str).fillna('') if 'time' in df_ana.columns else ''
-        if isinstance(_time_str, str):
-            _combined = _date_str
-        else:
+        if 'time' in df_ana.columns:
+            _time_str = df_ana['time'].astype(str).fillna('')
             _combined = _date_str + ' ' + _time_str
+        else:
+            _combined = _date_str
         # Try ISO format first (what our parser stores), then fall back
         for _fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d']:
             try:
@@ -1885,8 +1715,9 @@ def _build_cad_charts_html(df_calls):
 }})();
 </script>
 """
-    except Exception:
-        return ""
+    except Exception as e:
+        print(f"[BRINC] _build_cad_charts_html failed: {e}\n{traceback.format_exc()}")
+        return "<div style='color:#888;padding:20px;text-align:center;font-size:13px;'>Chart unavailable — data could not be rendered.</div>"
 
 
 def _build_apprehension_table(df_calls, text_main, text_muted, card_bg, card_border, accent_color):
@@ -2204,24 +2035,21 @@ def _make_random_stations(df_calls, n=40, boundary_geom=None, epsg_code=None):
         'type': types,
     })
 
-def generate_stations_from_calls(df_calls, max_stations=100):
-    """Query OpenStreetMap for real stations; fall back gracefully if unavailable."""
-    lats = df_calls['lat'].dropna().values
-    lons = df_calls['lon'].dropna().values
-    if len(lats) == 0: return None, "No coordinates available to generate stations."
-
-    q1_la, q3_la = np.percentile(lats, 25), np.percentile(lats, 75)
-    q1_lo, q3_lo = np.percentile(lons, 25), np.percentile(lons, 75)
-    iqr_la = q3_la - q1_la
-    iqr_lo = q3_lo - q1_lo
-    mask = (lats >= q1_la - 2.5 * iqr_la) & (lats <= q3_la + 2.5 * iqr_la) & (lons >= q1_lo - 2.5 * iqr_lo) & (lons <= q3_lo + 2.5 * iqr_lo)
-    cen_lat, cen_lon = lats[mask].mean(), lons[mask].mean()
-
-    # Try a slightly larger radius first, then fall back to tighter if too many results
+@st.cache_data(show_spinner=False)
+def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations: int = 100):
+    """Cache-friendly OSM query keyed on rounded centroid (2 dp ≈ 1 km grid).
+    Returns (list_of_dicts | None, note_str).  Timeout is kept short so the
+    UI falls back to random stations quickly if Overpass is unresponsive.
+    """
+    osm_urls = [
+        'https://overpass-api.de/api/interpreter',
+        'https://overpass.kumi.systems/api/interpreter',
+        'https://overpass.openstreetmap.ru/api/interpreter',
+    ]
     for R in [0.25, 0.45]:
-        bbox = f"{cen_lat - R},{cen_lon - R},{cen_lat + R},{cen_lon + R}"
+        bbox = f"{cen_lat_r - R},{cen_lon_r - R},{cen_lat_r + R},{cen_lon_r + R}"
         query = (
-            f'[out:json][timeout:30];'
+            f'[out:json][timeout:20];'
             f'(node["amenity"="fire_station"]({bbox});'
             f'node["amenity"="police"]({bbox});'
             f'node["amenity"="school"]({bbox});'
@@ -2230,45 +2058,42 @@ def generate_stations_from_calls(df_calls, max_stations=100):
             f'way["amenity"="school"]({bbox});'
             f');out center;'
         )
-
         data = None
-        osm_urls = [
-            'https://overpass-api.de/api/interpreter',
-            'https://overpass.kumi.systems/api/interpreter',
-            'https://overpass.openstreetmap.ru/api/interpreter',  # third mirror
-        ]
         for osm_url in osm_urls:
-            try:
-                req = urllib.request.Request(
-                    f"{osm_url}?data={urllib.parse.quote(query)}",
-                    headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'}
-                )
-                with urllib.request.urlopen(req, timeout=25) as resp:
-                    data = json.loads(resp.read().decode('utf-8'))
+            for _attempt in range(2):  # one retry per mirror before moving on
+                try:
+                    req = urllib.request.Request(
+                        f"{osm_url}?data={urllib.parse.quote(query)}",
+                        headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'}
+                    )
+                    with urllib.request.urlopen(req, timeout=8) as resp:  # fail fast
+                        data = json.loads(resp.read().decode('utf-8'))
+                    break
+                except Exception:
+                    if _attempt == 0:
+                        import time as _t; _t.sleep(1)
+                    continue
+            if data is not None:
                 break
-            except Exception:
-                continue
 
         if data is None:
-            continue  # try next radius / give up
+            continue
 
-        elements = data.get('elements', [])
         rows = []
-        for el in elements:
+        for el in data.get('elements', []):
             tags = el.get('tags', {})
             lat = el.get('lat') or (el.get('center') or {}).get('lat')
             lon = el.get('lon') or (el.get('center') or {}).get('lon')
-            if lat is None or lon is None: continue
+            if lat is None or lon is None:
+                continue
             amenity = tags.get('amenity', '')
             type_label = 'Fire' if amenity == 'fire_station' else 'Police' if amenity == 'police' else 'School'
-            fac_name = tags.get('name', f"{type_label} Station")
-            rows.append({'name': fac_name, 'lat': round(lat, 6), 'lon': round(lon, 6), 'type': type_label})
+            rows.append({'name': tags.get('name', f"{type_label} Station"),
+                         'lat': round(lat, 6), 'lon': round(lon, 6), 'type': type_label})
 
         if rows:
             df_s = pd.DataFrame(rows).drop_duplicates(subset=['lat', 'lon']).reset_index(drop=True)
-            # Enforce unique names
-            counts = {}
-            new_names = []
+            counts, new_names = {}, []
             for n in df_s['name']:
                 if n in counts:
                     counts[n] += 1
@@ -2278,18 +2103,41 @@ def generate_stations_from_calls(df_calls, max_stations=100):
                     new_names.append(n)
             df_s['name'] = new_names
             if len(df_s) > max_stations:
-                priority_order = {'Police': 0, 'Fire': 1, 'School': 2}
-                df_s['_pri'] = df_s['type'].map(priority_order).fillna(3)
+                pri = {'Police': 0, 'Fire': 1, 'School': 2}
+                df_s['_pri'] = df_s['type'].map(pri).fillna(3)
                 df_s = df_s.sort_values('_pri').head(max_stations).drop(columns='_pri').reset_index(drop=True)
-            return df_s, f"Auto-generated {len(df_s)} stations from OpenStreetMap."
+            return df_s.to_dict('records'), f"Found {len(df_s)} stations from OpenStreetMap."
 
-    # ── All OSM attempts failed — use random stations from call locations ──
+    return None, "OSM unavailable"
+
+
+def generate_stations_from_calls(df_calls, max_stations=100):
+    """Query OpenStreetMap for real stations; fall back gracefully if unavailable."""
+    lats = df_calls['lat'].dropna().values
+    lons = df_calls['lon'].dropna().values
+    if len(lats) == 0:
+        return None, "No coordinates available to generate stations."
+
+    q1_la, q3_la = np.percentile(lats, 25), np.percentile(lats, 75)
+    q1_lo, q3_lo = np.percentile(lons, 25), np.percentile(lons, 75)
+    iqr_la, iqr_lo = q3_la - q1_la, q3_lo - q1_lo
+    mask = (
+        (lats >= q1_la - 2.5 * iqr_la) & (lats <= q3_la + 2.5 * iqr_la) &
+        (lons >= q1_lo - 2.5 * iqr_lo) & (lons <= q3_lo + 2.5 * iqr_lo)
+    )
+    # Round to 2 dp (~1 km) so the same city always hits the cache
+    cen_lat_r = round(float(lats[mask].mean()), 2)
+    cen_lon_r = round(float(lons[mask].mean()), 2)
+
+    rows, note = _fetch_osm_stations_cached(cen_lat_r, cen_lon_r, max_stations)
+    if rows:
+        return pd.DataFrame(rows), note
+
+    # All OSM attempts failed — derive candidate sites from call density
     df_fallback = _make_random_stations(df_calls, n=40)
     if not df_fallback.empty:
         return df_fallback, "⚠️ OpenStreetMap unavailable — using estimated station locations from call data. Upload a stations CSV for accuracy."
     return None, "Could not generate stations — no valid call coordinates."
-
-    return df_s, f"Auto-generated {len(df_s)} stations from OpenStreetMap."
 
 # ============================================================
 # CACHED DATA FUNCTIONS
@@ -2666,13 +2514,13 @@ def add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=True):
         colors = FAA_CEILING_COLORS.get(snapped, FAA_DEFAULT_COLOR)
         coords = geom["coordinates"][0]
         bx, by = zip(*coords)
-        fig.add_trace(go.Scattermapbox(mode="lines", lon=list(bx), lat=list(by), fill="toself", fillcolor=colors["fill"], line=dict(color=colors["line"], width=1.5), hoverinfo="text", text=f"<b>{ceiling} ft AGL</b><br>{arpt}", name=f"LAANC {ceiling}ft", showlegend=False))
+        fig.add_trace(go.Scattermap(mode="lines", lon=list(bx), lat=list(by), fill="toself", fillcolor=colors["fill"], line=dict(color=colors["line"], width=1.5), hoverinfo="text", text=f"<b>{ceiling} ft AGL</b><br>{arpt}", name=f"LAANC {ceiling}ft", showlegend=False))
         try:
             centroid = shape(geom).centroid
             text_lons.append(centroid.x); text_lats.append(centroid.y); text_strings.append(str(ceiling)); text_hovers.append(f"{ceiling} ft — {arpt}")
         except Exception: pass
     if text_lons:
-        fig.add_trace(go.Scattermapbox(mode="text", lon=text_lons, lat=text_lats, text=text_strings, hovertext=text_hovers, hoverinfo="text", textfont=dict(size=10, color="#ffffff" if is_dark else "#000000"), showlegend=False, name="LAANC Labels"))
+        fig.add_trace(go.Scattermap(mode="text", lon=text_lons, lat=text_lats, text=text_strings, hovertext=text_hovers, hoverinfo="text", textfont=dict(size=10, color="#ffffff" if is_dark else "#000000"), showlegend=False, name="LAANC Labels"))
 
 def get_station_faa_ceiling(lat, lon, faa_geojson):
     if not faa_geojson or 'features' not in faa_geojson: return "400 ft (Class G)"
@@ -2725,6 +2573,9 @@ def get_nearest_airfield(lat, lon, airfields):
     return "No data"
 
 def generate_random_points_in_polygon(polygon, num_points):
+    # Flatten MultiPolygon to its largest component so bbox sampling stays efficient
+    if isinstance(polygon, MultiPolygon):
+        polygon = max(polygon.geoms, key=lambda p: p.area)
     points = []
     minx, miny, maxx, maxy = polygon.bounds
     while len(points) < num_points:
@@ -2736,6 +2587,8 @@ def generate_random_points_in_polygon(polygon, num_points):
     return points
 
 def generate_clustered_calls(polygon, num_points):
+    if isinstance(polygon, MultiPolygon):
+        polygon = max(polygon.geoms, key=lambda p: p.area)
     points = []
     minx, miny, maxx, maxy = polygon.bounds
     hotspots = []
@@ -2782,7 +2635,7 @@ def format_3_lines(name_str):
             return f"{parts[0].strip()},<br>{parts[1].strip()},<br>{','.join(parts[2:]).strip()}"
     return name_str
 
-def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2):
+def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2, simple=False):
     if not active_drones:
         return ""
     # Per-type daily airtime budgets derived from CONFIG duty cycles:
@@ -2916,8 +2769,50 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         # ── DEFICIT FOOTER (compact strip at card bottom) ─────────────────────────────
         _sc_fmt = f"${d_extra_same_capex:,}" if d_has_deficit else ""
         _ac_fmt = f"${d_extra_alt_capex:,}" if d_has_deficit else ""
+
+        # ── SIMPLE CARD (toggled from Display Options) ───────────────────────
+        if simple:
+            _pin_badge = (
+                f'<span style="font-size:0.55rem;background:rgba(255,215,0,0.15);color:#FFD700;border:1px solid rgba(255,215,0,0.4);border-radius:3px;padding:1px 5px;margin-left:4px;">🔒 Guardian</span>'
+                if (d.get("pinned") and d_type == "GUARDIAN") else
+                f'<span style="font-size:0.55rem;background:rgba(0,210,255,0.15);color:#00D2FF;border:1px solid rgba(0,210,255,0.4);border-radius:3px;padding:1px 5px;margin-left:4px;">🔒 Responder</span>'
+                if (d.get("pinned") and d_type == "RESPONDER") else ""
+            )
+            _deficit_strip = (
+                f'<div style="font-size:0.60rem;color:#dc3545;font-weight:700;margin-top:6px;padding-top:5px;border-top:1px solid rgba(220,53,69,0.3);">⚠️ Capacity deficit — {d_on_scene:.1f} min on-scene</div>'
+                if d_has_deficit else ""
+            )
+            cards_html.append(f'''
+<div class="unit-card" style="background:{card_bg};border:1px solid {"#dc3545" if d_has_deficit else card_border};border-top:3px solid {d_color};border-radius:8px;padding:10px 12px;box-sizing:border-box;">
+  <div style="display:flex;align-items:baseline;justify-content:space-between;gap:4px;margin-bottom:4px;">
+    <span style="font-weight:700;font-size:0.78rem;color:{card_title};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">{d["name"]}</span>
+    <span style="font-size:0.58rem;color:#666;text-transform:uppercase;white-space:nowrap;flex-shrink:0;">{d_type} · #{d_step}</span>
+  </div>
+  {_pin_badge}
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:7px;">
+    <div style="background:rgba(0,210,255,0.07);border:1px solid rgba(0,210,255,0.18);border-radius:5px;padding:6px 8px;text-align:center;">
+      <div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Annual Savings</div>
+      <div style="font-size:1.05rem;font-weight:900;color:{accent_color};">${d_best:,.0f}</div>
+    </div>
+    <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
+      <div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Avg Response</div>
+      <div style="font-size:1.05rem;font-weight:900;color:{card_title};">{d_time:.1f} min</div>
+    </div>
+    <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
+      <div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">CapEx</div>
+      <div style="font-size:0.85rem;font-weight:800;color:{card_title};">${d_cost:,.0f}</div>
+    </div>
+    <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
+      <div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Break-Even</div>
+      <div style="font-size:0.85rem;font-weight:800;color:{accent_color};">{d_be}</div>
+    </div>
+  </div>
+  {_deficit_strip}
+</div>''')
+            continue
+
         cards_html.append(f'''
-<div class="unit-card" style="background:{card_bg}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-top:3px solid {d_color}; border-radius:8px; padding:10px 12px; display:flex; flex-direction:column; box-sizing:border-box; height:580px; overflow:hidden;">
+<div class="unit-card" style="background:{card_bg}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-top:3px solid {d_color}; border-radius:8px; padding:10px 12px; display:flex; flex-direction:column; box-sizing:border-box;">
   <!-- Header: single compact row -->
   <div style="margin-bottom:5px; flex-shrink:0;">
     <div style="display:flex; align-items:baseline; gap:5px; overflow:hidden;">
@@ -3070,16 +2965,34 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     )
     # Wrap in a style-scoped div to prevent Streamlit container from collapsing width.
     # overflow:visible is required so the 1.5x hover scale isn't clipped by the grid container.
+    grid_id = f"ucg_{abs(hash(str([d.get('name') for d in active_drones]))) % 100000}"
     return (
         '<style>'
-        '.unit-card-grid { display:grid; gap:10px; align-items:stretch; width:100%; box-sizing:border-box; overflow:visible; }'
-        '.unit-card-grid > .unit-card { min-width:0; height:100%; overflow:visible; }'
+        '.unit-card-grid { display:grid; gap:10px; width:100%; box-sizing:border-box; overflow:visible; }'
+        '.unit-card-grid > .unit-card { min-width:0; box-sizing:border-box; overflow:visible; }'
         '.tip { display:inline-flex; align-items:center; justify-content:center; width:11px; height:11px; border-radius:50%; background:rgba(255,255,255,0.12); color:#888; font-size:8px; font-weight:700; cursor:default; margin-left:3px; vertical-align:middle; position:relative; flex-shrink:0; }'
         '.tip:hover::after { content:attr(data-tip); position:absolute; bottom:130%; left:50%; transform:translateX(-50%); background:#1a1a2e; color:#e0e0e0; font-size:10px; font-weight:400; padding:5px 8px; border-radius:5px; white-space:normal; width:200px; line-height:1.4; z-index:9999; border:1px solid #333; box-shadow:0 4px 12px rgba(0,0,0,0.5); pointer-events:none; text-transform:none; letter-spacing:normal; }'
         '</style>'
-        '<div class="unit-card-grid" style="grid-template-columns:repeat(' + str(columns_per_row) + ', minmax(0,1fr)); overflow:visible;">'
+        f'<div id="{grid_id}" class="unit-card-grid" style="grid-template-columns:repeat({columns_per_row}, minmax(0,1fr)); overflow:visible;">'
         + "".join(cards_html)
         + '</div>'
+        f'<script>'
+        f'(function(){{'
+        f'  function eq(){{'
+        f'    var g=document.getElementById("{grid_id}");'
+        f'    if(!g)return;'
+        f'    var cards=g.querySelectorAll(".unit-card");'
+        f'    if(!cards.length)return;'
+        f'    cards.forEach(function(c){{c.style.height="auto";}});'
+        f'    var maxH=0;'
+        f'    cards.forEach(function(c){{maxH=Math.max(maxH,c.getBoundingClientRect().height);}});'
+        f'    cards.forEach(function(c){{c.style.height=maxH+"px";}});'
+        f'  }}'
+        f'  if(document.readyState==="complete"){{eq();}}else{{window.addEventListener("load",eq);}}'
+        f'  setTimeout(eq,150);'
+        f'  setTimeout(eq,600);'
+        f'}})();'
+        f'</script>'
     )
 
 def to_kml_color(hex_str):
@@ -3679,7 +3592,7 @@ if not st.session_state['csvs_ready']:
         )
 
         station_template_bytes = base64.b64decode(
-            "TkFNRSxUWVBFLEFERFJFU1MsQ0FQQUNJVFksTk9URVMsTEFULExPTgpTYW1wbGUgMSBQb2xpY2UgU3RhdGlvbixQb2xpY2UsNDIwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMSwyLFByaW1hcnkgZG93bnRvd24gZGlzcGF0Y2ggaHViLDQyLjI3MTEsLTg5LjA5NDAKU2FtcGxlIDIgUG9saWNlIFN0YXRpb24sUG9saWNlLDM0MDEgTiBNYWluIFN0LCBSb2NrZm9yZCwgSUwgNjExMDMsMixOb3J0aCBzaWRlIHBhdHJvbCBiYXNlLDQyLjMxMDUsLTg5LjA4ODcKU2FtcGxlIDMgUG9saWNlIFN0YXRpb24sUG9saWNlLDE3MDcgUyBNdWxmb3JkIFJkLCBSb2NrZm9yZCwgSUwgNjExMDgsMSxTb3V0aGVhc3QgY29ycmlkb3IgY292ZXJhZ2UsNDIuMjQ4OCwtODguOTk5OApTYW1wbGUgNCBQb2xpY2UgU3RhdGlvbixQb2xpY2UsNDM0MCBXIFN0YXRlIFN0LCBSb2NrZm9yZCwgSUwgNjExMDIsMSxXZXN0IHNpZGUgcmFwaWQgcmVzcG9uc2UgdW5pdCw0Mi4yNzEyLC04OS4xMjQxClNhbXBsZSAxIEZpcmUgU3RhdGlvbixGaXJlLDcwOCBDbGludG9uIFN0LCBSb2NrZm9yZCwgSUwgNjExMDEsMixDZW50cmFsIGZpcmUgZGlzcGF0Y2ggLSBTdGF0aW9uIDEsNDIuMjcyMCwtODkuMDg5OApTYW1wbGUgMiBGaXJlIFN0YXRpb24sRmlyZSwxNDAyIE4gQ291cnQgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMywxLE5vcnRoIFJvY2tmb3JkIGZpcmUgY292ZXJhZ2UsNDIuMjk1MSwtODkuMDgyNgpTYW1wbGUgMyBGaXJlIFN0YXRpb24sRmlyZSwyMjUwIFMgQWxwaW5lIFJkLCBSb2NrZm9yZCwgSUwgNjExMDgsMSxTb3V0aCBBbHBpbmUgZmlyZSByZXNwb25zZSw0Mi4yNDAxLC04OC45OTY0ClNhbXBsZSA0IEZpcmUgU3RhdGlvbixGaXJlLDUyODUgU2FmZm9yZCBSZCwgUm9ja2ZvcmQsIElMIDYxMTAxLDEsV2VzdCBkaXN0cmljdCBmaXJlIHN0YXRpb24sNDIuMjY5OCwtODkuMTQwMgpTYW1wbGUgMSBFTVMgU3RhdGlvbixFTVMsMTQwMSBFIFN0YXRlIFN0LCBSb2NrZm9yZCwgSUwgNjExMDQsMixFYXN0IHNpZGUgRU1TIHJhcGlkIHJlc3BvbnNlLDQyLjI2OTQsLTg5LjA2MjEKU2FtcGxlIDIgRU1TIFN0YXRpb24sRU1TLDM3MjAgQ2hhcmxlcyBTdCwgUm9ja2ZvcmQsIElMIDYxMTA4LDEsU291dGhlYXN0IEVNUyBjb3ZlcmFnZSB6b25lLDQyLjI1MjIsLTg5LjAwNTgKU2FtcGxlIDMgRU1TIFN0YXRpb24sRU1TLDQ4MjUgTiBCZWxsIFNjaG9vbCBSZCwgUm9ja2ZvcmQsIElMIDYxMTA3LDEsTm9ydGhlYXN0IEVNUyByZXNwb25zZSBodWIsNDIuMzAyMSwtODguOTg5MQpTYW1wbGUgMSBHb3YgU3RhdGlvbixHb3Zlcm5tZW50LDQyNSBFIFN0YXRlIFN0LCBSb2NrZm9yZCwgSUwgNjExMDQsMSxXaW5uZWJhZ28gQ291bnR5IGFkbWluIGJ1aWxkaW5nLDQyLjI3MTUsLTg5LjA4NDgKU2FtcGxlIDIgR292IFN0YXRpb24sR292ZXJubWVudCwzMDAgVyBTdGF0ZSBTdCwgUm9ja2ZvcmQsIElMIDYxMTAxLDEsQ2l0eSBIYWxsIC0gUm9ja2ZvcmQgbXVuaWNpcGFsIGNlbnRlciw0Mi4yNzExLC04OS4wOTU3ClNhbXBsZSAzIEdvdiBTdGF0aW9uLEdvdmVybm1lbnQsNjUwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMiwxLFB1YmxpYyB3b3JrcyBhbmQgZW1lcmdlbmN5IG1nbXQsNDIuMjcxMywtODkuMTAxOAo="
+            "TkFNRSxUWVBFLEFERFJFU1MsQ0FQQUNJVFksTk9URVMsTEFULExPTgpTYW1wbGUgMSBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjQyMCBXIFN0YXRlIFN0LCBSb2NrZm9yZCwgSUwgNjExMDEiLDIsUHJpbWFyeSBkb3dudG93biBkaXNwYXRjaCBodWIsNDIuMjcxMSwtODkuMDk0MApTYW1wbGUgMiBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjM0MDEgTiBNYWluIFN0LCBSb2NrZm9yZCwgSUwgNjExMDMiLDIsTm9ydGggc2lkZSBwYXRyb2wgYmFzZSw0Mi4zMTA1LC04OS4wODg3ClNhbXBsZSAzIFBvbGljZSBTdGF0aW9uLFBvbGljZSwiMTcwNyBTIE11bGZvcmQgUmQsIFJvY2tmb3JkLCBJTCA2MTEwOCIsMSxTb3V0aGVhc3QgY29ycmlkb3IgY292ZXJhZ2UsNDIuMjQ4OCwtODguOTk5OApTYW1wbGUgNCBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjQzNDAgVyBTdGF0ZSBTdCwgUm9ja2ZvcmQsIElMIDYxMTAyIiwxLFdlc3Qgc2lkZSByYXBpZCByZXNwb25zZSB1bml0LDQyLjI3MTIsLTg5LjEyNDEKU2FtcGxlIDEgRmlyZSBTdGF0aW9uLEZpcmUsIjcwOCBDbGludG9uIFN0LCBSb2NrZm9yZCwgSUwgNjExMDEiLDIsQ2VudHJhbCBmaXJlIGRpc3BhdGNoIC0gU3RhdGlvbiAxLDQyLjI3MjAsLTg5LjA4OTgKU2FtcGxlIDIgRmlyZSBTdGF0aW9uLEZpcmUsIjE0MDIgTiBDb3VydCBTdCwgUm9ja2ZvcmQsIElMIDYxMTAzIiwxLE5vcnRoIFJvY2tmb3JkIGZpcmUgY292ZXJhZ2UsNDIuMjk1MSwtODkuMDgyNgpTYW1wbGUgMyBGaXJlIFN0YXRpb24sRmlyZSwiMjI1MCBTIEFscGluZSBSZCwgUm9ja2ZvcmQsIElMIDYxMTA4IiwxLFNvdXRoIEFscGluZSBmaXJlIHJlc3BvbnNlLDQyLjI0MDEsLTg4Ljk5NjQKU2FtcGxlIDQgRmlyZSBTdGF0aW9uLEZpcmUsIjUyODUgU2FmZm9yZCBSZCwgUm9ja2ZvcmQsIElMIDYxMTAxIiwxLFdlc3QgZGlzdHJpY3QgZmlyZSBzdGF0aW9uLDQyLjI2OTgsLTg5LjE0MDIKU2FtcGxlIDEgRU1TIFN0YXRpb24sRU1TLCIxNDAxIEUgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwNCIsMixFYXN0IHNpZGUgRU1TIHJhcGlkIHJlc3BvbnNlLDQyLjI2OTQsLTg5LjA2MjEKU2FtcGxlIDIgRU1TIFN0YXRpb24sRU1TLCIzNzIwIENoYXJsZXMgU3QsIFJvY2tmb3JkLCBJTCA2MTEwOCIsMSxTb3V0aGVhc3QgRU1TIGNvdmVyYWdlIHpvbmUsNDIuMjUyMiwtODkuMDA1OApTYW1wbGUgMyBFTVMgU3RhdGlvbixFTVMsIjQ4MjUgTiBCZWxsIFNjaG9vbCBSZCwgUm9ja2ZvcmQsIElMIDYxMTA3IiwxLE5vcnRoZWFzdCBFTVMgcmVzcG9uc2UgaHViLDQyLjMwMjEsLTg4Ljk4OTEKU2FtcGxlIDEgR292IFN0YXRpb24sR292ZXJubWVudCwiNDI1IEUgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwNCIsMSxXaW5uZWJhZ28gQ291bnR5IGFkbWluIGJ1aWxkaW5nLDQyLjI3MTUsLTg5LjA4NDgKU2FtcGxlIDIgR292IFN0YXRpb24sR292ZXJubWVudCwiMzAwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMSIsMSxDaXR5IEhhbGwgLSBSb2NrZm9yZCBtdW5pY2lwYWwgY2VudGVyLDQyLjI3MTEsLTg5LjA5NTcKU2FtcGxlIDMgR292IFN0YXRpb24sR292ZXJubWVudCwiNjUwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMiIsMSxQdWJsaWMgd29ya3MgYW5kIGVtZXJnZW5jeSBtZ210LDQyLjI3MTMsLTg5LjEwMTgK"
         )
         st.download_button(
             label="⬇️ Download sample stations.csv",
@@ -3771,19 +3684,29 @@ if not st.session_state['csvs_ready']:
                         
                         if save_data.get('calls_data'):
                             df_c = pd.DataFrame(save_data['calls_data'])
-                            # Safely cast to numeric so the map geometry doesn't crash
-                            if 'lat' in df_c.columns: df_c['lat'] = pd.to_numeric(df_c['lat'], errors='coerce')
-                            if 'lon' in df_c.columns: df_c['lon'] = pd.to_numeric(df_c['lon'], errors='coerce')
+                            if 'lat' not in df_c.columns or 'lon' not in df_c.columns:
+                                st.error("❌ .brinc file is missing required 'lat'/'lon' columns in calls data.")
+                                st.stop()
+                            df_c['lat'] = pd.to_numeric(df_c['lat'], errors='coerce')
+                            df_c['lon'] = pd.to_numeric(df_c['lon'], errors='coerce')
+                            df_c = df_c.dropna(subset=['lat', 'lon']).reset_index(drop=True)
+                            if df_c.empty:
+                                st.error("❌ .brinc file contains no valid coordinate data after parsing.")
+                                st.stop()
                             st.session_state['df_calls'] = df_c
                             st.session_state['df_calls_full'] = df_c.copy()
                             st.session_state['total_original_calls'] = len(df_c)
                             st.session_state['total_modeled_calls'] = len(df_c)
-                        
+
                         if save_data.get('stations_data'):
                             df_s = pd.DataFrame(save_data['stations_data'])
-                            if 'lat' in df_s.columns: df_s['lat'] = pd.to_numeric(df_s['lat'], errors='coerce')
-                            if 'lon' in df_s.columns: df_s['lon'] = pd.to_numeric(df_s['lon'], errors='coerce')
-                            st.session_state['df_stations'] = df_s
+                            if 'lat' not in df_s.columns or 'lon' not in df_s.columns:
+                                st.warning("⚠️ .brinc stations data missing lat/lon — stations will be re-generated.")
+                            else:
+                                df_s['lat'] = pd.to_numeric(df_s['lat'], errors='coerce')
+                                df_s['lon'] = pd.to_numeric(df_s['lon'], errors='coerce')
+                                df_s = df_s.dropna(subset=['lat', 'lon']).reset_index(drop=True)
+                                st.session_state['df_stations'] = df_s
                             
                         st.session_state['data_source'] = 'brinc_file'
                         st.session_state['demo_mode_used'] = False
@@ -3832,15 +3755,17 @@ if not st.session_state['csvs_ready']:
                         st.stop()
 
                     df_c_full = df_c.reset_index(drop=True).copy()
-                    st.session_state['total_original_calls'] = len(df_c_full)
 
                     if len(df_c_full) > 25000:
                         df_c = df_c_full.sample(25000, random_state=42).reset_index(drop=True)
-                        st.session_state['total_modeled_calls'] = len(df_c)
                         st.toast(f"⚠️ Optimization modeled with {len(df_c):,} representative calls out of {len(df_c_full):,} total incidents.")
                     else:
                         df_c = df_c_full.copy()
-                        st.session_state['total_modeled_calls'] = len(df_c)
+
+                    st.session_state.update({
+                        'total_original_calls': len(df_c_full),
+                        'total_modeled_calls': len(df_c),
+                    })
 
                     if station_file is not None:
                         with st.spinner("🔍 Reading stations file…"):
@@ -4302,19 +4227,19 @@ def generate_community_impact_dashboard_html(
     drone_min  = float(avg_resp_time_min or 0)
     saved_min  = float(avg_time_saved_min or 0)
     ground_min = drone_min + saved_min
-    drone_wins_pct = min(99, max(60, round(calls_covered_perc * 0.72))) if calls_covered_perc > 0 else 0
+    drone_wins_pct = min(99, max(CONFIG['DRONE_WINS_FLOOR'], round(calls_covered_perc * CONFIG['DRONE_WINS_MULTIPLIER']))) if calls_covered_perc > 0 else 0
 
     # Outcomes counter (modeled estimates)
     total_annual_dfr = int(annual_flights * float(dfr_dispatch_rate or 0.25))
-    arrests_est      = int(total_annual_dfr * 0.043)
-    rescues_est      = int(total_annual_dfr * 0.021)
-    deescalation_est = int(total_annual_dfr * 0.11)
-    missing_est      = int(total_annual_dfr * 0.008)
+    arrests_est      = int(total_annual_dfr * CONFIG['OUTCOME_ARREST_RATE'])
+    rescues_est      = int(total_annual_dfr * CONFIG['OUTCOME_RESCUE_RATE'])
+    deescalation_est = int(total_annual_dfr * CONFIG['OUTCOME_DEESCALATION_RATE'])
+    missing_est      = int(total_annual_dfr * CONFIG['OUTCOME_MISSING_RATE'])
 
     # ROI
     roi_multiple = round(float(annual_savings or 0) / max(float(fleet_capex or 1), 1), 2)
-    cost_per_call_drone  = 6
-    cost_per_call_officer = 82
+    cost_per_call_drone   = CONFIG['DRONE_COST_PER_CALL']
+    cost_per_call_officer = CONFIG['OFFICER_COST_PER_CALL']
     cost_saved_per_resolved = cost_per_call_officer - cost_per_call_drone
     total_resolved_annually = int(float(daily_drone_only_calls or 0) * 365)
 
@@ -5190,7 +5115,6 @@ if st.session_state['csvs_ready']:
 
     _boundary_kind_note = st.session_state.get('boundary_kind', 'place')
     _boundary_src_note = st.session_state.get('boundary_source_path', '')
-    st.caption(f"Boundary kind: {_boundary_kind_note} | Source: {_boundary_src_note or 'live lookup / none'}")
 
     if master_gdf is None or master_gdf.empty:
         # ── Fallback 1: load any saved shapefile directly (spatial join may have
@@ -5265,6 +5189,7 @@ if st.session_state['csvs_ready']:
         """, unsafe_allow_html=True)
 
     st.sidebar.markdown('<div class="sidebar-section-header">① Configure</div>', unsafe_allow_html=True)
+    st.sidebar.caption(f"Boundary: {_boundary_kind_note} · {_boundary_src_note.split(chr(47))[-1].split(chr(92))[-1] if _boundary_src_note else 'live lookup'}")
 
     total_pts = master_gdf['data_count'].sum()
     master_gdf['LABEL'] = master_gdf['DISPLAY_NAME'] + " (" + (master_gdf['data_count']/total_pts*100).round(1).astype(str) + "%)"
@@ -5321,6 +5246,8 @@ if st.session_state['csvs_ready']:
         show_health     = st.toggle("Health Score", value=False)
         show_satellite  = st.toggle("Satellite Imagery", value=False)
         show_cards      = True
+        simple_cards    = st.toggle("Simple Cards", value=False,
+                                    help="Show a compact card with just the key numbers — name, type, response time, annual savings, and CapEx.")
         show_faa        = st.toggle("FAA LAANC Airspace", value=False)
         simulate_traffic = st.toggle("Simulate Ground Traffic", value=False)
         traffic_level   = st.slider("Traffic Congestion", 0, 100, 40) if simulate_traffic else 40
@@ -5373,6 +5300,10 @@ if st.session_state['csvs_ready']:
         )
         st.session_state['resp_strat_idx'] = 0 if resp_strategy_raw == "Call Coverage" else 1
         resp_strategy = "Maximize Call Coverage" if resp_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
+
+        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Coverage Ranges</div>", unsafe_allow_html=True)
+        resp_radius_mi  = st.slider("🚁 Responder Range (mi)", 2.0, 3.0, float(st.session_state.get('r_resp', 2.0)), step=0.5)
+        guard_radius_mi = st.slider("🦅 Guardian Range (mi) [⚡ 5mi Rapid]", 1, 8, int(st.session_state.get('r_guard', 8)), help="The 5-mile rapid response focus zone will automatically be highlighted inside the maximum perimeter.")
 
     # Keep opt_strategy for any code that still references it (used in export/logs)
     opt_strategy = guard_strategy  # primary strategy label for reporting
@@ -5512,28 +5443,49 @@ if st.session_state['csvs_ready']:
 
     k_responder = st.sidebar.slider("🚁 Responder Count", 0, max(1, max_resp_calc), val_r, help="Short-range tactical drones (2-3mi radius).")
     k_guardian  = st.sidebar.slider("🦅 Guardian Count", 0, max(1, max_guard_calc), val_g, help="Long-range overwatch drones (5-8mi radius).")
-    
-    resp_radius_mi  = st.sidebar.slider("🚁 Responder Range (mi)", 2.0, 3.0, float(st.session_state.get('r_resp', 2.0)), step=0.5)
-    guard_radius_mi = st.sidebar.slider("🦅 Guardian Range (mi) [⚡ 5mi Rapid]", 1, 8, int(st.session_state.get('r_guard', 8)), help="The 5-mile rapid response focus zone will automatically be highlighted inside the maximum perimeter.")
 
     st.session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
     st.sidebar.caption('Minimum fleet default: 1 Guardian + Responders to 85% call coverage (minimum 2).')
 
-    # ── MANUAL STATION PINS ───────────────────────────────────────────────────
-    # ── Sync pinned station lists (expander removed — pinning via card buttons) ──
+    # ── LOCK STATIONS (sidebar multiselect) ──────────────────────────────────
     _station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
     _saved_g = [s for s in st.session_state.get('pinned_guard_names', []) if s in _station_names]
     _saved_r = [s for s in st.session_state.get('pinned_resp_names',  []) if s in _station_names]
-    st.session_state['pinned_guard_names'] = _saved_g
-    st.session_state['pinned_resp_names']  = _saved_r
-    pinned_guard_names = _saved_g
-    pinned_resp_names  = _saved_r
 
-    # Warn in sidebar if pin count exceeds slider
+    lock_expander = st.sidebar.expander("🔒 Lock Stations", expanded=bool(_saved_g or _saved_r))
+    with lock_expander:
+        st.caption("Force specific stations into the optimized solution.")
+        _new_g = st.multiselect(
+            "🦅 Lock as Guardian",
+            options=_station_names,
+            default=_saved_g,
+            key="lock_guard_ms",
+            help="These stations will always be assigned a Guardian drone regardless of optimizer output."
+        )
+        _new_r = st.multiselect(
+            "🚁 Lock as Responder",
+            options=[s for s in _station_names if s not in _new_g],
+            default=[s for s in _saved_r if s not in _new_g],
+            key="lock_resp_ms",
+            help="These stations will always be assigned a Responder drone regardless of optimizer output."
+        )
+        if _new_g != _saved_g or _new_r != [s for s in _saved_r if s not in _new_g]:
+            st.session_state['pinned_guard_names'] = _new_g
+            st.session_state['pinned_resp_names']  = _new_r
+            if '_opt_cache_key' in st.session_state:
+                del st.session_state['_opt_cache_key']
+            st.rerun()
+
+    st.session_state['pinned_guard_names'] = _new_g
+    st.session_state['pinned_resp_names']  = _new_r
+    pinned_guard_names = _new_g
+    pinned_resp_names  = _new_r
+
+    # Warn if locked count exceeds slider
     if len(pinned_guard_names) > k_guardian:
-        st.sidebar.warning(f"⚠️ Raise Guardian Count ≥ {len(pinned_guard_names)} to use all Guardian pins.")
+        st.sidebar.warning(f"⚠️ Raise Guardian Count ≥ {len(pinned_guard_names)} to honour all Guardian locks.")
     if len(pinned_resp_names) > k_responder:
-        st.sidebar.warning(f"⚠️ Raise Responder Count ≥ {len(pinned_resp_names)} to use all Responder pins.")
+        st.sidebar.warning(f"⚠️ Raise Responder Count ≥ {len(pinned_resp_names)} to honour all Responder locks.")
 
     # ── ADD CUSTOM STATION BY ADDRESS ─────────────────────────────────────────
     add_expander = st.sidebar.expander("➕ Add Custom Station", expanded=False)
@@ -6444,19 +6396,19 @@ if st.session_state['csvs_ready']:
             geoms_to_draw = [city_boundary_geom] if isinstance(city_boundary_geom, Polygon) else list(city_boundary_geom.geoms)
             for gi, geom in enumerate(geoms_to_draw):
                 bx, by = geom.exterior.coords.xy
-                fig.add_trace(go.Scattermapbox(mode="lines", lon=list(bx), lat=list(by),
+                fig.add_trace(go.Scattermap(mode="lines", lon=list(bx), lat=list(by),
                     line=dict(color=map_boundary_color, width=2), name="Jurisdiction Boundary",
                     hoverinfo='skip', showlegend=(gi==0)))
 
         if show_heatmap and not display_calls.empty:
-            fig.add_trace(go.Densitymapbox(lat=display_calls.geometry.y, lon=display_calls.geometry.x,
+            fig.add_trace(go.Densitymap(lat=display_calls.geometry.y, lon=display_calls.geometry.x,
                 z=np.ones(len(display_calls)), radius=12, colorscale='Inferno', opacity=0.6,
                 showscale=False, name="Heatmap", hoverinfo='skip'))
 
         if not display_calls.empty:
             point_size = 1 if len(display_calls) > 150000 else 2 if len(display_calls) > 50000 else 3 if len(display_calls) > 20000 else 4
             point_opacity = 0.06 if len(display_calls) > 150000 else 0.10 if len(display_calls) > 50000 else 0.18 if len(display_calls) > 20000 else 0.28 if len(display_calls) > 10000 else 0.4
-            fig.add_trace(go.Scattermapbox(lat=display_calls.geometry.y, lon=display_calls.geometry.x,
+            fig.add_trace(go.Scattermap(lat=display_calls.geometry.y, lon=display_calls.geometry.x,
                 mode='markers', marker=dict(size=point_size, color=map_incident_color, opacity=point_opacity),
                 name="Incident Data", hoverinfo='skip'))
 
@@ -6474,7 +6426,7 @@ if st.session_state['csvs_ready']:
             outer_width = 1.5 if is_extended_guardian else 4.5
             outer_opac = 0.4 if is_extended_guardian else 1.0
             
-            fig.add_trace(go.Scattermapbox(
+            fig.add_trace(go.Scattermap(
                 lat=list(clats)+[None,d['lat']], lon=list(clons)+[None,d['lon']],
                 mode='lines+markers',
                 opacity=outer_opac,
@@ -6485,7 +6437,7 @@ if st.session_state['csvs_ready']:
             # The 5-mile Rapid Response ring gets the "Important" styling (thick, solid, heavier fill)
             if is_extended_guardian:
                 f_lats, f_lons = get_circle_coords(d['lat'], d['lon'], r_mi=5.0)
-                fig.add_trace(go.Scattermapbox(
+                fig.add_trace(go.Scattermap(
                     lat=list(f_lats), lon=list(f_lons),
                     mode='lines',
                     line=dict(color=d['color'], width=4.5),
@@ -6500,7 +6452,7 @@ if st.session_state['csvs_ready']:
 
             # Star marker for manually pinned stations
             if d.get('pinned'):
-                fig.add_trace(go.Scattermapbox(
+                fig.add_trace(go.Scattermap(
                     lat=[d['lat']], lon=[d['lon']], mode='markers',
                     marker=dict(size=18, color=d['color'], symbol='star'),
                     name=f"📍 {d['name'].split(',')[0]} (Pinned)",
@@ -6516,21 +6468,21 @@ if st.session_state['csvs_ready']:
                 if gs > 0:
                     gr_mi = (gs/60) * (d['radius_m']/1609.34/d['speed_mph'])*60
                     ga = np.linspace(0,2*np.pi,9)
-                    fig.add_trace(go.Scattermapbox(
+                    fig.add_trace(go.Scattermap(
                         lat=list(d['lat']+(gr_mi/69.172)*np.sin(ga)),
                         lon=list(d['lon']+(gr_mi/(69.172*np.cos(np.radians(d['lat']))))*np.cos(ga)),
                         mode='lines', line=dict(color=t_color, width=2.5),
                         fill='toself', fillcolor=t_fill,
                         name=f"Ground ({t_label})", hoverinfo='skip'))
 
-        mapbox_cfg = dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style=map_style)
+        map_cfg = dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style=map_style)
         if show_satellite:
-            mapbox_cfg["style"] = "carto-positron"
-            mapbox_cfg["layers"] = [{"below":"traces","sourcetype":"raster",
+            map_cfg["style"] = "carto-positron"
+            map_cfg["layers"] = [{"below":"traces","sourcetype":"raster",
                 "sourceattribution":"Esri, Maxar, Earthstar Geographics",
                 "source":["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"]}]
 
-        fig.update_layout(uirevision="LOCKED_MAP", mapbox=mapbox_cfg,
+        fig.update_layout(uirevision="LOCKED_MAP", map=map_cfg,
             margin=dict(l=0,r=0,t=0,b=0), height=800, font=dict(size=18),
             showlegend=True,
             legend=dict(yanchor="top", y=0.98, xanchor="left", x=0.02,
@@ -6565,86 +6517,14 @@ if st.session_state['csvs_ready']:
         unsafe_allow_html=True
     )
     if active_drones:
-        _n_cols = 4  # always 4 columns — minimum 4 on first row, overflow wraps to next rows
-        _saved_gnames = list(st.session_state.get('pinned_guard_names', []))
-        _saved_rnames = list(st.session_state.get('pinned_resp_names',  []))
-
-        # Render card HTML + lock buttons together inside st.columns so buttons
-        # are always directly below their card in the same Streamlit column.
-        import math as _math
-        _n_rows = _math.ceil(len(active_drones) / _n_cols)
-        for _row_idx in range(_n_rows):
-            _row_drones = active_drones[_row_idx * _n_cols : (_row_idx + 1) * _n_cols]
-            _row_cols   = st.columns(_n_cols)
-            for _slot, _d in enumerate(_row_drones):
-                _ci    = _row_idx * _n_cols + _slot
-                _dname = _d['name']
-                _dtype = _d['type']
-                _is_pg = _dname in _saved_gnames
-                _is_pr = _dname in _saved_rnames
-                with _row_cols[_slot]:
-                    # ── Card HTML ─────────────────────────────────────────────
-                    st.markdown(
-                        _build_unit_cards_html(
-                            [_d], text_main, text_muted, card_bg, card_border,
-                            card_title, accent_color, columns_per_row=1
-                        ),
-                        unsafe_allow_html=True
-                    )
-                    # ── Lock / Switch / Unpin buttons (functional) ──────
-                    if _is_pg or _is_pr:
-                        _switch_label = "🚁 Switch→Resp" if _is_pg else "🦅 Switch→Guard"
-                        _bc1, _bc2 = st.columns([3, 2])
-                        with _bc1:
-                            if st.button(_switch_label, key=f"switch_{_ci}",
-                                         use_container_width=True):
-                                if _is_pg:
-                                    _pg = list(st.session_state.get('pinned_guard_names', []))
-                                    _pr = list(st.session_state.get('pinned_resp_names', []))
-                                    _pg = [x for x in _pg if x != _dname]
-                                    if _dname not in _pr: _pr.append(_dname)
-                                    st.session_state['pinned_guard_names'] = _pg
-                                    st.session_state['pinned_resp_names']  = _pr
-                                    if st.session_state.get('k_resp', 0) < len(_pr):
-                                        st.session_state['k_resp'] = len(_pr)
-                                else:
-                                    _pg = list(st.session_state.get('pinned_guard_names', []))
-                                    _pr = list(st.session_state.get('pinned_resp_names', []))
-                                    _pr = [x for x in _pr if x != _dname]
-                                    if _dname not in _pg: _pg.append(_dname)
-                                    st.session_state['pinned_guard_names'] = _pg
-                                    st.session_state['pinned_resp_names']  = _pr
-                                    if st.session_state.get('k_guard', 0) < len(_pg):
-                                        st.session_state['k_guard'] = len(_pg)
-                                st.rerun()
-                        with _bc2:
-                            if st.button("✕ Unpin", key=f"unpin_{_ci}",
-                                         use_container_width=True, type="primary"):
-                                st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
-                                st.session_state['pinned_resp_names']  = [x for x in _saved_rnames if x != _dname]
-                                st.rerun()
-                    else:
-                        _ba, _bb = st.columns(2)
-                        with _ba:
-                            if st.button("🦅 Lock Guard", key=f"pin_g_{_ci}",
-                                         use_container_width=True):
-                                _pg = list(st.session_state.get('pinned_guard_names', []))
-                                if _dname not in _pg: _pg.append(_dname)
-                                st.session_state['pinned_guard_names'] = _pg
-                                st.session_state['pinned_resp_names']  = [x for x in _saved_rnames if x != _dname]
-                                if st.session_state.get('k_guard', 0) < len(_pg):
-                                    st.session_state['k_guard'] = len(_pg)
-                                st.rerun()
-                        with _bb:
-                            if st.button("🚁 Lock Resp", key=f"pin_r_{_ci}",
-                                         use_container_width=True):
-                                _pr = list(st.session_state.get('pinned_resp_names', []))
-                                if _dname not in _pr: _pr.append(_dname)
-                                st.session_state['pinned_resp_names']  = _pr
-                                st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
-                                if st.session_state.get('k_resp', 0) < len(_pr):
-                                    st.session_state['k_resp'] = len(_pr)
-                                st.rerun()
+        st.markdown(
+            _build_unit_cards_html(
+                active_drones, text_main, text_muted, card_bg, card_border,
+                card_title, accent_color, columns_per_row=4,
+                simple=simple_cards
+            ),
+            unsafe_allow_html=True
+        )
     else:
         st.markdown(
             f"""
@@ -7050,9 +6930,6 @@ if st.session_state['csvs_ready']:
     pd_dept_phone = st.session_state.get('pd_dept_phone', '')
     prop_email = f"{user_clean}@brincdrones.com"
     prop_name = " ".join([word.capitalize() for word in user_clean.split('.')])
-    # Persist so session-close snapshot can read them without needing sidebar locals
-    st.session_state['_prop_email'] = prop_email
-    st.session_state['_prop_name']  = prop_name
 
     # Always define these so download buttons work regardless of fleet_capex
     prop_city  = st.session_state.get('active_city', 'City')
@@ -7157,19 +7034,6 @@ if st.session_state['csvs_ready']:
             } for d in active_drones],
         }
 
-        # ── Push the full export_details into the session registry snapshot ──
-        # so the session-close flush has drone/financial data even if the user
-        # never clicks a download button.
-        _sid = st.session_state.get('session_id', '')
-        if _sid:
-            with _REGISTRY_LOCK:
-                if _sid in _SESSION_REGISTRY:
-                    _SESSION_REGISTRY[_sid]['export_details'] = export_details
-                    _SESSION_REGISTRY[_sid]['active_city']    = prop_city
-                    _SESSION_REGISTRY[_sid]['active_state']   = prop_state
-                    _SESSION_REGISTRY[_sid]['brinc_user']     = prop_name
-                    _SESSION_REGISTRY[_sid]['brinc_email']    = prop_email
-
         export_dict = {
             "city": prop_city, "state": prop_state,
             "_disclaimer": (
@@ -7191,16 +7055,20 @@ if st.session_state['csvs_ready']:
         fig_for_export = go.Figure()
         for d in active_drones:
             clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
-            fig_for_export.add_trace(go.Scattermapbox(
+            fig_for_export.add_trace(go.Scattermap(
                 lat=list(clats)+[None,d['lat']], lon=list(clons)+[None,d['lon']],
                 mode='lines+markers', line=dict(color=d['color'], width=3),
                 marker=dict(size=[0]*len(clats)+[0,16], color=d['color']),
                 fill='toself', fillcolor='rgba(0,0,0,0)', name=d['name'][:30]
             ))
         fig_for_export.update_layout(
-            mapbox=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
+            map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
             margin=dict(l=0,r=0,t=0,b=0), height=500, showlegend=True,
-            legend=dict(bgcolor=legend_bg, font=dict(color=legend_text, size=11))
+            legend=dict(
+                yanchor="top", y=0.98, xanchor="left", x=0.02,
+                bgcolor=legend_bg, bordercolor="#444444", borderwidth=1,
+                font=dict(color=legend_text, size=11)
+            )
         )
         map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
         station_rows = "".join(f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>" for d in active_drones)
@@ -7977,7 +7845,7 @@ sections.forEach(s=>obs.observe(s));
                            prop_name, prop_email, details=export_details)
     # 2. Executive Summary / proposal HTML export
     if fleet_capex > 0:
-        if st.sidebar.download_button("📄 Download Executive Summary HTML",
+        if st.sidebar.download_button(f"📄 {prop_city}, {prop_state} — Executive Summary",
                                       data=export_html,
                                       file_name=f"BRINC_Executive_Summary_{_safe_city}_{_ts}.html",
                                       mime="text/html",

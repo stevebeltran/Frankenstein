@@ -7059,29 +7059,30 @@ body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text)
 .cover-headline h1 span{{color:var(--cyan)}}
 .cover-headline p{{font-size:16px;color:#888;max-width:480px;line-height:1.7}}
 .cover-meta{{
-  display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;
+  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
   background:#1a1a2a;border:1px solid #1a1a2a;border-radius:10px;overflow:hidden;
+  margin-top:4px;
 }}
 .cover-meta-cell{{
-  background:var(--ink);padding:20px 24px;
+  background:var(--ink);padding:16px 14px;
 }}
-.cover-meta-cell .label{{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#555;margin-bottom:6px}}
-.cover-meta-cell .value{{font-size:clamp(12px,1.4vw,15px);font-weight:700;color:#fff;word-break:break-word;overflow-wrap:anywhere}}
+.cover-meta-cell .label{{font-size:9px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#555;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.cover-meta-cell .value{{font-size:clamp(11px,1vw,14px);font-weight:800;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'IBM Plex Mono',monospace;letter-spacing:-0.3px}}
 .cover-meta-cell .value.accent{{color:var(--cyan)}}
 .cover-meta-cell .value.gold{{color:var(--gold)}}
 .cover-bottom{{margin-top:40px;font-size:12px;color:#444;border-top:1px solid #1a1a2a;padding-top:24px;display:flex;justify-content:space-between}}
 
 /* ── METRICS SECTION ─────────────────────────────────────────── */
 .metrics-hero{{
-  display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1px;
+  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
   background:var(--border);border-radius:12px;overflow:hidden;
   margin-bottom:40px;box-shadow:0 1px 3px rgba(0,0,0,0.04);
 }}
 .metric-cell{{
-  background:#fff;padding:28px 24px;text-align:center;
+  background:#fff;padding:24px 16px;text-align:center;min-width:0;
 }}
-.metric-cell .m-label{{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}}
-.metric-cell .m-value{{font-size:clamp(18px,2.4vw,36px);font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1.1;color:var(--text);word-break:break-word;overflow-wrap:anywhere}}
+.metric-cell .m-label{{font-size:9px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.metric-cell .m-value{{font-size:clamp(16px,1.8vw,28px);font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1.1;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
 .metric-cell .m-value.cyan{{color:var(--cyan)}}
 .metric-cell .m-value.gold{{color:var(--gold)}}
 .metric-cell .m-value.green{{color:var(--green)}}
@@ -7276,6 +7277,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
         <div class="cover-meta-cell"><div class="label">Call Coverage</div><div class="value accent">{calls_covered_perc:.1f}%</div></div>
         <div class="cover-meta-cell"><div class="label">Avg Response</div><div class="value">{avg_resp_time:.1f} min</div></div>
         <div class="cover-meta-cell"><div class="label">Time Saved</div><div class="value gold">{avg_time_saved:.1f} min</div></div>
+        <div class="cover-meta-cell" style="background:rgba(0,210,255,0.04)"><div class="label" style="color:#1a4a5a">Fleet Size</div><div class="value" style="color:#00a0bf">{actual_k_responder + actual_k_guardian} Units</div></div>
       </div>
     </div>
     <div class="cover-right">
@@ -7294,11 +7296,12 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
   <div class="metrics-hero">
     <div class="metric-cell"><div class="m-label">Fleet Capital Expenditure</div><div class="m-value cyan">${fleet_capex:,.0f}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
     <div class="metric-cell"><div class="m-label">Annual Savings Capacity</div><div class="m-value gold">${annual_savings:,.0f}</div><div class="m-sub">At {int(dfr_dispatch_rate*100)}% dispatch · {int(deflection_rate*100)}% resolution</div></div>
-    <div class="metric-cell"><div class="m-label">Possible Add'l Thermal + K-9</div><div class="m-value green">${possible_additional_savings:,.0f}</div><div class="m-sub">Thermal ${thermal_savings:,.0f} · K-9 ${k9_savings:,.0f}</div></div>
+    <div class="metric-cell"><div class="m-label">Add'l Thermal + K-9 Savings</div><div class="m-value green">${possible_additional_savings:,.0f}</div><div class="m-sub">Thermal ${thermal_savings:,.0f} · K-9 ${k9_savings:,.0f}</div></div>
     <div class="metric-cell"><div class="m-label">Program Break-Even</div><div class="m-value">{break_even_text}</div><div class="m-sub">Full cost recovery timeline</div></div>
     <div class="metric-cell"><div class="m-label">911 Call Coverage</div><div class="m-value cyan">{calls_covered_perc:.1f}%</div><div class="m-sub">of {st.session_state.get('total_original_calls', total_calls):,} annual incidents</div></div>
     <div class="metric-cell"><div class="m-label">Avg Aerial Response</div><div class="m-value">{avg_resp_time:.1f} min</div><div class="m-sub">vs. ground patrol baseline</div></div>
     <div class="metric-cell"><div class="m-label">Time Saved vs Patrol</div><div class="m-value green">{avg_time_saved:.1f} min</div><div class="m-sub">per incident, on average</div></div>
+    <div class="metric-cell" style="background:#fafbfc"><div class="m-label">Total Fleet Units</div><div class="m-value" style="color:#374151">{actual_k_responder + actual_k_guardian}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
   </div>
   <p style="font-size:15px;color:#444;line-height:1.8;max-width:680px">
     The {jurisdiction_list} proposes a BRINC Drones Drone as a First Responder (DFR) program deploying

@@ -5640,6 +5640,7 @@ if st.session_state['csvs_ready']:
         area_covered_perc = (unary_union(active_geos).area / city_area) * 100
     if total_calls > 0:
         calls_covered_perc = (np.logical_or(cov_r, cov_g).sum() / total_calls) * 100
+        st.session_state['calls_covered_perc'] = calls_covered_perc
     if len(active_geos) >= 2:
         inters = [active_geos[i].intersection(active_geos[j])
                   for i in range(len(active_geos))
@@ -5952,6 +5953,9 @@ if st.session_state['csvs_ready']:
         avg_time_saved = ((sum((d['radius_m']/1609.34*1.4/_avg_ground_speed_exec)*60 for d in active_drones) / len(active_drones)) - avg_resp_time) if active_drones and _avg_ground_speed_exec > 0 else 0.0
     except Exception:
         avg_time_saved = 0.0
+    # ── Persist live deployment metrics so the apprehension table reads real values ──
+    st.session_state['avg_time_saved_min'] = avg_time_saved
+    st.session_state['avg_resp_time_min']  = avg_resp_time
 
     # 1. THE SINGLE-LINE EXECUTIVE HEADER
     logo_b64 = get_transparent_product_base64("gigs.png")

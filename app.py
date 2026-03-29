@@ -6413,6 +6413,60 @@ if st.session_state['csvs_ready']:
                         ),
                         unsafe_allow_html=True
                     )
+                    # ── Lock / Switch / Unpin buttons (functional) ──────
+                    if _is_pg or _is_pr:
+                        _switch_label = "🚁 Switch→Resp" if _is_pg else "🦅 Switch→Guard"
+                        _bc1, _bc2 = st.columns([3, 2])
+                        with _bc1:
+                            if st.button(_switch_label, key=f"switch_{_ci}",
+                                         use_container_width=True):
+                                if _is_pg:
+                                    _pg = list(st.session_state.get('pinned_guard_names', []))
+                                    _pr = list(st.session_state.get('pinned_resp_names', []))
+                                    _pg = [x for x in _pg if x != _dname]
+                                    if _dname not in _pr: _pr.append(_dname)
+                                    st.session_state['pinned_guard_names'] = _pg
+                                    st.session_state['pinned_resp_names']  = _pr
+                                    if st.session_state.get('k_resp', 0) < len(_pr):
+                                        st.session_state['k_resp'] = len(_pr)
+                                else:
+                                    _pg = list(st.session_state.get('pinned_guard_names', []))
+                                    _pr = list(st.session_state.get('pinned_resp_names', []))
+                                    _pr = [x for x in _pr if x != _dname]
+                                    if _dname not in _pg: _pg.append(_dname)
+                                    st.session_state['pinned_guard_names'] = _pg
+                                    st.session_state['pinned_resp_names']  = _pr
+                                    if st.session_state.get('k_guard', 0) < len(_pg):
+                                        st.session_state['k_guard'] = len(_pg)
+                                st.rerun()
+                        with _bc2:
+                            if st.button("✕ Unpin", key=f"unpin_{_ci}",
+                                         use_container_width=True, type="primary"):
+                                st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
+                                st.session_state['pinned_resp_names']  = [x for x in _saved_rnames if x != _dname]
+                                st.rerun()
+                    else:
+                        _ba, _bb = st.columns(2)
+                        with _ba:
+                            if st.button("🦅 Lock Guard", key=f"pin_g_{_ci}",
+                                         use_container_width=True):
+                                _pg = list(st.session_state.get('pinned_guard_names', []))
+                                if _dname not in _pg: _pg.append(_dname)
+                                st.session_state['pinned_guard_names'] = _pg
+                                st.session_state['pinned_resp_names']  = [x for x in _saved_rnames if x != _dname]
+                                if st.session_state.get('k_guard', 0) < len(_pg):
+                                    st.session_state['k_guard'] = len(_pg)
+                                st.rerun()
+                        with _bb:
+                            if st.button("🚁 Lock Resp", key=f"pin_r_{_ci}",
+                                         use_container_width=True):
+                                _pr = list(st.session_state.get('pinned_resp_names', []))
+                                if _dname not in _pr: _pr.append(_dname)
+                                st.session_state['pinned_resp_names']  = _pr
+                                st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
+                                if st.session_state.get('k_resp', 0) < len(_pr):
+                                    st.session_state['k_resp'] = len(_pr)
+                                st.rerun()
     else:
         st.markdown(
             f"""

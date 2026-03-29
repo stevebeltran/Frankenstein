@@ -3501,7 +3501,7 @@ if not st.session_state['csvs_ready']:
         )
 
         station_template_bytes = base64.b64decode(
-            "77u/c3RhdGlvbl9pZCxuYW1lLGxhdCxsb24NCjEsIlBvbGljZSAxMjMgUyBFYXN0IFN0LCBCZW50b24sIEFSIDcyMDE1IiwzNC41NjI4NzIyMiwtOTIuNTg1MDM3MDQNCjIsIlNjaG9vbCAgMTIzIFMgRWFzdCBTdCwgQmVudG9uLCBBUiA3MjAxNiIsMzQuNTgxNDAzNDEsLTkyLjU4MjA4MTA5DQo0LCJGaXJlICAxMjMgUyBFYXN0IFN0LCBCZW50b24sIEFSIDcyMDE3IiwzNC42MDkzNDY3OSwtOTIuNTM3MDUyNTkNCjUsIlB1YmxpYyBXb3JrcyAxMjMgUyBFYXN0IFN0LCBCZW50b24sIEFSIDcyMDE4IiwzNC41NjM3NTMzOSwtOTIuNTcyODcyMzENCjYsIlByaXZhdGUgIDEyMyBTIEVhc3QgU3QsIEJlbnRvbiwgQVIgNzIwMTkiLDM0LjU0OTc0ODcxLC05Mi42MDcxMjMyNQ0K"
+            "TkFNRSxUWVBFLEFERFJFU1MsQ0FQQUNJVFksTk9URVMsTEFULExPTgpTYW1wbGUgMSBQb2xpY2UgU3RhdGlvbixQb2xpY2UsNDIwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMSwyLFByaW1hcnkgZG93bnRvd24gZGlzcGF0Y2ggaHViLDQyLjI3MTEsLTg5LjA5NDAKU2FtcGxlIDIgUG9saWNlIFN0YXRpb24sUG9saWNlLDM0MDEgTiBNYWluIFN0LCBSb2NrZm9yZCwgSUwgNjExMDMsMixOb3J0aCBzaWRlIHBhdHJvbCBiYXNlLDQyLjMxMDUsLTg5LjA4ODcKU2FtcGxlIDMgUG9saWNlIFN0YXRpb24sUG9saWNlLDE3MDcgUyBNdWxmb3JkIFJkLCBSb2NrZm9yZCwgSUwgNjExMDgsMSxTb3V0aGVhc3QgY29ycmlkb3IgY292ZXJhZ2UsNDIuMjQ4OCwtODguOTk5OApTYW1wbGUgNCBQb2xpY2UgU3RhdGlvbixQb2xpY2UsNDM0MCBXIFN0YXRlIFN0LCBSb2NrZm9yZCwgSUwgNjExMDIsMSxXZXN0IHNpZGUgcmFwaWQgcmVzcG9uc2UgdW5pdCw0Mi4yNzEyLC04OS4xMjQxClNhbXBsZSAxIEZpcmUgU3RhdGlvbixGaXJlLDcwOCBDbGludG9uIFN0LCBSb2NrZm9yZCwgSUwgNjExMDEsMixDZW50cmFsIGZpcmUgZGlzcGF0Y2ggLSBTdGF0aW9uIDEsNDIuMjcyMCwtODkuMDg5OApTYW1wbGUgMiBGaXJlIFN0YXRpb24sRmlyZSwxNDAyIE4gQ291cnQgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMywxLE5vcnRoIFJvY2tmb3JkIGZpcmUgY292ZXJhZ2UsNDIuMjk1MSwtODkuMDgyNgpTYW1wbGUgMyBGaXJlIFN0YXRpb24sRmlyZSwyMjUwIFMgQWxwaW5lIFJkLCBSb2NrZm9yZCwgSUwgNjExMDgsMSxTb3V0aCBBbHBpbmUgZmlyZSByZXNwb25zZSw0Mi4yNDAxLC04OC45OTY0ClNhbXBsZSA0IEZpcmUgU3RhdGlvbixGaXJlLDUyODUgU2FmZm9yZCBSZCwgUm9ja2ZvcmQsIElMIDYxMTAxLDEsV2VzdCBkaXN0cmljdCBmaXJlIHN0YXRpb24sNDIuMjY5OCwtODkuMTQwMgpTYW1wbGUgMSBFTVMgU3RhdGlvbixFTVMsMTQwMSBFIFN0YXRlIFN0LCBSb2NrZm9yZCwgSUwgNjExMDQsMixFYXN0IHNpZGUgRU1TIHJhcGlkIHJlc3BvbnNlLDQyLjI2OTQsLTg5LjA2MjEKU2FtcGxlIDIgRU1TIFN0YXRpb24sRU1TLDM3MjAgQ2hhcmxlcyBTdCwgUm9ja2ZvcmQsIElMIDYxMTA4LDEsU291dGhlYXN0IEVNUyBjb3ZlcmFnZSB6b25lLDQyLjI1MjIsLTg5LjAwNTgKU2FtcGxlIDMgRU1TIFN0YXRpb24sRU1TLDQ4MjUgTiBCZWxsIFNjaG9vbCBSZCwgUm9ja2ZvcmQsIElMIDYxMTA3LDEsTm9ydGhlYXN0IEVNUyByZXNwb25zZSBodWIsNDIuMzAyMSwtODguOTg5MQpTYW1wbGUgMSBHb3YgU3RhdGlvbixHb3Zlcm5tZW50LDQyNSBFIFN0YXRlIFN0LCBSb2NrZm9yZCwgSUwgNjExMDQsMSxXaW5uZWJhZ28gQ291bnR5IGFkbWluIGJ1aWxkaW5nLDQyLjI3MTUsLTg5LjA4NDgKU2FtcGxlIDIgR292IFN0YXRpb24sR292ZXJubWVudCwzMDAgVyBTdGF0ZSBTdCwgUm9ja2ZvcmQsIElMIDYxMTAxLDEsQ2l0eSBIYWxsIC0gUm9ja2ZvcmQgbXVuaWNpcGFsIGNlbnRlciw0Mi4yNzExLC04OS4wOTU3ClNhbXBsZSAzIEdvdiBTdGF0aW9uLEdvdmVybm1lbnQsNjUwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMiwxLFB1YmxpYyB3b3JrcyBhbmQgZW1lcmdlbmN5IG1nbXQsNDIuMjcxMywtODkuMTAxOAo="
         )
         st.download_button(
             label="⬇️ Download sample stations.csv",
@@ -7005,18 +7005,8 @@ if st.session_state['csvs_ready']:
             ))
         fig_for_export.update_layout(
             mapbox=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
-            margin=dict(l=0,r=0,t=40,b=0), height=500, showlegend=True,
-legend=dict(
-    bgcolor="rgba(15, 20, 30, 0.97)",   # near-opaque, readable on any background
-    bordercolor="#00D2FF",
-    borderwidth=1,
-    font=dict(color="#ffffff", size=11),
-    yanchor="top",
-    y=1.12,          # floats the legend ABOVE the map — no overlap with controls
-    xanchor="left",
-    x=0.0,
-    orientation="h"  # horizontal row instead of stacked column, saves vertical space
-)
+            margin=dict(l=0,r=0,t=0,b=0), height=500, showlegend=True,
+            legend=dict(bgcolor=legend_bg, font=dict(color=legend_text, size=11))
         )
         map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
         station_rows = "".join(f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>" for d in active_drones)

@@ -1854,7 +1854,28 @@ def _build_apprehension_table(df_calls, text_main, text_muted, card_bg, card_bor
   </p>
 </div>
 """
-    st.markdown(table_html, unsafe_allow_html=True)
+    # Wrap in a full HTML document so components.html renders the table faithfully.
+    # st.markdown strips <table> tags in recent Streamlit versions.
+    full_html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body {{
+    margin: 0; padding: 0;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }}
+</style>
+</head>
+<body>
+{table_html}
+</body>
+</html>"""
+    # Height: header ~60px + description ~40px + 9 rows × 44px + score row 54px + footnote 30px
+    _table_height = 60 + 40 + (len(rows) * 44) + 54 + 44 + 30
+    import streamlit.components.v1 as _comp
+    _comp.html(full_html, height=_table_height, scrolling=False)
 
 
 def _build_cad_charts(df_calls, text_main, text_muted, card_bg, card_border, accent_color):

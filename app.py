@@ -2739,16 +2739,17 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         _sc_fmt = f"${d_extra_same_capex:,}" if d_has_deficit else ""
         _ac_fmt = f"${d_extra_alt_capex:,}" if d_has_deficit else ""
         cards_html.append(f'''
-<div class="unit-card" style="background:{card_bg}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-top:3px solid {d_color}; border-radius:8px; padding:12px; display:flex; flex-direction:column; box-sizing:border-box; min-height:440px; height:100%;">
-  <!-- Header: name + type badge -->
-  <div style="margin-bottom:8px; min-height:82px;">
-    <div style="font-weight:700; font-size:0.88rem; color:{card_title}; line-height:1.3; margin-bottom:2px;">{short_name}</div>
-    <div style="font-size:0.70rem; color:#777; text-transform:uppercase; letter-spacing:0.5px;">{"🔒 " if d.get("pinned") else ""}{d_type} · Phase #{d_step}</div>
-    <div style="font-size:0.72rem; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-      <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
+<div class="unit-card" style="background:{card_bg}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-top:3px solid {d_color}; border-radius:8px; padding:10px 12px; display:flex; flex-direction:column; box-sizing:border-box; height:580px; overflow:hidden;">
+  <!-- Header: single compact row -->
+  <div style="margin-bottom:5px; flex-shrink:0;">
+    <div style="display:flex; align-items:baseline; gap:5px; overflow:hidden;">
+      <span style="font-weight:700; font-size:0.78rem; color:{card_title}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0;">{"🔒 " if d.get("pinned") else ""}{d["name"]}</span>
+      <span style="font-size:0.58rem; color:#666; text-transform:uppercase; letter-spacing:0.3px; white-space:nowrap; flex-shrink:0;">{d_type} · #{d_step}</span>
+    </div>
+    <div style="font-size:0.65rem; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+      <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:500; opacity:0.85;">📍 {d_address} ↗</a>
     </div>
   </div>
-  <!-- Annual capacity value box -->
   <div style="background:rgba(0,210,255,0.07); border:1px solid rgba(0,210,255,0.15); border-radius:6px; padding:8px 10px; margin-bottom:6px;"
        title="Annual Capacity Value is based on calls handled without sending a squad.">
     <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Annual Capacity Value<span class="tip" data-tip="Estimated annual savings from calls this drone resolves without sending a ground unit. Capped at physical flight capacity.">?</span>{"  ⚠️ capped at physical max" if d_has_deficit else ""}</div>
@@ -2876,10 +2877,10 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
      f'<span style="font-size:0.60rem;color:#2ecc71;font-weight:700;">✓ WITHIN CAPACITY</span>'  
      f'<span style="font-size:0.60rem;color:{scene_color};font-weight:600;">· {d_on_scene:.1f} min on-scene</span>'  
      f'</div>') }
-  <!-- Pin buttons — rendered via session_state keys set by JS postMessage -->
-  <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
-    {"'''<div style=\'background:rgba(255,215,0,0.15); border:1px solid rgba(255,215,0,0.4); border-radius:4px; padding:4px 6px; font-size:0.65rem; font-weight:700; color:#FFD700; text-align:center; cursor:pointer;\'>&nbsp;🔒 GUARDIAN LOCKED</div>'''" if d.get("pinned") and d_type=="GUARDIAN" else "'''<div style=\'border:1px dashed rgba(255,215,0,0.25); border-radius:4px; padding:4px 6px; font-size:0.65rem; color:rgba(255,215,0,0.5); text-align:center;\'><span style=\'opacity:0.6\'>🦅 lock as guard</span></div>'''" }
-    {"'''<div style=\'background:rgba(0,210,255,0.15); border:1px solid rgba(0,210,255,0.4); border-radius:4px; padding:4px 6px; font-size:0.65rem; font-weight:700; color:#00D2FF; text-align:center; cursor:pointer;\'>&nbsp;🔒 RESPONDER LOCKED</div>'''" if d.get("pinned") and d_type=="RESPONDER" else "'''<div style=\'border:1px dashed rgba(0,210,255,0.25); border-radius:4px; padding:4px 6px; font-size:0.65rem; color:rgba(0,210,255,0.5); text-align:center;\'><span style=\'opacity:0.6\'>🚁 lock as resp</span></div>'''" }
+  <!-- Inline lock status indicators -->
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:3px; margin-top:auto; padding-top:4px; flex-shrink:0;">
+    <div style="{"background:rgba(255,215,0,0.15);border:1px solid rgba(255,215,0,0.5);" if (d.get("pinned") and d_type=="GUARDIAN") else "background:rgba(255,255,255,0.03);border:1px dashed rgba(255,215,0,0.18);"} border-radius:4px; padding:3px 6px; font-size:0.57rem; color:{"#FFD700" if (d.get("pinned") and d_type=="GUARDIAN") else "rgba(255,215,0,0.35)"}; text-align:center; line-height:1.5; white-space:nowrap;">{"🔒 Guardian" if (d.get("pinned") and d_type=="GUARDIAN") else "🦅 lock guard"}</div>
+    <div style="{"background:rgba(0,210,255,0.15);border:1px solid rgba(0,210,255,0.5);" if (d.get("pinned") and d_type=="RESPONDER") else "background:rgba(255,255,255,0.03);border:1px dashed rgba(0,210,255,0.18);"} border-radius:4px; padding:3px 6px; font-size:0.57rem; color:{"#00D2FF" if (d.get("pinned") and d_type=="RESPONDER") else "rgba(0,210,255,0.35)"}; text-align:center; line-height:1.5; white-space:nowrap;">{"🔒 Responder" if (d.get("pinned") and d_type=="RESPONDER") else "🚁 lock resp"}</div>
   </div>
 </div>''')
 
@@ -6412,56 +6413,6 @@ if st.session_state['csvs_ready']:
                         ),
                         unsafe_allow_html=True
                     )
-                    # ── Lock / Switch / Unpin buttons ─────────────────────────
-                    if _is_pg or _is_pr:
-                        _switch_label = "🚁 Switch to Resp" if _is_pg else "🦅 Switch to Guard"
-                        _bc1, _bc2 = st.columns([3, 2])
-                        with _bc1:
-                            if st.button(_switch_label, key=f"switch_{_ci}",
-                                         use_container_width=True):
-                                if _is_pg:
-                                    st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
-                                    _pr = list(st.session_state.get('pinned_resp_names', []))
-                                    if _dname not in _pr: _pr.append(_dname)
-                                    st.session_state['pinned_resp_names'] = _pr
-                                    if st.session_state.get('k_resp', 0) < len(_pr):
-                                        st.session_state['k_resp'] = len(_pr)
-                                else:
-                                    st.session_state['pinned_resp_names'] = [x for x in _saved_rnames if x != _dname]
-                                    _pg = list(st.session_state.get('pinned_guard_names', []))
-                                    if _dname not in _pg: _pg.append(_dname)
-                                    st.session_state['pinned_guard_names'] = _pg
-                                    if st.session_state.get('k_guard', 0) < len(_pg):
-                                        st.session_state['k_guard'] = len(_pg)
-                                st.rerun()
-                        with _bc2:
-                            if st.button("✕ Unpin", key=f"unpin_{_ci}",
-                                         use_container_width=True, type="primary"):
-                                st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
-                                st.session_state['pinned_resp_names']  = [x for x in _saved_rnames if x != _dname]
-                                st.rerun()
-                    else:
-                        _ba, _bb = st.columns(2)
-                        with _ba:
-                            if st.button("🦅 lock as guard", key=f"pin_g_{_ci}",
-                                         use_container_width=True):
-                                _pg = list(st.session_state.get('pinned_guard_names', []))
-                                if _dname not in _pg: _pg.append(_dname)
-                                st.session_state['pinned_guard_names'] = _pg
-                                st.session_state['pinned_resp_names']  = [x for x in _saved_rnames if x != _dname]
-                                if st.session_state.get('k_guard', 0) < len(_pg):
-                                    st.session_state['k_guard'] = len(_pg)
-                                st.rerun()
-                        with _bb:
-                            if st.button("🚁 lock as resp", key=f"pin_r_{_ci}",
-                                         use_container_width=True):
-                                _pr = list(st.session_state.get('pinned_resp_names', []))
-                                if _dname not in _pr: _pr.append(_dname)
-                                st.session_state['pinned_resp_names']  = _pr
-                                st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
-                                if st.session_state.get('k_resp', 0) < len(_pr):
-                                    st.session_state['k_resp'] = len(_pr)
-                                st.rerun()
     else:
         st.markdown(
             f"""

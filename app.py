@@ -1099,6 +1099,26 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
 # ============================================================
 # AGGRESSIVE DATA PARSER
 # ============================================================
+@st.cache_data(show_spinner=False)
+def _geocode_address_census(address: str):
+    try:
+        _params = urllib.parse.urlencode({
+            "address": address,
+            "benchmark": "2020",
+            "format": "json"
+        })
+        _url = f"https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?{_params}"
+        with urllib.request.urlopen(_url, timeout=8) as _resp:
+            _data = json.loads(_resp.read().decode())
+        _matches = _data.get("result", {}).get("addressMatches", [])
+        if _matches:
+            _coords = _matches[0]["coordinates"]
+            return float(_coords["y"]), float(_coords["x"])
+    except Exception:
+        pass
+    return None, None
+
+
 def aggressive_parse_calls(uploaded_files):
     all_calls_list = []
     CV = {
@@ -1212,48 +1232,91 @@ def aggressive_parse_calls(uploaded_files):
 
                 def _sheet_score(ws):
                     score = 0
-                    rows = list(ws.iter_rows(min_row=1, max_row=3, values_only=True))
+                    rows = list(ws.iter_rows(min_row=1, max_row=15, values_only=True))
                     if not rows:
                         return -1
-                    header = rows[0] or []
-                    header_norm = [str(h).strip().lower() for h in header if h is not None]
-                    if not header_norm:
-                        return -1
-                    hints = ['latitude', 'longitude', 'lat', 'lon', 'priority', 'location', 'date', 'time']
-                    score += sum(10 for h in header_norm if any(k == h or k in h for k in hints))
-                    score += sum(1 for h in header_norm if h and not re.match(r'^column\d+$', h))
-                    if len(rows) > 1 and rows[1] and any(v is not None and str(v).strip() != '' for v in rows[1]):
-                        score += 25
-                    # Penalize external-data placeholder sheets
-                    if len(header_norm) == 1 and header_norm[0].startswith('externaldata_'):
-                        score -= 100
-                    return score
+
+                    best_row_score = -1
+                    strong_hints = ['event', 'pri', 'type', 'from', 'to', 'location', 'created time', 'call priority', 'agency event type code desc', 'addressx', 'addressy']
+                    weak_hints = ['latitude', 'longitude', 'lat', 'lon', 'priority', 'location', 'date', 'time']
+
+                    for row in rows:
+                        header_norm = [str(h).strip().lower() for h in (row or []) if h is not None and str(h).strip() != '']
+                        if not header_norm:
+                            continue
+                        row_score = 0
+                        row_score += sum(20 for h in header_norm if h in strong_hints)
+                        row_score += sum(8 for h in header_norm if any(k == h or k in h for k in weak_hints))
+                        row_score += sum(1 for h in header_norm if h and not re.match(r'^column\d+$', h))
+                        if len(header_norm) >= 6:
+                            row_score += 15
+                        if len(header_norm) == 1 and header_norm[0].startswith('externaldata_'):
+                            row_score -= 200
+                        best_row_score = max(best_row_score, row_score)
+
+                    return best_row_score
 
                 try:
                     import openpyxl as _oxl
                     _wb = _oxl.load_workbook(io.BytesIO(raw_bytes), read_only=True, data_only=True)
                     _sheet_name = max(_wb.sheetnames, key=lambda sn: _sheet_score(_wb[sn]))
                     _ws = _wb[_sheet_name]
-                    _row_iter = _ws.iter_rows(values_only=True)
-                    _headers_raw = next(_row_iter)
-                    if _headers_raw is None:
+                    _rows_preview = list(_ws.iter_rows(min_row=1, max_row=15, values_only=True))
+
+                    _header_row_idx = None
+                    _header_values = None
+                    _best_header_score = -1
+                    for _idx, _row in enumerate(_rows_preview, start=1):
+                        _vals = list(_row or [])
+                        _norm = [str(v).strip().lower() if v is not None else '' for v in _vals]
+                        _nonempty = [v for v in _norm if v]
+                        if not _nonempty:
+                            continue
+                        _score = 0
+                        _score += sum(20 for h in _nonempty if h in ['event', 'pri', 'type', 'from', 'to', 'location', 'created time', 'call priority', 'agency event type code desc', 'addressx', 'addressy'])
+                        _score += sum(8 for h in _nonempty if any(k == h or k in h for k in ['latitude', 'longitude', 'lat', 'lon', 'priority', 'location', 'date', 'time']))
+                        if len(_nonempty) >= 6:
+                            _score += 15
+                        if _score > _best_header_score:
+                            _best_header_score = _score
+                            _header_row_idx = _idx
+                            _header_values = _vals
+
+                    if _header_values is None:
                         raise ValueError("Selected Excel sheet has no header row.")
+
                     _real_idx = [
-                        i for i, h in enumerate(_headers_raw)
-                        if h is not None and not (str(h).startswith('Column') and str(h)[6:].isdigit())
+                        i for i, h in enumerate(_header_values)
+                        if h is not None and str(h).strip() != '' and not (str(h).startswith('Column') and str(h)[6:].isdigit())
                     ]
                     if not _real_idx:
-                        _real_idx = [i for i, h in enumerate(_headers_raw) if h is not None]
-                    _real_headers = [str(_headers_raw[i]).lower().strip() for i in _real_idx]
+                        _real_idx = [i for i, h in enumerate(_header_values) if h is not None]
+                    _real_headers = [str(_header_values[i]).lower().strip() for i in _real_idx]
+
                     _rows_data = []
-                    for _row in _row_iter:
+                    _current_date_marker = None
+                    for _row in _ws.iter_rows(min_row=_header_row_idx + 1, values_only=True):
                         if _row is None:
                             continue
                         _trimmed = [_row[i] if i < len(_row) else None for i in _real_idx]
-                        if any(v is not None and str(v).strip() != '' for v in _trimmed):
-                            _rows_data.append(_trimmed)
+                        if not any(v is not None and str(v).strip() != '' for v in _trimmed):
+                            continue
+
+                        _first = _trimmed[0] if _trimmed else None
+                        _first_str = str(_first).strip() if _first is not None else ''
+                        _m = re.match(r'^\[(\d{1,2}/\d{1,2}/\d{2,4})\]$', _first_str)
+                        if _m:
+                            _current_date_marker = _m.group(1)
+                            continue
+                        if _first_str.lower() in ('incname', 'click on heading to change sort order.'):
+                            continue
+
+                        _row_dict = {str(_real_headers[j]).lower().strip(): _trimmed[j] for j in range(len(_real_headers))}
+                        if _current_date_marker:
+                            _row_dict['_stacked_date_marker'] = _current_date_marker
+                        _rows_data.append(_row_dict)
                     _wb.close()
-                    raw_df = pd.DataFrame(_rows_data, columns=_real_headers)
+                    raw_df = pd.DataFrame(_rows_data)
                     raw_df = raw_df.dropna(how='all')
                     raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
                 except Exception as _xe:
@@ -1293,6 +1356,13 @@ def aggressive_parse_calls(uploaded_files):
                 raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
             
             res = pd.DataFrame()
+            _xy_name_map = {str(c).strip().lower(): c for c in raw_df.columns}
+            if 'addressx' in _xy_name_map and 'addressy' in _xy_name_map:
+                res['lon'] = pd.to_numeric(raw_df[_xy_name_map['addressx']], errors='coerce')
+                res['lat'] = pd.to_numeric(raw_df[_xy_name_map['addressy']], errors='coerce')
+            elif 'address_x' in _xy_name_map and 'address_y' in _xy_name_map:
+                res['lon'] = pd.to_numeric(raw_df[_xy_name_map['address_x']], errors='coerce')
+                res['lat'] = pd.to_numeric(raw_df[_xy_name_map['address_y']], errors='coerce')
             exact_coord_names = {
                 'lat': ['latitude', 'lat', 'gps_lat', 'gps_latitude'],
                 'lon': ['longitude', 'lon', 'long', 'gps_lon', 'gps_longitude']
@@ -1376,6 +1446,14 @@ def aggressive_parse_calls(uploaded_files):
             d_found = [c for c in raw_df.columns if any(s in c for s in CV['date'])]
             t_found = [c for c in raw_df.columns if any(s in c for s in CV['time'])]
 
+            if not d_found and '_stacked_date_marker' in raw_df.columns:
+                d_found = ['_stacked_date_marker']
+            if not t_found:
+                for _time_col in ['from', 'to', 'time', 'call time']:
+                    if _time_col in raw_df.columns:
+                        t_found = [_time_col]
+                        break
+
             # Fallback: if no date column found by name hint, scan all string columns
             # for any that successfully parse as datetime (catches columns like
             # 'createdtime_central', 'call_ts', 'event_dttm', etc.)
@@ -1395,9 +1473,9 @@ def aggressive_parse_calls(uploaded_files):
             if d_found:
                 # Build the raw string series to parse — combine date+time cols if separate
                 if t_found and d_found[0] != t_found[0]:
-                    _raw_dt_str = raw_df[d_found[0]].fillna('') + ' ' + raw_df[t_found[0]].fillna('')
+                    _raw_dt_str = raw_df[d_found[0]].fillna('').astype(str).str.strip() + ' ' + raw_df[t_found[0]].fillna('').astype(str).str.strip()
                 else:
-                    _raw_dt_str = raw_df[d_found[0]]
+                    _raw_dt_str = raw_df[d_found[0]].fillna('').astype(str).str.strip()
 
                 # Try explicit common formats first (orders of magnitude faster than
                 # dateutil fallback on large files, and avoids NaT on ghost rows).
@@ -1408,6 +1486,8 @@ def aggressive_parse_calls(uploaded_files):
                     '%m/%d/%Y %I:%M %p',   # 2/14/2025 6:03 PM  (Mobile AL)
                     '%m/%d/%Y %H:%M:%S',   # 2/14/2025 18:03:00
                     '%m/%d/%Y %H:%M',      # 2/14/2025 18:03
+                    '%m/%d/%y %H:%M:%S',   # 10/14/23 00:06:00
+                    '%m/%d/%y %H:%M',      # 10/14/23 00:06
                     '%Y-%m-%d %H:%M:%S',   # 2025-02-14 18:03:00
                     '%Y-%m-%dT%H:%M:%S',   # ISO 8601
                     '%Y-%m-%d %H:%M',      # 2025-02-14 18:03
@@ -1441,11 +1521,16 @@ def aggressive_parse_calls(uploaded_files):
                         converted = False
                         # Strategy 1: Try common State Plane CRS at /100 and /1 scales
                         candidate_crs = [
-                            "EPSG:2278",  # TX South Central (ftUS)
-                            "EPSG:2277",  # TX Central (ftUS)
-                            "EPSG:2276",  # TX North Central (ftUS)
-                            "EPSG:2279",  # TX South (ftUS)
-                            "EPSG:32140", # TX South Central (m)
+                            "EPSG:26911",  # NAD83 / UTM zone 11N
+                            "EPSG:32611",  # WGS84 / UTM zone 11N
+                            "EPSG:2227",   # NV West / ftUS
+                            "EPSG:26910",  # nearby fallback
+                            "EPSG:32610",  # nearby fallback
+                            "EPSG:2278",   # TX South Central (ftUS)
+                            "EPSG:2277",   # TX Central (ftUS)
+                            "EPSG:2276",   # TX North Central (ftUS)
+                            "EPSG:2279",   # TX South (ftUS)
+                            "EPSG:32140",  # TX South Central (m)
                         ]
                         for scale in [100.0, 1.0]:
                             for crs in candidate_crs:
@@ -1532,6 +1617,54 @@ def aggressive_parse_calls(uploaded_files):
             inferred_state = _infer_state_from_text(raw_df, top_city_name)
             if inferred_state:
                 res["_csv_state"] = inferred_state
+
+            addr_candidates = [
+                c for c in raw_df.columns
+                if any(k in c for k in ['location', 'address', 'incident_location', 'addr', 'street'])
+            ]
+            if (('lat' not in res.columns) or ('lon' not in res.columns) or res[['lat', 'lon']].dropna().empty) and addr_candidates:
+                addr_col = addr_candidates[0]
+                res['raw_location'] = raw_df[addr_col].astype(str).str.strip()
+                res['raw_location'] = res['raw_location'].replace(
+                    r'(?i)^(nan|none|null|incname|\[.*\])$',
+                    np.nan,
+                    regex=True
+                )
+
+                def _normalize_addr(_addr):
+                    if pd.isna(_addr):
+                        return None
+                    _s = str(_addr).strip()
+                    if not _s or _s.lower() in ('nan', 'none', 'null', 'incname'):
+                        return None
+                    _s = re.sub(r',\s*RNO\s*$', ', Reno, NV', _s, flags=re.I)
+                    _s = re.sub(r',\s*RENO\s*$', ', Reno, NV', _s, flags=re.I)
+                    if inferred_state and inferred_state.lower() not in _s.lower() and 'reno, nv' not in _s.lower() and 'reno nv' not in _s.lower():
+                        if top_city_name and top_city_name.lower() not in _s.lower():
+                            _s = f"{_s}, {top_city_name}, {inferred_state}"
+                        else:
+                            _s = f"{_s}, {inferred_state}"
+                    elif top_city_name and top_city_name.lower() not in _s.lower() and 'reno, nv' not in _s.lower() and 'reno nv' not in _s.lower():
+                        _s = f"{_s}, {top_city_name}"
+                    return _s
+
+                _unique_addrs = []
+                _seen_addrs = set()
+                for _addr in res['raw_location'].dropna().astype(str):
+                    _norm = _normalize_addr(_addr)
+                    if _norm and _norm not in _seen_addrs:
+                        _seen_addrs.add(_norm)
+                        _unique_addrs.append(_norm)
+
+                _geo_map = {}
+                for _addr in _unique_addrs[:2500]:
+                    _lat, _lon = _geocode_address_census(_addr)
+                    if _lat is not None and _lon is not None:
+                        _geo_map[_addr] = (_lat, _lon)
+
+                _mapped = res['raw_location'].apply(lambda _x: _geo_map.get(_normalize_addr(_x), (np.nan, np.nan)))
+                res['lat'] = [m[0] for m in _mapped]
+                res['lon'] = [m[1] for m in _mapped]
 
             # ── Capture file data matrix for Sheets/email logging ────────────
             try:
@@ -3761,7 +3894,7 @@ if not st.session_state['csvs_ready']:
                         df_c = aggressive_parse_calls(call_files)
 
                     if df_c is None or df_c.empty:
-                        st.error("❌ Calls file error: Could not parse valid coordinates.")
+                        st.error("❌ Calls file error: no usable coordinates were parsed or geocoded from the CAD export.")
                         st.stop()
 
                     df_c_full = df_c.reset_index(drop=True).copy()

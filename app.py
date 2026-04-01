@@ -2737,6 +2737,8 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_deficit_f    = d.get('deficit_flights', 0)
         d_unserv_day   = d.get('unserv_calls_day', 0)
         d_unserv_yr    = d.get('unserv_calls_yr', 0)
+        d_total_flights_possible_yr = max(0.0, float(d_max_cap or 0) * 365.0)
+        d_total_uncovered_flights_yr = max(0.0, float(d_zone_flights_annual or 0) - d_total_flights_possible_yr)
         d_extra_same   = d.get('extra_same', 0)
         d_extra_alt    = d.get('extra_alt', 0)
         d_extra_same_capex = d.get('extra_same_capex', 0)
@@ -2937,6 +2939,14 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   { (f'<div style="border-top:1px solid rgba(220,53,69,0.35);margin-top:4px;padding-top:5px;">'  
        f'<div style="font-size:0.62rem;font-weight:800;color:#dc3545;margin-bottom:3px;">⚠️ CAPACITY DEFICIT · {d_on_scene:.1f} min on-scene (min 10)</div>'  
        f'<div style="font-size:0.59rem;color:{text_muted};margin-bottom:4px;">{d_unserv_day:.0f} calls/day unserviceable · {d_unserv_yr:,.0f}/yr</div>'  
+       f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:4px;">'  
+       f'<div style="background:rgba(220,53,69,0.08);border:1px solid rgba(220,53,69,0.2);border-radius:4px;padding:3px 6px;font-size:0.59rem;">'  
+       f'<div style="color:{text_muted};">Total Flights Possible</div>'  
+       f'<div style="font-weight:700;color:{card_title};">{d_total_flights_possible_yr:,.0f}/yr</div></div>'  
+       f'<div style="background:rgba(220,53,69,0.08);border:1px solid rgba(220,53,69,0.2);border-radius:4px;padding:3px 6px;font-size:0.59rem;">'  
+       f'<div style="color:{text_muted};">Uncovered Flights</div>'  
+       f'<div style="font-weight:700;color:#dc3545;">{d_total_uncovered_flights_yr:,.0f}/yr</div></div>'  
+       f'</div>'  
        f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;">'  
        f'<div style="background:rgba(220,53,69,0.08);border:1px solid rgba(220,53,69,0.2);border-radius:4px;padding:3px 6px;font-size:0.59rem;">'  
        f'<div style="color:{text_muted};">+{d_extra_same} {d_same_lbl}</div>'  
@@ -6106,6 +6116,12 @@ if st.session_state['csvs_ready']:
             _shared_daily      = (_shared_calls / total_calls) * calls_per_day
             _shared_dfr        = _shared_daily * dfr_dispatch_rate
             _concurrent_daily  = _shared_dfr * _util
+            # In deficit, the drone is already at or over capacity from exclusive zone
+            # flights alone. Cap concurrent to whatever flight capacity remains so the
+            # Annual Capacity Value reflects only calls the drone can physically service.
+            if _has_deficit:
+                _remaining_cap_day = max(0.0, _max_flights_cap - _excl_flights)
+                _concurrent_daily  = min(_concurrent_daily, _remaining_cap_day)
             _concurrent_month  = _cost_delta * (_concurrent_daily * deflection_rate) * 30.4
             _concurrent_annual = _concurrent_month * 12
 

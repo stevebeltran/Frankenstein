@@ -5414,98 +5414,207 @@ if st.session_state['csvs_ready']:
         except Exception:
             pass
 
-    with st.spinner(get_jurisdiction_message()):
-        _preferred_shp = st.session_state.get('boundary_source_path', '') or None
-        master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
-
     _boundary_kind_note = st.session_state.get('boundary_kind', 'place')
     _boundary_src_note = st.session_state.get('boundary_source_path', '')
 
-    if master_gdf is None or master_gdf.empty:
-        # ── Fallback 1: load any saved shapefile directly (spatial join may have
-        #    failed if coordinate conversion was imperfect, but the shapefile exists) ──
+    def _build_jurisdiction_master_gdf(df_calls, df_stations_all, state_abbr):
+        """
+        Build the jurisdiction GeoDataFrame by querying places_lite.parquet
+        (and counties_lite.parquet as fallback) for ALL named areas that overlap
+        the call bounding box.  Each area is assigned a call count via spatial join.
+        Areas with < 1% of total calls are excluded.
+        Falls back to find_relevant_jurisdictions → shapefile fallback → bbox box.
+        """
+        total_n = max(len(df_calls), 1)
+        pts_gdf = None
+        try:
+            _pts = df_calls.dropna(subset=['lat', 'lon']).copy()
+            pts_gdf = gpd.GeoDataFrame(
+                _pts, geometry=gpd.points_from_xy(_pts['lon'], _pts['lat']), crs="EPSG:4326"
+            )
+        except Exception:
+            pass
+
+        _call_minlon = float(df_calls['lon'].min())
+        _call_maxlon = float(df_calls['lon'].max())
+        _call_minlat = float(df_calls['lat'].min())
+        _call_maxlat = float(df_calls['lat'].max())
+        _pad = 0.15
+
+        # ── Try places_lite.parquet first ───────────────────────────────────
+        for _parquet_file, _name_col in [('places_lite.parquet', 'NAMELSAD'), ('counties_lite.parquet', 'NAME')]:
+            if not os.path.exists(_parquet_file):
+                continue
+            try:
+                state_fips = STATE_FIPS.get(state_abbr, '')
+                if not state_fips:
+                    continue
+                _pq = gpd.read_parquet(_parquet_file)
+                # Filter to this state and overlapping bounding box
+                _pq = _pq[_pq['STATEFP'] == state_fips].copy()
+                if _pq.empty:
+                    continue
+                if _pq.crs is None:
+                    _pq = _pq.set_crs(epsg=4269)
+                _pq = _pq.to_crs(epsg=4326)
+                # Bounding-box pre-filter for speed
+                _bounds = _pq.bounds
+                _overlap_mask = (
+                    (_bounds['maxx'] >= _call_minlon - _pad) &
+                    (_bounds['minx'] <= _call_maxlon + _pad) &
+                    (_bounds['maxy'] >= _call_minlat - _pad) &
+                    (_bounds['miny'] <= _call_maxlat + _pad)
+                )
+                _pq = _pq[_overlap_mask].copy()
+                if _pq.empty:
+                    continue
+
+                # Use NAMELSAD if available, else NAME; append "County" for counties
+                if _name_col == 'NAMELSAD' and 'NAMELSAD' in _pq.columns:
+                    _pq['DISPLAY_NAME'] = _pq['NAMELSAD'].astype(str)
+                elif 'NAME' in _pq.columns:
+                    if _parquet_file == 'counties_lite.parquet':
+                        _pq['DISPLAY_NAME'] = _pq['NAME'].astype(str) + ' County'
+                    else:
+                        _pq['DISPLAY_NAME'] = _pq['NAME'].astype(str)
+                else:
+                    _pq['DISPLAY_NAME'] = _pq.iloc[:, 0].astype(str)
+
+                if pts_gdf is not None and not pts_gdf.empty:
+                    # Spatial join: count how many call points fall in each area
+                    try:
+                        _joined = gpd.sjoin(pts_gdf[['geometry']], _pq[['DISPLAY_NAME', 'geometry']], how='left', predicate='within')
+                        _counts = _joined['DISPLAY_NAME'].value_counts()
+                        _pq['data_count'] = _pq['DISPLAY_NAME'].map(_counts).fillna(0).astype(int)
+                    except Exception:
+                        _pq['data_count'] = 0
+                else:
+                    _pq['data_count'] = 0
+
+                # Keep only areas that have at least 1 call point
+                _pq = _pq[_pq['data_count'] > 0].copy()
+                if _pq.empty:
+                    continue
+
+                # Dissolve duplicates by display name
+                _pq = _pq.dissolve(by='DISPLAY_NAME', aggfunc={'data_count': 'sum'}).reset_index()
+                _pq = _pq.sort_values('data_count', ascending=False)
+
+                # Filter out areas with < 1% share
+                _total = _pq['data_count'].sum()
+                if _total > 0:
+                    _pq['_pct'] = _pq['data_count'] / _total
+                    _pq = _pq[_pq['_pct'] >= 0.01].drop(columns=['_pct'])
+
+                if not _pq.empty:
+                    return _pq[['DISPLAY_NAME', 'data_count', 'geometry']]
+            except Exception:
+                continue
+
+        # ── Fallback A: find_relevant_jurisdictions (existing .shp files) ───
+        try:
+            _preferred_shp = st.session_state.get('boundary_source_path', '') or None
+            _mgdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
+            if _mgdf is not None and not _mgdf.empty:
+                # Re-run call-count spatial join on whatever shapes came back
+                if pts_gdf is not None and not pts_gdf.empty:
+                    try:
+                        _jj = gpd.sjoin(pts_gdf[['geometry']], _mgdf[['DISPLAY_NAME', 'geometry']], how='left', predicate='within')
+                        _cc = _jj['DISPLAY_NAME'].value_counts()
+                        _mgdf['data_count'] = _mgdf['DISPLAY_NAME'].map(_cc).fillna(0).astype(int)
+                    except Exception:
+                        pass
+                _total = _mgdf['data_count'].sum()
+                if _total > 0:
+                    _mgdf['_pct'] = _mgdf['data_count'] / _total
+                    _mgdf = _mgdf[_mgdf['_pct'] >= 0.01].drop(columns=['_pct'])
+                if not _mgdf.empty:
+                    return _mgdf[['DISPLAY_NAME', 'data_count', 'geometry']]
+        except Exception:
+            pass
+
+        # ── Fallback B: any overlapping saved .shp with proper name ─────────
         shp_files = glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp"))
         if shp_files:
             try:
-                preferred_kind = st.session_state.get('boundary_kind', 'place')
                 active_city = st.session_state.get('active_city', '')
-                active_state = st.session_state.get('active_state', '')
+                preferred_kind = st.session_state.get('boundary_kind', 'place')
                 best = st.session_state.get('boundary_source_path', '') or None
-
-                # Prefer exact typed boundary path first
                 if not best:
-                    exact = _boundary_shp_base(preferred_kind, active_city, active_state) + ".shp"
+                    exact = _boundary_shp_base(preferred_kind, active_city, state_abbr) + ".shp"
                     if os.path.exists(exact):
                         best = exact
-
-                # Then prefer typed files whose basename matches the active city
                 if not best:
                     city_key = _sanitize_boundary_token(active_city).lower()
-                    typed = []
-                    other = []
                     for sf in shp_files:
-                        base = os.path.basename(sf).lower()
-                        if base.startswith(preferred_kind + "__"):
-                            typed.append(sf)
-                        else:
-                            other.append(sf)
-                    for sf in typed + other:
                         if city_key and city_key in os.path.basename(sf).lower():
                             best = sf
                             break
-
-                if best is None:
-                    # Before falling back to shp_files[0], verify it overlaps
-                    # the call coordinate bounding box — skip stale files from
-                    # prior sessions that are geographically unrelated
-                    _fb_lat_min = df_calls['lat'].min()
-                    _fb_lat_max = df_calls['lat'].max()
-                    _fb_lon_min = df_calls['lon'].min()
-                    _fb_lon_max = df_calls['lon'].max()
-                    _overlap_pad = 2.0  # degrees
-                    for _sf_cand in shp_files:
+                if not best:
+                    for sf in shp_files:
                         try:
-                            import fiona as _fiona
-                            with _fiona.open(_sf_cand) as _sc:
+                            import fiona as _fi
+                            with _fi.open(sf) as _sc:
                                 _sb = _sc.bounds
-                            _overlaps = not (
-                                _sb[2] < _fb_lon_min - _overlap_pad or
-                                _sb[0] > _fb_lon_max + _overlap_pad or
-                                _sb[3] < _fb_lat_min - _overlap_pad or
-                                _sb[1] > _fb_lat_max + _overlap_pad
-                            )
-                            if _overlaps:
-                                best = _sf_cand
+                            if not (_sb[2] < _call_minlon - 2 or _sb[0] > _call_maxlon + 2 or
+                                    _sb[3] < _call_minlat - 2 or _sb[1] > _call_maxlat + 2):
+                                best = sf
                                 break
                         except Exception:
-                            best = _sf_cand
+                            best = sf
                             break
-                    # If every file failed the overlap check, skip loading —
-                    # let Fallback 2 (bbox polygon) handle it cleanly
-                    if best is None:
-                        master_gdf = None
-                        raise ValueError("No overlapping shapefiles found")
-
-                fallback_gdf = gpd.read_file(best)
-                if fallback_gdf.crs is None:
-                    fallback_gdf = fallback_gdf.set_crs(epsg=4269)
-                fallback_gdf = fallback_gdf.to_crs(epsg=4326)
-                name_col = next((c for c in ['NAME', 'DISTRICT', 'NAMELSAD'] if c in fallback_gdf.columns), fallback_gdf.columns[0])
-                fallback_gdf['DISPLAY_NAME'] = fallback_gdf[name_col].astype(str)
-                fallback_gdf['data_count'] = len(df_calls)
-                master_gdf = fallback_gdf[['DISPLAY_NAME', 'data_count', 'geometry']]
-                st.session_state['boundary_source_path'] = best
+                if best:
+                    _fb = gpd.read_file(best)
+                    if _fb.crs is None:
+                        _fb = _fb.set_crs(epsg=4269)
+                    _fb = _fb.to_crs(epsg=4326)
+                    _nc = next((c for c in ['NAMELSAD', 'NAME', 'DISTRICT'] if c in _fb.columns), _fb.columns[0])
+                    _fb['DISPLAY_NAME'] = _fb[_nc].astype(str)
+                    if pts_gdf is not None and not pts_gdf.empty:
+                        try:
+                            _jj = gpd.sjoin(pts_gdf[['geometry']], _fb[['DISPLAY_NAME', 'geometry']], how='left', predicate='within')
+                            _cc = _jj['DISPLAY_NAME'].value_counts()
+                            _fb['data_count'] = _fb['DISPLAY_NAME'].map(_cc).fillna(0).astype(int)
+                        except Exception:
+                            _fb['data_count'] = len(df_calls)
+                    else:
+                        _fb['data_count'] = len(df_calls)
+                    _fb = _fb.dissolve(by='DISPLAY_NAME', aggfunc={'data_count': 'sum'}).reset_index()
+                    _fb = _fb[_fb['data_count'] > 0]
+                    _total = _fb['data_count'].sum()
+                    if _total > 0:
+                        _fb = _fb[(_fb['data_count'] / _total) >= 0.01]
+                    if not _fb.empty:
+                        st.session_state['boundary_source_path'] = best
+                        return _fb[['DISPLAY_NAME', 'data_count', 'geometry']]
             except Exception:
-                master_gdf = None
+                pass
+
+        # ── Fallback C: bounding box with active city name ───────────────────
+        min_lon, min_lat = df_calls['lon'].min(), df_calls['lat'].min()
+        max_lon, max_lat = df_calls['lon'].max(), df_calls['lat'].max()
+        lon_pad = (max_lon - min_lon) * 0.1
+        lat_pad = (max_lat - min_lat) * 0.1
+        poly = box(min_lon - lon_pad, min_lat - lat_pad, max_lon + lon_pad, max_lat + lat_pad)
+        _label = st.session_state.get('active_city') or 'Coverage Area'
+        return gpd.GeoDataFrame(
+            {'DISPLAY_NAME': [_label], 'data_count': [len(df_calls)]},
+            geometry=[poly], crs="EPSG:4326"
+        )
+
+    with st.spinner(get_jurisdiction_message()):
+        _active_state_for_jx = st.session_state.get('active_state', '')
+        master_gdf = _build_jurisdiction_master_gdf(df_calls, df_stations_all, _active_state_for_jx)
 
     if master_gdf is None or master_gdf.empty:
-        # ── Fallback 2: bounding box around call points ──
+        # Final safety net
         min_lon, min_lat = df_calls['lon'].min(), df_calls['lat'].min()
         max_lon, max_lat = df_calls['lon'].max(), df_calls['lat'].max()
         lon_pad = (max_lon - min_lon) * 0.1
         lat_pad = (max_lat - min_lat) * 0.1
         poly = box(min_lon-lon_pad, min_lat-lat_pad, max_lon+lon_pad, max_lat+lat_pad)
-        master_gdf = gpd.GeoDataFrame({'DISPLAY_NAME':['Auto-Generated Boundary'],'data_count':[len(df_calls)]}, geometry=[poly], crs="EPSG:4326")
+        _label = st.session_state.get('active_city') or 'Coverage Area'
+        master_gdf = gpd.GeoDataFrame({'DISPLAY_NAME': [_label], 'data_count': [len(df_calls)]}, geometry=[poly], crs="EPSG:4326")
 
     # --- DRAW SIDEBAR LOGO FIRST SO IT IS AT THE ABSOLUTE TOP ---
     logo_b64 = get_themed_logo_base64("logo.png", theme="dark")

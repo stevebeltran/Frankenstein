@@ -1228,7 +1228,8 @@ def aggressive_parse_calls(uploaded_files):
 
             parts = [p.strip() for p in val.split(',') if p and p.strip()]
             if len(parts) >= 2:
-                locality = parts[-2] if re.match(r'^[A-Z]{2}$', parts[-1]) else parts[-1]
+                last = parts[-1].strip()
+                locality = parts[-2] if re.match(r'^[A-Z]{2}(\s+\d{5}(-\d{4})?)?$', last) else last
                 locality = locality.strip()
                 if locality and locality not in {'COUNTY', 'CITY', 'TOWN', 'VILLAGE', 'HAMLET'}:
                     candidates.append(locality.title())

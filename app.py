@@ -39,6 +39,7 @@ defaults = {
     'boundary_source_path': '',
     'location_detection_source': '',
     'boundary_detection_mode': '',
+    'master_gdf_override': None,  # GeoDataFrame from coordinate-based jurisdiction lookup
     # ── NEW: file ingestion metadata & engagement tracking ──────────────────
     'file_meta': {},            # populated by aggressive_parse_calls; see _extract_file_meta()
     'export_event_log': [],     # ordered list of export types clicked this session
@@ -4389,6 +4390,7 @@ if not st.session_state['csvs_ready']:
                     except Exception:
                         pass
                     st.session_state['boundary_source_path'] = ''
+                    st.session_state['master_gdf_override'] = None
 
                     with st.spinner(get_jurisdiction_message()):
                         _calls_for_boundary = df_c_full if df_c_full is not None and len(df_c_full) > 0 else df_c
@@ -4399,27 +4401,15 @@ if not st.session_state['csvs_ready']:
                         coord_gdf = find_jurisdictions_by_coordinates(_calls_for_boundary)
 
                         if coord_gdf is not None and not coord_gdf.empty:
-                            # Store each jurisdiction as a separate shapefile so
-                            # find_relevant_jurisdictions can load them all on re-render.
-                            _first_saved = None
-                            for _, jrow in coord_gdf.iterrows():
-                                jname = str(jrow['DISPLAY_NAME'])
-                                is_county = jname.lower().endswith('county')
-                                b_kind = 'county' if is_county else 'place'
-                                single = gpd.GeoDataFrame(
-                                    [{'NAME': jname, 'geometry': jrow['geometry']}],
-                                    crs='EPSG:4326'
-                                )
-                                _saved = save_boundary_gdf(single, b_kind, jname,
-                                                           st.session_state.get('active_state', 'US'))
-                                if _first_saved is None and _saved:
-                                    _first_saved = _saved
-                            st.session_state['boundary_source_path'] = _first_saved or ''
+                            # Store the GeoDataFrame directly in session state — no disk
+                            # round-trip needed. The render pass reads it back directly.
+                            st.session_state['master_gdf_override'] = coord_gdf
+                            st.session_state['boundary_source_path'] = 'local_parquet'
                             st.session_state['boundary_kind'] = 'place'
-                            # Update active_city to the top jurisdiction name for display
                             st.session_state['active_city'] = coord_gdf.iloc[0]['DISPLAY_NAME']
 
                         else:
+                            st.session_state['master_gdf_override'] = None
                             # ── FALLBACK: name-based lookup (original path) ──
                             detected_city_for_boundary = st.session_state.get('active_city', '')
                             detected_state_for_boundary = st.session_state.get('active_state', '')
@@ -5617,9 +5607,15 @@ if st.session_state['csvs_ready']:
         except Exception:
             pass
 
-    with st.spinner(get_jurisdiction_message()):
-        _preferred_shp = st.session_state.get('boundary_source_path', '') or None
-        master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
+    # ── Jurisdiction boundary: use coordinate-lookup result if available,
+    #    otherwise fall back to shapefile scan (demo/brinc restore paths) ──
+    _master_override = st.session_state.get('master_gdf_override')
+    if _master_override is not None and not _master_override.empty:
+        master_gdf = _master_override.copy()
+    else:
+        with st.spinner(get_jurisdiction_message()):
+            _preferred_shp = st.session_state.get('boundary_source_path', '') or None
+            master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
 
     _boundary_kind_note = st.session_state.get('boundary_kind', 'place')
     _boundary_src_note = st.session_state.get('boundary_source_path', '')
@@ -5726,7 +5722,11 @@ if st.session_state['csvs_ready']:
         """, unsafe_allow_html=True)
 
     st.sidebar.markdown('<div class="sidebar-section-header">① Configure</div>', unsafe_allow_html=True)
-    st.sidebar.caption(f"Boundary: {_boundary_kind_note} · {_boundary_src_note.split(chr(47))[-1].split(chr(92))[-1] if _boundary_src_note else 'live lookup'}")
+    _boundary_src_display = (
+        'local parquet' if _boundary_src_note == 'local_parquet'
+        else (_boundary_src_note.split(chr(47))[-1].split(chr(92))[-1] if _boundary_src_note else 'live lookup')
+    )
+    st.sidebar.caption(f"Boundary: {_boundary_kind_note} · {_boundary_src_display}")
 
     total_pts = master_gdf['data_count'].sum()
     master_gdf['LABEL'] = master_gdf['DISPLAY_NAME'] + " (" + (master_gdf['data_count']/total_pts*100).round(1).astype(str) + "%)"

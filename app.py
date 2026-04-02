@@ -3229,7 +3229,25 @@ def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir, preferred_
     else:
         shp_files = glob.glob(os.path.join(shapefile_dir, "*.shp"))
     relevant_polys = []
+    _calls_minx, _calls_miny, _calls_maxx, _calls_maxy = total_bounds
     for shp_path in shp_files:
+        try:
+            # Quick bbox pre-check: skip shapefiles whose extent doesn't overlap
+            # the call-point bounding box at all. This prevents stale shapefiles
+            # from prior sessions (e.g. Bernalillo NM when data is from FL) from
+            # being selected as the jurisdiction boundary.
+            import fiona
+            with fiona.open(shp_path) as _shp_src:
+                _shp_bounds = _shp_src.bounds  # (minx, miny, maxx, maxy)
+            _no_overlap = (
+                _shp_bounds[2] < _calls_minx or _shp_bounds[0] > _calls_maxx or
+                _shp_bounds[3] < _calls_miny or _shp_bounds[1] > _calls_maxy
+            )
+            if _no_overlap:
+                continue  # shapefile is geographically unrelated — skip it
+        except Exception:
+            pass  # if fiona check fails, proceed normally and let geopandas filter
+
         try:
             gdf_chunk = gpd.read_file(shp_path, bbox=tuple(total_bounds))
             if not gdf_chunk.empty:
@@ -4062,12 +4080,112 @@ if not st.session_state['csvs_ready']:
                             except Exception:
                                 pass
 
+                        # ── Fallback: derive city/state from coordinate centroid bbox ──
+                        # If Nominatim failed or returned nothing, try the Census FCC API
+                        # which is reliable and returns county + state from a lat/lon.
+                        if not detected_city or not detected_state:
+                            try:
+                                cen_lat_fb = float(df_c['lat'].median())
+                                cen_lon_fb = float(df_c['lon'].median())
+                                _fcc_url = (
+                                    f"https://geo.fcc.gov/api/census/block/find"
+                                    f"?latitude={cen_lat_fb}&longitude={cen_lon_fb}"
+                                    f"&format=json&showall=false"
+                                )
+                                _fcc_req = urllib.request.Request(
+                                    _fcc_url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"}
+                                )
+                                with urllib.request.urlopen(_fcc_req, timeout=8) as _fcc_resp:
+                                    _fcc_data = json.loads(_fcc_resp.read().decode("utf-8"))
+                                _fcc_county = _fcc_data.get("County", {}).get("name", "")
+                                _fcc_state  = _fcc_data.get("State", {}).get("code", "")
+                                if _fcc_county and _fcc_state and _fcc_state in STATE_FIPS:
+                                    if not detected_state:
+                                        detected_state = _fcc_state
+                                    if not detected_city:
+                                        # Use "County Name County" so fetch_county_boundary_local can find it
+                                        detected_city = _fcc_county
+                                    detection_source = "fcc_centroid"
+                            except Exception:
+                                pass
+
+                        # Last resort: derive state from coordinate range alone
+                        # (FL: lat 24-31, lon -87 to -80; this catches most US states uniquely)
+                        if not detected_state:
+                            try:
+                                _cen_lat = float(df_c['lat'].median())
+                                _cen_lon = float(df_c['lon'].median())
+                                _BBOX_STATES = [
+                                    ("FL", 24.5, 31.0, -87.6, -79.9),
+                                    ("CA", 32.5, 42.0, -124.5, -114.1),
+                                    ("TX", 25.8, 36.5, -106.6, -93.5),
+                                    ("NY", 40.5, 45.0, -79.8, -71.9),
+                                    ("IL", 36.9, 42.5, -91.5, -87.0),
+                                    ("GA", 30.4, 35.0, -85.6, -80.8),
+                                    ("NC", 33.8, 36.6, -84.3, -75.5),
+                                    ("OH", 38.4, 42.0, -84.8, -80.5),
+                                    ("PA", 39.7, 42.3, -80.5, -74.7),
+                                    ("WA", 45.5, 49.0, -124.7, -116.9),
+                                    ("AZ", 31.3, 37.0, -114.8, -109.0),
+                                    ("CO", 36.9, 41.0, -109.1, -102.0),
+                                    ("MO", 35.9, 40.6, -95.8, -89.1),
+                                    ("NM", 31.3, 37.0, -109.1, -103.0),
+                                    ("OR", 41.9, 46.2, -124.6, -116.5),
+                                    ("TN", 34.9, 36.7, -90.3, -81.6),
+                                    ("VA", 36.5, 39.5, -83.7, -75.2),
+                                    ("SC", 32.0, 35.2, -83.4, -78.5),
+                                    ("MI", 41.7, 48.3, -90.4, -82.4),
+                                    ("WI", 42.5, 47.1, -92.9, -86.2),
+                                    ("MN", 43.5, 49.4, -97.2, -89.5),
+                                    ("IA", 40.4, 43.5, -96.6, -90.1),
+                                    ("KS", 36.9, 40.0, -102.1, -94.6),
+                                    ("NE", 40.0, 43.0, -104.1, -95.3),
+                                    ("OK", 33.6, 37.0, -103.0, -94.4),
+                                    ("AR", 33.0, 36.5, -94.6, -89.6),
+                                    ("LA", 28.9, 33.0, -94.0, -88.8),
+                                    ("MS", 30.2, 35.0, -91.7, -88.1),
+                                    ("AL", 30.2, 35.0, -88.5, -84.9),
+                                    ("IN", 37.8, 41.8, -88.1, -84.8),
+                                    ("KY", 36.5, 39.1, -89.6, -81.9),
+                                    ("WV", 37.2, 40.6, -82.6, -77.7),
+                                    ("MD", 37.9, 39.7, -79.5, -75.0),
+                                    ("DE", 38.4, 39.8, -75.8, -75.0),
+                                    ("NJ", 38.9, 41.4, -75.6, -73.9),
+                                    ("CT", 41.0, 42.1, -73.7, -71.8),
+                                    ("RI", 41.1, 42.0, -71.9, -71.1),
+                                    ("MA", 41.2, 42.9, -73.5, -69.9),
+                                    ("VT", 42.7, 45.0, -73.4, -71.5),
+                                    ("NH", 42.7, 45.3, -72.6, -70.7),
+                                    ("ME", 43.1, 47.5, -71.1, -66.9),
+                                    ("NV", 35.0, 42.0, -120.0, -114.0),
+                                    ("UT", 36.9, 42.0, -114.1, -109.0),
+                                    ("ID", 41.9, 49.0, -117.2, -111.0),
+                                    ("MT", 44.4, 49.0, -116.1, -104.0),
+                                    ("WY", 40.9, 45.0, -111.1, -104.0),
+                                    ("ND", 45.9, 49.0, -104.1, -96.6),
+                                    ("SD", 42.5, 45.9, -104.1, -96.4),
+                                    ("AK", 54.0, 71.5, -168.0, -130.0),
+                                    ("HI", 18.9, 22.2, -160.2, -154.8),
+                                ]
+                                for _st, _lat0, _lat1, _lon0, _lon1 in _BBOX_STATES:
+                                    if _lat0 <= _cen_lat <= _lat1 and _lon0 <= _cen_lon <= _lon1:
+                                        detected_state = _st
+                                        detection_source = "coord_bbox"
+                                        break
+                            except Exception:
+                                pass
+
                         if detected_city and detected_state:
                             st.session_state['active_city'] = detected_city
                             st.session_state['active_state'] = detected_state
                             st.session_state['target_cities'] = [{"city": detected_city, "state": detected_state}]
                             st.session_state['location_detection_source'] = detection_source
                             st.toast(f"📍 Detected: {detected_city}, {detected_state}")
+                        elif detected_state:
+                            # We have state but no city — store state and let boundary
+                            # selection use the FCC county name as a county lookup
+                            st.session_state['active_state'] = detected_state
+                            st.session_state['location_detection_source'] = detection_source
 
                     # Keep uploaded calls intact here. Boundary validation should be the first real geographic filter.
                     st.session_state['df_calls']             = df_c
@@ -4075,6 +4193,23 @@ if not st.session_state['csvs_ready']:
                     st.session_state['df_stations']          = df_s
                     st.session_state['total_original_calls'] = len(df_c_full)
                     st.session_state['total_modeled_calls']  = len(df_c)
+
+                    # ── Clear stale shapefiles from previous sessions ──────────────
+                    # Old .shp files from prior cities (e.g. Bernalillo) would otherwise
+                    # be picked up by find_relevant_jurisdictions when no fresh boundary
+                    # is saved, causing completely wrong jurisdiction boundaries.
+                    try:
+                        import glob as _glob
+                        for _stale in _glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp")):
+                            for _ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
+                                _f = _stale.replace(".shp", _ext)
+                                try:
+                                    if os.path.exists(_f): os.remove(_f)
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+                    st.session_state['boundary_source_path'] = ''
 
                     with st.spinner(get_jurisdiction_message()):
                         # Choose the boundary that actually contains uploaded calls.
@@ -5320,7 +5455,36 @@ if st.session_state['csvs_ready']:
                             break
 
                 if best is None:
-                    best = shp_files[0]
+                    # Before falling back to shp_files[0], verify it overlaps
+                    # the call coordinate bounding box — skip stale files from
+                    # prior sessions that are geographically unrelated
+                    _fb_lat_min = df_calls['lat'].min()
+                    _fb_lat_max = df_calls['lat'].max()
+                    _fb_lon_min = df_calls['lon'].min()
+                    _fb_lon_max = df_calls['lon'].max()
+                    _overlap_pad = 2.0  # degrees
+                    for _sf_cand in shp_files:
+                        try:
+                            import fiona as _fiona
+                            with _fiona.open(_sf_cand) as _sc:
+                                _sb = _sc.bounds
+                            _overlaps = not (
+                                _sb[2] < _fb_lon_min - _overlap_pad or
+                                _sb[0] > _fb_lon_max + _overlap_pad or
+                                _sb[3] < _fb_lat_min - _overlap_pad or
+                                _sb[1] > _fb_lat_max + _overlap_pad
+                            )
+                            if _overlaps:
+                                best = _sf_cand
+                                break
+                        except Exception:
+                            best = _sf_cand
+                            break
+                    # If every file failed the overlap check, skip loading —
+                    # let Fallback 2 (bbox polygon) handle it cleanly
+                    if best is None:
+                        master_gdf = None
+                        raise ValueError("No overlapping shapefiles found")
 
                 fallback_gdf = gpd.read_file(best)
                 if fallback_gdf.crs is None:

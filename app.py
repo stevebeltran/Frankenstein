@@ -1099,94 +1099,10 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
 # ============================================================
 # AGGRESSIVE DATA PARSER
 # ============================================================
-
-@st.cache_data(show_spinner=False)
-def _resolve_locality_hint(token):
-    """Best-effort resolve of a locality token (city shorthand, campus code, etc.) to city/state."""
-    token = str(token or '').strip()
-    if not token:
-        return '', ''
-    try:
-        q = urllib.parse.urlencode({
-            "q": token,
-            "format": "jsonv2",
-            "limit": 1,
-            "addressdetails": 1,
-        })
-        req = urllib.request.Request(
-            f"https://nominatim.openstreetmap.org/search?{q}",
-            headers={"User-Agent": "BRINC_COS_Optimizer/1.0"}
-        )
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        if data:
-            addr = data[0].get("address", {})
-            city = (
-                addr.get("city")
-                or addr.get("town")
-                or addr.get("village")
-                or addr.get("hamlet")
-                or addr.get("county")
-                or ""
-            )
-            state_name = addr.get("state", "")
-            state = US_STATES_ABBR.get(state_name, state_name[:2].upper() if state_name else "")
-            return str(city).strip(), str(state).strip()
-    except Exception:
-        pass
-    return '', ''
-
-
-@st.cache_data(show_spinner=False)
-def _geocode_customer_location(address):
-    """Geocode a single oneline address using Census first, then OpenStreetMap as fallback."""
-    address = str(address or '').strip()
-    if not address:
-        return None, None, "", "empty"
-
-    # Primary: Census geocoder
-    try:
-        params = urllib.parse.urlencode({
-            "address": address,
-            "benchmark": "2020",
-            "format": "json"
-        })
-        url = f"https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?{params}"
-        with urllib.request.urlopen(url, timeout=8) as resp:
-            data = json.loads(resp.read().decode())
-        matches = data.get("result", {}).get("addressMatches", [])
-        if matches:
-            coords = matches[0]["coordinates"]
-            return float(coords["y"]), float(coords["x"]), "census", "ok"
-    except Exception:
-        pass
-
-    # Fallback: OSM/Nominatim handles intersections, POIs, campus buildings more gracefully
-    try:
-        q = urllib.parse.urlencode({
-            "q": address,
-            "format": "jsonv2",
-            "limit": 1,
-            "addressdetails": 1,
-        })
-        req = urllib.request.Request(
-            f"https://nominatim.openstreetmap.org/search?{q}",
-            headers={"User-Agent": "BRINC_COS_Optimizer/1.0"}
-        )
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        if data:
-            return float(data[0]["lat"]), float(data[0]["lon"]), "nominatim", "ok"
-    except Exception:
-        pass
-
-    return None, None, "", "failed"
-
-
 def aggressive_parse_calls(uploaded_files):
     all_calls_list = []
     CV = {
-        'date': ['received date','incident date','call date','call creation date','calldatetime','call datetime','calltime','timestamp','date','datetime','dispatch date','time received','incdate','date_rept','date_occu','createdtime','created time','created_time','receivedtime','received_time','eventtime','event_time','incidenttime','incident_time','reportedtime','reported_time','entrytime','entry_time','time_central','time_stamp','created'],
+        'date': ['received date','incident date','call date','call creation date','calldatetime','call datetime','calltime','timestamp','date','datetime','dispatch date','time received','incdate','date_rept','date_occu','createdtime','created_time','receivedtime','received_time','eventtime','event_time','incidenttime','incident_time','reportedtime','reported_time','entrytime','entry_time','time_central','time_stamp','created'],
         'time': ['call creation time','call time','dispatch time','received time','time', 'hour', 'hour_rept','hour_occu'],
         'priority': ['call priority', 'priority level', 'priority', 'pri', 'urgency'],
         'lat': ['latitude','lat','y coord','ycoord','ycoor','addressy','geoy','y_coord','map_y',
@@ -1196,75 +1112,6 @@ def aggressive_parse_calls(uploaded_files):
                 'map_x','point_x','gps_lon','gps_long','gps_longitude','xlon','coord_x','easting',
                 'x_wgs','lon_wgs','incident_lon','inc_lon','event_lon','x_coordinate','address_x','xlocation']
     }
-
-    def _normalize_header_value(v):
-        s = str(v or '').strip().lower()
-        s = re.sub(r'[^a-z0-9]+', ' ', s).strip()
-        return s
-
-    def _dedupe_headers(headers):
-        seen = {}
-        out = []
-        for i, h in enumerate(headers):
-            base = _normalize_header_value(h) or f'column_{i}'
-            if base in seen:
-                seen[base] += 1
-                out.append(f"{base}_{seen[base]}")
-            else:
-                seen[base] = 0
-                out.append(base)
-        return out
-
-    def _row_header_score(values):
-        toks = [_normalize_header_value(v) for v in values if str(v or '').strip()]
-        if not toks:
-            return -1
-        strong = {
-            'event', 'pri', 'priority', 'type', 'location', 'address',
-            'from', 'to', 'date', 'time', 'latitude', 'longitude', 'lat', 'lon',
-            'call priority', 'created time'
-        }
-        weak_parts = ['event', 'pri', 'type', 'location', 'address', 'date', 'time', 'lat', 'lon', 'from', 'to']
-        score = sum(20 for t in toks if t in strong)
-        score += sum(6 for t in toks if any(p == t or p in t for p in weak_parts))
-        score += min(len(toks), 20)
-        # punish metadata/title rows
-        joined = ' '.join(toks)
-        if 'call summary for' in joined or 'output for' in joined or 'click on heading' in joined:
-            score -= 50
-        return score
-
-    def _read_excel_best_sheet(raw_bytes, engine):
-        all_sheets = pd.read_excel(io.BytesIO(raw_bytes), engine=engine, sheet_name=None, header=None)
-        best_sheet_name, best_df, best_header_idx, best_score = None, None, None, -10**9
-
-        for sn, df0 in all_sheets.items():
-            if df0 is None or df0.empty:
-                continue
-            sample_rows = min(len(df0), 15)
-            for ridx in range(sample_rows):
-                row_vals = df0.iloc[ridx].tolist()
-                score = _row_header_score(row_vals)
-                if score < 0:
-                    continue
-                # reward real data beneath the header
-                lower = df0.iloc[ridx + 1:ridx + 8]
-                if not lower.empty:
-                    score += int(lower.notna().any(axis=1).sum() * 3)
-                if score > best_score:
-                    best_sheet_name, best_df, best_header_idx, best_score = sn, df0.copy(), ridx, score
-
-        if best_df is None:
-            best_sheet_name = next(iter(all_sheets.keys()))
-            best_df = all_sheets[best_sheet_name].copy()
-            best_header_idx = 0
-
-        headers = _dedupe_headers(best_df.iloc[best_header_idx].tolist())
-        data = best_df.iloc[best_header_idx + 1:].copy()
-        data.columns = headers
-        data = data.dropna(how='all').reset_index(drop=True)
-        data.columns = [str(c).lower().strip() for c in data.columns]
-        return data, best_sheet_name
 
     def _infer_city_from_location_text(raw_df):
         text_cols = [c for c in raw_df.columns if c in ['location', 'address', 'incident_location', 'addr', 'street']]
@@ -1276,8 +1123,8 @@ def aggressive_parse_calls(uploaded_files):
             return None
 
         s = s.str.replace(r':.*$', '', regex=True)
-        s = s.str.replace(r'\bCNTY\b', 'COUNTY', regex=True)
-        s = s.str.replace(r'[^A-Z0-9 /,-]', ' ', regex=True)
+        s = s.str.replace(r'CNTY', 'COUNTY', regex=True)
+        s = s.str.replace(r'[^A-Z0-9 /-]', ' ', regex=True)
         s = s.str.replace(r'\s+', ' ', regex=True).str.strip()
 
         candidates = []
@@ -1287,15 +1134,7 @@ def aggressive_parse_calls(uploaded_files):
                 candidates.append('Mobile')
                 continue
 
-            parts = [p.strip() for p in val.split(',') if p and str(p).strip()]
-            if len(parts) >= 2:
-                locality = parts[-1].strip()
-                if locality and locality not in {'COUNTY', 'CITY'}:
-                    # direct city name
-                    if len(locality) > 3 or not locality.isupper():
-                        candidates.append(locality.title())
-
-            m = re.search(r'\b([A-Z]{3,}(?:\s+[A-Z]{3,}){0,2})$', val)
+            m = re.search(r'([A-Z]{3,}(?:\s+[A-Z]{3,}){0,2})$', val)
             if m:
                 city = m.group(1).title()
                 if city not in {'County', 'City'}:
@@ -1305,8 +1144,7 @@ def aggressive_parse_calls(uploaded_files):
             return None
 
         vc = pd.Series(candidates).value_counts()
-        top = vc.index[0] if not vc.empty else None
-        return top if top and top != 'Rno' else None
+        return vc.index[0] if not vc.empty else None
 
     def _infer_state_from_text(raw_df, inferred_city=None):
         for col in ['state', 'state_name']:
@@ -1324,6 +1162,7 @@ def aggressive_parse_calls(uploaded_files):
         if inferred_city == 'Mobile':
             return 'AL'
         return None
+
 
     def _choose_priority_column(raw_df):
         exact_names = ['priority', 'call priority', 'priority level', 'pri']
@@ -1347,175 +1186,15 @@ def aggressive_parse_calls(uploaded_files):
 
     def parse_priority(raw):
         s = str(raw).strip().upper()
-        if not s or s == 'NAN':
-            return None
-        if any(w in s for w in ['ROBBERY','BURGLARY','ASSAULT','SHOOTING','STABBING','CRITICAL','EMERG']):
-            return 1
-        if any(w in s for w in ['ACCIDENT','DISTURBANCE','THEFT','MED','ALARM']):
-            return 2
-        if any(w in s for w in ['NON REPORTABLE','FOUND PROPERTY','INFO','ROUTINE','MISC']):
-            return 4
-
+        if not s or s == 'NAN': return None
+        # Smart inference for PD offenses if priority column is missing
+        if any(w in s for w in ['ROBBERY','BURGLARY','ASSAULT','SHOOTING','STABBING','CRITICAL','EMERG']): return 1
+        if any(w in s for w in ['ACCIDENT','DISTURBANCE','THEFT','MED','ALARM']): return 2
+        if any(w in s for w in ['NON REPORTABLE','FOUND PROPERTY','INFO','ROUTINE','MISC']): return 4
+        
         m = re.search(r'^(\d+)', s)
-        if m:
-            return int(m.group(1))
+        if m: return int(m.group(1))
         return 3
-
-    def _expand_stacked_dispatch_rows(raw_df):
-        if raw_df is None or raw_df.empty:
-            return raw_df
-
-        cols = {str(c).strip().lower(): c for c in raw_df.columns}
-        event_col = cols.get('event')
-        location_col = cols.get('location')
-        if not event_col or not location_col:
-            return raw_df
-
-        # If this already looks like a normal flat table, leave it alone.
-        if raw_df[event_col].astype(str).str.strip().str.startswith('#').mean() > 0.5:
-            return raw_df.reset_index(drop=True)
-
-        records = []
-        current_date = None
-        for _, row in raw_df.iterrows():
-            event_val = str(row.get(event_col, '')).strip()
-            if not event_val:
-                continue
-            date_match = re.match(r'^\[(\d{1,2}/\d{1,2}/\d{2,4})\]$', event_val)
-            if date_match:
-                current_date = date_match.group(1)
-                continue
-
-            low = event_val.lower()
-            if low in {'incname'} or 'click on heading' in low or 'call summary for' in low or 'output for:' in low:
-                continue
-
-            row_dict = row.to_dict()
-            if current_date:
-                row_dict['_cad_date_marker'] = current_date
-            records.append(row_dict)
-
-        if records:
-            return pd.DataFrame(records).reset_index(drop=True)
-        return raw_df.reset_index(drop=True)
-
-    def _infer_date_from_event_id(val):
-        s = str(val or '').strip()
-        m = re.search(r'(\d{2})(\d{3})\d+', s)
-        if not m:
-            return pd.NaT
-        try:
-            yy = int(m.group(1))
-            doy = int(m.group(2))
-            year = 2000 + yy if yy < 70 else 1900 + yy
-            return pd.Timestamp(year=year, month=1, day=1) + pd.to_timedelta(doy - 1, unit='D')
-        except Exception:
-            return pd.NaT
-
-    def _best_time_col(raw_df):
-        for cand in ['from', 'time', 'call time', 'dispatch time', 'received time', 'to']:
-            if cand in raw_df.columns:
-                return cand
-        for c in raw_df.columns:
-            if _normalize_header_value(c) in {'from', 'to', 'time'}:
-                return c
-        return None
-
-    def _normalize_customer_location(addr, inferred_city='', inferred_state=''):
-        s = str(addr or '').strip()
-        if not s or s.lower() in {'nan', 'none', 'null', 'incname'}:
-            return ''
-
-        s = re.sub(r'\s+', ' ', s)
-        s = re.sub(r'^\[.*?\]\s*', '', s)
-        s = re.sub(r'(?i)\b(\d+)\s+blk\b', r'\1', s)
-        s = re.sub(r'(?i)\bblk\b', '', s)
-        s = re.sub(r'\s*/\s*', ' & ', s)
-        s = re.sub(r'\s+,', ',', s).strip(' ,')
-
-        parts = [p.strip() for p in s.split(',') if p and p.strip()]
-        locality_token = parts[-1].upper() if len(parts) >= 2 else ''
-        city = inferred_city
-        state = inferred_state
-
-        known_locality_aliases = {
-            'RNO': ('Reno', 'NV'),
-            'SPK': ('Spokane', 'WA'),
-            'LAX': ('Los Angeles', 'CA'),
-        }
-        if locality_token in known_locality_aliases:
-            city, state = known_locality_aliases[locality_token]
-            s = ', '.join(parts[:-1])
-
-        if not city and locality_token and locality_token not in STATE_FIPS:
-            city_guess, state_guess = _resolve_locality_hint(locality_token)
-            city = city or city_guess
-            state = state or state_guess
-            if city_guess:
-                s = ', '.join(parts[:-1]) if len(parts) >= 2 else s
-
-        if city and city.lower() not in s.lower():
-            s = f"{s}, {city}"
-        if state and state.upper() not in s.upper():
-            s = f"{s}, {state}"
-
-        if 'usa' not in s.lower():
-            s = f"{s}, USA"
-        return s.strip(' ,')
-
-    def _geocode_address_only_rows(raw_df, res):
-        location_candidates = [
-            c for c in raw_df.columns
-            if any(k in str(c).lower() for k in ['location', 'address', 'incident_location', 'addr', 'street'])
-        ]
-        if not location_candidates:
-            return res
-
-        has_coords = (
-            'lat' in res.columns and 'lon' in res.columns and
-            res[['lat', 'lon']].dropna().shape[0] > 0
-        )
-        if has_coords:
-            return res
-
-        loc_col = location_candidates[0]
-        loc_series = raw_df[loc_col].astype(str).str.strip()
-        if loc_series.replace({'nan': '', 'None': ''}).str.len().eq(0).all():
-            return res
-
-        inferred_city = None
-        inferred_state = None
-        if '_csv_city' in res.columns and len(res['_csv_city'].dropna()) > 0:
-            inferred_city = str(res['_csv_city'].dropna().iloc[0]).strip()
-        if '_csv_state' in res.columns and len(res['_csv_state'].dropna()) > 0:
-            inferred_state = str(res['_csv_state'].dropna().iloc[0]).strip()
-
-        normalized = loc_series.apply(lambda x: _normalize_customer_location(x, inferred_city or '', inferred_state or ''))
-        unique_addrs = [a for a in pd.Series(normalized.dropna().unique()).tolist() if a]
-        if not unique_addrs:
-            return res
-
-        # Geocode unique locations once, then map back across all rows
-        addr_to_result = {}
-        for addr in unique_addrs:
-            lat, lon, method, status = _geocode_customer_location(addr)
-            addr_to_result[addr] = (lat, lon, method, status)
-
-        lat_vals, lon_vals, methods, statuses = [], [], [], []
-        for addr in normalized:
-            lat, lon, method, status = addr_to_result.get(addr, (None, None, "", "missing"))
-            lat_vals.append(lat)
-            lon_vals.append(lon)
-            methods.append(method)
-            statuses.append(status)
-
-        res['raw_location'] = loc_series
-        res['normalized_location'] = normalized
-        res['lat'] = pd.to_numeric(pd.Series(lat_vals), errors='coerce')
-        res['lon'] = pd.to_numeric(pd.Series(lon_vals), errors='coerce')
-        res['geocode_method'] = methods
-        res['geocode_status'] = statuses
-        return res
 
     for cfile in uploaded_files:
         try:
@@ -1523,45 +1202,110 @@ def aggressive_parse_calls(uploaded_files):
             excel_exts = ('.xlsx', '.xls', '.xlsb', '.xlsm')
 
             if fname.endswith(excel_exts):
+                # ── Excel path ────────────────────────────────────────────────
                 raw_bytes = cfile.getvalue()
                 engine = 'openpyxl'
                 if fname.endswith('.xls'):
                     engine = 'xlrd'
                 elif fname.endswith('.xlsb'):
                     engine = 'pyxlsb'
-                raw_df, _sheet_name = _read_excel_best_sheet(raw_bytes, engine)
-                raw_df = _expand_stacked_dispatch_rows(raw_df)
+
+                def _sheet_score(ws):
+                    score = 0
+                    rows = list(ws.iter_rows(min_row=1, max_row=3, values_only=True))
+                    if not rows:
+                        return -1
+                    header = rows[0] or []
+                    header_norm = [str(h).strip().lower() for h in header if h is not None]
+                    if not header_norm:
+                        return -1
+                    hints = ['latitude', 'longitude', 'lat', 'lon', 'priority', 'location', 'date', 'time']
+                    score += sum(10 for h in header_norm if any(k == h or k in h for k in hints))
+                    score += sum(1 for h in header_norm if h and not re.match(r'^column\d+$', h))
+                    if len(rows) > 1 and rows[1] and any(v is not None and str(v).strip() != '' for v in rows[1]):
+                        score += 25
+                    # Penalize external-data placeholder sheets
+                    if len(header_norm) == 1 and header_norm[0].startswith('externaldata_'):
+                        score -= 100
+                    return score
+
+                try:
+                    import openpyxl as _oxl
+                    _wb = _oxl.load_workbook(io.BytesIO(raw_bytes), read_only=True, data_only=True)
+                    _sheet_name = max(_wb.sheetnames, key=lambda sn: _sheet_score(_wb[sn]))
+                    _ws = _wb[_sheet_name]
+                    _row_iter = _ws.iter_rows(values_only=True)
+                    _headers_raw = next(_row_iter)
+                    if _headers_raw is None:
+                        raise ValueError("Selected Excel sheet has no header row.")
+                    _real_idx = [
+                        i for i, h in enumerate(_headers_raw)
+                        if h is not None and not (str(h).startswith('Column') and str(h)[6:].isdigit())
+                    ]
+                    if not _real_idx:
+                        _real_idx = [i for i, h in enumerate(_headers_raw) if h is not None]
+                    _real_headers = [str(_headers_raw[i]).lower().strip() for i in _real_idx]
+                    _rows_data = []
+                    for _row in _row_iter:
+                        if _row is None:
+                            continue
+                        _trimmed = [_row[i] if i < len(_row) else None for i in _real_idx]
+                        if any(v is not None and str(v).strip() != '' for v in _trimmed):
+                            _rows_data.append(_trimmed)
+                    _wb.close()
+                    raw_df = pd.DataFrame(_rows_data, columns=_real_headers)
+                    raw_df = raw_df.dropna(how='all')
+                    raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
+                except Exception as _xe:
+                    raw_df = None
+                    # Try all sheets with pandas and pick the one that looks most like CAD data
+                    try:
+                        _all = pd.read_excel(io.BytesIO(raw_bytes), engine=engine, sheet_name=None)
+                        best_score = -10**9
+                        best_df = None
+                        for _sn, _df in _all.items():
+                            _df.columns = [str(c).lower().strip() for c in _df.columns]
+                            _score = 0
+                            for _c in _df.columns:
+                                if _c in ('latitude', 'longitude', 'priority', 'location'):
+                                    _score += 20
+                                elif any(k in _c for k in ['lat', 'lon', 'priority', 'location', 'date', 'time']):
+                                    _score += 5
+                            _score += min(len(_df), 100)
+                            if len(_df.columns) == 1 and str(_df.columns[0]).startswith('externaldata_'):
+                                _score -= 100
+                            if _score > best_score:
+                                best_score = _score
+                                best_df = _df
+                        if best_df is not None:
+                            raw_df = best_df
+                    except Exception:
+                        pass
+                    if raw_df is None:
+                        raw_df = pd.read_excel(io.BytesIO(raw_bytes), engine=engine, dtype=str)
+                        raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
             else:
+                # ── CSV / TXT path ────────────────────────────────────────────
                 content = cfile.getvalue().decode('utf-8', errors='ignore')
                 first_line = content.split('\n')[0]
                 delim = ',' if first_line.count(',') > first_line.count('\t') else '\t'
                 raw_df = pd.read_csv(io.StringIO(content), sep=delim, dtype=str)
                 raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
-                raw_df = _expand_stacked_dispatch_rows(raw_df)
+            
+            res = pd.DataFrame()
+            exact_coord_names = {
+                'lat': ['latitude', 'lat', 'gps_lat', 'gps_latitude'],
+                'lon': ['longitude', 'lon', 'long', 'gps_lon', 'gps_longitude']
+            }
+            for field in ['lat', 'lon']:
+                found_exact = [c for c in raw_df.columns if c.strip().lower() in exact_coord_names[field]]
+                found_loose = [c for c in raw_df.columns if any(s in c for s in CV[field])]
+                found = found_exact or found_loose
+                if found:
+                    res[field] = pd.to_numeric(raw_df[found[0]], errors='coerce')
 
-            raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
-            res = pd.DataFrame(index=raw_df.index)
-
-            # direct AddressX / AddressY pairs should win over loose matching
-            xy_name_map = {str(c).strip().lower(): c for c in raw_df.columns}
-            if 'addressx' in xy_name_map and 'addressy' in xy_name_map:
-                res['lon'] = pd.to_numeric(raw_df[xy_name_map['addressx']], errors='coerce')
-                res['lat'] = pd.to_numeric(raw_df[xy_name_map['addressy']], errors='coerce')
-            elif 'address_x' in xy_name_map and 'address_y' in xy_name_map:
-                res['lon'] = pd.to_numeric(raw_df[xy_name_map['address_x']], errors='coerce')
-                res['lat'] = pd.to_numeric(raw_df[xy_name_map['address_y']], errors='coerce')
-            else:
-                exact_coord_names = {
-                    'lat': ['latitude', 'lat', 'gps_lat', 'gps_latitude'],
-                    'lon': ['longitude', 'lon', 'long', 'gps_lon', 'gps_longitude']
-                }
-                for field in ['lat', 'lon']:
-                    found_exact = [c for c in raw_df.columns if c.strip().lower() in exact_coord_names[field]]
-                    found_loose = [c for c in raw_df.columns if any(s in c for s in CV[field])]
-                    found = found_exact or found_loose
-                    if found:
-                        res[field] = pd.to_numeric(raw_df[found[0]], errors='coerce')
-
+            # ── Fallback: no column name matched — scan numeric columns by value range ──
+            # Lat: -90 to 90, Lon: -180 to 180. Pick best candidate for each.
             if 'lat' not in res.columns or 'lon' not in res.columns:
                 numeric_cols = []
                 for c in raw_df.columns:
@@ -1572,6 +1316,10 @@ def aggressive_parse_calls(uploaded_files):
                 lat_candidates, lon_candidates = [], []
                 for c, series in numeric_cols:
                     mn, mx = series.min(), series.max()
+                    # Reject if already assigned
+                    if c in (res.get('_lat_col',''), res.get('_lon_col','')):
+                        continue
+                    # Large integer coords (State Plane) — treat as potential coord pair
                     if mx > 1000:
                         lat_candidates.append((c, series))
                         lon_candidates.append((c, series))
@@ -1581,18 +1329,191 @@ def aggressive_parse_calls(uploaded_files):
                     if -180 <= mn and mx <= 180 and (mn < -90 or mx > 90):
                         lon_candidates.append((c, series))
 
+                # Prefer candidate whose name hints at lat/lon
                 def _score(name, hints):
                     return sum(1 for h in hints if h in name)
 
                 if 'lat' not in res.columns and lat_candidates:
-                    lat_candidates.sort(key=lambda x: -_score(str(x[0]).lower(), ['lat','y','north']))
-                    res['lat'] = pd.to_numeric(raw_df[lat_candidates[0][0]], errors='coerce')
+                    lat_candidates.sort(key=lambda x: -_score(x[0], ['lat','y','north']))
+                    best_lat_col = lat_candidates[0][0]
+                    res['lat'] = pd.to_numeric(raw_df[best_lat_col], errors='coerce')
 
                 if 'lon' not in res.columns and lon_candidates:
-                    lon_candidates.sort(key=lambda x: -_score(str(x[0]).lower(), ['lon','long','x','east']))
-                    res['lon'] = pd.to_numeric(raw_df[lon_candidates[0][0]], errors='coerce')
+                    # Don't reuse the lat column
+                    used = res.get('lat', pd.Series()).name if 'lat' in res.columns else None
+                    lon_candidates = [(c, s) for c, s in lon_candidates if c != used]
+                    if lon_candidates:
+                        lon_candidates.sort(key=lambda x: -_score(x[0], ['lon','long','x','east']))
+                        best_lon_col = lon_candidates[0][0]
+                        res['lon'] = pd.to_numeric(raw_df[best_lon_col], errors='coerce')
+            
+            _p_col = _choose_priority_column(raw_df)
+            p_found = [_p_col] if _p_col else []
+            if _p_col:
+                parsed_priority = raw_df[_p_col].apply(parse_priority)
+                parsed_priority = pd.to_numeric(parsed_priority, errors='coerce')
+                parsed_priority = parsed_priority.where(parsed_priority.isin([1, 2, 3, 4, 5, 6, 7, 8, 9]))
+                if parsed_priority.dropna().empty:
+                    res['priority'] = 3
+                else:
+                    res['priority'] = parsed_priority.fillna(3).astype(int)
+            else:
+                # No trustworthy priority field — keep the app usable with a neutral default
+                res['priority'] = 3
+            
+            # ── Event type description — carried through for CAD analytics charts ──
+            _desc_hints = ['desc','type','nature','offense','calltype','call_type','event_type',
+                           'eventtype','calldesc','incident_type','agencyeventtype']
+            _desc_found = [c for c in raw_df.columns
+                           if any(h in c for h in _desc_hints)
+                           and c not in (p_found[:1] if p_found else [])]
+            if _desc_found:
+                # Pick the column with the most unique text values (most descriptive)
+                _best_desc = max(_desc_found, key=lambda c: raw_df[c].dropna().nunique())
+                if raw_df[_best_desc].dropna().nunique() > 2:
+                    res['call_type_desc'] = raw_df[_best_desc].astype(str).str.strip()
 
-            # city/state detection first so geocoding can use them
+            d_found = [c for c in raw_df.columns if any(s in c for s in CV['date'])]
+            t_found = [c for c in raw_df.columns if any(s in c for s in CV['time'])]
+
+            # Fallback: if no date column found by name hint, scan all string columns
+            # for any that successfully parse as datetime (catches columns like
+            # 'createdtime_central', 'call_ts', 'event_dttm', etc.)
+            if not d_found:
+                for _col in raw_df.columns:
+                    if _col in (t_found or []):
+                        continue
+                    try:
+                        _test = pd.to_datetime(raw_df[_col].dropna().head(50), errors='coerce')
+                        _valid = _test.dropna()
+                        if len(_valid) >= 10 and _valid.dt.year.between(2000, 2035).mean() > 0.8:
+                            d_found = [_col]
+                            break
+                    except Exception:
+                        continue
+
+            if d_found:
+                # Build the raw string series to parse — combine date+time cols if separate
+                if t_found and d_found[0] != t_found[0]:
+                    _raw_dt_str = raw_df[d_found[0]].fillna('') + ' ' + raw_df[t_found[0]].fillna('')
+                else:
+                    _raw_dt_str = raw_df[d_found[0]]
+
+                # Try explicit common formats first (orders of magnitude faster than
+                # dateutil fallback on large files, and avoids NaT on ghost rows).
+                # Format detection: sample the first non-null value.
+                _sample_vals = _raw_dt_str.dropna().str.strip()
+                _sample_vals = _sample_vals[_sample_vals != ''].head(5)
+                _fmt_candidates = [
+                    '%m/%d/%Y %I:%M %p',   # 2/14/2025 6:03 PM  (Mobile AL)
+                    '%m/%d/%Y %H:%M:%S',   # 2/14/2025 18:03:00
+                    '%m/%d/%Y %H:%M',      # 2/14/2025 18:03
+                    '%Y-%m-%d %H:%M:%S',   # 2025-02-14 18:03:00
+                    '%Y-%m-%dT%H:%M:%S',   # ISO 8601
+                    '%Y-%m-%d %H:%M',      # 2025-02-14 18:03
+                    '%Y/%m/%d %H:%M:%S',
+                    '%d/%m/%Y %H:%M:%S',
+                    '%m-%d-%Y %H:%M:%S',
+                ]
+                dt_series = None
+                if not _sample_vals.empty:
+                    for _fmt in _fmt_candidates:
+                        try:
+                            _trial = pd.to_datetime(_sample_vals.iloc[0], format=_fmt, errors='raise')
+                            # Format matched — apply to full series
+                            dt_series = pd.to_datetime(_raw_dt_str, format=_fmt, errors='coerce')
+                            break
+                        except Exception:
+                            continue
+                if dt_series is None:
+                    # Final fallback: let pandas infer (slow but handles edge cases)
+                    dt_series = pd.to_datetime(_raw_dt_str, errors='coerce')
+
+                res['date'] = dt_series.dt.strftime('%Y-%m-%d')
+                res['time'] = dt_series.dt.strftime('%H:%M:%S')
+
+            # --- COORDINATE CONVERSION (STATE PLANE / LARGE-INTEGER DETECTOR) ---
+            if not res.empty and 'lat' in res.columns and 'lon' in res.columns:
+                res = res[(res['lat'] != 0) & (res['lon'] != 0)].dropna(subset=['lat', 'lon'])
+                if not res.empty:
+                    max_val = max(res['lat'].abs().max(), res['lon'].abs().max())
+                    if max_val > 1000:
+                        converted = False
+                        # Strategy 1: Try common State Plane CRS at /100 and /1 scales
+                        candidate_crs = [
+                            "EPSG:2278",  # TX South Central (ftUS)
+                            "EPSG:2277",  # TX Central (ftUS)
+                            "EPSG:2276",  # TX North Central (ftUS)
+                            "EPSG:2279",  # TX South (ftUS)
+                            "EPSG:32140", # TX South Central (m)
+                        ]
+                        for scale in [100.0, 1.0]:
+                            for crs in candidate_crs:
+                                try:
+                                    transformer = pyproj.Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+                                    test_lons, test_lats = transformer.transform(
+                                        res['lon'].values[:20] / scale,
+                                        res['lat'].values[:20] / scale
+                                    )
+                                    if (24 < float(test_lats.mean()) < 50 and
+                                            -130 < float(test_lons.mean()) < -60 and
+                                            float(test_lats.std()) < 5 and
+                                            float(test_lons.std()) < 5):
+                                        lons, lats = transformer.transform(
+                                            res['lon'].values / scale, res['lat'].values / scale
+                                        )
+                                        res['lon'], res['lat'] = lons, lats
+                                        converted = True
+                                        break
+                                except Exception:
+                                    continue
+                            if converted:
+                                break
+
+                        # Strategy 2: If CRS conversion failed, anchor to city column geocode
+                        if not converted:
+                            try:
+                                city_name = None
+                                for col in ['city', 'city_name', 'municipality', 'jurisdiction']:
+                                    if col in raw_df.columns:
+                                        top = raw_df[col].dropna().str.strip().value_counts()
+                                        if not top.empty:
+                                            city_name = top.index[0]
+                                            break
+                                state_name = None
+                                for col in ['state', 'state_name']:
+                                    if col in raw_df.columns:
+                                        top = raw_df[col].dropna().str.strip().value_counts()
+                                        if not top.empty:
+                                            state_name = top.index[0]
+                                            break
+                                if city_name:
+                                    query_str = f"{city_name}, {state_name}" if state_name else city_name
+                                    geo_url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(query_str)}&limit=1"
+                                    req = urllib.request.Request(geo_url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"})
+                                    with urllib.request.urlopen(req, timeout=10) as resp:
+                                        geo_data = json.loads(resp.read().decode("utf-8"))
+                                    if geo_data:
+                                        anchor_lat = float(geo_data[0]["lat"])
+                                        anchor_lon = float(geo_data[0]["lon"])
+                                        raw_cx = res["lon"].median()
+                                        raw_cy = res["lat"].median()
+                                        city_radius_deg = 0.35
+                                        raw_spread = max(res["lon"].std(), res["lat"].std(), 1)
+                                        deg_per_unit = city_radius_deg / raw_spread
+                                        res["lon"] = anchor_lon + (res["lon"] - raw_cx) * deg_per_unit
+                                        res["lat"] = anchor_lat + (res["lat"] - raw_cy) * deg_per_unit
+                                        converted = True
+                            except Exception:
+                                pass
+
+                        if converted:
+                            res = res[
+                                (res["lat"] > 18) & (res["lat"] < 72) &
+                                (res["lon"] > -170) & (res["lon"] < -60)
+                            ]
+
+            # City/state detection: store top values on rows for location detection
             top_city_name = None
             for col in ["city", "city_name", "municipality", "jurisdiction"]:
                 if col in raw_df.columns:
@@ -1612,137 +1533,11 @@ def aggressive_parse_calls(uploaded_files):
             if inferred_state:
                 res["_csv_state"] = inferred_state
 
-            # projected-coordinate conversion, broadened beyond TX-only defaults
-            if not res.empty and 'lat' in res.columns and 'lon' in res.columns:
-                res = res[(res['lat'] != 0) & (res['lon'] != 0)].dropna(subset=['lat', 'lon'], how='all')
-                coord_non_null = res[['lat', 'lon']].dropna()
-                if not coord_non_null.empty:
-                    max_val = max(coord_non_null['lat'].abs().max(), coord_non_null['lon'].abs().max())
-                    if max_val > 1000:
-                        converted = False
-                        candidate_crs = [
-                            "EPSG:26911", "EPSG:32611", "EPSG:2227", "EPSG:26910", "EPSG:32610",
-                            "EPSG:2278", "EPSG:2277", "EPSG:2276", "EPSG:2279", "EPSG:32140"
-                        ]
-                        for crs in candidate_crs:
-                            try:
-                                transformer = pyproj.Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
-                                test_lons, test_lats = transformer.transform(
-                                    coord_non_null['lon'].values[:50], coord_non_null['lat'].values[:50]
-                                )
-                                if (
-                                    -125 < float(np.nanmedian(test_lons)) < -65 and
-                                    24 < float(np.nanmedian(test_lats)) < 50 and
-                                    float(np.nanstd(test_lons)) < 5 and
-                                    float(np.nanstd(test_lats)) < 5
-                                ):
-                                    lons, lats = transformer.transform(coord_non_null['lon'].values, coord_non_null['lat'].values)
-                                    res.loc[coord_non_null.index, 'lon'] = lons
-                                    res.loc[coord_non_null.index, 'lat'] = lats
-                                    converted = True
-                                    break
-                            except Exception:
-                                continue
-
-                        if converted:
-                            res = res[
-                                (res["lat"] > 18) & (res["lat"] < 72) &
-                                (res["lon"] > -170) & (res["lon"] < -60)
-                            ]
-
-            # Address-only fallback: geocode the customer file instead of hard-failing
-            res = _geocode_address_only_rows(raw_df, res)
-
-            _p_col = _choose_priority_column(raw_df)
-            p_found = [_p_col] if _p_col else []
-            if _p_col:
-                parsed_priority = raw_df[_p_col].apply(parse_priority)
-                parsed_priority = pd.to_numeric(parsed_priority, errors='coerce')
-                parsed_priority = parsed_priority.where(parsed_priority.isin([1, 2, 3, 4, 5, 6, 7, 8, 9]))
-                if parsed_priority.dropna().empty:
-                    res['priority'] = 3
-                else:
-                    res['priority'] = parsed_priority.fillna(3).astype(int)
-            else:
-                res['priority'] = 3
-
-            _desc_hints = ['desc','type','nature','offense','calltype','call_type','event_type',
-                           'eventtype','calldesc','incident_type','agencyeventtype']
-            _desc_found = [c for c in raw_df.columns
-                           if any(h in c for h in _desc_hints)
-                           and c not in (p_found[:1] if p_found else [])]
-            if _desc_found:
-                _best_desc = max(_desc_found, key=lambda c: raw_df[c].dropna().nunique())
-                if raw_df[_best_desc].dropna().nunique() > 2:
-                    res['call_type_desc'] = raw_df[_best_desc].astype(str).str.strip()
-
-            dt_series = None
-            time_col = _best_time_col(raw_df)
-
-            if '_cad_date_marker' in raw_df.columns:
-                _dates = pd.to_datetime(raw_df['_cad_date_marker'], errors='coerce')
-                if time_col:
-                    dt_series = pd.to_datetime(_dates.dt.strftime('%Y-%m-%d').fillna('') + ' ' + raw_df[time_col].astype(str).fillna(''), errors='coerce')
-                else:
-                    dt_series = _dates
-
-            if (dt_series is None or dt_series.dropna().empty) and 'event' in raw_df.columns:
-                _event_dates = raw_df['event'].apply(_infer_date_from_event_id)
-                if _event_dates.notna().mean() >= 0.5:
-                    if time_col:
-                        dt_series = pd.to_datetime(_event_dates.dt.strftime('%Y-%m-%d').fillna('') + ' ' + raw_df[time_col].astype(str).fillna(''), errors='coerce')
-                    else:
-                        dt_series = _event_dates
-
-            if dt_series is None or dt_series.dropna().empty:
-                d_found = [c for c in raw_df.columns if any(s in c for s in CV['date'])]
-                t_found = [c for c in raw_df.columns if any(s in c for s in CV['time'])]
-
-                if not d_found:
-                    for _col in raw_df.columns:
-                        if _col in (t_found or []):
-                            continue
-                        try:
-                            _test = pd.to_datetime(raw_df[_col].dropna().head(50), errors='coerce')
-                            _valid = _test.dropna()
-                            if len(_valid) >= 10 and _valid.dt.year.between(2000, 2035).mean() > 0.8:
-                                d_found = [_col]
-                                break
-                        except Exception:
-                            continue
-
-                if d_found:
-                    if t_found and d_found[0] != t_found[0]:
-                        _raw_dt_str = raw_df[d_found[0]].fillna('').astype(str) + ' ' + raw_df[t_found[0]].fillna('').astype(str)
-                    else:
-                        _raw_dt_str = raw_df[d_found[0]].fillna('').astype(str)
-
-                    _sample_vals = _raw_dt_str.dropna().astype(str).str.strip()
-                    _sample_vals = _sample_vals[_sample_vals != ''].head(5)
-                    _fmt_candidates = [
-                        '%m/%d/%Y %I:%M %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y %H:%M',
-                        '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M',
-                        '%Y/%m/%d %H:%M:%S', '%d/%m/%Y %H:%M:%S', '%m-%d-%Y %H:%M:%S',
-                        '%m/%d/%y %H:%M:%S', '%m/%d/%y %H:%M'
-                    ]
-                    dt_series = None
-                    if not _sample_vals.empty:
-                        for _fmt in _fmt_candidates:
-                            try:
-                                pd.to_datetime(_sample_vals.iloc[0], format=_fmt, errors='raise')
-                                dt_series = pd.to_datetime(_raw_dt_str, format=_fmt, errors='coerce')
-                                break
-                            except Exception:
-                                continue
-                    if dt_series is None:
-                        dt_series = pd.to_datetime(_raw_dt_str, errors='coerce')
-
-            if dt_series is not None and dt_series.dropna().shape[0] > 0:
-                res['date'] = dt_series.dt.strftime('%Y-%m-%d')
-                res['time'] = dt_series.dt.strftime('%H:%M:%S')
-
+            # ── Capture file data matrix for Sheets/email logging ────────────
             try:
                 _meta = _extract_file_meta(raw_df, res, filename=cfile.name)
+                # Merge into session-level file_meta (last file wins for per-field values;
+                # accumulate filenames if multiple files are uploaded at once)
                 _existing = st.session_state.get('file_meta', {})
                 _existing_names = _existing.get('uploaded_filename', '')
                 if _existing_names and _meta.get('uploaded_filename','') and _meta['uploaded_filename'] not in _existing_names:
@@ -1752,29 +1547,25 @@ def aggressive_parse_calls(uploaded_files):
                 pass
 
             all_calls_list.append(res)
-        except Exception:
-            continue
-
-    if not all_calls_list:
-        return pd.DataFrame()
-
-    valid = []
-    for df in all_calls_list:
-        if 'lat' in df.columns and 'lon' in df.columns:
-            df2 = df.copy()
-            df2['lat'] = pd.to_numeric(df2['lat'], errors='coerce')
-            df2['lon'] = pd.to_numeric(df2['lon'], errors='coerce')
-            df2 = df2.dropna(subset=['lat', 'lon'])
-            if not df2.empty:
-                valid.append(df2)
-
-    if not valid:
-        return pd.DataFrame()
-
+        except: continue
+        
+    if not all_calls_list: return pd.DataFrame()
+    # Only keep frames that actually have lat/lon columns — Excel sheets
+    # without coordinate data should not crash the concat
+    valid = [df for df in all_calls_list if 'lat' in df.columns and 'lon' in df.columns]
+    if not valid: return pd.DataFrame()
     combined = pd.concat(valid, ignore_index=True)
+    # Safe dropna — columns guaranteed to exist now
     combined = combined.dropna(subset=['lat', 'lon'])
+    # IMPORTANT: keep the full parsed CAD dataset here.
+    #
+    # The optimizer is sampled later (after upload) for performance, but the
+    # parsed dataframe itself must preserve every incident so:
+    #   1) Total Incidents shows the true uploaded count
+    #   2) the stations map can render a much denser full-history call cloud
+    #   3) export/reporting math stays tied to the source file, not a k-means
+    #      surrogate created during parsing
     return combined
-
 
 def _build_cad_charts_html(df_calls):
     """Generate a self-contained HTML block for the PDF/HTML export.
@@ -3383,8 +3174,10 @@ def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, se
 def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash):
     gdf_calls = gpd.GeoDataFrame(df_calls, geometry=gpd.points_from_xy(df_calls.lon, df_calls.lat), crs="EPSG:4326")
     gdf_calls_utm = gdf_calls.to_crs(epsg=int(epsg_code))
-    try: calls_in_city = gdf_calls_utm[gdf_calls_utm.within(_city_m)]
-    except: calls_in_city = gdf_calls_utm
+    try:
+        calls_in_city = gdf_calls_utm[gdf_calls_utm.within(_city_m)]
+    except Exception:
+        calls_in_city = gdf_calls_utm
     radius_resp_m = resp_radius_mi * 1609.34
     radius_guard_m = guard_radius_mi * 1609.34
     station_metadata = []
@@ -3395,12 +3188,19 @@ def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, e
     dist_matrix_r = np.zeros((n, total_calls))
     dist_matrix_g = np.zeros((n, total_calls))
     display_calls = build_display_calls(df_calls_full if df_calls_full is not None else df_calls, _city_m, epsg_code, max_points=300000)
-    max_dist = max(((row['lon']-center_lon)**2 + (row['lat']-center_lat)**2)**0.5 for _, row in df_stations_all.iterrows()) or 1.0
-    if not calls_in_city.empty:
+    max_dist = max(
+        (((row['lon'] - center_lon) ** 2 + (row['lat'] - center_lat) ** 2) ** 0.5 for _, row in df_stations_all.iterrows()),
+        default=1.0
+    ) or 1.0
+    calls_array = None
+    if total_calls > 0:
         calls_array = np.array(list(zip(calls_in_city.geometry.x, calls_in_city.geometry.y)))
-        for idx_pos, (i, row) in enumerate(df_stations_all.iterrows()):
-            s_pt_m = gpd.GeoSeries([Point(row['lon'], row['lat'])], crs="EPSG:4326").to_crs(epsg=int(epsg_code)).iloc[0]
-            dists = np.sqrt((calls_array[:,0]-s_pt_m.x)**2 + (calls_array[:,1]-s_pt_m.y)**2)
+
+    for idx_pos, (_, row) in enumerate(df_stations_all.iterrows()):
+        s_pt_m = gpd.GeoSeries([Point(row['lon'], row['lat'])], crs="EPSG:4326").to_crs(epsg=int(epsg_code)).iloc[0]
+
+        if calls_array is not None:
+            dists = np.sqrt((calls_array[:, 0] - s_pt_m.x) ** 2 + (calls_array[:, 1] - s_pt_m.y) ** 2)
             dists_mi = dists / 1609.34
             mask_r = dists <= radius_resp_m
             mask_g = dists <= radius_guard_m
@@ -3408,20 +3208,31 @@ def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, e
             guard_matrix[idx_pos, :] = mask_g
             dist_matrix_r[idx_pos, :] = dists_mi
             dist_matrix_g[idx_pos, :] = dists_mi
-            full_buf_2m = s_pt_m.buffer(radius_resp_m)
-            try: clipped_2m = full_buf_2m.intersection(_city_m)
-            except: clipped_2m = full_buf_2m
-            full_buf_guard = s_pt_m.buffer(radius_guard_m)
-            try: clipped_guard = full_buf_guard.intersection(_city_m)
-            except: clipped_guard = full_buf_guard
-            dist_c = ((row['lon']-center_lon)**2 + (row['lat']-center_lat)**2)**0.5
-            station_metadata.append({
-                'name': row['name'], 'lat': row['lat'], 'lon': row['lon'],
-                'clipped_2m': clipped_2m, 'clipped_guard': clipped_guard,
-                'avg_dist_r': dists_mi[mask_r].mean() if mask_r.any() else resp_radius_mi*(2/3),
-                'avg_dist_g': dists_mi[mask_g].mean() if mask_g.any() else guard_radius_mi*(2/3),
-                'centrality': 1.0 - (dist_c / max_dist)
-            })
+            avg_dist_r = dists_mi[mask_r].mean() if mask_r.any() else resp_radius_mi * (2 / 3)
+            avg_dist_g = dists_mi[mask_g].mean() if mask_g.any() else guard_radius_mi * (2 / 3)
+        else:
+            avg_dist_r = resp_radius_mi * (2 / 3)
+            avg_dist_g = guard_radius_mi * (2 / 3)
+
+        full_buf_2m = s_pt_m.buffer(radius_resp_m)
+        try:
+            clipped_2m = full_buf_2m.intersection(_city_m)
+        except Exception:
+            clipped_2m = full_buf_2m
+        full_buf_guard = s_pt_m.buffer(radius_guard_m)
+        try:
+            clipped_guard = full_buf_guard.intersection(_city_m)
+        except Exception:
+            clipped_guard = full_buf_guard
+        dist_c = ((row['lon'] - center_lon) ** 2 + (row['lat'] - center_lat) ** 2) ** 0.5
+        station_metadata.append({
+            'name': row['name'], 'lat': row['lat'], 'lon': row['lon'],
+            'clipped_2m': clipped_2m, 'clipped_guard': clipped_guard,
+            'avg_dist_r': avg_dist_r,
+            'avg_dist_g': avg_dist_g,
+            'centrality': 1.0 - (dist_c / max_dist)
+        })
+
     return calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls
 
 def solve_mclp(resp_matrix, guard_matrix, dist_r, dist_g, num_resp, num_guard, allow_redundancy, incremental=True, forced_r=None, forced_g=None):
@@ -3970,7 +3781,7 @@ if not st.session_state['csvs_ready']:
                         df_c = aggressive_parse_calls(call_files)
 
                     if df_c is None or df_c.empty:
-                        st.error("❌ Calls file error: Could not parse or geocode valid coordinates from the calls file.")
+                        st.error("❌ Calls file error: Could not parse valid coordinates.")
                         st.stop()
 
                     df_c_full = df_c.reset_index(drop=True).copy()
@@ -5877,6 +5688,8 @@ if st.session_state['csvs_ready']:
     calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls = precompute_spatial_data(
         df_calls, df_calls_full, df_stations_all, city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash
     )
+    if total_calls == 0 and len(df_calls) > 0:
+        st.warning("No uploaded calls fell inside the selected jurisdiction boundary. Coverage rings can still render, but call coverage will be 0%. Check city/state selection or clean outlier coordinates in the CAD file.")
     df_curve = compute_all_elbow_curves(
         total_calls, resp_matrix, guard_matrix,
         [s['clipped_2m'] for s in station_metadata],
@@ -5981,7 +5794,7 @@ if st.session_state['csvs_ready']:
                 else:
                     g_best, chrono_g = _greedy_area(
                         guard_matrix,
-                        [station_metadata[i]['clipped_guard'] for i in range(n)],
+                        [station_metadata[i]['clipped_guard'] for i in range(len(station_metadata))],
                         k_guardian, locked_g_pins, set()
                     )
                 g_best = list(g_best)
@@ -6024,7 +5837,7 @@ if st.session_state['csvs_ready']:
                     _excl_resp = set(g_best) if complement_mode else set()
                     r_best, chrono_r = _greedy_area(
                         resp_matrix_eff,
-                        [station_metadata[i]['clipped_2m'] for i in range(n)],
+                        [station_metadata[i]['clipped_2m'] for i in range(len(station_metadata))],
                         k_responder, locked_r_pins, _excl_resp
                     )
             else:

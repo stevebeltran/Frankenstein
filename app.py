@@ -1113,8 +1113,40 @@ def aggressive_parse_calls(uploaded_files):
                 'x_wgs','lon_wgs','incident_lon','inc_lon','event_lon','x_coordinate','address_x','xlocation']
     }
 
+
+    def _looks_like_headerless_geocoder_export(df):
+        try:
+            cols = [str(c).strip() for c in df.columns]
+            coord_pat = re.compile(r'^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$')
+            zip_pat = re.compile(r'\b[A-Z]{2}\b\s*,\s*\d{5}(?:-\d{4})?$', re.I)
+            has_coord_col = any(coord_pat.match(c) for c in cols)
+            has_address_col = any(',' in c and zip_pat.search(c) for c in cols)
+            has_matchish = any(str(c).strip().lower() in {'match', 'no_match', 'exact', 'non_exact'} for c in cols)
+            return has_coord_col and has_address_col and has_matchish
+        except Exception:
+            return False
+
+    def _normalize_headerless_geocoder_export(df):
+        rows = [list(df.columns)] + df.astype(str).fillna('').values.tolist()
+        width = max(len(r) for r in rows)
+        padded = [r + [''] * (width - len(r)) for r in rows]
+        norm = pd.DataFrame(padded)
+        base_cols = ['source_id', 'input_address', 'match_status', 'match_type', 'matched_address', 'lonlat', 'external_id', 'side']
+        if width > len(base_cols):
+            base_cols += [f'extra_{i}' for i in range(1, width - len(base_cols) + 1)]
+        norm.columns = base_cols[:width]
+        return norm
+
+    def _extract_lonlat_pair(series):
+        s = series.astype(str).str.strip()
+        pair = s.str.extract(r'^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$')
+        lon = pd.to_numeric(pair[0], errors='coerce')
+        lat = pd.to_numeric(pair[1], errors='coerce')
+        valid = ((lat.between(-90, 90)) & (lon.between(-180, 180))).mean()
+        return lon, lat, float(valid)
+
     def _infer_city_from_location_text(raw_df):
-        text_cols = [c for c in raw_df.columns if c in ['location', 'address', 'incident_location', 'addr', 'street']]
+        text_cols = [c for c in raw_df.columns if c in ['location', 'address', 'incident_location', 'addr', 'street', 'input_address', 'matched_address']]
         if not text_cols:
             return None
 
@@ -1123,8 +1155,8 @@ def aggressive_parse_calls(uploaded_files):
             return None
 
         s = s.str.replace(r':.*$', '', regex=True)
-        s = s.str.replace(r'CNTY', 'COUNTY', regex=True)
-        s = s.str.replace(r'[^A-Z0-9 /-]', ' ', regex=True)
+        s = s.str.replace(r'\bCNTY\b', 'COUNTY', regex=True)
+        s = s.str.replace(r'[^A-Z0-9 /,-]', ' ', regex=True)
         s = s.str.replace(r'\s+', ' ', regex=True).str.strip()
 
         candidates = []
@@ -1134,10 +1166,18 @@ def aggressive_parse_calls(uploaded_files):
                 candidates.append('Mobile')
                 continue
 
-            m = re.search(r'([A-Z]{3,}(?:\s+[A-Z]{3,}){0,2})$', val)
+            parts = [p.strip() for p in val.split(',') if p and p.strip()]
+            if len(parts) >= 2:
+                locality = parts[-2] if re.match(r'^[A-Z]{2}$', parts[-1]) else parts[-1]
+                locality = locality.strip()
+                if locality and locality not in {'COUNTY', 'CITY', 'TOWN', 'VILLAGE', 'HAMLET'}:
+                    candidates.append(locality.title())
+                    continue
+
+            m = re.search(r'\b([A-Z]{3,}(?:\s+[A-Z]{3,}){0,2})$', val)
             if m:
                 city = m.group(1).title()
-                if city not in {'County', 'City'}:
+                if city not in {'County', 'City', 'Town', 'Village', 'Hamlet'}:
                     candidates.append(city)
 
         if not candidates:
@@ -1290,6 +1330,8 @@ def aggressive_parse_calls(uploaded_files):
                 first_line = content.split('\n')[0]
                 delim = ',' if first_line.count(',') > first_line.count('\t') else '\t'
                 raw_df = pd.read_csv(io.StringIO(content), sep=delim, dtype=str)
+                if _looks_like_headerless_geocoder_export(raw_df):
+                    raw_df = _normalize_headerless_geocoder_export(raw_df)
                 raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
             
             res = pd.DataFrame()
@@ -1303,6 +1345,14 @@ def aggressive_parse_calls(uploaded_files):
                 found = found_exact or found_loose
                 if found:
                     res[field] = pd.to_numeric(raw_df[found[0]], errors='coerce')
+
+            if 'lat' not in res.columns or 'lon' not in res.columns:
+                for c in raw_df.columns:
+                    lon_series, lat_series, valid_rate = _extract_lonlat_pair(raw_df[c])
+                    if valid_rate >= 0.50:
+                        res['lon'] = lon_series
+                        res['lat'] = lat_series
+                        break
 
             # ── Fallback: no column name matched — scan numeric columns by value range ──
             # Lat: -90 to 90, Lon: -180 to 180. Pick best candidate for each.
@@ -1530,6 +1580,13 @@ def aggressive_parse_calls(uploaded_files):
                     res["_csv_city"] = inferred_city
 
             inferred_state = _infer_state_from_text(raw_df, top_city_name)
+            if not inferred_state:
+                for _addr_col in ['input_address', 'matched_address', 'address', 'location']:
+                    if _addr_col in raw_df.columns:
+                        _states = raw_df[_addr_col].astype(str).str.extract(r',\s*([A-Z]{2})\s*,\s*\d{5}(?:-\d{4})?')[0].dropna()
+                        if not _states.empty:
+                            inferred_state = _states.value_counts().idxmax()
+                            break
             if inferred_state:
                 res["_csv_state"] = inferred_state
 
@@ -1557,6 +1614,9 @@ def aggressive_parse_calls(uploaded_files):
     combined = pd.concat(valid, ignore_index=True)
     # Safe dropna — columns guaranteed to exist now
     combined = combined.dropna(subset=['lat', 'lon'])
+    combined['lat'] = pd.to_numeric(combined['lat'], errors='coerce')
+    combined['lon'] = pd.to_numeric(combined['lon'], errors='coerce')
+    combined = combined[(combined['lat'].between(-90, 90)) & (combined['lon'].between(-180, 180))]
     # IMPORTANT: keep the full parsed CAD dataset here.
     #
     # The optimizer is sampled later (after upload) for performance, but the

@@ -5929,8 +5929,10 @@ if st.session_state['csvs_ready']:
         """, unsafe_allow_html=True)
 
     st.sidebar.markdown('<div class="sidebar-section-header">① Configure</div>', unsafe_allow_html=True)
+    _jur_src_file = st.session_state.get('_jur_source_file', '')
     _boundary_src_display = (
-        'local parquet' if _boundary_src_note == 'local_parquet'
+        _jur_src_file if _boundary_src_note == 'local_parquet' and _jur_src_file
+        else 'local_parquet' if _boundary_src_note == 'local_parquet'
         else (_boundary_src_note.split(chr(47))[-1].split(chr(92))[-1] if _boundary_src_note else 'live lookup')
     )
     st.sidebar.caption(f"Boundary: {_boundary_kind_note} · {_boundary_src_display}")
@@ -5944,11 +5946,10 @@ if st.session_state['csvs_ready']:
     selected_labels = st.sidebar.multiselect("Jurisdictions", options=all_options, default=default_selection,
                                              help="Select which geographic areas to include in coverage analysis.")
 
-    _jur_debug = st.session_state.get('_jur_debug')
-    if _jur_debug:
-        with st.sidebar.expander("🔍 Jurisdiction Debug", expanded=True):
-            for msg in _jur_debug:
-                st.caption(msg)
+    _jur_debug = st.session_state.get('_jur_debug', [])
+    _jur_source = next((m.split(': ')[1].split(' ')[0] for m in _jur_debug if 'parquet exists' in m and 'True' in m), None)
+    if _jur_source:
+        st.session_state['_jur_source_file'] = _jur_source
 
     if not selected_labels:
         st.warning("Please select at least one jurisdiction from the sidebar.")

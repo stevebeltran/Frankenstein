@@ -1162,7 +1162,7 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
 def aggressive_parse_calls(uploaded_files):
     all_calls_list = []
     CV = {
-        'date': ['received date','incident date','call date','call creation date','calldatetime','call datetime','calltime','timestamp','date','datetime','dispatch date','time received','incdate','date_rept','date_occu','createdtime','created_time','receivedtime','received_time','eventtime','event_time','incidenttime','incident_time','reportedtime','reported_time','entrytime','entry_time','time_central','time_stamp','created'],
+        'date': ['received date','incident date','call date','call creation date','calldatetime','call datetime','calltime','timestamp','date','datetime','date time','dispatch date','time received','incdate','date_rept','date_occu','createdtime','created_time','receivedtime','received_time','eventtime','event_time','incidenttime','incident_time','reportedtime','reported_time','entrytime','entry_time','time_central','time_stamp','created'],
         'time': ['call creation time','call time','dispatch time','received time','time', 'hour', 'hour_rept','hour_occu'],
         'priority': ['call priority', 'priority level', 'priority', 'pri', 'urgency'],
         'lat': ['latitude','lat','y coord','ycoord','ycoor','addressy','geoy','y_coord','map_y',
@@ -1182,20 +1182,6 @@ def aggressive_parse_calls(uploaded_files):
             has_coord_col = any(coord_pat.match(c) for c in cols)
             has_address_col = any(',' in c and zip_pat.search(c) for c in cols)
             has_matchish = any(str(c).strip().lower() in {'match', 'no_match', 'exact', 'non_exact'} for c in cols)
-            # Also detect Census Geocoder exports with no header row (first col is a numeric ID)
-            if not (has_coord_col and has_address_col and has_matchish):
-                first_col_numeric = bool(re.match(r'^\d+$', cols[0])) if cols else False
-                match_in_data = False
-                lonlat_in_data = False
-                if first_col_numeric and len(df) > 0:
-                    for col in df.columns:
-                        col_vals = df[col].dropna().astype(str).str.strip().str.lower()
-                        if col_vals.isin({'match', 'no_match', 'tie'}).mean() > 0.3:
-                            match_in_data = True
-                        if col_vals.str.match(r'^-?\d+\.\d+,-?\d+\.\d+$').mean() > 0.3:
-                            lonlat_in_data = True
-                if first_col_numeric and match_in_data and lonlat_in_data:
-                    return True
             return has_coord_col and has_address_col and has_matchish
         except Exception:
             return False
@@ -1209,35 +1195,6 @@ def aggressive_parse_calls(uploaded_files):
         if width > len(base_cols):
             base_cols += [f'extra_{i}' for i in range(1, width - len(base_cols) + 1)]
         norm.columns = base_cols[:width]
-        # Drop rows with no match (No_Match / Tie have empty lonlat)
-        norm = norm[norm['match_status'].str.strip().str.lower() == 'match'].reset_index(drop=True)
-        # Split the combined "lon,lat" field (Census geocoder: longitude first, latitude second)
-        if 'lonlat' in norm.columns:
-            _coord = norm['lonlat'].str.strip().str.extract(
-                r'^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$'
-            )
-            norm['lon'] = pd.to_numeric(_coord[0], errors='coerce')
-            norm['lat'] = pd.to_numeric(_coord[1], errors='coerce')
-        # Extract city and state from input_address for boundary detection
-        # Census geocoder format: "123 Main St, Apt 2, CityName, ST, 12345"
-        if 'input_address' in norm.columns:
-            _STATE_ABBRS = {"AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
-                "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY",
-                "NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"}
-            def _extract_city_state(addr):
-                parts = [p.strip() for p in str(addr).split(',') if p.strip()]
-                i = len(parts) - 1
-                if i >= 0 and re.match(r'^\d{5}(-\d{4})?$', parts[i]):
-                    i -= 1
-                state = ''
-                if i >= 0 and parts[i].upper() in _STATE_ABBRS:
-                    state = parts[i].upper()
-                    i -= 1
-                city = parts[i].title() if i >= 0 else ''
-                return city, state
-            _cs = norm['input_address'].apply(_extract_city_state)
-            norm['_csv_city']  = _cs.apply(lambda x: x[0])
-            norm['_csv_state'] = _cs.apply(lambda x: x[1])
         return norm
 
     def _extract_lonlat_pair(series):
@@ -1262,9 +1219,6 @@ def aggressive_parse_calls(uploaded_files):
         s = s.str.replace(r'[^A-Z0-9 /,-]', ' ', regex=True)
         s = s.str.replace(r'\s+', ' ', regex=True).str.strip()
 
-        _STATE_SET = {"AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
-            "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY",
-            "NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"}
         candidates = []
         for val in s:
             padded = f' {val} '
@@ -1274,17 +1228,9 @@ def aggressive_parse_calls(uploaded_files):
 
             parts = [p.strip() for p in val.split(',') if p and p.strip()]
             if len(parts) >= 2:
-                # Walk right-to-left: skip ZIP, find state abbr, city is the part before it.
-                # Handles both "City, ST" and "City, ST, ZIP" (Census geocoder) formats.
-                i = len(parts) - 1
-                if i >= 0 and re.match(r'^\d{5}(-\d{4})?$', parts[i]):
-                    i -= 1
-                if i >= 0 and parts[i].upper() in _STATE_SET:
-                    i -= 1
-                elif i >= 0 and re.match(r'^[A-Z]{2}(\s+\d{5}(-\d{4})?)?$', parts[i]):
-                    i -= 1
-                locality = parts[i].strip() if i >= 0 else ''
-                if locality and locality not in {'COUNTY', 'CITY', 'TOWN', 'VILLAGE', 'HAMLET'} and not re.match(r'^\d', locality):
+                locality = parts[-2] if re.match(r'^[A-Z]{2}$', parts[-1]) else parts[-1]
+                locality = locality.strip()
+                if locality and locality not in {'COUNTY', 'CITY', 'TOWN', 'VILLAGE', 'HAMLET'}:
                     candidates.append(locality.title())
                     continue
 
@@ -1527,7 +1473,7 @@ def aggressive_parse_calls(uploaded_files):
             
             # ── Event type description — carried through for CAD analytics charts ──
             _desc_hints = ['desc','type','nature','offense','calltype','call_type','event_type',
-                           'eventtype','calldesc','incident_type','agencyeventtype']
+                           'eventtype','calldesc','incident_type','agencyeventtype','violation','call_nature','cfs_type']
             _desc_found = [c for c in raw_df.columns
                            if any(h in c for h in _desc_hints)
                            and c not in (p_found[:1] if p_found else [])]
@@ -1595,6 +1541,37 @@ def aggressive_parse_calls(uploaded_files):
 
                 res['date'] = dt_series.dt.strftime('%Y-%m-%d')
                 res['time'] = dt_series.dt.strftime('%H:%M:%S')
+
+            # --- COORDINATE CLEANUP: sentinel values & sign errors ---
+            if not res.empty and 'lat' in res.columns and 'lon' in res.columns:
+                # Drop obvious sentinel/null-coordinate rows before any further processing
+                # lat=0 and lon=0 are common CAD null sentinels (no valid location on the equator/prime meridian)
+                # lon=-179.99999 is another common sentinel used by some CAD vendors
+                _sentinel_mask = (
+                    (res['lat'] == 0) | (res['lon'] == 0) |
+                    (res['lat'].abs() < 0.001) | (res['lon'].abs() < 0.001) |
+                    (res['lon'] < -179.9)
+                )
+                if _sentinel_mask.any():
+                    res = res[~_sentinel_mask].copy()
+
+                # Fix wrong-sign longitudes: some CAD exports omit the minus sign for
+                # western-hemisphere longitudes (e.g. 81.31 instead of -81.31).
+                # Detect by checking if the majority of lons are negative (correct for US)
+                # while a small minority are positive with the same absolute magnitude.
+                if not res.empty and 'lon' in res.columns:
+                    _neg_count = (res['lon'] < 0).sum()
+                    _pos_count = (res['lon'] > 0).sum()
+                    _total = len(res)
+                    # If >90% are negative but some are positive AND the median negative lon
+                    # matches -(positive lon range), flip the positive ones
+                    if _neg_count > 0 and _pos_count > 0 and (_neg_count / _total) > 0.90:
+                        _median_neg = res.loc[res['lon'] < 0, 'lon'].median()
+                        _pos_vals = res.loc[res['lon'] > 0, 'lon']
+                        # Check if flipping would land near the median negative cluster
+                        _would_match = ((-_pos_vals).between(_median_neg - 2, _median_neg + 2)).mean()
+                        if _would_match > 0.5:
+                            res.loc[res['lon'] > 0, 'lon'] = -res.loc[res['lon'] > 0, 'lon']
 
             # --- COORDINATE CONVERSION (STATE PLANE / LARGE-INTEGER DETECTOR) ---
             if not res.empty and 'lat' in res.columns and 'lon' in res.columns:
@@ -1679,20 +1656,6 @@ def aggressive_parse_calls(uploaded_files):
 
             # City/state detection: store top values on rows for location detection
             top_city_name = None
-
-            # Fast-path: geocoder normalization already extracted city/state into raw_df
-            if '_csv_city' in raw_df.columns:
-                _pre_city = raw_df['_csv_city'].dropna().astype(str).str.strip()
-                _pre_city = _pre_city[_pre_city != '']
-                if not _pre_city.empty:
-                    top_city_name = _pre_city.value_counts().index[0]
-                    res['_csv_city'] = top_city_name
-            if '_csv_state' in raw_df.columns:
-                _pre_state = raw_df['_csv_state'].dropna().astype(str).str.strip()
-                _pre_state = _pre_state[_pre_state != '']
-                if not _pre_state.empty:
-                    res['_csv_state'] = _pre_state.value_counts().index[0]
-
             for col in ["city", "city_name", "municipality", "jurisdiction"]:
                 if col in raw_df.columns:
                     top_city = raw_df[col].dropna().astype(str).str.strip().value_counts()

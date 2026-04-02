@@ -37,6 +37,8 @@ defaults = {
     'map_build_logged': False,  # prevent duplicate map-build rows per session
     'boundary_kind': 'place',
     'boundary_source_path': '',
+    'location_detection_source': '',
+    'boundary_detection_mode': '',
     # ── NEW: file ingestion metadata & engagement tracking ──────────────────
     'file_meta': {},            # populated by aggressive_parse_calls; see _extract_file_meta()
     'export_event_log': [],     # ordered list of export types clicked this session
@@ -425,6 +427,64 @@ def get_faa_message(): return random.choice(FAA_MESSAGES)
 def get_airfield_message(): return random.choice(AIRFIELD_MESSAGES)
 def get_jurisdiction_message(): return random.choice(JURISDICTION_MESSAGES)
 def get_spatial_message(): return random.choice(SPATIAL_MESSAGES)
+
+
+def _count_points_within_boundary(df_calls, boundary_gdf):
+    try:
+        if df_calls is None or len(df_calls) == 0 or boundary_gdf is None or getattr(boundary_gdf, "empty", True):
+            return 0
+        work = df_calls.copy()
+        work['lat'] = pd.to_numeric(work['lat'], errors='coerce')
+        work['lon'] = pd.to_numeric(work['lon'], errors='coerce')
+        work = work.dropna(subset=['lat', 'lon'])
+        if work.empty:
+            return 0
+        pts = gpd.GeoDataFrame(work, geometry=gpd.points_from_xy(work.lon, work.lat), crs="EPSG:4326")
+        try:
+            boundary_4326 = boundary_gdf.to_crs(epsg=4326)
+        except Exception:
+            boundary_4326 = boundary_gdf
+        poly = unary_union(boundary_4326.geometry)
+        inside = pts.within(poly)
+        return int(inside.sum())
+    except Exception:
+        return 0
+
+
+def _select_best_boundary_for_calls(df_calls, city_text, state_abbr, prefer_county=False):
+    """Try place and county boundaries and keep the candidate containing the most uploaded calls."""
+    candidates = []
+
+    try:
+        place_success, place_gdf = fetch_place_boundary_local(state_abbr, city_text)
+        if place_success and place_gdf is not None and not place_gdf.empty:
+            candidates.append(('place', place_gdf, _count_points_within_boundary(df_calls, place_gdf)))
+    except Exception:
+        pass
+
+    county_names = [city_text]
+    if not str(city_text).lower().endswith(" county"):
+        county_names.append(f"{city_text} County")
+
+    for cname in county_names:
+        try:
+            county_success, county_gdf = fetch_county_boundary_local(state_abbr, cname)
+            if county_success and county_gdf is not None and not county_gdf.empty:
+                candidates.append(('county', county_gdf, _count_points_within_boundary(df_calls, county_gdf)))
+                break
+        except Exception:
+            pass
+
+    if not candidates:
+        return False, None, 'place', 0
+
+    if prefer_county:
+        candidates.sort(key=lambda x: (x[2], 1 if x[0] == 'county' else 0), reverse=True)
+    else:
+        candidates.sort(key=lambda x: (x[2], 1 if x[0] == 'place' else 0), reverse=True)
+
+    best_kind, best_gdf, best_hits = candidates[0]
+    return True, best_gdf, best_kind, int(best_hits)
 
 def get_base64_of_bin_file(bin_file):
     try:
@@ -3920,6 +3980,7 @@ if not st.session_state['csvs_ready']:
 
                     detected_city = None
                     detected_state = None
+                    detection_source = 'unknown'
 
                     with st.spinner(get_jurisdiction_message()):
                         # Priority 1: city/state extracted directly from the CAD export
@@ -3927,13 +3988,16 @@ if not st.session_state['csvs_ready']:
                             city_val = str(df_c['_csv_city'].iloc[0]).strip().title()
                             if city_val and city_val.lower() not in ('nan', 'none', ''):
                                 detected_city = city_val
+                                detection_source = 'file'
 
                         if '_csv_state' in df_c.columns:
                             state_val = str(df_c['_csv_state'].iloc[0]).strip().upper()
                             if state_val in STATE_FIPS:
                                 detected_state = state_val
+                                detection_source = 'file'
                             elif state_val.title() in US_STATES_ABBR:
                                 detected_state = US_STATES_ABBR[state_val.title()]
+                                detection_source = 'file'
 
                         # If the export gives us a city but not a state, forward-geocode the city name.
                         if detected_city and not detected_state:
@@ -3948,6 +4012,7 @@ if not st.session_state['csvs_ready']:
                                     state_full = parts[2] if len(parts) >= 3 else ''
                                     if state_full in US_STATES_ABBR:
                                         detected_state = US_STATES_ABBR[state_full]
+                                        detection_source = 'file'
                             except Exception:
                                 pass
 
@@ -3962,6 +4027,7 @@ if not st.session_state['csvs_ready']:
                                         detected_state = US_STATES_ABBR[detected_state_full]
                                     if not detected_city and detected_city_rg and detected_city_rg != 'Unknown City':
                                         detected_city = detected_city_rg
+                                    detection_source = 'centroid'
                             except Exception:
                                 pass
 
@@ -3969,64 +4035,10 @@ if not st.session_state['csvs_ready']:
                             st.session_state['active_city'] = detected_city
                             st.session_state['active_state'] = detected_state
                             st.session_state['target_cities'] = [{"city": detected_city, "state": detected_state}]
+                            st.session_state['location_detection_source'] = detection_source
                             st.toast(f"📍 Detected: {detected_city}, {detected_state}")
 
-                    # SAFE UPLOAD PIPELINE:
-                    # Do not aggressively clip calls to the station bounding box before
-                    # boundary validation. Bad or sparse station generation can wipe out
-                    # valid calls and later cause false "no uploaded calls fell inside
-                    # the selected jurisdiction boundary" warnings.
-                    if detected_city and detected_state:
-                        try:
-                            call_lat_med = float(pd.to_numeric(df_c['lat'], errors='coerce').dropna().median()) if not df_c.empty else float('nan')
-                            call_lon_med = float(pd.to_numeric(df_c['lon'], errors='coerce').dropna().median()) if not df_c.empty else float('nan')
-                            station_lat_med = float(pd.to_numeric(df_s['lat'], errors='coerce').dropna().median()) if not df_s.empty else float('nan')
-                            station_lon_med = float(pd.to_numeric(df_s['lon'], errors='coerce').dropna().median()) if not df_s.empty else float('nan')
-
-                            # Approximate distance in degrees. ~1 degree latitude ~= 69 miles.
-                            centroid_gap_deg = ((call_lat_med - station_lat_med) ** 2 + (call_lon_med - station_lon_med) ** 2) ** 0.5
-                            station_bbox_spread = max(
-                                float(pd.to_numeric(df_s['lat'], errors='coerce').max() - pd.to_numeric(df_s['lat'], errors='coerce').min()) if not df_s.empty else 0.0,
-                                float(pd.to_numeric(df_s['lon'], errors='coerce').max() - pd.to_numeric(df_s['lon'], errors='coerce').min()) if not df_s.empty else 0.0
-                            )
-
-                            # Only do a very loose station-based clip when stations clearly
-                            # align with the uploaded calls. Otherwise keep the full call set
-                            # and let the jurisdiction boundary be the first geographic filter.
-                            should_clip_to_station_bbox = (
-                                pd.notna(call_lat_med) and pd.notna(call_lon_med) and
-                                pd.notna(station_lat_med) and pd.notna(station_lon_med) and
-                                centroid_gap_deg <= 1.0 and
-                                station_bbox_spread > 0
-                            )
-
-                            if should_clip_to_station_bbox:
-                                lat_min, lat_max = df_s['lat'].min(), df_s['lat'].max()
-                                lon_min, lon_max = df_s['lon'].min(), df_s['lon'].max()
-                                clip_pad = max(0.5, station_bbox_spread * 0.25)
-                                clip_mask_modeled = (
-                                    (df_c['lat'] >= lat_min - clip_pad) & (df_c['lat'] <= lat_max + clip_pad) &
-                                    (df_c['lon'] >= lon_min - clip_pad) & (df_c['lon'] <= lon_max + clip_pad)
-                                )
-                                clip_mask_full = (
-                                    (df_c_full['lat'] >= lat_min - clip_pad) & (df_c_full['lat'] <= lat_max + clip_pad) &
-                                    (df_c_full['lon'] >= lon_min - clip_pad) & (df_c_full['lon'] <= lon_max + clip_pad)
-                                )
-
-                                clipped_modeled = df_c[clip_mask_modeled].reset_index(drop=True)
-                                clipped_full = df_c_full[clip_mask_full].reset_index(drop=True)
-
-                                # Never accept a destructive clip that removes essentially all calls.
-                                if len(clipped_modeled) >= max(25, int(len(df_c) * 0.25)):
-                                    df_c = clipped_modeled
-                                    df_c_full = clipped_full
-                                else:
-                                    st.info("ℹ️ Skipped station-based pre-clipping because it would remove most uploaded calls.")
-                            else:
-                                st.info("ℹ️ Skipped station-based pre-clipping and kept full uploaded call set for boundary validation.")
-                        except Exception:
-                            st.info("ℹ️ Skipped station-based pre-clipping and kept full uploaded call set for boundary validation.")
-
+                    # Keep uploaded calls intact here. Boundary validation should be the first real geographic filter.
                     st.session_state['df_calls']             = df_c
                     st.session_state['df_calls_full']        = df_c_full
                     st.session_state['df_stations']          = df_s
@@ -4034,31 +4046,27 @@ if not st.session_state['csvs_ready']:
                     st.session_state['total_modeled_calls']  = len(df_c)
 
                     with st.spinner(get_jurisdiction_message()):
-                        # ── BOUNDARY LOOKUP: fetch & save shapefile NOW so
-                        # find_relevant_jurisdictions() can use it on the map page.
-                        # Auto-detect: try place first, fall back to county automatically.
+                        # Choose the boundary that actually contains uploaded calls.
                         detected_city_for_boundary = st.session_state.get('active_city', '')
                         detected_state_for_boundary = st.session_state.get('active_state', '')
                         if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
                             city_text = str(detected_city_for_boundary or '').strip()
-                            is_county_name = city_text.lower().endswith(" county")
-                            if is_county_name:
-                                b_success, b_gdf = fetch_county_boundary_local(detected_state_for_boundary, city_text)
-                                b_kind = 'county'
-                            else:
-                                b_success, b_gdf = fetch_place_boundary_local(detected_state_for_boundary, city_text)
-                                b_kind = 'place'
-                                if not b_success:
-                                    b_success, b_gdf = fetch_county_boundary_local(detected_state_for_boundary, city_text)
-                                    if not b_success:
-                                        b_success, b_gdf = fetch_county_boundary_local(detected_state_for_boundary, city_text + " County")
-                                    b_kind = 'county' if b_success else 'place'
+                            prefer_county = str(st.session_state.get('location_detection_source', '')) == 'centroid'
+                            b_success, b_gdf, b_kind, b_hits = _select_best_boundary_for_calls(
+                                df_c_full if df_c_full is not None and len(df_c_full) > 0 else df_c,
+                                city_text,
+                                detected_state_for_boundary,
+                                prefer_county=prefer_county
+                            )
                             st.session_state['boundary_kind'] = b_kind
+                            st.session_state['boundary_detection_mode'] = 'county_first' if prefer_county else 'file_first'
                             if not b_success:
                                 st.warning(f"Boundary not found for {city_text}, {detected_state_for_boundary}.")
                             if b_success and b_gdf is not None:
                                 _saved = save_boundary_gdf(b_gdf, b_kind, city_text, detected_state_for_boundary)
                                 st.session_state['boundary_source_path'] = _saved or ''
+                                if b_hits == 0:
+                                    st.warning(f"Detected {city_text}, {detected_state_for_boundary}, but the chosen {b_kind} boundary contains 0 uploaded calls.")
 
                     st.session_state['data_source'] = 'cad_upload'
                     st.session_state['demo_mode_used'] = False

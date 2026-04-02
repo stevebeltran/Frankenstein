@@ -3917,7 +3917,7 @@ if not st.session_state['csvs_ready']:
 
         def _looks_like_stations(fname):
             n = fname.lower()
-            return any(k in n for k in ['station','dept','agency','facility','police','fire','loc'])
+            return any(k in n for k in ['station','facility','loc'])
 
         if uploaded_files and len(uploaded_files) >= 1:
             

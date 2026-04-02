@@ -3971,20 +3971,61 @@ if not st.session_state['csvs_ready']:
                             st.session_state['target_cities'] = [{"city": detected_city, "state": detected_state}]
                             st.toast(f"📍 Detected: {detected_city}, {detected_state}")
 
-                    # Only clip calls to the station bbox once we know the correct jurisdiction.
+                    # SAFE UPLOAD PIPELINE:
+                    # Do not aggressively clip calls to the station bounding box before
+                    # boundary validation. Bad or sparse station generation can wipe out
+                    # valid calls and later cause false "no uploaded calls fell inside
+                    # the selected jurisdiction boundary" warnings.
                     if detected_city and detected_state:
-                        lat_min, lat_max = df_s['lat'].min(), df_s['lat'].max()
-                        lon_min, lon_max = df_s['lon'].min(), df_s['lon'].max()
-                        clip_mask_modeled = (
-                            (df_c['lat'] >= lat_min - 0.5) & (df_c['lat'] <= lat_max + 0.5) &
-                            (df_c['lon'] >= lon_min - 0.5) & (df_c['lon'] <= lon_max + 0.5)
-                        )
-                        df_c = df_c[clip_mask_modeled].reset_index(drop=True)
-                        clip_mask_full = (
-                            (df_c_full['lat'] >= lat_min - 0.5) & (df_c_full['lat'] <= lat_max + 0.5) &
-                            (df_c_full['lon'] >= lon_min - 0.5) & (df_c_full['lon'] <= lon_max + 0.5)
-                        )
-                        df_c_full = df_c_full[clip_mask_full].reset_index(drop=True)
+                        try:
+                            call_lat_med = float(pd.to_numeric(df_c['lat'], errors='coerce').dropna().median()) if not df_c.empty else float('nan')
+                            call_lon_med = float(pd.to_numeric(df_c['lon'], errors='coerce').dropna().median()) if not df_c.empty else float('nan')
+                            station_lat_med = float(pd.to_numeric(df_s['lat'], errors='coerce').dropna().median()) if not df_s.empty else float('nan')
+                            station_lon_med = float(pd.to_numeric(df_s['lon'], errors='coerce').dropna().median()) if not df_s.empty else float('nan')
+
+                            # Approximate distance in degrees. ~1 degree latitude ~= 69 miles.
+                            centroid_gap_deg = ((call_lat_med - station_lat_med) ** 2 + (call_lon_med - station_lon_med) ** 2) ** 0.5
+                            station_bbox_spread = max(
+                                float(pd.to_numeric(df_s['lat'], errors='coerce').max() - pd.to_numeric(df_s['lat'], errors='coerce').min()) if not df_s.empty else 0.0,
+                                float(pd.to_numeric(df_s['lon'], errors='coerce').max() - pd.to_numeric(df_s['lon'], errors='coerce').min()) if not df_s.empty else 0.0
+                            )
+
+                            # Only do a very loose station-based clip when stations clearly
+                            # align with the uploaded calls. Otherwise keep the full call set
+                            # and let the jurisdiction boundary be the first geographic filter.
+                            should_clip_to_station_bbox = (
+                                pd.notna(call_lat_med) and pd.notna(call_lon_med) and
+                                pd.notna(station_lat_med) and pd.notna(station_lon_med) and
+                                centroid_gap_deg <= 1.0 and
+                                station_bbox_spread > 0
+                            )
+
+                            if should_clip_to_station_bbox:
+                                lat_min, lat_max = df_s['lat'].min(), df_s['lat'].max()
+                                lon_min, lon_max = df_s['lon'].min(), df_s['lon'].max()
+                                clip_pad = max(0.5, station_bbox_spread * 0.25)
+                                clip_mask_modeled = (
+                                    (df_c['lat'] >= lat_min - clip_pad) & (df_c['lat'] <= lat_max + clip_pad) &
+                                    (df_c['lon'] >= lon_min - clip_pad) & (df_c['lon'] <= lon_max + clip_pad)
+                                )
+                                clip_mask_full = (
+                                    (df_c_full['lat'] >= lat_min - clip_pad) & (df_c_full['lat'] <= lat_max + clip_pad) &
+                                    (df_c_full['lon'] >= lon_min - clip_pad) & (df_c_full['lon'] <= lon_max + clip_pad)
+                                )
+
+                                clipped_modeled = df_c[clip_mask_modeled].reset_index(drop=True)
+                                clipped_full = df_c_full[clip_mask_full].reset_index(drop=True)
+
+                                # Never accept a destructive clip that removes essentially all calls.
+                                if len(clipped_modeled) >= max(25, int(len(df_c) * 0.25)):
+                                    df_c = clipped_modeled
+                                    df_c_full = clipped_full
+                                else:
+                                    st.info("ℹ️ Skipped station-based pre-clipping because it would remove most uploaded calls.")
+                            else:
+                                st.info("ℹ️ Skipped station-based pre-clipping and kept full uploaded call set for boundary validation.")
+                        except Exception:
+                            st.info("ℹ️ Skipped station-based pre-clipping and kept full uploaded call set for boundary validation.")
 
                     st.session_state['df_calls']             = df_c
                     st.session_state['df_calls_full']        = df_c_full

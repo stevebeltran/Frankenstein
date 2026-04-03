@@ -46,6 +46,9 @@ defaults = {
     'export_count': 0,          # total download button clicks this session
     'demo_mode_used': False,    # True if any demo city was loaded
     'sim_mode_used': False,     # True if simulation (not real upload) was run
+    'pin_drop_mode': False,     # True when map-click pin placement is active
+    'pending_pin': None,        # dict(lat, lon) waiting for user confirmation
+    'pin_drop_used': False,     # True once a station was added via pin-drop; suppresses auto-minimums
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -2619,13 +2622,19 @@ def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations:
     for R in [0.25, 0.45]:
         bbox = f"{cen_lat_r - R},{cen_lon_r - R},{cen_lat_r + R},{cen_lon_r + R}"
         query = (
-            f'[out:json][timeout:20];'
+            f'[out:json][timeout:25];'
             f'(node["amenity"="fire_station"]({bbox});'
             f'node["amenity"="police"]({bbox});'
             f'node["amenity"="school"]({bbox});'
+            f'node["amenity"="hospital"]({bbox});'
+            f'node["amenity"="library"]({bbox});'
+            f'node["building"="government"]({bbox});'
             f'way["amenity"="fire_station"]({bbox});'
             f'way["amenity"="police"]({bbox});'
             f'way["amenity"="school"]({bbox});'
+            f'way["amenity"="hospital"]({bbox});'
+            f'way["amenity"="library"]({bbox});'
+            f'way["building"="government"]({bbox});'
             f');out center;'
         )
         data = None
@@ -2656,8 +2665,16 @@ def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations:
             lon = el.get('lon') or (el.get('center') or {}).get('lon')
             if lat is None or lon is None:
                 continue
-            amenity = tags.get('amenity', '')
-            type_label = 'Fire' if amenity == 'fire_station' else 'Police' if amenity == 'police' else 'School'
+            amenity  = tags.get('amenity', '')
+            building = tags.get('building', '')
+            type_label = (
+                'Fire'       if amenity == 'fire_station' else
+                'Police'     if amenity == 'police'       else
+                'Hospital'   if amenity == 'hospital'     else
+                'Library'    if amenity == 'library'      else
+                'Government' if building == 'government'  else
+                'School'
+            )
             rows.append({'name': tags.get('name', f"{type_label} Station"),
                          'lat': round(lat, 6), 'lon': round(lon, 6), 'type': type_label})
 
@@ -2681,8 +2698,67 @@ def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations:
     return None, "OSM unavailable"
 
 
+@st.cache_data(show_spinner=False)
+def _fetch_hifld_stations_cached(min_lat: float, min_lon: float, max_lat: float, max_lon: float):
+    """Fetch fire stations and law enforcement from HIFLD (US Federal open data).
+    Returns (list_of_dicts | None, note_str).
+    HIFLD endpoints are ArcGIS FeatureServer REST services maintained by DHS.
+    """
+    _HIFLD_SOURCES = [
+        (
+            "https://services1.arcgis.com/Hp6G80Pky0om7QvQ/arcgis/rest/services/Fire_Stations/FeatureServer/0/query",
+            "Fire",
+            "NAME",
+        ),
+        (
+            "https://services1.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Law_Enforcement_Locations/FeatureServer/0/query",
+            "Police",
+            "NAME",
+        ),
+    ]
+    bbox_str = f"{min_lon},{min_lat},{max_lon},{max_lat}"
+    all_rows = []
+    for url, type_label, name_field in _HIFLD_SOURCES:
+        try:
+            params = urllib.parse.urlencode({
+                'where': '1=1',
+                'geometry': bbox_str,
+                'geometryType': 'esriGeometryEnvelope',
+                'inSR': '4326',
+                'spatialRel': 'esriSpatialRelIntersects',
+                'outFields': f'{name_field},CITY,STATE',
+                'outSR': '4326',
+                'f': 'json',
+                'resultRecordCount': 500,
+            })
+            req = urllib.request.Request(
+                f"{url}?{params}",
+                headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'}
+            )
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+            for feat in data.get('features', []):
+                geom  = feat.get('geometry', {})
+                attrs = feat.get('attributes', {})
+                lat   = geom.get('y')
+                lon   = geom.get('x')
+                if lat is None or lon is None:
+                    continue
+                name = (attrs.get(name_field) or '').strip() or f"{type_label} Station"
+                all_rows.append({'name': name, 'lat': round(float(lat), 6),
+                                 'lon': round(float(lon), 6), 'type': type_label})
+        except Exception:
+            continue
+
+    if all_rows:
+        return all_rows, f"Found {len(all_rows)} stations from HIFLD (US Federal)."
+    return None, "HIFLD unavailable"
+
+
 def generate_stations_from_calls(df_calls, max_stations=100):
-    """Query OpenStreetMap for real stations; fall back gracefully if unavailable."""
+    """Query OSM and HIFLD in parallel; merge results; fall back to call density."""
+    import concurrent.futures as _cf
+
     lats = df_calls['lat'].dropna().values
     lons = df_calls['lon'].dropna().values
     if len(lats) == 0:
@@ -2695,18 +2771,47 @@ def generate_stations_from_calls(df_calls, max_stations=100):
         (lats >= q1_la - 2.5 * iqr_la) & (lats <= q3_la + 2.5 * iqr_la) &
         (lons >= q1_lo - 2.5 * iqr_lo) & (lons <= q3_lo + 2.5 * iqr_lo)
     )
-    # Round to 2 dp (~1 km) so the same city always hits the cache
     cen_lat_r = round(float(lats[mask].mean()), 2)
     cen_lon_r = round(float(lons[mask].mean()), 2)
 
-    rows, note = _fetch_osm_stations_cached(cen_lat_r, cen_lon_r, max_stations)
-    if rows:
-        return pd.DataFrame(rows), note
+    # Bounding box for HIFLD (rounded to 2 dp cache key)
+    _pad = 0.45
+    min_lat_r = round(cen_lat_r - _pad, 2)
+    max_lat_r = round(cen_lat_r + _pad, 2)
+    min_lon_r = round(cen_lon_r - _pad, 2)
+    max_lon_r = round(cen_lon_r + _pad, 2)
 
-    # All OSM attempts failed — derive candidate sites from call density
+    # Fire both sources in parallel — total latency = max(osm, hifld), not sum
+    with _cf.ThreadPoolExecutor(max_workers=2) as pool:
+        fut_osm   = pool.submit(_fetch_osm_stations_cached,   cen_lat_r, cen_lon_r, max_stations)
+        fut_hifld = pool.submit(_fetch_hifld_stations_cached, min_lat_r, min_lon_r, max_lat_r, max_lon_r)
+        osm_rows,   osm_note   = fut_osm.result()
+        hifld_rows, hifld_note = fut_hifld.result()
+
+    # Merge both result sets
+    combined = []
+    if osm_rows:
+        combined.extend(osm_rows)
+    if hifld_rows:
+        combined.extend(hifld_rows)
+
+    if combined:
+        df_combined = pd.DataFrame(combined)
+        # Deduplicate: drop points within ~100 m of each other (0.001° ≈ 111 m)
+        df_combined = df_combined.round({'lat': 3, 'lon': 3})
+        df_combined = df_combined.drop_duplicates(subset=['lat', 'lon']).reset_index(drop=True)
+        # Prioritise Police/Fire over secondary types when trimming to max_stations
+        _pri_map = {'Police': 0, 'Fire': 1, 'School': 2, 'Hospital': 3, 'Government': 4, 'Library': 5}
+        df_combined['_pri'] = df_combined['type'].map(_pri_map).fillna(9)
+        df_combined = df_combined.sort_values('_pri').head(max_stations).drop(columns='_pri').reset_index(drop=True)
+        sources = [s for s, r in [('OSM', osm_rows), ('HIFLD', hifld_rows)] if r]
+        note = f"Found {len(df_combined)} candidate sites from {' + '.join(sources)}."
+        return df_combined, note
+
+    # All remote sources failed — derive candidate sites from call density
     df_fallback = _make_random_stations(df_calls, n=40)
     if not df_fallback.empty:
-        return df_fallback, "⚠️ OpenStreetMap unavailable — using estimated station locations from call data. Upload a stations CSV for accuracy."
+        return df_fallback, "⚠️ OSM and HIFLD unavailable — using estimated locations from call data. Upload a stations CSV for accuracy."
     return None, "Could not generate stations — no valid call coordinates."
 
 # ============================================================
@@ -6422,20 +6527,32 @@ if st.session_state['csvs_ready']:
 
     # Default minimum fleet: 1 Guardian and enough Responders to reach 85% responder call coverage (minimum 2).
     try:
-        _auto_sig = f"{st.session_state.get('active_city','')}|{st.session_state.get('active_state','')}|{round(area_sq_mi,1)}|{n}|{round(r_resp_est,1)}|{round(r_guard_est,1)}"
+        _pin_r_count = len(st.session_state.get('pinned_resp_names',  []))
+        _pin_g_count = len(st.session_state.get('pinned_guard_names', []))
+        _pin_drop_used = st.session_state.get('pin_drop_used', False)
+        _auto_sig = (
+            f"{st.session_state.get('active_city','')}|{st.session_state.get('active_state','')}|"
+            f"{round(area_sq_mi,1)}|{n}|{round(r_resp_est,1)}|{round(r_guard_est,1)}|"
+            f"{_pin_r_count}|{_pin_g_count}|{int(_pin_drop_used)}"
+        )
         if st.session_state.get('_auto_minimums_sig') != _auto_sig:
-            _resp_default = 2
-            try:
-                _resp_curve = df_curve[['Drones', 'Responder (Calls)']].dropna()
-                _hit = _resp_curve[_resp_curve['Responder (Calls)'] >= 85.0]
-                if not _hit.empty:
-                    _resp_default = int(_hit.iloc[0]['Drones'])
-            except Exception:
-                pass
-            _resp_default = max(2, min(int(_resp_default), max(1, max_resp_calc)))
-            _guard_default = max(1, min(1, max(1, max_guard_calc)))
-            st.session_state['k_resp'] = max(_resp_default, len(st.session_state.get('pinned_resp_names', [])))
-            st.session_state['k_guard'] = max(_guard_default, len(st.session_state.get('pinned_guard_names', [])))
+            if _pin_drop_used:
+                # Pin-drop mode: fleet sizes driven entirely by pin counts — no auto-fill
+                st.session_state['k_resp']  = _pin_r_count
+                st.session_state['k_guard'] = _pin_g_count
+            else:
+                _resp_default = 2
+                try:
+                    _resp_curve = df_curve[['Drones', 'Responder (Calls)']].dropna()
+                    _hit = _resp_curve[_resp_curve['Responder (Calls)'] >= 85.0]
+                    if not _hit.empty:
+                        _resp_default = int(_hit.iloc[0]['Drones'])
+                except Exception:
+                    pass
+                _resp_default = max(2, min(int(_resp_default), max(1, max_resp_calc)))
+                _guard_default = max(1, min(1, max(1, max_guard_calc)))
+                st.session_state['k_resp']  = max(_resp_default, _pin_r_count)
+                st.session_state['k_guard'] = max(_guard_default, _pin_g_count)
             st.session_state['_auto_minimums_sig'] = _auto_sig
     except Exception:
         pass
@@ -6455,6 +6572,14 @@ if st.session_state['csvs_ready']:
     _saved_g = [s for s in st.session_state.get('pinned_guard_names', []) if s in _station_names]
     _saved_r = [s for s in st.session_state.get('pinned_resp_names',  []) if s in _station_names]
 
+    # Sync multiselect widget state with session state BEFORE rendering so that
+    # programmatically-added pins (e.g. from pin-drop) are reflected in the widget.
+    if st.session_state.get('lock_guard_ms') != _saved_g:
+        st.session_state['lock_guard_ms'] = _saved_g
+    _saved_r_excl = [s for s in _saved_r if s not in _saved_g]
+    if st.session_state.get('lock_resp_ms') != _saved_r_excl:
+        st.session_state['lock_resp_ms'] = _saved_r_excl
+
     lock_expander = st.sidebar.expander("🔒 Lock Stations", expanded=bool(_saved_g or _saved_r))
     with lock_expander:
         st.caption("Force specific stations into the optimized solution.")
@@ -6468,27 +6593,132 @@ if st.session_state['csvs_ready']:
         _new_r = st.multiselect(
             "🚁 Lock as Responder",
             options=[s for s in _station_names if s not in _new_g],
-            default=[s for s in _saved_r if s not in _new_g],
+            default=_saved_r_excl,
             key="lock_resp_ms",
             help="These stations will always be assigned a Responder drone regardless of optimizer output."
         )
-        if _new_g != _saved_g or _new_r != [s for s in _saved_r if s not in _new_g]:
+        if _new_g != _saved_g or _new_r != _saved_r_excl:
             st.session_state['pinned_guard_names'] = _new_g
             st.session_state['pinned_resp_names']  = _new_r
+            st.session_state.pop('pin_drop_used', None)
+            st.session_state.pop('_auto_minimums_sig', None)
             if '_opt_cache_key' in st.session_state:
                 del st.session_state['_opt_cache_key']
             st.rerun()
 
-    st.session_state['pinned_guard_names'] = _new_g
-    st.session_state['pinned_resp_names']  = _new_r
-    pinned_guard_names = _new_g
-    pinned_resp_names  = _new_r
+    # Use session state as the authoritative source; only update from widget if
+    # the user interacted with it (handled in the if-block above).
+    pinned_guard_names = _saved_g
+    pinned_resp_names  = _saved_r
 
     # Warn if locked count exceeds slider
     if len(pinned_guard_names) > k_guardian:
         st.sidebar.warning(f"⚠️ Raise Guardian Count ≥ {len(pinned_guard_names)} to honour all Guardian locks.")
     if len(pinned_resp_names) > k_responder:
         st.sidebar.warning(f"⚠️ Raise Responder Count ≥ {len(pinned_resp_names)} to honour all Responder locks.")
+
+    # ── MAP-CLICK PIN DROP ─────────────────────────────────────────────────────
+    # Apply deferred toggle reset before the widget instantiates (can't modify after)
+    if st.session_state.pop('_reset_pin_toggle', False):
+        st.session_state['pin_drop_toggle'] = False
+        st.session_state['pin_drop_mode']   = False
+
+    _pin_mode = st.sidebar.toggle(
+        "📍 Drop Pin on Map",
+        value=st.session_state.get('pin_drop_mode', False),
+        key="pin_drop_toggle",
+        help="Turn on, then click-and-drag a small box on the map to place a station. A confirmation form will appear here."
+    )
+    st.session_state['pin_drop_mode'] = _pin_mode
+
+    # If pin mode was just turned off, clear any pending pin
+    if not _pin_mode and st.session_state.get('pending_pin') is not None:
+        st.session_state['pending_pin'] = None
+
+    # Pending-pin confirmation form (appears after a map click)
+    _pending = st.session_state.get('pending_pin')
+    if _pin_mode and _pending is not None:
+        with st.sidebar.container():
+            st.sidebar.markdown(
+                f"<div style='background:rgba(0,210,255,0.08);border:1px solid rgba(0,210,255,0.35);"
+                f"border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:0.72rem;color:#e0e0f0;'>"
+                f"📍 <b>Pin dropped</b> — {_pending['lat']:.5f}, {_pending['lon']:.5f}</div>",
+                unsafe_allow_html=True
+            )
+            if 'pp_label_buf' not in st.session_state: st.session_state['pp_label_buf'] = ""
+            if 'pp_type_buf'  not in st.session_state: st.session_state['pp_type_buf']  = "Police"
+            if 'pp_role_buf'  not in st.session_state: st.session_state['pp_role_buf']  = "🦅 Lock as Guardian"
+
+            _pp_label = st.sidebar.text_input("Station name", value=st.session_state['pp_label_buf'],
+                                               placeholder="Fire Station 4", key="pp_label_input")
+            _pp_type  = st.sidebar.selectbox("Type", ["Police","Fire","School","Government","Hospital","Library","Other"],
+                                              index=["Police","Fire","School","Government","Hospital","Library","Other"].index(
+                                                  st.session_state['pp_type_buf']) if st.session_state['pp_type_buf'] in
+                                                  ["Police","Fire","School","Government","Hospital","Library","Other"] else 0,
+                                              key="pp_type_select")
+            _pp_role  = st.sidebar.radio("Pin as", ["🦅 Lock as Guardian","🚁 Lock as Responder"],
+                                          index=0, horizontal=True, key="pp_role_radio")
+            st.session_state['pp_label_buf'] = _pp_label
+            st.session_state['pp_type_buf']  = _pp_type
+            st.session_state['pp_role_buf']  = _pp_role
+
+            _pin_cols = st.sidebar.columns(2)
+            if _pin_cols[0].button("✅ Add Station", use_container_width=True, key="pp_confirm_btn"):
+                _label = _pp_label.strip() or f"{_pp_type} Station"
+                _prefixed_label = f"[{_pp_type}] {_label}"
+                _new_pin_row = pd.DataFrame([{
+                    "name":   _label,
+                    "lat":    _pending['lat'],
+                    "lon":    _pending['lon'],
+                    "type":   _pp_type,
+                    "custom": True,
+                }])
+                # Store in custom_stations (same path as address geocoder) so the
+                # boundary clip and station type filter never drop it
+                _cst = st.session_state.get('custom_stations', pd.DataFrame())
+                st.session_state['custom_stations'] = (
+                    pd.concat([_cst, _new_pin_row], ignore_index=True)
+                    if not _cst.empty else _new_pin_row
+                )
+                # Lock into the chosen fleet.
+                # Set BOTH k values to exactly the pin counts so the optimizer
+                # doesn't fill extra open slots with auto-selected stations.
+                if "Guardian" in _pp_role:
+                    _pg = list(st.session_state.get('pinned_guard_names', []))
+                    if _prefixed_label not in _pg:
+                        _pg.append(_prefixed_label)
+                    st.session_state['pinned_resp_names'] = [
+                        x for x in st.session_state.get('pinned_resp_names', [])
+                        if x != _prefixed_label]
+                    st.session_state['pinned_guard_names'] = _pg
+                else:
+                    _pr = list(st.session_state.get('pinned_resp_names', []))
+                    if _prefixed_label not in _pr:
+                        _pr.append(_prefixed_label)
+                    st.session_state['pinned_guard_names'] = [
+                        x for x in st.session_state.get('pinned_guard_names', [])
+                        if x != _prefixed_label]
+                    st.session_state['pinned_resp_names'] = _pr
+                # Drive fleet counts entirely from pin lists so no open slots remain
+                st.session_state['k_guard'] = len(st.session_state.get('pinned_guard_names', []))
+                st.session_state['k_resp']  = len(st.session_state.get('pinned_resp_names',  []))
+                st.session_state['pin_drop_used'] = True
+                # Bust the auto-minimums sig so the block re-evaluates with pin counts
+                st.session_state.pop('_auto_minimums_sig', None)
+                # Clear optimizer caches so the new station enters the LP solver
+                for _ck in ['_opt_cache_key', '_opt_best_combo',
+                            '_opt_chrono_r', '_opt_chrono_g']:
+                    st.session_state.pop(_ck, None)
+                st.session_state['pending_pin']         = None
+                st.session_state['pp_label_buf']        = ""
+                st.session_state['pin_drop_mode']       = False
+                st.session_state['_reset_pin_toggle']   = True  # applied before toggle renders next run
+                st.session_state.pop('_pin_sel_hash', None)
+                st.toast(f"✅ {_label} pinned as {'Guardian' if 'Guardian' in _pp_role else 'Responder'}.")
+                st.rerun()
+            if _pin_cols[1].button("✕ Cancel", use_container_width=True, key="pp_cancel_btn"):
+                st.session_state['pending_pin'] = None
+                st.rerun()
 
     # ── ADD CUSTOM STATION BY ADDRESS ─────────────────────────────────────────
     add_expander = st.sidebar.expander("➕ Add Custom Station", expanded=False)
@@ -6645,6 +6875,10 @@ if st.session_state['csvs_ready']:
                     x for x in st.session_state.get('pinned_guard_names', []) if x not in _rm_names]
                 st.session_state['pinned_resp_names']  = [
                     x for x in st.session_state.get('pinned_resp_names',  []) if x not in _rm_names]
+                # Restore auto-minimums if all pin-drop stations have been removed
+                if not st.session_state.get('pinned_guard_names') and not st.session_state.get('pinned_resp_names'):
+                    st.session_state['pin_drop_used'] = False
+                st.session_state.pop('_auto_minimums_sig', None)
                 if '_opt_cache_key' in st.session_state:
                     del st.session_state['_opt_cache_key']
                 st.rerun()
@@ -7587,14 +7821,89 @@ if st.session_state['csvs_ready']:
                 "sourceattribution":"Esri, Maxar, Earthstar Geographics",
                 "source":["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"]}]
 
+        _pin_drop_active = st.session_state.get('pin_drop_mode', False)
+
+        # In pin-drop mode, switch Plotly to 'select' dragmode so a click-drag
+        # draws a selection box instead of panning.  The center of that box
+        # becomes the pin coordinate — no need to hit an invisible point precisely.
+        _layout_extra = dict(dragmode='select') if _pin_drop_active else {}
+
         fig.update_layout(uirevision="LOCKED_MAP", map=map_cfg,
             margin=dict(l=0,r=0,t=0,b=0), height=800, font=dict(size=18),
             showlegend=True,
             legend=dict(yanchor="top", y=0.98, xanchor="left", x=0.02,
                         bgcolor=legend_bg, bordercolor=accent_color, borderwidth=1,
-                        font=dict(size=12, color=legend_text), itemclick="toggle"))
+                        font=dict(size=12, color=legend_text), itemclick="toggle"),
+            **_layout_extra)
 
-        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
+        if _pin_drop_active:
+            # Dense grid of subtle markers so box-select always captures at least
+            # one point to confirm the lat/lon.  Size=40 ensures full overlap at
+            # typical city zoom levels (no gaps between adjacent markers).
+            _grid_n = 80
+            _grid_lats = np.linspace(miny, maxy, _grid_n)
+            _grid_lons = np.linspace(minx, maxx, _grid_n)
+            _gla, _glo = np.meshgrid(_grid_lats, _grid_lons)
+            fig.add_trace(go.Scattermap(
+                lat=_gla.ravel().tolist(),
+                lon=_glo.ravel().tolist(),
+                mode='markers',
+                marker=dict(size=40, color='rgba(0,210,255,0.04)'),
+                hoverinfo='skip',
+                showlegend=False,
+                name='__pin_grid__',
+            ))
+            fig.add_annotation(
+                text="📍 Pin Drop Mode — click and drag a small box on your target location",
+                xref="paper", yref="paper", x=0.5, y=0.98,
+                showarrow=False, font=dict(size=13, color="#00D2FF"),
+                bgcolor="rgba(0,0,0,0.72)", bordercolor="#00D2FF", borderwidth=1,
+                borderpad=6, xanchor="center",
+            )
+
+        _map_event = st.plotly_chart(
+            fig, use_container_width=True,
+            config={"scrollZoom": not _pin_drop_active, "displayModeBar": _pin_drop_active},
+            on_select="rerun" if _pin_drop_active else "ignore",
+            key="main_map_chart",
+        )
+
+        # Resolve pin location from whichever signal arrives first:
+        #   1. Selection box center  (most reliable — works even on empty map)
+        #   2. First selected point  (fallback)
+        if _pin_drop_active and _map_event and hasattr(_map_event, 'selection') \
+                and st.session_state.get('pending_pin') is None:
+            _sel = _map_event.selection
+            _clicked_lat = _clicked_lon = None
+
+            # Priority 1: bounding box of the drawn selection rectangle
+            _box_list = getattr(_sel, 'box', None) or []
+            if _box_list:
+                _b = _box_list[0]
+                _lats = _b.get('y') or _b.get('lat') or []
+                _lons = _b.get('x') or _b.get('lon') or []
+                if len(_lats) >= 2 and len(_lons) >= 2:
+                    _clicked_lat = (min(_lats) + max(_lats)) / 2.0
+                    _clicked_lon = (min(_lons) + max(_lons)) / 2.0
+
+            # Priority 2: nearest grid point that was selected
+            if _clicked_lat is None:
+                _sel_pts = getattr(_sel, 'points', []) or []
+                if _sel_pts:
+                    _pt = _sel_pts[0]
+                    _clicked_lat = _pt.get('lat') or _pt.get('y')
+                    _clicked_lon = _pt.get('lon') or _pt.get('x')
+
+            if _clicked_lat is not None and _clicked_lon is not None:
+                # Dedup: ignore if this is the same selection that was already processed
+                _sel_hash = hash(f"{_clicked_lat:.4f},{_clicked_lon:.4f}")
+                if _sel_hash != st.session_state.get('_pin_sel_hash'):
+                    st.session_state['_pin_sel_hash'] = _sel_hash
+                    st.session_state['pending_pin'] = {
+                        'lat': round(float(_clicked_lat), 6),
+                        'lon': round(float(_clicked_lon), 6),
+                    }
+                    st.rerun()
 
     # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────
     st.markdown("---")

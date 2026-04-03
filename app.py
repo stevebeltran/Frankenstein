@@ -39,6 +39,7 @@ defaults = {
     'boundary_source_path': '',
     'location_detection_source': '',
     'boundary_detection_mode': '',
+    'path02_boundary_mode': 'auto',
     # ── NEW: file ingestion metadata & engagement tracking ──────────────────
     'file_meta': {},            # populated by aggressive_parse_calls; see _extract_file_meta()
     'export_event_log': [],     # ordered list of export types clicked this session
@@ -52,7 +53,7 @@ for k, v in defaults.items():
 
 
 if 'target_cities' not in st.session_state:
-    st.session_state['target_cities'] = [{"city": "", "state": st.session_state.get('active_state', 'TX')}]
+    st.session_state['target_cities'] = [{"city": "", "state": st.session_state.get('active_state', 'TX'), "boundary_mode": "auto"}]
 
 
 GUARDIAN_FLIGHT_HOURS_PER_DAY = 23.5
@@ -429,6 +430,134 @@ def get_jurisdiction_message(): return random.choice(JURISDICTION_MESSAGES)
 def get_spatial_message(): return random.choice(SPATIAL_MESSAGES)
 
 
+def _normalize_boundary_mode(mode, default="auto"):
+    mode = str(mode or default).strip().lower()
+    if mode in ("city", "place"):
+        return "place"
+    if mode == "county":
+        return "county"
+    return "auto"
+
+
+def _boundary_mode_label(mode):
+    mode = _normalize_boundary_mode(mode)
+    return {"auto": "Auto", "place": "City", "county": "County"}.get(mode, "Auto")
+
+
+def resolve_boundary(state_abbr, name, mode="auto", df_calls=None, prefer_county=False):
+    """Resolve a boundary explicitly or by preserving the app's current auto behavior."""
+    mode = _normalize_boundary_mode(mode)
+    city_text = str(name or '').strip()
+    if not city_text or not state_abbr:
+        return False, None, 'place', 0
+
+    county_names = [city_text]
+    if not city_text.lower().endswith(" county"):
+        county_names.append(f"{city_text} County")
+
+    if mode == 'place':
+        try:
+            success, gdf = fetch_place_boundary_local(state_abbr, city_text)
+            if success and gdf is not None and not gdf.empty:
+                hits = _count_points_within_boundary(df_calls, gdf) if df_calls is not None else 0
+                return True, gdf, 'place', int(hits)
+        except Exception:
+            pass
+        return False, None, 'place', 0
+
+    if mode == 'county':
+        for cname in county_names:
+            try:
+                success, gdf = fetch_county_boundary_local(state_abbr, cname)
+                if success and gdf is not None and not gdf.empty:
+                    hits = _count_points_within_boundary(df_calls, gdf) if df_calls is not None else 0
+                    return True, gdf, 'county', int(hits)
+            except Exception:
+                pass
+        return False, None, 'county', 0
+
+    if df_calls is not None:
+        return _select_best_boundary_for_calls(df_calls, city_text, state_abbr, prefer_county=prefer_county)
+
+    try:
+        success, gdf = fetch_place_boundary_local(state_abbr, city_text)
+        if success and gdf is not None and not gdf.empty:
+            return True, gdf, 'place', 0
+    except Exception:
+        pass
+
+    for cname in county_names:
+        try:
+            success, gdf = fetch_county_boundary_local(state_abbr, cname)
+            if success and gdf is not None and not gdf.empty:
+                return True, gdf, 'county', 0
+        except Exception:
+            pass
+
+    return False, None, 'place', 0
+
+
+
+def resolve_upload_boundary(state_abbr, name, requested_mode="auto", df_calls=None, prefer_county=False):
+    """
+    Resolve upload boundaries conservatively to preserve the legacy Path 02 behavior:
+    prefer the detected city/place boundary for normal city uploads, honor explicit
+    City/County selection when it works, and only fall through to broader heuristics
+    when the requested lookup fails.
+    """
+    requested_mode = _normalize_boundary_mode(requested_mode)
+
+    if requested_mode in ("place", "county"):
+        success, gdf, kind, hits = resolve_boundary(
+            state_abbr, name, mode=requested_mode, df_calls=df_calls, prefer_county=prefer_county
+        )
+        if success and gdf is not None:
+            return success, gdf, kind, hits, requested_mode
+        # Fail safe: if the forced selection misses, retry with legacy auto behavior
+        auto_success, auto_gdf, auto_kind, auto_hits = resolve_upload_boundary(
+            state_abbr, name, requested_mode="auto", df_calls=df_calls, prefer_county=prefer_county
+        )
+        return auto_success, auto_gdf, auto_kind, auto_hits, "auto_fallback"
+
+    # Legacy city-first behavior for typical CAD uploads. When location was inferred
+    # from text (not centroid-only), prefer a valid place boundary before broader
+    # county matching to avoid drifting into auto-generated polygons.
+    if not prefer_county:
+        place_success, place_gdf, place_kind, place_hits = resolve_boundary(
+            state_abbr, name, mode="place", df_calls=df_calls, prefer_county=prefer_county
+        )
+        if place_success and place_gdf is not None:
+            return place_success, place_gdf, place_kind, place_hits, "place_first"
+
+    auto_success, auto_gdf, auto_kind, auto_hits = resolve_boundary(
+        state_abbr, name, mode="auto", df_calls=df_calls, prefer_county=prefer_county
+    )
+    if auto_success and auto_gdf is not None:
+        return auto_success, auto_gdf, auto_kind, auto_hits, "auto"
+
+    # Final fallbacks to avoid dropping straight into an auto-generated boundary.
+    if prefer_county:
+        county_success, county_gdf, county_kind, county_hits = resolve_boundary(
+            state_abbr, name, mode="county", df_calls=df_calls, prefer_county=prefer_county
+        )
+        if county_success and county_gdf is not None:
+            return county_success, county_gdf, county_kind, county_hits, "county_fallback"
+
+    place_success, place_gdf, place_kind, place_hits = resolve_boundary(
+        state_abbr, name, mode="place", df_calls=df_calls, prefer_county=prefer_county
+    )
+    if place_success and place_gdf is not None:
+        return place_success, place_gdf, place_kind, place_hits, "place_fallback"
+
+    county_success, county_gdf, county_kind, county_hits = resolve_boundary(
+        state_abbr, name, mode="county", df_calls=df_calls, prefer_county=prefer_county
+    )
+    if county_success and county_gdf is not None:
+        return county_success, county_gdf, county_kind, county_hits, "county_fallback"
+
+    return False, None, 'place', 0, "none"
+
+
 def _count_points_within_boundary(df_calls, boundary_gdf):
     try:
         if df_calls is None or len(df_calls) == 0 or boundary_gdf is None or getattr(boundary_gdf, "empty", True):
@@ -485,63 +614,6 @@ def _select_best_boundary_for_calls(df_calls, city_text, state_abbr, prefer_coun
 
     best_kind, best_gdf, best_hits = candidates[0]
     return True, best_gdf, best_kind, int(best_hits)
-
-
-def _resolve_upload_boundary_with_fallback(df_calls, city_text, state_abbr, prefer_county=False):
-    """Prefer the detected city boundary for uploaded CAD files, then fall back safely.
-
-    This protects upload behavior from ending up at an auto-generated polygon when the
-    detected city exists locally but hit-count heuristics are noisy or zero.
-    Returns (success, gdf, kind, hits, mode_used).
-    """
-    city_text = str(city_text or '').strip()
-    state_abbr = str(state_abbr or '').strip()
-    if not city_text or not state_abbr:
-        return False, None, 'place', 0, 'missing_input'
-
-    # 1) Strongly prefer the exact city/place boundary when it contains any uploaded calls.
-    try:
-        place_success, place_gdf = fetch_place_boundary_local(state_abbr, city_text)
-        if place_success and place_gdf is not None and not place_gdf.empty:
-            place_hits = _count_points_within_boundary(df_calls, place_gdf)
-            if place_hits > 0:
-                return True, place_gdf, 'place', int(place_hits), 'place_hits'
-    except Exception:
-        pass
-
-    # 2) Use the existing blended selector.
-    try:
-        best_success, best_gdf, best_kind, best_hits = _select_best_boundary_for_calls(
-            df_calls, city_text, state_abbr, prefer_county=prefer_county
-        )
-        if best_success and best_gdf is not None:
-            return True, best_gdf, best_kind, int(best_hits), 'best_selector'
-    except Exception:
-        pass
-
-    # 3) If the selector misses, retry city/place directly before allowing any later fallback.
-    try:
-        place_success, place_gdf = fetch_place_boundary_local(state_abbr, city_text)
-        if place_success and place_gdf is not None and not place_gdf.empty:
-            place_hits = _count_points_within_boundary(df_calls, place_gdf)
-            return True, place_gdf, 'place', int(place_hits), 'place_fallback'
-    except Exception:
-        pass
-
-    # 4) Final local fallback: county boundary.
-    county_names = [city_text]
-    if not city_text.lower().endswith(' county'):
-        county_names.append(f"{city_text} County")
-    for cname in county_names:
-        try:
-            county_success, county_gdf = fetch_county_boundary_local(state_abbr, cname)
-            if county_success and county_gdf is not None and not county_gdf.empty:
-                county_hits = _count_points_within_boundary(df_calls, county_gdf)
-                return True, county_gdf, 'county', int(county_hits), 'county_fallback'
-        except Exception:
-            pass
-
-    return False, None, 'place', 0, 'not_found'
 
 def get_base64_of_bin_file(bin_file):
     try:
@@ -3874,18 +3946,24 @@ if not st.session_state['csvs_ready']:
         _state_keys = list(STATE_FIPS.keys())
 
         # Column headers
-        _h_city, _h_state = st.columns([3, 1])
+        _h_city, _h_state, _h_boundary = st.columns([3, 1, 1.25])
         _h_city.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>City or County</div>", unsafe_allow_html=True)
         _h_state.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>State</div>", unsafe_allow_html=True)
+        _h_boundary.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>Boundary</div>", unsafe_allow_html=True)
 
         while len(st.session_state['target_cities']) < st.session_state.city_count:
-            st.session_state['target_cities'].append({"city": "", "state": st.session_state.get('active_state', 'TX')})
+            st.session_state['target_cities'].append({"city": "", "state": st.session_state.get('active_state', 'TX'), "boundary_mode": "auto"})
+
+        _boundary_options = ["Auto", "City", "County"]
+        _boundary_mode_map = {"Auto": "auto", "City": "place", "County": "county"}
 
         for i in range(st.session_state.city_count):
-            c_val = st.session_state['target_cities'][i]['city'] if i < len(st.session_state['target_cities']) else ""
-            s_val = st.session_state['target_cities'][i]['state'] if i < len(st.session_state['target_cities']) else "TX"
+            target_row = st.session_state['target_cities'][i] if i < len(st.session_state['target_cities']) else {}
+            c_val = target_row.get('city', "")
+            s_val = target_row.get('state', "TX")
+            boundary_mode_val = _normalize_boundary_mode(target_row.get('boundary_mode', 'auto'))
 
-            col_city, col_state = st.columns([3, 1])
+            col_city, col_state, col_boundary = st.columns([3, 1, 1.25])
 
             c_name = col_city.text_input(
                 f"city_or_county_{i}", value=c_val,
@@ -3905,10 +3983,22 @@ if not st.session_state['csvs_ready']:
                 help="Two-letter state abbreviation."
             )
 
+            boundary_label = _boundary_mode_label(boundary_mode_val)
+            boundary_idx = _boundary_options.index(boundary_label) if boundary_label in _boundary_options else 0
+            boundary_label = col_boundary.selectbox(
+                f"boundary_mode_{i}",
+                options=_boundary_options,
+                index=boundary_idx,
+                label_visibility="collapsed",
+                key=f"bm_{i}",
+                help="Auto keeps current behavior. City forces a place boundary. County forces a county boundary."
+            )
+            boundary_mode = _boundary_mode_map.get(boundary_label, 'auto')
+
             if i < len(st.session_state['target_cities']):
-                st.session_state['target_cities'][i] = {"city": c_name, "state": s_name}
+                st.session_state['target_cities'][i] = {"city": c_name, "state": s_name, "boundary_mode": boundary_mode}
             else:
-                st.session_state['target_cities'].append({"city": c_name, "state": s_name})
+                st.session_state['target_cities'].append({"city": c_name, "state": s_name, "boundary_mode": boundary_mode})
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
         st.file_uploader(
@@ -3954,6 +4044,21 @@ if not st.session_state['csvs_ready']:
         """, unsafe_allow_html=True)
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+        _path02_boundary_options = ["Auto", "City", "County"]
+        _path02_boundary_label = _boundary_mode_label(st.session_state.get('path02_boundary_mode', 'auto'))
+        st.session_state['path02_boundary_mode'] = _normalize_boundary_mode(
+            {label: label.lower() for label in _path02_boundary_options}.get(
+                st.selectbox(
+                    "Boundary type for this upload",
+                    options=_path02_boundary_options,
+                    index=_path02_boundary_options.index(_path02_boundary_label) if _path02_boundary_label in _path02_boundary_options else 0,
+                    key="path02_boundary_mode_select",
+                    help="Auto keeps current best-fit detection. City forces a city/place boundary. County forces a county boundary."
+                ),
+                'auto'
+            )
+        )
 
         uploaded_files = st.file_uploader(
             "Drop your CAD export (+ optional stations CSV)",
@@ -4002,6 +4107,14 @@ if not st.session_state['csvs_ready']:
                         
                         st.session_state['active_city'] = save_data.get('city', 'Unknown')
                         st.session_state['active_state'] = save_data.get('state', 'US')
+                        _saved_targets = save_data.get('target_cities', [{"city": st.session_state['active_city'], "state": st.session_state['active_state'], "boundary_mode": "auto"}])
+                        st.session_state['target_cities'] = [{
+                            "city": t.get('city', ''),
+                            "state": t.get('state', st.session_state['active_state']),
+                            "boundary_mode": _normalize_boundary_mode(t.get('boundary_mode', 'auto'))
+                        } for t in (_saved_targets or [])]
+                        st.session_state.city_count = max(1, len(st.session_state['target_cities']))
+                        st.session_state['path02_boundary_mode'] = _normalize_boundary_mode(save_data.get('path02_boundary_mode', 'auto'))
                         st.session_state['k_resp'] = save_data.get('k_resp', 2)
                         st.session_state['k_guard'] = save_data.get('k_guard', 0)
                         st.session_state['r_resp'] = save_data.get('r_resp', 2.0)
@@ -4306,7 +4419,7 @@ if not st.session_state['csvs_ready']:
                         if detected_city and detected_state:
                             st.session_state['active_city'] = detected_city
                             st.session_state['active_state'] = detected_state
-                            st.session_state['target_cities'] = [{"city": detected_city, "state": detected_state}]
+                            st.session_state['target_cities'] = [{"city": detected_city, "state": detected_state, "boundary_mode": st.session_state.get('path02_boundary_mode', 'auto')}]
                             st.session_state['location_detection_source'] = detection_source
                             st.toast(f"📍 Detected: {detected_city}, {detected_state}")
                         elif detected_state:
@@ -4346,14 +4459,16 @@ if not st.session_state['csvs_ready']:
                         if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
                             city_text = str(detected_city_for_boundary or '').strip()
                             prefer_county = str(st.session_state.get('location_detection_source', '')) == 'centroid'
-                            b_success, b_gdf, b_kind, b_hits, b_mode = _resolve_upload_boundary_with_fallback(
-                                df_c_full if df_c_full is not None and len(df_c_full) > 0 else df_c,
-                                city_text,
+                            boundary_mode = _normalize_boundary_mode(st.session_state.get('path02_boundary_mode', 'auto'))
+                            b_success, b_gdf, b_kind, b_hits, upload_boundary_strategy = resolve_upload_boundary(
                                 detected_state_for_boundary,
+                                city_text,
+                                requested_mode=boundary_mode,
+                                df_calls=df_c_full if df_c_full is not None and len(df_c_full) > 0 else df_c,
                                 prefer_county=prefer_county
                             )
                             st.session_state['boundary_kind'] = b_kind
-                            st.session_state['boundary_detection_mode'] = b_mode
+                            st.session_state['boundary_detection_mode'] = upload_boundary_strategy
                             if not b_success:
                                 st.warning(f"Boundary not found for {city_text}, {detected_state_for_boundary}.")
                             if b_success and b_gdf is not None:
@@ -4387,7 +4502,7 @@ if not st.session_state['csvs_ready']:
             candidates = [c for c in FAST_DEMO_CITIES if c[0] != already_used]
             rcity, rstate = random.choice(candidates)
             st.session_state['_last_demo_city'] = rcity
-            st.session_state['target_cities'] = [{"city": rcity, "state": rstate}]
+            st.session_state['target_cities'] = [{"city": rcity, "state": rstate, "boundary_mode": "auto"}]
             st.session_state.city_count = 1
             for i in range(10):
                 st.session_state.pop(f"c_{i}", None)
@@ -4444,29 +4559,13 @@ if not st.session_state['csvs_ready']:
         for i, loc in enumerate(active_targets):
             c_name = loc['city'].strip()
             s_name = loc['state']
-            is_county = c_name.lower().endswith(" county")
-            boundary_kind = 'county' if is_county else 'place'
-            
+            boundary_mode = _normalize_boundary_mode(loc.get('boundary_mode', 'auto'))
+            boundary_kind = 'place'
+
             prog.progress(10 + int((i / len(active_targets)) * 20),
                           text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
-            
-            if is_county:
-                success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
-                if not success:
-                    success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
-                if success:
-                    boundary_kind = 'county'
-            else:
-                # Try place first, auto-fall back to county if not found
-                success, temp_gdf = fetch_place_boundary_local(s_name, c_name)
-                if success:
-                    boundary_kind = 'place'
-                else:
-                    success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
-                    if not success:
-                        success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
-                    if success:
-                        boundary_kind = 'county'
+
+            success, temp_gdf, boundary_kind, _ = resolve_boundary(s_name, c_name, mode=boundary_mode)
             is_county = (boundary_kind == 'county')
             st.session_state['boundary_kind'] = boundary_kind
 
@@ -4498,7 +4597,7 @@ if not st.session_state['csvs_ready']:
                     candidates = [c for c in DEMO_CITIES if c[0] != c_name]
                     rcity, rstate = random.choice(candidates)
                     st.session_state['_last_demo_city'] = rcity
-                    st.session_state['target_cities'] = [{"city": rcity, "state": rstate}]
+                    st.session_state['target_cities'] = [{"city": rcity, "state": rstate, "boundary_mode": "auto"}]
                     for j in range(10):
                         st.session_state.pop(f"c_{j}", None)
                         st.session_state.pop(f"s_{j}", None)
@@ -7530,6 +7629,8 @@ if st.session_state['csvs_ready']:
                 else st.session_state.get('df_calls')
             ),
             "stations_data": _safe_df_to_records(st.session_state.get('df_stations')),
+            "target_cities": st.session_state.get('target_cities', []),
+            "path02_boundary_mode": st.session_state.get('path02_boundary_mode', 'auto'),
             "faa_geojson": faa_geojson
         }
 
@@ -8310,6 +8411,8 @@ sections.forEach(s=>obs.observe(s));
             else st.session_state.get('df_calls')
         ),
         "stations_data": _safe_df_to_records(st.session_state.get('df_stations')),
+        "target_cities": st.session_state.get('target_cities', []),
+        "path02_boundary_mode": st.session_state.get('path02_boundary_mode', 'auto'),
     })
     if st.sidebar.download_button("💾 Save Deployment Plan", data=_brinc_data,
                                   file_name=f"Brinc_{_safe_city}_{_ts}.brinc",

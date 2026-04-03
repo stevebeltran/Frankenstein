@@ -3,7 +3,8 @@
     "allow": [
       "Bash(python3:*)",
       "Bash(grep -E \"\\\\.py$|\\\\.csv$|\\\\.txt$\")",
-      "Bash(ccusage:*)"
+      "Bash(ccusage:*)",
+      "Bash(pip show:*)"
     ]
   }
 }

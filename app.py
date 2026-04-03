@@ -3328,6 +3328,13 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_thermal = d_thermal_calls * _THERMAL_PER_CALL
         d_k9      = d_k9_calls      * _K9_PER_CALL
         d_fire    = d_fire_calls    * _FIRE_PER_CALL
+        d["thermal_calls_assisted"] = d_thermal_calls
+        d["k9_calls_assisted"] = d_k9_calls
+        d["fire_calls_assisted"] = d_fire_calls
+        d["thermal_value_annual"] = d_thermal
+        d["k9_value_annual"] = d_k9
+        d["fire_value_annual"] = d_fire
+        d["specialty_value_annual"] = d_thermal + d_k9 + d_fire
         patrol_time_line = ""
         if total_daily_flights > 0:
             # Raw calculation: patrol budget / flights = available min per flight
@@ -6828,53 +6835,6 @@ if st.session_state['csvs_ready']:
     fire_calls_annual = float(specialty_savings.get('fire_calls_annual', 0) or 0)
     possible_additional_savings = float(specialty_savings.get('additional_savings_total', 0) or 0)
 
-    if fleet_capex > 0:
-        st.sidebar.markdown(f"""
-        <div style="background:{budget_box_bg}; border:1px solid {budget_box_border}; padding:12px; border-radius:4px;
-             text-align:center; margin:8px 0 12px 0; box-shadow:0 2px 5px {budget_box_shadow};">
-            <div style="font-size:0.7rem; color:{text_muted}; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
-            <div style="font-size:1.8rem; font-weight:900; color:{budget_box_border}; font-family:monospace;">${annual_savings:,.0f}</div>
-            <div style="font-size:0.68rem; color:{text_muted}; margin-top:4px;">+ specialty response upside</div>
-            <div style="font-size:1.05rem; font-weight:800; color:#39FF14; font-family:monospace; margin-top:2px;">${possible_additional_savings:,.0f}</div>
-            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-top:6px;">
-                <span style="color:{text_muted};">🔥 Thermal response:</span>
-                <span style="color:#fbbf24; font-weight:700;">${thermal_savings:,.0f}/yr</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-top:2px;">
-                <span style="color:{text_muted};">🐕 K-9 replacement:</span>
-                <span style="color:#39FF14; font-weight:700;">${k9_savings:,.0f}/yr</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-bottom:2px; margin-top:2px;">
-                <span style="color:{text_muted};">🚒 Fire dept value:</span>
-                <span style="color:#fb7121; font-weight:700;">${fire_savings:,.0f}/yr</span>
-            </div>
-            <div style="border-top:1px solid {card_border}; margin:8px 0;"></div>
-            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
-                <span style="color:{text_muted};">Calls in range:</span>
-                <span style="color:{text_main}; font-weight:700;">{covered_daily_calls:.1f}/day</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
-                <span style="color:{text_muted};">DFR flights ({int(dfr_dispatch_rate*100)}%):</span>
-                <span style="color:{text_main}; font-weight:700;">{daily_dfr_responses:.1f}/day</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:8px;">
-                <span style="color:{text_muted};">Resolved no dispatch:</span>
-                <span style="color:{text_main}; font-weight:700;">{daily_drone_only_calls:.1f}/day</span>
-            </div>
-            <div style="border-top:1px dashed {card_border}; margin:6px 0;"></div>
-            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
-                <span style="color:{text_muted};">Fleet CapEx:</span>
-                <span style="color:{text_main}; font-weight:700;">${fleet_capex:,.0f}</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:0.72rem;">
-                <span style="color:{text_muted};">Break-even:</span>
-                <span style="color:{budget_box_border}; font-weight:700;">{break_even_text}</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.sidebar.info("👈 Set Responder/Guardian counts above to calculate budget impact.")
-
     # ── BUILD DRONE OBJECTS ───────────────────────────────────────────
     active_drones = []
     cumulative_mask = np.zeros(total_calls, dtype=bool) if total_calls > 0 else None
@@ -7082,6 +7042,67 @@ if st.session_state['csvs_ready']:
                       'zone_flights_annual':0})
         active_drones.append(d)
         step += 1
+
+    # ── SPECIALTY VALUE: align headline/sidebar totals to unit cards ───────
+    if active_drones:
+        thermal_savings = float(sum(max(0.0, float(d.get('thermal_value_annual', 0) or 0)) for d in active_drones))
+        k9_savings = float(sum(max(0.0, float(d.get('k9_value_annual', 0) or 0)) for d in active_drones))
+        fire_savings = float(sum(max(0.0, float(d.get('fire_value_annual', 0) or 0)) for d in active_drones))
+        fire_calls_annual = float(sum(max(0.0, float(d.get('fire_calls_assisted', 0) or 0)) for d in active_drones))
+        possible_additional_savings = thermal_savings + k9_savings + fire_savings
+    else:
+        thermal_savings = 0.0
+        k9_savings = 0.0
+        fire_savings = 0.0
+        fire_calls_annual = 0.0
+        possible_additional_savings = 0.0
+
+    if fleet_capex > 0:
+        st.sidebar.markdown(f"""
+        <div style="background:{budget_box_bg}; border:1px solid {budget_box_border}; padding:12px; border-radius:4px;
+             text-align:center; margin:8px 0 12px 0; box-shadow:0 2px 5px {budget_box_shadow};">
+            <div style="font-size:0.7rem; color:{text_muted}; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
+            <div style="font-size:1.8rem; font-weight:900; color:{budget_box_border}; font-family:monospace;">${annual_savings:,.0f}</div>
+            <div style="font-size:0.68rem; color:{text_muted}; margin-top:4px;">+ specialty response upside</div>
+            <div style="font-size:1.05rem; font-weight:800; color:#39FF14; font-family:monospace; margin-top:2px;">${possible_additional_savings:,.0f}</div>
+            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-top:6px;">
+                <span style="color:{text_muted};">🔥 Thermal response:</span>
+                <span style="color:#fbbf24; font-weight:700;">${thermal_savings:,.0f}/yr</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-top:2px;">
+                <span style="color:{text_muted};">🐕 K-9 replacement:</span>
+                <span style="color:#39FF14; font-weight:700;">${k9_savings:,.0f}/yr</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-bottom:2px; margin-top:2px;">
+                <span style="color:{text_muted};">🚒 Fire dept value:</span>
+                <span style="color:#fb7121; font-weight:700;">${fire_savings:,.0f}/yr</span>
+            </div>
+            <div style="border-top:1px solid {card_border}; margin:8px 0;"></div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
+                <span style="color:{text_muted};">Calls in range:</span>
+                <span style="color:{text_main}; font-weight:700;">{covered_daily_calls:.1f}/day</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
+                <span style="color:{text_muted};">DFR flights ({int(dfr_dispatch_rate*100)}%):</span>
+                <span style="color:{text_main}; font-weight:700;">{daily_dfr_responses:.1f}/day</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:8px;">
+                <span style="color:{text_muted};">Resolved no dispatch:</span>
+                <span style="color:{text_main}; font-weight:700;">{daily_drone_only_calls:.1f}/day</span>
+            </div>
+            <div style="border-top:1px dashed {card_border}; margin:6px 0;"></div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
+                <span style="color:{text_muted};">Fleet CapEx:</span>
+                <span style="color:{text_main}; font-weight:700;">${fleet_capex:,.0f}</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem;">
+                <span style="color:{text_muted};">Break-even:</span>
+                <span style="color:{budget_box_border}; font-weight:700;">{break_even_text}</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.sidebar.info("👈 Set Responder/Guardian counts above to calculate budget impact.")
 
     # ── RECONCILE UNIT ECONOMICS TO FLEET HEADLINE ───────────────────────
     if active_drones and annual_savings >= 0:

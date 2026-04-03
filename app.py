@@ -497,67 +497,6 @@ def resolve_boundary(state_abbr, name, mode="auto", df_calls=None, prefer_county
     return False, None, 'place', 0
 
 
-
-def resolve_upload_boundary(state_abbr, name, requested_mode="auto", df_calls=None, prefer_county=False):
-    """
-    Resolve upload boundaries conservatively to preserve the legacy Path 02 behavior:
-    prefer the detected city/place boundary for normal city uploads, honor explicit
-    City/County selection when it works, and only fall through to broader heuristics
-    when the requested lookup fails.
-    """
-    requested_mode = _normalize_boundary_mode(requested_mode)
-
-    if requested_mode in ("place", "county"):
-        success, gdf, kind, hits = resolve_boundary(
-            state_abbr, name, mode=requested_mode, df_calls=df_calls, prefer_county=prefer_county
-        )
-        if success and gdf is not None:
-            return success, gdf, kind, hits, requested_mode
-        # Fail safe: if the forced selection misses, retry with legacy auto behavior
-        auto_success, auto_gdf, auto_kind, auto_hits = resolve_upload_boundary(
-            state_abbr, name, requested_mode="auto", df_calls=df_calls, prefer_county=prefer_county
-        )
-        return auto_success, auto_gdf, auto_kind, auto_hits, "auto_fallback"
-
-    # Legacy city-first behavior for typical CAD uploads. When location was inferred
-    # from text (not centroid-only), prefer a valid place boundary before broader
-    # county matching to avoid drifting into auto-generated polygons.
-    if not prefer_county:
-        place_success, place_gdf, place_kind, place_hits = resolve_boundary(
-            state_abbr, name, mode="place", df_calls=df_calls, prefer_county=prefer_county
-        )
-        if place_success and place_gdf is not None:
-            return place_success, place_gdf, place_kind, place_hits, "place_first"
-
-    auto_success, auto_gdf, auto_kind, auto_hits = resolve_boundary(
-        state_abbr, name, mode="auto", df_calls=df_calls, prefer_county=prefer_county
-    )
-    if auto_success and auto_gdf is not None:
-        return auto_success, auto_gdf, auto_kind, auto_hits, "auto"
-
-    # Final fallbacks to avoid dropping straight into an auto-generated boundary.
-    if prefer_county:
-        county_success, county_gdf, county_kind, county_hits = resolve_boundary(
-            state_abbr, name, mode="county", df_calls=df_calls, prefer_county=prefer_county
-        )
-        if county_success and county_gdf is not None:
-            return county_success, county_gdf, county_kind, county_hits, "county_fallback"
-
-    place_success, place_gdf, place_kind, place_hits = resolve_boundary(
-        state_abbr, name, mode="place", df_calls=df_calls, prefer_county=prefer_county
-    )
-    if place_success and place_gdf is not None:
-        return place_success, place_gdf, place_kind, place_hits, "place_fallback"
-
-    county_success, county_gdf, county_kind, county_hits = resolve_boundary(
-        state_abbr, name, mode="county", df_calls=df_calls, prefer_county=prefer_county
-    )
-    if county_success and county_gdf is not None:
-        return county_success, county_gdf, county_kind, county_hits, "county_fallback"
-
-    return False, None, 'place', 0, "none"
-
-
 def _count_points_within_boundary(df_calls, boundary_gdf):
     try:
         if df_calls is None or len(df_calls) == 0 or boundary_gdf is None or getattr(boundary_gdf, "empty", True):
@@ -4460,15 +4399,15 @@ if not st.session_state['csvs_ready']:
                             city_text = str(detected_city_for_boundary or '').strip()
                             prefer_county = str(st.session_state.get('location_detection_source', '')) == 'centroid'
                             boundary_mode = _normalize_boundary_mode(st.session_state.get('path02_boundary_mode', 'auto'))
-                            b_success, b_gdf, b_kind, b_hits, upload_boundary_strategy = resolve_upload_boundary(
+                            b_success, b_gdf, b_kind, b_hits = resolve_boundary(
                                 detected_state_for_boundary,
                                 city_text,
-                                requested_mode=boundary_mode,
+                                mode=boundary_mode,
                                 df_calls=df_c_full if df_c_full is not None and len(df_c_full) > 0 else df_c,
                                 prefer_county=prefer_county
                             )
                             st.session_state['boundary_kind'] = b_kind
-                            st.session_state['boundary_detection_mode'] = upload_boundary_strategy
+                            st.session_state['boundary_detection_mode'] = boundary_mode if boundary_mode != 'auto' else ('county_first' if prefer_county else 'file_first')
                             if not b_success:
                                 st.warning(f"Boundary not found for {city_text}, {detected_state_for_boundary}.")
                             if b_success and b_gdf is not None:

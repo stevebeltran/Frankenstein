@@ -4462,14 +4462,48 @@ if not st.session_state['csvs_ready']:
                         brinc_file.seek(0)
                         save_data = json.loads(brinc_file.getvalue().decode('utf-8'))
                         
-                        st.session_state['active_city'] = save_data.get('city', 'Unknown')
-                        st.session_state['active_state'] = save_data.get('state', 'US')
-                        st.session_state['k_resp'] = save_data.get('k_resp', 2)
-                        st.session_state['k_guard'] = save_data.get('k_guard', 0)
-                        st.session_state['r_resp'] = save_data.get('r_resp', 2.0)
-                        st.session_state['r_guard'] = save_data.get('r_guard', 8.0)
-                        st.session_state['dfr_rate'] = save_data.get('dfr_rate', 12)
-                        st.session_state['deflect_rate'] = save_data.get('deflect_rate', 25)
+                        st.session_state['active_city']   = save_data.get('city', 'Unknown')
+                        st.session_state['active_state']  = save_data.get('state', 'US')
+                        st.session_state['k_resp']        = save_data.get('k_resp', 2)
+                        st.session_state['k_guard']       = save_data.get('k_guard', 0)
+                        st.session_state['r_resp']        = save_data.get('r_resp', 2.0)
+                        st.session_state['r_guard']       = save_data.get('r_guard', 8.0)
+                        st.session_state['dfr_rate']      = save_data.get('dfr_rate', 12)
+                        st.session_state['deflect_rate']  = save_data.get('deflect_rate', 25)
+
+                        # Restore locked stations
+                        st.session_state['pinned_guard_names'] = save_data.get('pinned_guard_names', [])
+                        st.session_state['pinned_resp_names']  = save_data.get('pinned_resp_names',  [])
+
+                        # Restore custom / pin-dropped stations
+                        _cs_records = save_data.get('custom_stations')
+                        if _cs_records:
+                            try:
+                                _cs_df = pd.DataFrame(_cs_records)
+                                if not _cs_df.empty and 'lat' in _cs_df.columns and 'lon' in _cs_df.columns:
+                                    st.session_state['custom_stations'] = _cs_df
+                            except Exception:
+                                pass
+
+                        # Restore optimization strategy indices
+                        _rstr = save_data.get('resp_strategy', 'Call Coverage')
+                        _gstr = save_data.get('guard_strategy', 'Land Coverage')
+                        st.session_state['resp_strat_idx']  = 0 if _rstr == 'Call Coverage' else 1
+                        st.session_state['guard_strat_idx'] = 0 if _gstr == 'Call Coverage' else 1
+
+                        # Restore pin-drop mode flag
+                        st.session_state['pin_drop_used'] = save_data.get('pin_drop_used', False)
+
+                        # Prevent auto-minimums from overriding the restored k values.
+                        # _brinc_k_override tells the auto-minimums block to skip one cycle
+                        # and lock the sig so subsequent reruns also stay stable.
+                        st.session_state['_brinc_k_override'] = True
+                        st.session_state.pop('_auto_minimums_sig', None)
+
+                        # Clear optimizer caches so the restored fleet is recalculated fresh
+                        for _ck in ['_opt_cache_key', '_opt_best_combo',
+                                    '_opt_chrono_r', '_opt_chrono_g']:
+                            st.session_state.pop(_ck, None)
                         
                         if save_data.get('calls_data'):
                             df_c = pd.DataFrame(save_data['calls_data'])
@@ -6536,7 +6570,11 @@ if st.session_state['csvs_ready']:
             f"{_pin_r_count}|{_pin_g_count}|{int(_pin_drop_used)}"
         )
         if st.session_state.get('_auto_minimums_sig') != _auto_sig:
-            if _pin_drop_used:
+            if st.session_state.pop('_brinc_k_override', False):
+                # BRINC import: k_resp/k_guard were already restored from the file —
+                # just lock the sig so this block doesn't fire again on the next render.
+                pass
+            elif _pin_drop_used:
                 # Pin-drop mode: fleet sizes driven entirely by pin counts — no auto-fill
                 st.session_state['k_resp']  = _pin_r_count
                 st.session_state['k_guard'] = _pin_g_count
@@ -8469,15 +8507,29 @@ if st.session_state['csvs_ready']:
                 "Real-world results will vary. This is not a legal recommendation, binding proposal, contract, "
                 "or guarantee of any product, service, or financial outcome."
             ),
+            # Fleet counts and ranges
             "k_resp": k_responder, "k_guard": k_guardian,
             "r_resp": resp_radius_mi, "r_guard": guard_radius_mi,
+            # Rates
             "dfr_rate": int(dfr_dispatch_rate*100), "deflect_rate": int(deflection_rate*100),
+            # Optimization strategies
+            "resp_strategy": resp_strategy_raw,
+            "guard_strategy": guard_strategy_raw,
+            # Locked stations (must restore before auto-minimums runs)
+            "pinned_guard_names": list(pinned_guard_names),
+            "pinned_resp_names":  list(pinned_resp_names),
+            # Custom / pin-dropped stations (bypass OSM on reimport)
+            "custom_stations": _safe_df_to_records(st.session_state.get('custom_stations')),
+            # Whether fleet was manually built via pin-drop
+            "pin_drop_used": st.session_state.get('pin_drop_used', False),
+            # Call and station data
             "calls_data": _safe_df_to_records(
                 st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None
                 else st.session_state.get('df_calls')
             ),
             "stations_data": _safe_df_to_records(st.session_state.get('df_stations')),
             "faa_geojson": faa_geojson,
+            # Boundary / shapefile
             "boundary_geojson": _boundary_geojson_export,
             "boundary_kind": st.session_state.get('boundary_kind', 'place'),
             "boundary_source_path": st.session_state.get('boundary_source_path', ''),

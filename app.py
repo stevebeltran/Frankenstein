@@ -7106,7 +7106,11 @@ if st.session_state['csvs_ready']:
                     _d['be_text'] = f"{_d['cost']/_alloc_monthly:.1f} MO" if _alloc_monthly > 0 else "N/A"
                     _d['best_be_text'] = _d['be_text']
             else:
-                _scale = _fleet_target_annual / _raw_total_annual
+                # Cap scale at 1.0: never inflate per-unit values above their raw
+                # pre-reconciliation figures. When _fleet_target_annual exceeds
+                # _raw_total_annual (low-utilisation / no-overlap case) the gap is
+                # handled by the drift correction below rather than by scaling up.
+                _scale = min(1.0, _fleet_target_annual / _raw_total_annual)
                 for _d in active_drones:
                     _base = float(_d.get('base_annual', 0) or 0)
                     _conc = float(_d.get('concurrent_annual', 0) or 0)
@@ -7127,11 +7131,23 @@ if st.session_state['csvs_ready']:
             _drift = _fleet_target_annual - _reconciled_total
             if abs(_drift) > 0.01 and active_drones:
                 _lead = max(active_drones, key=lambda x: float(x.get('annual_savings', 0) or 0))
-                _lead['annual_savings'] = float(_lead.get('annual_savings', 0) or 0) + _drift
+                _lead['annual_savings']   = float(_lead.get('annual_savings',   0) or 0) + _drift
                 _lead['best_case_annual'] = float(_lead.get('best_case_annual', 0) or 0) + _drift
-                _lead['monthly_savings'] = float(_lead.get('monthly_savings', 0) or 0) + (_drift / 12.0)
-                _lead['base_annual'] = max(0.0, float(_lead.get('base_annual', 0) or 0) + _drift)
-                _lead['be_text'] = f"{_lead['cost']/_lead['monthly_savings']:.1f} MO" if _lead['monthly_savings'] > 0 else "N/A"
+                _lead['monthly_savings']  = float(_lead.get('monthly_savings',  0) or 0) + (_drift / 12.0)
+                # Distribute drift into base first; overflow goes into concurrent so that
+                # base_annual + concurrent_annual always equals best_case_annual (keeps the
+                # Value Breakdown box consistent with the headline figure).
+                _lead_base = float(_lead.get('base_annual', 0) or 0)
+                _lead_conc = float(_lead.get('concurrent_annual', 0) or 0)
+                _drift_to_base = max(-_lead_base, min(_drift, _drift))  # full drift to base …
+                _new_base = _lead_base + _drift_to_base
+                if _new_base < 0:                                        # … unless base would go negative
+                    _drift_to_base = -_lead_base
+                    _new_base = 0.0
+                _drift_to_conc = _drift - _drift_to_base
+                _lead['base_annual']       = _new_base
+                _lead['concurrent_annual'] = max(0.0, _lead_conc + _drift_to_conc)
+                _lead['be_text']      = f"{_lead['cost']/_lead['monthly_savings']:.1f} MO" if _lead['monthly_savings'] > 0 else "N/A"
                 _lead['best_be_text'] = _lead['be_text']
 
     pop_metric = st.session_state.get('estimated_pop', 250000)

@@ -3315,19 +3315,15 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         total_daily_flights = d_flights + d_shared
         d_zone_calls = float(d.get("zone_calls_annual", 0) or 0)
         d_zone_flights_annual = float(d.get("zone_flights_annual", total_daily_flights * 365.0) or 0)
-        # Cap thermal/K9 base to physically serviceable flights (max_flights_cap * 365)
-        # zone_flights_annual is raw DEMANDED flights — thermal/K9 assists can only
-        # happen on flights actually flown within the 10-min scene-floor capacity.
-        _serviceable_annual = float(d.get("max_flights_cap", 0) or 0) * 365.0
-        _flight_base = min(d_zone_flights_annual, _serviceable_annual) if _serviceable_annual > 0 else d_zone_flights_annual
-        # Further cap: assists cannot exceed total zone calls in range
-        _flight_base = min(_flight_base, d_zone_calls) if d_zone_calls > 0 else _flight_base
-        d_thermal_calls = _flight_base * _THERMAL_RATE
-        d_k9_calls      = _flight_base * _K9_RATE
-        d_fire_calls    = _flight_base * _FIRE_RATE
-        d_thermal = d_thermal_calls * _THERMAL_PER_CALL
-        d_k9      = d_k9_calls      * _K9_PER_CALL
-        d_fire    = d_fire_calls    * _FIRE_PER_CALL
+        # Use pre-reconciled per-drone specialty values stored in the drone dict.
+        # These are based on exclusive zone calls and scaled to fleet totals, so
+        # summing across all cards matches the sidebar specialty upside figure.
+        d_thermal = float(d.get('specialty_thermal_raw', 0) or 0)
+        d_k9      = float(d.get('specialty_k9_raw',      0) or 0)
+        d_fire    = float(d.get('specialty_fire_raw',    0) or 0)
+        d_thermal_calls = d_thermal / _THERMAL_PER_CALL if _THERMAL_PER_CALL > 0 else 0.0
+        d_k9_calls      = d_k9      / _K9_PER_CALL      if _K9_PER_CALL      > 0 else 0.0
+        d_fire_calls    = d_fire    / _FIRE_PER_CALL     if _FIRE_PER_CALL    > 0 else 0.0
         patrol_time_line = ""
         if total_daily_flights > 0:
             # Raw calculation: patrol budget / flights = available min per flight
@@ -7068,6 +7064,19 @@ if st.session_state['csvs_ready']:
             d['concurrent_monthly']  = _concurrent_month
             d['be_text']     = f"{d['cost']/_best_monthly:.1f} MO" if _best_monthly > 0 else "N/A"
             d['best_be_text']= d['be_text']
+
+            # ── PER-DRONE SPECIALTY (pre-reconciliation) ──────────────────────
+            # Use EXCLUSIVE zone calls only as the base so overlapping stations
+            # don't double-count the same calls. The reconciliation block below
+            # will scale these up to match fleet specialty totals.
+            _sp_thermal_rate = float(specialty_savings.get('thermal_rate', CONFIG["THERMAL_DEFAULT_APPLICABLE_RATE"]) or 0)
+            _sp_k9_rate      = float(specialty_savings.get('k9_rate',      CONFIG["K9_DEFAULT_APPLICABLE_RATE"])      or 0)
+            _sp_fire_rate    = float(specialty_savings.get('fire_rate',     CONFIG["FIRE_DEFAULT_APPLICABLE_RATE"])    or 0)
+            # Cap serviceable base to the drone's physical flight capacity
+            _sp_serviceable  = min(float(_excl_calls), float(_max_flights_cap) * 365.0)
+            d['specialty_thermal_raw'] = _sp_serviceable * _sp_thermal_rate * float(CONFIG["THERMAL_SAVINGS_PER_CALL"])
+            d['specialty_k9_raw']      = _sp_serviceable * _sp_k9_rate      * float(CONFIG["K9_SAVINGS_PER_CALL"])
+            d['specialty_fire_raw']    = _sp_serviceable * _sp_fire_rate     * float(CONFIG["FIRE_SAVINGS_PER_CALL"])
         else:
             d.update({'assigned_indices':[],'annual_savings':0,'marginal_flights':0,
                       'marginal_deflected':0,'shared_flights':0,'be_text':"N/A",
@@ -7079,7 +7088,8 @@ if st.session_state['csvs_ready']:
                       'concurrent_monthly':0,'best_case_annual':0,
                       'blocked_per_day':0,'best_be_text':"N/A",'base_annual':0,
                       'concurrent_annual':0,'zone_flights':0,'zone_calls_annual':0,
-                      'zone_flights_annual':0})
+                      'zone_flights_annual':0,
+                      'specialty_thermal_raw':0,'specialty_k9_raw':0,'specialty_fire_raw':0})
         active_drones.append(d)
         step += 1
 
@@ -7149,6 +7159,28 @@ if st.session_state['csvs_ready']:
                 _lead['concurrent_annual'] = max(0.0, _lead_conc + _drift_to_conc)
                 _lead['be_text']      = f"{_lead['cost']/_lead['monthly_savings']:.1f} MO" if _lead['monthly_savings'] > 0 else "N/A"
                 _lead['best_be_text'] = _lead['be_text']
+
+    # ── RECONCILE PER-DRONE SPECIALTY VALUES TO FLEET TOTALS ─────────────────
+    # Per-drone specialty was computed on exclusive-zone calls only to avoid
+    # double-counting overlapping stations. Scale each specialty type so the
+    # sum across all drones matches the fleet-level totals computed by
+    # estimate_specialty_response_savings().
+    if active_drones:
+        for _sp_key, _fleet_sp_val in [
+            ('specialty_thermal_raw', thermal_savings),
+            ('specialty_k9_raw',      k9_savings),
+            ('specialty_fire_raw',    fire_savings),
+        ]:
+            _raw_sp_sum = float(sum(max(0.0, d.get(_sp_key, 0) or 0) for d in active_drones))
+            if _raw_sp_sum > 0 and _fleet_sp_val > 0:
+                _sp_scale = _fleet_sp_val / _raw_sp_sum
+                for _d in active_drones:
+                    _d[_sp_key] = max(0.0, float(_d.get(_sp_key, 0) or 0)) * _sp_scale
+            elif _fleet_sp_val > 0 and _raw_sp_sum <= 0:
+                # No exclusive-call base; distribute fleet total equally
+                _equal_share = _fleet_sp_val / len(active_drones)
+                for _d in active_drones:
+                    _d[_sp_key] = _equal_share
 
     pop_metric = st.session_state.get('estimated_pop', 250000)
     grant_bracket = estimate_grants(pop_metric)

@@ -4391,7 +4391,18 @@ if not st.session_state['csvs_ready']:
                                 df_s['lon'] = pd.to_numeric(df_s['lon'], errors='coerce')
                                 df_s = df_s.dropna(subset=['lat', 'lon']).reset_index(drop=True)
                                 st.session_state['df_stations'] = df_s
-                            
+
+                        if save_data.get('boundary_geojson'):
+                            try:
+                                import io as _io
+                                _bgdf = gpd.read_file(_io.StringIO(save_data['boundary_geojson']))
+                                if not _bgdf.empty:
+                                    st.session_state['master_gdf_override'] = _bgdf
+                            except Exception:
+                                pass
+                        st.session_state['boundary_kind'] = save_data.get('boundary_kind', 'place')
+                        st.session_state['boundary_source_path'] = save_data.get('boundary_source_path', '')
+
                         st.session_state['data_source'] = 'brinc_file'
                         st.session_state['demo_mode_used'] = False
                         st.session_state['sim_mode_used'] = False
@@ -8112,6 +8123,14 @@ if st.session_state['csvs_ready']:
             } for d in active_drones],
         }
 
+        _mgdf_export = st.session_state.get('master_gdf_override')
+        _boundary_geojson_export = None
+        if _mgdf_export is not None and not _mgdf_export.empty:
+            try:
+                _boundary_geojson_export = _mgdf_export.to_crs(epsg=4326).to_json()
+            except Exception:
+                _boundary_geojson_export = None
+
         export_dict = {
             "city": prop_city, "state": prop_state,
             "_disclaimer": (
@@ -8127,7 +8146,10 @@ if st.session_state['csvs_ready']:
                 else st.session_state.get('df_calls')
             ),
             "stations_data": _safe_df_to_records(st.session_state.get('df_stations')),
-            "faa_geojson": faa_geojson
+            "faa_geojson": faa_geojson,
+            "boundary_geojson": _boundary_geojson_export,
+            "boundary_kind": st.session_state.get('boundary_kind', 'place'),
+            "boundary_source_path": st.session_state.get('boundary_source_path', ''),
         }
 
         fig_for_export = go.Figure()

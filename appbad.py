@@ -5,7 +5,7 @@ import numpy as np
 import plotly.graph_objects as go
 from shapely.geometry import Point, Polygon, MultiPolygon, box, shape
 from shapely.ops import unary_union
-import os, itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib, uuid, traceback
+import os, itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib, uuid
 from concurrent.futures import ThreadPoolExecutor
 import pulp
 import urllib.request
@@ -25,9 +25,9 @@ st.set_page_config(page_title="BRINC COS Drone Optimizer", layout="wide", initia
 # This MUST run before any st.session_state checks to prevent KeyError
 defaults = {
     'csvs_ready': False, 'df_calls': None, 'df_calls_full': None, 'df_stations': None,
-    'active_city': "Rockford", 'active_state': "IL", 'estimated_pop': 65000,
+    'active_city': "Victoria", 'active_state': "TX", 'estimated_pop': 65000,
     'k_resp': 2, 'k_guard': 0, 'r_resp': 2.0, 'r_guard': 8.0,
-    'dfr_rate': 12, 'deflect_rate': 25, 'total_original_calls': 0, 'total_modeled_calls': 0,
+    'dfr_rate': 25, 'deflect_rate': 30, 'total_original_calls': 0, 'total_modeled_calls': 0,
     'onboarding_done': False, 'trigger_sim': False, 'city_count': 1,
     'brinc_user': 'steven.beltran',
     'pd_chief_name': '', 'pd_dept_name': '', 'pd_dept_email': '', 'pd_dept_phone': '',
@@ -37,9 +37,6 @@ defaults = {
     'map_build_logged': False,  # prevent duplicate map-build rows per session
     'boundary_kind': 'place',
     'boundary_source_path': '',
-    'location_detection_source': '',
-    'boundary_detection_mode': '',
-    'master_gdf_override': None,  # GeoDataFrame from coordinate-based jurisdiction lookup
     # ── NEW: file ingestion metadata & engagement tracking ──────────────────
     'file_meta': {},            # populated by aggressive_parse_calls; see _extract_file_meta()
     'export_event_log': [],     # ordered list of export types clicked this session
@@ -53,10 +50,17 @@ for k, v in defaults.items():
 
 
 if 'target_cities' not in st.session_state:
-    st.session_state['target_cities'] = [{"city": "", "state": st.session_state.get('active_state', 'IL')}]
+    st.session_state['target_cities'] = [{"city": "", "state": st.session_state.get('active_state', 'TX')}]
 
 
 GUARDIAN_FLIGHT_HOURS_PER_DAY = 23.5
+
+APPREHENSION_MODEL_DEFAULTS = {
+    "suspect_present_rate": 0.12,
+    "baseline_apprehension_rate": 0.38,
+    "drone_apprehension_rate": 0.52,
+    "value_per_apprehension": 3000.0,
+}
 
 SIMULATOR_DISCLAIMER_SHORT = (
     "Simulation output only. Coverage, station placement, response time, and ROI figures are model estimates based on uploaded data and configuration settings. "
@@ -365,11 +369,6 @@ CONFIG = {
     "THERMAL_SAVINGS_PER_CALL": 38,
     "K9_DEFAULT_APPLICABLE_RATE": 0.03,
     "K9_SAVINGS_PER_CALL": 155,
-    # Fire department value: aerial recon/scene size-up + overhaul hotspot detection
-    # ~5% of addressable calls are fire-related; blended savings $450/call assisted
-    # (15% aerial ladder avoidance at $4,500/deploy + $90 overhaul crew time saved)
-    "FIRE_DEFAULT_APPLICABLE_RATE": 0.05,
-    "FIRE_SAVINGS_PER_CALL": 450,
     "DEFAULT_TRAFFIC_SPEED": 35.0, "RESPONDER_SPEED": 42.0, "GUARDIAN_SPEED": 60.0,
     # Guardian duty cycle: 60 min flight + 3 min charge = 63 min cycle
     # Daily airtime = (24*60) / 63 * 60 = 1371.4 min = 22.86 hrs
@@ -378,16 +377,6 @@ CONFIG = {
     # Responder duty cycle: 30-min max flight per sortie, 11.6hr shift
     "RESPONDER_FLIGHT_MIN":   30,    # max flight minutes per sortie
     "RESPONDER_PATROL_HOURS": 11.6,
-    # Officer / drone cost model
-    "OFFICER_HOURLY_WAGE": 37.0,     # baseline hourly wage for overtime estimates
-    # Outcome rates (modeled estimates; adjust per-agency as needed)
-    "OUTCOME_ARREST_RATE":      0.043,
-    "OUTCOME_RESCUE_RATE":      0.021,
-    "OUTCOME_DEESCALATION_RATE":0.11,
-    "OUTCOME_MISSING_RATE":     0.008,
-    # drone_wins_pct formula: pct = clamp(calls_covered * WINS_MULTIPLIER, WINS_FLOOR, 99)
-    "DRONE_WINS_MULTIPLIER":    0.72,
-    "DRONE_WINS_FLOOR":         60,
 }
 # Derived: compute Guardian daily airtime from duty cycle
 CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] = (
@@ -434,376 +423,6 @@ def get_airfield_message(): return random.choice(AIRFIELD_MESSAGES)
 def get_jurisdiction_message(): return random.choice(JURISDICTION_MESSAGES)
 def get_spatial_message(): return random.choice(SPATIAL_MESSAGES)
 
-
-def _count_points_within_boundary(df_calls, boundary_gdf):
-    try:
-        if df_calls is None or len(df_calls) == 0 or boundary_gdf is None or getattr(boundary_gdf, "empty", True):
-            return 0
-        work = df_calls.copy()
-        work['lat'] = pd.to_numeric(work['lat'], errors='coerce')
-        work['lon'] = pd.to_numeric(work['lon'], errors='coerce')
-        work = work.dropna(subset=['lat', 'lon'])
-        if work.empty:
-            return 0
-        pts = gpd.GeoDataFrame(work, geometry=gpd.points_from_xy(work.lon, work.lat), crs="EPSG:4326")
-        try:
-            boundary_4326 = boundary_gdf.to_crs(epsg=4326)
-        except Exception:
-            boundary_4326 = boundary_gdf
-        poly = unary_union(boundary_4326.geometry)
-        inside = pts.within(poly)
-        return int(inside.sum())
-    except Exception:
-        return 0
-
-
-def find_jurisdictions_by_coordinates(df_calls, min_call_share=0.001, min_call_count=3):
-    """
-    Purely coordinate-driven jurisdiction lookup.
-
-    Spatially joins call points against places_lite.parquet (and
-    counties_lite.parquet as fallback) to find every jurisdiction that
-    contains at least `min_call_share` of the uploaded calls OR at least
-    `min_call_count` absolute calls.  Returns a GeoDataFrame with columns
-    [DISPLAY_NAME, data_count, geometry] sorted descending by data_count,
-    or None if nothing is found.
-    """
-    import traceback as _tb
-    _debug_msgs = []
-    try:
-        if df_calls is None or df_calls.empty:
-            _debug_msgs.append("df_calls is None or empty")
-            st.session_state['_jur_debug'] = _debug_msgs
-            return None
-
-        pts = df_calls.copy()
-        pts['lat'] = pd.to_numeric(pts['lat'], errors='coerce')
-        pts['lon'] = pd.to_numeric(pts['lon'], errors='coerce')
-        pts = pts.dropna(subset=['lat', 'lon'])
-        if pts.empty:
-            _debug_msgs.append("no valid lat/lon after cleaning")
-            st.session_state['_jur_debug'] = _debug_msgs
-            return None
-
-        _debug_msgs.append(f"pts count: {len(pts)}, lat range: {pts['lat'].min():.3f}–{pts['lat'].max():.3f}, lon range: {pts['lon'].min():.3f}–{pts['lon'].max():.3f}")
-
-        sample = pts.sample(min(len(pts), 5000), random_state=42) if len(pts) > 5000 else pts
-        pts_gdf = gpd.GeoDataFrame(sample, geometry=gpd.points_from_xy(sample.lon, sample.lat), crs='EPSG:4326')
-        bbox = tuple(pts_gdf.total_bounds)
-        _debug_msgs.append(f"bbox: {bbox}")
-
-        results = []
-
-        for parquet_file, name_col, kind in [
-            ('places_lite.parquet',  'NAME', 'place'),
-            ('counties_lite.parquet','NAME', 'county'),
-        ]:
-            _exists = os.path.exists(parquet_file)
-            _debug_msgs.append(f"{parquet_file} exists: {_exists}")
-            if not _exists:
-                continue
-            try:
-                # Full read then cx filter — bbox kwarg not supported by this parquet build
-                poly_gdf = gpd.read_parquet(parquet_file)
-                poly_gdf = poly_gdf.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]
-
-                _debug_msgs.append(f"{parquet_file} rows in bbox: {len(poly_gdf)}")
-                if poly_gdf is None or poly_gdf.empty:
-                    continue
-                if poly_gdf.crs is None:
-                    poly_gdf = poly_gdf.set_crs(epsg=4326)
-                poly_gdf = poly_gdf.to_crs(epsg=4326)
-
-                joined = gpd.sjoin(pts_gdf[['geometry']], poly_gdf[[name_col, 'geometry']], how='left', predicate='within')
-                hit_counts = joined[name_col].value_counts().dropna()
-                _debug_msgs.append(f"sjoin hits: {dict(list(hit_counts.items())[:10])}")
-                if hit_counts.empty:
-                    continue
-
-                total = hit_counts.sum()
-                for jname, cnt in hit_counts.items():
-                    # Include if meets share threshold OR absolute minimum count
-                    if cnt / total < min_call_share and cnt < min_call_count:
-                        continue
-                    row = poly_gdf[poly_gdf[name_col] == jname].copy()
-                    if row.empty:
-                        continue
-                    display = str(jname)
-                    if kind == 'county' and not display.lower().endswith('county'):
-                        display = display + ' County'
-                    already = any(r['DISPLAY_NAME'] == display for r in results)
-                    if not already:
-                        results.append({
-                            'DISPLAY_NAME': display,
-                            'data_count': int(cnt),
-                            'geometry': row.geometry.iloc[0],
-                        })
-            except Exception as _e:
-                _debug_msgs.append(f"{parquet_file} ERROR: {_e}\n{_tb.format_exc()[-300:]}")
-                continue
-
-            if results and parquet_file.startswith('places'):
-                break
-
-        _debug_msgs.append(f"total results: {len(results)}, names: {[r['DISPLAY_NAME'] for r in results]}")
-        st.session_state['_jur_debug'] = _debug_msgs
-
-        if not results:
-            return None
-
-        out = gpd.GeoDataFrame(results, crs='EPSG:4326')
-        out = out.sort_values('data_count', ascending=False).reset_index(drop=True)
-        return out
-
-    except Exception as _e:
-        _debug_msgs.append(f"OUTER ERROR: {_e}\n{_tb.format_exc()[-400:]}")
-        st.session_state['_jur_debug'] = _debug_msgs
-        return None
-    """
-    Purely coordinate-driven jurisdiction lookup.
-
-    Spatially joins call points against places_lite.parquet (and
-    counties_lite.parquet as fallback) to find every jurisdiction that
-    contains at least `min_call_share` of the uploaded calls.  Returns a
-    GeoDataFrame with columns [DISPLAY_NAME, data_count, geometry] sorted
-    descending by data_count, or None if nothing is found.
-
-    This is the primary boundary-detection path for uploaded CAD files.
-    It requires no city/state name inference — it works purely from lat/lon.
-    """
-    import traceback as _tb
-    _debug_msgs = []
-    try:
-        if df_calls is None or df_calls.empty:
-            _debug_msgs.append("df_calls is None or empty")
-            st.session_state['_jur_debug'] = _debug_msgs
-            return None
-
-        pts = df_calls.copy()
-        pts['lat'] = pd.to_numeric(pts['lat'], errors='coerce')
-        pts['lon'] = pd.to_numeric(pts['lon'], errors='coerce')
-        pts = pts.dropna(subset=['lat', 'lon'])
-        if pts.empty:
-            _debug_msgs.append("no valid lat/lon after cleaning")
-            st.session_state['_jur_debug'] = _debug_msgs
-            return None
-
-        _debug_msgs.append(f"pts count: {len(pts)}, lat range: {pts['lat'].min():.3f}–{pts['lat'].max():.3f}, lon range: {pts['lon'].min():.3f}–{pts['lon'].max():.3f}")
-
-        # Sample for speed on large files (spatial join is O(n·m))
-        sample = pts.sample(min(len(pts), 5000), random_state=42) if len(pts) > 5000 else pts
-        pts_gdf = gpd.GeoDataFrame(sample, geometry=gpd.points_from_xy(sample.lon, sample.lat), crs='EPSG:4326')
-        bbox = tuple(pts_gdf.total_bounds)  # (minx, miny, maxx, maxy)
-        _debug_msgs.append(f"bbox: {bbox}")
-
-        results = []
-
-        for parquet_file, name_col, kind in [
-            ('places_lite.parquet',  'NAME', 'place'),
-            ('counties_lite.parquet','NAME', 'county'),
-        ]:
-            _exists = os.path.exists(parquet_file)
-            _debug_msgs.append(f"{parquet_file} exists: {_exists}")
-            if not _exists:
-                continue
-            try:
-                try:
-                    poly_gdf = gpd.read_parquet(parquet_file, bbox=bbox)
-                except Exception as _be:
-                    _debug_msgs.append(f"bbox read failed ({_be}), falling back to full read")
-                    poly_gdf = gpd.read_parquet(parquet_file)
-                    poly_gdf = poly_gdf.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]
-
-                _debug_msgs.append(f"{parquet_file} rows in bbox: {len(poly_gdf)}")
-                if poly_gdf is None or poly_gdf.empty:
-                    continue
-                if poly_gdf.crs is None:
-                    poly_gdf = poly_gdf.set_crs(epsg=4326)
-                poly_gdf = poly_gdf.to_crs(epsg=4326)
-
-                joined = gpd.sjoin(pts_gdf[['geometry']], poly_gdf[[name_col, 'geometry']], how='left', predicate='within')
-                hit_counts = joined[name_col].value_counts().dropna()
-                _debug_msgs.append(f"sjoin hits: {dict(list(hit_counts.items())[:5])}")
-                if hit_counts.empty:
-                    continue
-
-                total = hit_counts.sum()
-                for jname, cnt in hit_counts.items():
-                    if cnt / total < min_call_share:
-                        continue
-                    row = poly_gdf[poly_gdf[name_col] == jname].copy()
-                    if row.empty:
-                        continue
-                    display = str(jname)
-                    if kind == 'county' and not display.lower().endswith('county'):
-                        display = display + ' County'
-                    already = any(r['DISPLAY_NAME'] == display for r in results)
-                    if not already:
-                        results.append({
-                            'DISPLAY_NAME': display,
-                            'data_count': int(cnt),
-                            'geometry': row.geometry.iloc[0],
-                        })
-            except Exception as _e:
-                _debug_msgs.append(f"{parquet_file} ERROR: {_e}\n{_tb.format_exc()[-300:]}")
-                continue
-
-            if results and parquet_file.startswith('places'):
-                break
-
-        _debug_msgs.append(f"total results: {len(results)}, names: {[r['DISPLAY_NAME'] for r in results]}")
-        st.session_state['_jur_debug'] = _debug_msgs
-
-        if not results:
-            return None
-
-        out = gpd.GeoDataFrame(results, crs='EPSG:4326')
-        out = out.sort_values('data_count', ascending=False).reset_index(drop=True)
-        return out
-
-    except Exception as _e:
-        _debug_msgs.append(f"OUTER ERROR: {_e}\n{_tb.format_exc()[-400:]}")
-        st.session_state['_jur_debug'] = _debug_msgs
-        return None
-    """
-    Purely coordinate-driven jurisdiction lookup.
-
-    Spatially joins call points against places_lite.parquet (and
-    counties_lite.parquet as fallback) to find every jurisdiction that
-    contains at least `min_call_share` of the uploaded calls.  Returns a
-    GeoDataFrame with columns [DISPLAY_NAME, data_count, geometry] sorted
-    descending by data_count, or None if nothing is found.
-
-    This is the primary boundary-detection path for uploaded CAD files.
-    It requires no city/state name inference — it works purely from lat/lon.
-    """
-    try:
-        if df_calls is None or df_calls.empty:
-            return None
-
-        pts = df_calls.copy()
-        pts['lat'] = pd.to_numeric(pts['lat'], errors='coerce')
-        pts['lon'] = pd.to_numeric(pts['lon'], errors='coerce')
-        pts = pts.dropna(subset=['lat', 'lon'])
-        if pts.empty:
-            return None
-
-        # Sample for speed on large files (spatial join is O(n·m))
-        sample = pts.sample(min(len(pts), 5000), random_state=42) if len(pts) > 5000 else pts
-        pts_gdf = gpd.GeoDataFrame(sample, geometry=gpd.points_from_xy(sample.lon, sample.lat), crs='EPSG:4326')
-        bbox = tuple(pts_gdf.total_bounds)  # (minx, miny, maxx, maxy)
-
-        results = []
-
-        for parquet_file, name_col, kind in [
-            ('places_lite.parquet',  'NAME', 'place'),
-            ('counties_lite.parquet','NAME', 'county'),
-        ]:
-            if not os.path.exists(parquet_file):
-                continue
-            try:
-                poly_gdf = gpd.read_parquet(parquet_file, bbox=bbox)
-                if poly_gdf is None or poly_gdf.empty:
-                    # bbox kwarg not supported by all versions — fall back to full read + filter
-                    poly_gdf = gpd.read_parquet(parquet_file)
-                    poly_gdf = poly_gdf.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]
-                if poly_gdf.empty:
-                    continue
-                if poly_gdf.crs is None:
-                    poly_gdf = poly_gdf.set_crs(epsg=4326)
-                poly_gdf = poly_gdf.to_crs(epsg=4326)
-
-                joined = gpd.sjoin(pts_gdf[['geometry']], poly_gdf[[name_col, 'geometry']], how='left', predicate='within')
-                hit_counts = joined[name_col].value_counts().dropna()
-                if hit_counts.empty:
-                    continue
-
-                total = hit_counts.sum()
-                for jname, cnt in hit_counts.items():
-                    if cnt / total < min_call_share:
-                        continue
-                    row = poly_gdf[poly_gdf[name_col] == jname].copy()
-                    if row.empty:
-                        continue
-                    display = str(jname)
-                    if kind == 'county' and not display.lower().endswith('county'):
-                        display = display + ' County'
-                    # Avoid duplicating a place already captured from places_lite
-                    already = any(r['DISPLAY_NAME'] == display for r in results)
-                    if not already:
-                        results.append({
-                            'DISPLAY_NAME': display,
-                            'data_count': int(cnt),
-                            'geometry': row.geometry.iloc[0],
-                        })
-            except Exception:
-                continue
-
-            # If places gave us results, don't also add county duplicates
-            if results and parquet_file.startswith('places'):
-                break
-
-        if not results:
-            return None
-
-        out = gpd.GeoDataFrame(results, crs='EPSG:4326')
-        out = out.sort_values('data_count', ascending=False).reset_index(drop=True)
-        return out
-
-    except Exception:
-        return None
-
-
-def _select_best_boundary_for_calls(df_calls, city_text, state_abbr, prefer_county=False):
-    """Try place and county boundaries and keep the candidate containing the most uploaded calls."""
-    candidates = []
-
-    try:
-        place_success, place_gdf = fetch_place_boundary_local(state_abbr, city_text)
-        if place_success and place_gdf is not None and not place_gdf.empty:
-            candidates.append(('place', place_gdf, _count_points_within_boundary(df_calls, place_gdf)))
-    except Exception:
-        pass
-
-    county_names = [city_text]
-    if not str(city_text).lower().endswith(" county"):
-        county_names.append(f"{city_text} County")
-
-    for cname in county_names:
-        try:
-            county_success, county_gdf = fetch_county_boundary_local(state_abbr, cname)
-            if county_success and county_gdf is not None and not county_gdf.empty:
-                candidates.append(('county', county_gdf, _count_points_within_boundary(df_calls, county_gdf)))
-                break
-        except Exception:
-            pass
-
-    if not candidates:
-        # ── TIGER fallback: parquet not present or city not found — download from Census ──
-        state_fips = STATE_FIPS.get(state_abbr)
-        if state_fips:
-            try:
-                tiger_success, tiger_gdf = fetch_tiger_city_shapefile(state_fips, city_text, SHAPEFILE_DIR)
-                if tiger_success and tiger_gdf is not None and not tiger_gdf.empty:
-                    tiger_gdf = tiger_gdf.copy()
-                    if 'NAME' not in tiger_gdf.columns:
-                        tiger_gdf['NAME'] = city_text
-                    hits = _count_points_within_boundary(df_calls, tiger_gdf)
-                    candidates.append(('place', tiger_gdf, hits))
-            except Exception:
-                pass
-
-    if not candidates:
-        return False, None, 'place', 0
-
-    if prefer_county:
-        candidates.sort(key=lambda x: (x[2], 1 if x[0] == 'county' else 0), reverse=True)
-    else:
-        candidates.sort(key=lambda x: (x[2], 1 if x[0] == 'place' else 0), reverse=True)
-
-    best_kind, best_gdf, best_hits = candidates[0]
-    return True, best_gdf, best_kind, int(best_hits)
-
 def get_base64_of_bin_file(bin_file):
     try:
         with open(bin_file, 'rb') as f: return base64.b64encode(f.read()).decode()
@@ -833,13 +452,15 @@ def get_transparent_product_base64(image_file="gigs.png", threshold=32):
     """Return product image as transparent PNG by removing near-black background."""
     try:
         with Image.open(image_file).convert('RGBA') as img:
-            arr = np.array(img)
-            r, g, b, a = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2], arr[:, :, 3]
-            mask = (r <= threshold) & (g <= threshold) & (b <= threshold)
-            arr[:, :, 3] = np.where(mask, 0, a)
-            result = Image.fromarray(arr, 'RGBA')
+            px = img.load()
+            w, h = img.size
+            for y in range(h):
+                for x in range(w):
+                    r, g, b, a = px[x, y]
+                    if r <= threshold and g <= threshold and b <= threshold:
+                        px[x, y] = (r, g, b, 0)
             buf = io.BytesIO()
-            result.save(buf, format='PNG')
+            img.save(buf, format='PNG')
             return base64.b64encode(buf.getvalue()).decode()
     except Exception:
         return get_base64_of_bin_file(image_file)
@@ -911,7 +532,7 @@ def estimate_high_activity_overtime(df_calls_full, state_abbr, calls_covered_per
             if busy_hours <= 0:
                 continue
 
-            officer_hourly, wage_source = CONFIG['OFFICER_HOURLY_WAGE'], 'estimate'
+            officer_hourly, wage_source = 37.0, 'estimate'
             overtime_hourly = officer_hourly * 1.5
 
             drone_relief_share = (calls_covered_perc / 100.0) * dfr_dispatch_rate * deflection_rate
@@ -961,13 +582,10 @@ def estimate_specialty_response_savings(df_calls_full, total_calls_annual, calls
         'addressable_calls_annual': addressable_calls,
         'thermal_rate': float(CONFIG["THERMAL_DEFAULT_APPLICABLE_RATE"]),
         'k9_rate': float(CONFIG["K9_DEFAULT_APPLICABLE_RATE"]),
-        'fire_rate': float(CONFIG["FIRE_DEFAULT_APPLICABLE_RATE"]),
         'thermal_calls_annual': 0.0,
         'k9_calls_annual': 0.0,
-        'fire_calls_annual': 0.0,
         'thermal_savings': 0.0,
         'k9_savings': 0.0,
-        'fire_savings': 0.0,
         'additional_savings_total': 0.0,
         'source': 'default_model',
     }
@@ -994,24 +612,15 @@ def estimate_specialty_response_savings(df_calls_full, total_calls_annual, calls
             )
             thermal_rate_raw = float(s.str.contains(thermal_pattern, regex=True, na=False).mean())
             k9_rate_raw = float(s.str.contains(k9_pattern, regex=True, na=False).mean())
-            fire_pattern = (
-                r'fire|structure fire|building fire|fire alarm|alarm fire|brush fire|grass fire|'
-                r'wildfire|vegetation fire|vehicle fire|dumpster fire|smoke|smoke investigation|'
-                r'odor of smoke|fire investigation|carbon monoxide|co alarm|gas leak|hazmat'
-            )
-            fire_rate_raw = float(s.str.contains(fire_pattern, regex=True, na=False).mean())
             out['thermal_rate'] = min(0.25, max(CONFIG["THERMAL_DEFAULT_APPLICABLE_RATE"] * 0.5, thermal_rate_raw if thermal_rate_raw > 0 else CONFIG["THERMAL_DEFAULT_APPLICABLE_RATE"]))
             out['k9_rate'] = min(0.08, max(CONFIG["K9_DEFAULT_APPLICABLE_RATE"] * 0.5, k9_rate_raw if k9_rate_raw > 0 else CONFIG["K9_DEFAULT_APPLICABLE_RATE"]))
-            out['fire_rate'] = min(0.20, max(CONFIG["FIRE_DEFAULT_APPLICABLE_RATE"] * 0.5, fire_rate_raw if fire_rate_raw > 0 else CONFIG["FIRE_DEFAULT_APPLICABLE_RATE"]))
             out['source'] = f'cad_call_types:{call_type_col}'
 
     out['thermal_calls_annual'] = addressable_calls * out['thermal_rate']
     out['k9_calls_annual'] = addressable_calls * out['k9_rate']
-    out['fire_calls_annual'] = addressable_calls * out['fire_rate']
     out['thermal_savings'] = out['thermal_calls_annual'] * float(CONFIG["THERMAL_SAVINGS_PER_CALL"])
     out['k9_savings'] = out['k9_calls_annual'] * float(CONFIG["K9_SAVINGS_PER_CALL"])
-    out['fire_savings'] = out['fire_calls_annual'] * float(CONFIG["FIRE_SAVINGS_PER_CALL"])
-    out['additional_savings_total'] = out['thermal_savings'] + out['k9_savings'] + out['fire_savings']
+    out['additional_savings_total'] = out['thermal_savings'] + out['k9_savings']
     return out
 
 def build_high_activity_staffing_html(overtime_stats, dark=True, compact=False):
@@ -1091,11 +700,11 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
     dt_obj = None
     if 'date' in df_ana.columns:
         _date_str = df_ana['date'].astype(str).fillna('')
-        if 'time' in df_ana.columns:
-            _time_str = df_ana['time'].astype(str).fillna('')
-            _combined = _date_str + ' ' + _time_str
-        else:
+        _time_str = df_ana['time'].astype(str).fillna('') if 'time' in df_ana.columns else ''
+        if isinstance(_time_str, str):
             _combined = _date_str
+        else:
+            _combined = _date_str + ' ' + _time_str
         # Try ISO format first (what our parser stores), then fall back
         for _fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d']:
             try:
@@ -1492,7 +1101,7 @@ def generate_command_center_html(df, total_orig_calls, export_mode=False):
 def aggressive_parse_calls(uploaded_files):
     all_calls_list = []
     CV = {
-        'date': ['received date','incident date','call date','call creation date','calldatetime','call datetime','calltime','timestamp','date','datetime','date time','dispatch date','time received','incdate','date_rept','date_occu','createdtime','created_time','receivedtime','received_time','eventtime','event_time','incidenttime','incident_time','reportedtime','reported_time','entrytime','entry_time','time_central','time_stamp','created'],
+        'date': ['received date','incident date','call date','call creation date','calldatetime','call datetime','calltime','timestamp','date','datetime','dispatch date','time received','incdate','date_rept','date_occu','createdtime','created_time','receivedtime','received_time','eventtime','event_time','incidenttime','incident_time','reportedtime','reported_time','entrytime','entry_time','time_central','time_stamp','created'],
         'time': ['call creation time','call time','dispatch time','received time','time', 'hour', 'hour_rept','hour_occu'],
         'priority': ['call priority', 'priority level', 'priority', 'pri', 'urgency'],
         'lat': ['latitude','lat','y coord','ycoord','ycoor','addressy','geoy','y_coord','map_y',
@@ -1503,40 +1112,8 @@ def aggressive_parse_calls(uploaded_files):
                 'x_wgs','lon_wgs','incident_lon','inc_lon','event_lon','x_coordinate','address_x','xlocation']
     }
 
-
-    def _looks_like_headerless_geocoder_export(df):
-        try:
-            cols = [str(c).strip() for c in df.columns]
-            coord_pat = re.compile(r'^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$')
-            zip_pat = re.compile(r'\b[A-Z]{2}\b\s*,\s*\d{5}(?:-\d{4})?$', re.I)
-            has_coord_col = any(coord_pat.match(c) for c in cols)
-            has_address_col = any(',' in c and zip_pat.search(c) for c in cols)
-            has_matchish = any(str(c).strip().lower() in {'match', 'no_match', 'exact', 'non_exact'} for c in cols)
-            return has_coord_col and has_address_col and has_matchish
-        except Exception:
-            return False
-
-    def _normalize_headerless_geocoder_export(df):
-        rows = [list(df.columns)] + df.astype(str).fillna('').values.tolist()
-        width = max(len(r) for r in rows)
-        padded = [r + [''] * (width - len(r)) for r in rows]
-        norm = pd.DataFrame(padded)
-        base_cols = ['source_id', 'input_address', 'match_status', 'match_type', 'matched_address', 'lonlat', 'external_id', 'side']
-        if width > len(base_cols):
-            base_cols += [f'extra_{i}' for i in range(1, width - len(base_cols) + 1)]
-        norm.columns = base_cols[:width]
-        return norm
-
-    def _extract_lonlat_pair(series):
-        s = series.astype(str).str.strip()
-        pair = s.str.extract(r'^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$')
-        lon = pd.to_numeric(pair[0], errors='coerce')
-        lat = pd.to_numeric(pair[1], errors='coerce')
-        valid = ((lat.between(-90, 90)) & (lon.between(-180, 180))).mean()
-        return lon, lat, float(valid)
-
     def _infer_city_from_location_text(raw_df):
-        text_cols = [c for c in raw_df.columns if c in ['location', 'address', 'incident_location', 'addr', 'street', 'input_address', 'matched_address']]
+        text_cols = [c for c in raw_df.columns if c in ['location', 'address', 'incident_location', 'addr', 'street']]
         if not text_cols:
             return None
 
@@ -1545,8 +1122,8 @@ def aggressive_parse_calls(uploaded_files):
             return None
 
         s = s.str.replace(r':.*$', '', regex=True)
-        s = s.str.replace(r'\bCNTY\b', 'COUNTY', regex=True)
-        s = s.str.replace(r'[^A-Z0-9 /,-]', ' ', regex=True)
+        s = s.str.replace(r'CNTY', 'COUNTY', regex=True)
+        s = s.str.replace(r'[^A-Z0-9 /-]', ' ', regex=True)
         s = s.str.replace(r'\s+', ' ', regex=True).str.strip()
 
         candidates = []
@@ -1556,18 +1133,10 @@ def aggressive_parse_calls(uploaded_files):
                 candidates.append('Mobile')
                 continue
 
-            parts = [p.strip() for p in val.split(',') if p and p.strip()]
-            if len(parts) >= 2:
-                locality = parts[-2] if re.match(r'^[A-Z]{2}$', parts[-1]) else parts[-1]
-                locality = locality.strip()
-                if locality and locality not in {'COUNTY', 'CITY', 'TOWN', 'VILLAGE', 'HAMLET'}:
-                    candidates.append(locality.title())
-                    continue
-
-            m = re.search(r'\b([A-Z]{3,}(?:\s+[A-Z]{3,}){0,2})$', val)
+            m = re.search(r'([A-Z]{3,}(?:\s+[A-Z]{3,}){0,2})$', val)
             if m:
                 city = m.group(1).title()
-                if city not in {'County', 'City', 'Town', 'Village', 'Hamlet'}:
+                if city not in {'County', 'City'}:
                     candidates.append(city)
 
         if not candidates:
@@ -1720,52 +1289,8 @@ def aggressive_parse_calls(uploaded_files):
                 first_line = content.split('\n')[0]
                 delim = ',' if first_line.count(',') > first_line.count('\t') else '\t'
                 raw_df = pd.read_csv(io.StringIO(content), sep=delim, dtype=str)
-                if _looks_like_headerless_geocoder_export(raw_df):
-                    raw_df = _normalize_headerless_geocoder_export(raw_df)
                 raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
-
-                # ── Census Geocoder: split combined 'lonlat' column ──────────
-                # After normalization the file has a 'lonlat' column storing
-                # "lon,lat" pairs (e.g. "-93.283,36.601").  The generic
-                # coord-name scanner below matches 'lonlat' for BOTH lat and
-                # lon but pd.to_numeric returns all-NaN on comma-pair strings.
-                # Handle it here explicitly before the scanner runs, then drop
-                # No_Match rows whose lonlat is empty.
-                if 'lonlat' in raw_df.columns and 'lat' not in raw_df.columns:
-                    _pair = raw_df['lonlat'].astype(str).str.strip().str.extract(
-                        r'^\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$'
-                    )
-                    _lon_cand = pd.to_numeric(_pair[0], errors='coerce')
-                    _lat_cand = pd.to_numeric(_pair[1], errors='coerce')
-                    # Census geocoder stores lon first, lat second — verify US range
-                    if _lon_cand.between(-180, -50).mean() > 0.3 and _lat_cand.between(18, 72).mean() > 0.3:
-                        raw_df['lon'] = _lon_cand
-                        raw_df['lat'] = _lat_cand
-                    # Drop rows with no geocoded location (No_Match rows)
-                    if 'lat' in raw_df.columns:
-                        raw_df = raw_df[raw_df['lat'].notna()].copy()
-
-                # ── Census Geocoder: extract city & state from matched_address ──
-                # matched_address format: "32 GOLFSHORES DR, BRANSON, MO, 65616"
-                if 'matched_address' in raw_df.columns and '_csv_city' not in raw_df.columns:
-                    try:
-                        _ma = raw_df['matched_address'].dropna().astype(str)
-                        _ma_parts = _ma.str.split(',')
-                        _ma_cities = _ma_parts.apply(
-                            lambda p: p[-3].strip().title() if len(p) >= 4 else (p[-2].strip().title() if len(p) >= 2 else None)
-                        ).dropna()
-                        _ma_states = _ma_parts.apply(
-                            lambda p: p[-2].strip().upper() if len(p) >= 2 else None
-                        ).dropna()
-                        if not _ma_cities.empty:
-                            raw_df['_csv_city'] = _ma_cities.value_counts().index[0]
-                        if not _ma_states.empty:
-                            _top_st = _ma_states.value_counts().index[0]
-                            if _top_st in STATE_FIPS:
-                                raw_df['_csv_state'] = _top_st
-                    except Exception:
-                        pass
-
+            
             res = pd.DataFrame()
             exact_coord_names = {
                 'lat': ['latitude', 'lat', 'gps_lat', 'gps_latitude'],
@@ -1773,21 +1298,10 @@ def aggressive_parse_calls(uploaded_files):
             }
             for field in ['lat', 'lon']:
                 found_exact = [c for c in raw_df.columns if c.strip().lower() in exact_coord_names[field]]
-                # Exclude bare 'lonlat' from the loose scan — it's a combined field,
-                # not a plain numeric column, and will produce all-NaN via pd.to_numeric.
-                found_loose = [c for c in raw_df.columns
-                               if c != 'lonlat' and any(s in c for s in CV[field])]
+                found_loose = [c for c in raw_df.columns if any(s in c for s in CV[field])]
                 found = found_exact or found_loose
                 if found:
                     res[field] = pd.to_numeric(raw_df[found[0]], errors='coerce')
-
-            if 'lat' not in res.columns or 'lon' not in res.columns:
-                for c in raw_df.columns:
-                    lon_series, lat_series, valid_rate = _extract_lonlat_pair(raw_df[c])
-                    if valid_rate >= 0.50:
-                        res['lon'] = lon_series
-                        res['lat'] = lat_series
-                        break
 
             # ── Fallback: no column name matched — scan numeric columns by value range ──
             # Lat: -90 to 90, Lon: -180 to 180. Pick best candidate for each.
@@ -1848,7 +1362,7 @@ def aggressive_parse_calls(uploaded_files):
             
             # ── Event type description — carried through for CAD analytics charts ──
             _desc_hints = ['desc','type','nature','offense','calltype','call_type','event_type',
-                           'eventtype','calldesc','incident_type','agencyeventtype','violation','call_nature','cfs_type']
+                           'eventtype','calldesc','incident_type','agencyeventtype']
             _desc_found = [c for c in raw_df.columns
                            if any(h in c for h in _desc_hints)
                            and c not in (p_found[:1] if p_found else [])]
@@ -1916,37 +1430,6 @@ def aggressive_parse_calls(uploaded_files):
 
                 res['date'] = dt_series.dt.strftime('%Y-%m-%d')
                 res['time'] = dt_series.dt.strftime('%H:%M:%S')
-
-            # --- COORDINATE CLEANUP: sentinel values & sign errors ---
-            if not res.empty and 'lat' in res.columns and 'lon' in res.columns:
-                # Drop obvious sentinel/null-coordinate rows before any further processing
-                # lat=0 and lon=0 are common CAD null sentinels (no valid location on the equator/prime meridian)
-                # lon=-179.99999 is another common sentinel used by some CAD vendors
-                _sentinel_mask = (
-                    (res['lat'] == 0) | (res['lon'] == 0) |
-                    (res['lat'].abs() < 0.001) | (res['lon'].abs() < 0.001) |
-                    (res['lon'] < -179.9)
-                )
-                if _sentinel_mask.any():
-                    res = res[~_sentinel_mask].copy()
-
-                # Fix wrong-sign longitudes: some CAD exports omit the minus sign for
-                # western-hemisphere longitudes (e.g. 81.31 instead of -81.31).
-                # Detect by checking if the majority of lons are negative (correct for US)
-                # while a small minority are positive with the same absolute magnitude.
-                if not res.empty and 'lon' in res.columns:
-                    _neg_count = (res['lon'] < 0).sum()
-                    _pos_count = (res['lon'] > 0).sum()
-                    _total = len(res)
-                    # If >90% are negative but some are positive AND the median negative lon
-                    # matches -(positive lon range), flip the positive ones
-                    if _neg_count > 0 and _pos_count > 0 and (_neg_count / _total) > 0.90:
-                        _median_neg = res.loc[res['lon'] < 0, 'lon'].median()
-                        _pos_vals = res.loc[res['lon'] > 0, 'lon']
-                        # Check if flipping would land near the median negative cluster
-                        _would_match = ((-_pos_vals).between(_median_neg - 2, _median_neg + 2)).mean()
-                        if _would_match > 0.5:
-                            res.loc[res['lon'] > 0, 'lon'] = -res.loc[res['lon'] > 0, 'lon']
 
             # --- COORDINATE CONVERSION (STATE PLANE / LARGE-INTEGER DETECTOR) ---
             if not res.empty and 'lat' in res.columns and 'lon' in res.columns:
@@ -2029,32 +1512,6 @@ def aggressive_parse_calls(uploaded_files):
                                 (res["lon"] > -170) & (res["lon"] < -60)
                             ]
 
-            # ── Agency / source tagging (Fire vs Police) ─────────────────────
-            # Look for a column named 'agency', 'department', or 'dept' and
-            # carry it through as a lowercase 'agency' column so the map
-            # renderer can colour fire calls red and police calls the default colour.
-            _agency_col = next(
-                (c for c in raw_df.columns if c.strip().lower() in ('agency', 'department', 'dept')),
-                None
-            )
-            if _agency_col:
-                res['agency'] = raw_df[_agency_col].astype(str).str.strip().str.lower()
-            else:
-                res['agency'] = 'police'   # safe default for single-agency files
-
-            # ── Agency / source tagging (Fire vs Police) ─────────────────────
-            # Look for a column named 'agency', 'department', or 'dept' and
-            # carry it through as a lowercase 'agency' column so the map
-            # renderer can colour fire calls red and police calls the default colour.
-            _agency_col = next(
-                (c for c in raw_df.columns if c.strip().lower() in ('agency', 'department', 'dept')),
-                None
-            )
-            if _agency_col:
-                res['agency'] = raw_df[_agency_col].astype(str).str.strip().str.lower()
-            else:
-                res['agency'] = 'police'   # safe default for single-agency files
-
             # City/state detection: store top values on rows for location detection
             top_city_name = None
             for col in ["city", "city_name", "municipality", "jurisdiction"]:
@@ -2072,18 +1529,6 @@ def aggressive_parse_calls(uploaded_files):
                     res["_csv_city"] = inferred_city
 
             inferred_state = _infer_state_from_text(raw_df, top_city_name)
-            if not inferred_state:
-                for _addr_col in ['input_address', 'matched_address', 'address', 'location']:
-                    if _addr_col in raw_df.columns:
-                        _addr_series = raw_df[_addr_col].astype(str)
-                        # Pattern 1: "..., ST, ZIPCODE" (comma-separated state and zip)
-                        _states = _addr_series.str.extract(r',\s*([A-Z]{2})\s*,\s*\d{5}(?:-\d{4})?')[0].dropna()
-                        if _states.empty:
-                            # Pattern 2: "..., ST ZIPCODE" (state and zip in same segment, common format)
-                            _states = _addr_series.str.extract(r',\s*([A-Z]{2})\s+\d{5}(?:-\d{4})?')[0].dropna()
-                        if not _states.empty:
-                            inferred_state = _states.value_counts().idxmax()
-                            break
             if inferred_state:
                 res["_csv_state"] = inferred_state
 
@@ -2111,9 +1556,6 @@ def aggressive_parse_calls(uploaded_files):
     combined = pd.concat(valid, ignore_index=True)
     # Safe dropna — columns guaranteed to exist now
     combined = combined.dropna(subset=['lat', 'lon'])
-    combined['lat'] = pd.to_numeric(combined['lat'], errors='coerce')
-    combined['lon'] = pd.to_numeric(combined['lon'], errors='coerce')
-    combined = combined[(combined['lat'].between(-90, 90)) & (combined['lon'].between(-180, 180))]
     # IMPORTANT: keep the full parsed CAD dataset here.
     #
     # The optimizer is sampled later (after upload) for performance, but the
@@ -2124,385 +1566,168 @@ def aggressive_parse_calls(uploaded_files):
     #      surrogate created during parsing
     return combined
 
-def _build_cad_charts_html(df_calls):
-    """Generate a self-contained HTML block for the PDF/HTML export.
-    Includes the Drone Apprehension Impact Value table and the Top Call Types chart.
-    Returns an empty string if no real CAD data is available."""
+def _build_apprehension_value_model(total_calls_annual, calls_covered_perc, annual_savings=0.0, specialty_savings=0.0, assumptions=None):
+    """Build a fixed-assumption apprehension and value model."""
+    assumptions = {**APPREHENSION_MODEL_DEFAULTS, **(assumptions or {})}
+    total_calls_annual = float(total_calls_annual or 0)
+    calls_covered_perc = float(calls_covered_perc or 0)
+    annual_savings = float(annual_savings or 0)
+    specialty_savings = float(specialty_savings or 0)
+
+    covered_calls = total_calls_annual * max(0.0, min(1.0, calls_covered_perc / 100.0))
+    suspect_present_incidents = covered_calls * assumptions["suspect_present_rate"]
+    baseline_apprehensions = suspect_present_incidents * assumptions["baseline_apprehension_rate"]
+    drone_apprehensions = suspect_present_incidents * assumptions["drone_apprehension_rate"]
+    incremental_apprehensions = max(0.0, drone_apprehensions - baseline_apprehensions)
+    apprehension_value = incremental_apprehensions * assumptions["value_per_apprehension"]
+    final_annual_value = annual_savings + specialty_savings + apprehension_value
+
+    return {
+        "assumptions": assumptions,
+        "total_calls_annual": total_calls_annual,
+        "covered_calls": covered_calls,
+        "suspect_present_incidents": suspect_present_incidents,
+        "baseline_apprehensions": baseline_apprehensions,
+        "drone_apprehensions": drone_apprehensions,
+        "incremental_apprehensions": incremental_apprehensions,
+        "value_per_apprehension": assumptions["value_per_apprehension"],
+        "apprehension_value": apprehension_value,
+        "patrol_savings": annual_savings,
+        "specialty_savings": specialty_savings,
+        "final_annual_value": final_annual_value,
+    }
+
+
+def _build_apprehension_tables_html(model, theme='light'):
+    """Generate executive-style HTML tables for export and in-app display."""
+    dark = str(theme).lower() == 'dark'
+    bg = '#06060a' if dark else '#ffffff'
+    card = '#0c0c12' if dark else '#f8fafc'
+    border = '#1a1a26' if dark else '#e5e7eb'
+    text_main = '#e8e8f2' if dark else '#111827'
+    text_muted = '#7777a0' if dark else '#6b7280'
+    accent = '#00D2FF'
+    good = '#22c55e'
+
+    a = model['assumptions']
+
+    def pct(v):
+        return f"{v * 100:.0f}%"
+
+    def num(v):
+        return f"{v:,.0f}"
+
+    def money(v):
+        return f"${v:,.0f}"
+
+    rows_primary = [
+        ("Total Annual Calls", "Observed CAD workload", "Input", num(model['total_calls_annual']), "—"),
+        ("Drone-Addressable Calls", "% of annual calls within modeled drone coverage", "Annual calls × coverage %", pct(model['covered_calls'] / model['total_calls_annual']) if model['total_calls_annual'] > 0 else '0%', num(model['covered_calls'])),
+        ("Suspect-Present Rate", "Fixed commercial assumption for time-sensitive calls", "Covered calls × 12%", pct(a['suspect_present_rate']), num(model['suspect_present_incidents'])),
+        ("Baseline Apprehension Rate", "Fixed no-drone clearance assumption", "Suspect-present × 38%", pct(a['baseline_apprehension_rate']), num(model['baseline_apprehensions'])),
+        ("Drone-Assisted Apprehension Rate", "Fixed drone-assisted clearance assumption", "Suspect-present × 52%", pct(a['drone_apprehension_rate']), num(model['drone_apprehensions'])),
+        ("Incremental Apprehensions", "Additional successful apprehensions attributable to faster aerial response", "Drone-assisted − baseline", num(model['incremental_apprehensions']), num(model['incremental_apprehensions'])),
+        ("Value per Apprehension", "Fixed economic value per incremental apprehension", "Constant", money(model['value_per_apprehension']), "—"),
+        ("Apprehension Value", "Annual modeled financial benefit from added apprehensions", "Incremental apprehensions × value/app", "—", money(model['apprehension_value'])),
+    ]
+
+    rows_summary = [
+        ("Patrol / Deflection Savings", money(model['patrol_savings'])),
+        ("Thermal + K-9 Specialty Savings", money(model['specialty_savings'])),
+        ("Apprehension Value", money(model['apprehension_value'])),
+        ("Final Annual Value", money(model['final_annual_value'])),
+    ]
+
+    primary_rows_html = ''.join([
+        f"<tr>"
+        f"<td style='padding:10px 12px; border-top:1px solid {border}; color:{text_main}; font-weight:700;'>{metric}</td>"
+        f"<td style='padding:10px 12px; border-top:1px solid {border}; color:{text_muted};'>{definition}</td>"
+        f"<td style='padding:10px 12px; border-top:1px solid {border}; color:{text_muted}; font-family:IBM Plex Mono, monospace;'>{formula}</td>"
+        f"<td style='padding:10px 12px; border-top:1px solid {border}; color:{text_main}; text-align:right; font-family:IBM Plex Mono, monospace;'>{example}</td>"
+        f"<td style='padding:10px 12px; border-top:1px solid {border}; color:{accent}; text-align:right; font-weight:800; font-family:IBM Plex Mono, monospace;'>{impact}</td>"
+        f"</tr>"
+        for metric, definition, formula, example, impact in rows_primary
+    ])
+
+    summary_rows_html = ''.join([
+        f"<tr>"
+        f"<td style='padding:12px; border-top:1px solid {border}; color:{text_main}; font-weight:{800 if label == 'Final Annual Value' else 700};'>{label}</td>"
+        f"<td style='padding:12px; border-top:1px solid {border}; color:{good if label == 'Final Annual Value' else accent}; text-align:right; font-size:{'20px' if label == 'Final Annual Value' else '15px'}; font-weight:800; font-family:IBM Plex Mono, monospace;'>{value}</td>"
+        f"</tr>"
+        for label, value in rows_summary
+    ])
+
+    assumptions_html = (
+        f"Fixed assumptions: suspect-present rate <strong>{pct(a['suspect_present_rate'])}</strong>, "
+        f"baseline apprehension rate <strong>{pct(a['baseline_apprehension_rate'])}</strong>, "
+        f"drone-assisted apprehension rate <strong>{pct(a['drone_apprehension_rate'])}</strong>, "
+        f"and value per apprehension <strong>{money(a['value_per_apprehension'])}</strong>."
+    )
+
+    return f"""
+<h2 style="color:{text_main}; font-size:22px; font-weight:800; margin-top:40px; margin-bottom:16px; padding-bottom:10px; border-bottom:2px solid {border};">Apprehension Impact &amp; Financial Value</h2>
+<p style="font-size:13px; color:{text_muted}; margin-bottom:16px;">{assumptions_html}</p>
+<div style="background:{bg}; border:1px solid {border}; border-radius:10px; overflow:hidden; margin-bottom:20px;">
+  <table style="width:100%; border-collapse:collapse; font-size:12px;">
+    <thead>
+      <tr style="background:{card};">
+        <th style="text-align:left; padding:11px 12px; color:{text_muted}; font-size:11px; text-transform:uppercase; letter-spacing:0.6px;">Metric</th>
+        <th style="text-align:left; padding:11px 12px; color:{text_muted}; font-size:11px; text-transform:uppercase; letter-spacing:0.6px;">Definition</th>
+        <th style="text-align:left; padding:11px 12px; color:{text_muted}; font-size:11px; text-transform:uppercase; letter-spacing:0.6px;">Formula</th>
+        <th style="text-align:right; padding:11px 12px; color:{text_muted}; font-size:11px; text-transform:uppercase; letter-spacing:0.6px;">Model Input</th>
+        <th style="text-align:right; padding:11px 12px; color:{text_muted}; font-size:11px; text-transform:uppercase; letter-spacing:0.6px;">Annual Impact</th>
+      </tr>
+    </thead>
+    <tbody>{primary_rows_html}</tbody>
+  </table>
+</div>
+<div style="display:grid; grid-template-columns:1.25fr 0.75fr; gap:18px; align-items:start;">
+  <div style="background:{card}; border:1px solid {border}; border-radius:10px; padding:16px;">
+    <div style="font-size:11px; color:{text_muted}; text-transform:uppercase; letter-spacing:0.7px; margin-bottom:8px;">Why this matters</div>
+    <div style="font-size:14px; color:{text_main}; line-height:1.6;">
+      This table replaces descriptive call-density and priority visuals with a decision model focused on <strong>incremental apprehensions</strong> and <strong>annual economic value</strong>. It keeps the operational facts from CAD volume and drone coverage, then translates them into a single executive value number.
+    </div>
+  </div>
+  <div style="background:{bg}; border:1px solid {border}; border-radius:10px; overflow:hidden;">
+    <table style="width:100%; border-collapse:collapse; font-size:12px;">
+      <thead><tr style="background:{card};"><th colspan="2" style="text-align:left; padding:11px 12px; color:{text_muted}; font-size:11px; text-transform:uppercase; letter-spacing:0.6px;">Total Program Value Summary</th></tr></thead>
+      <tbody>{summary_rows_html}</tbody>
+    </table>
+  </div>
+</div>
+"""
+
+
+def _build_cad_charts_html(df_calls, total_calls_annual=0, calls_covered_perc=0.0, annual_savings=0.0, specialty_savings=0.0):
+    """Generate an executive apprehension-value section for the PDF/HTML export."""
     if df_calls is None or df_calls.empty:
         return ""
     try:
-        total_calls = len(df_calls)
-
-        # ── Apprehension metric calculations ─────────────────────────────────
-        import streamlit as _st
-        dfr_rate        = float(_st.session_state.get('dfr_rate', 12)) / 100.0
-        pursuit_rate    = 0.18
-        pursuit_calls   = round(total_calls * pursuit_rate)
-        dfr_pursuit     = round(pursuit_calls * dfr_rate)
-        arr_lift        = 0.20   # +20 pp
-        additional_arr  = round(dfr_pursuit * arr_lift)
-        coverage_pct    = float(_st.session_state.get('calls_covered_perc', 70) or 70)
-        time_saved      = float(_st.session_state.get('avg_time_saved_min', 6) or 6)
-        score = round(
-            0.40 * min(coverage_pct, 100) +
-            0.35 * min(time_saved / 10.0 * 100, 100) +
-            0.25 * min(dfr_rate * 100 / 30.0 * 100, 100)
+        model = _build_apprehension_value_model(
+            total_calls_annual=(total_calls_annual or len(df_calls)),
+            calls_covered_perc=calls_covered_perc,
+            annual_savings=annual_savings,
+            specialty_savings=specialty_savings,
         )
-        score = max(0, min(score, 100))
-        if score >= 75:
-            score_label = "HIGH"
-            score_color = "#008060"
-        elif score >= 50:
-            score_label = "MODERATE"
-            score_color = "#b06000"
-        else:
-            score_label = "LOW"
-            score_color = "#b00020"
-
-        rows = [
-            ("Average officer response time",          "8 – 12 min",             "2 – 4 min (DFR first on scene)",    "BRINC field deployments"),
-            ("Suspect located before officer arrival", "~18% of pursuits",        "~62% of pursuits",                  "Aerial ID + thermal"),
-            ("Apprehension rate per pursuit incident", "34%",                     "54%  (+20 pp)",                     "Perimeter intel, real-time relay"),
-            ("Additional arrests per 100 calls",       "—",                       "+20 apprehensions",                 "Net lift on DFR-covered incidents"),
-            ("Thermal imaging (nighttime pursuits)",   "Unavailable",             "100% of flight hours",              "Eliminates blind foot searches"),
-            ("Perimeter containment",                  "4 – 6 officers required", "Drone in < 90 sec",                 "Officers freed for contact"),
-            ("DFR-dispatched pursuit calls / year",    "—",                       f"{dfr_pursuit:,}",                  f"{int(dfr_rate*100)}% DFR × {pursuit_calls:,} pursuit calls"),
-            ("Est. additional arrests / year",         "—",                       f"+ {additional_arr:,} arrests",     "DFR pursuit calls × +20 pp lift"),
-        ]
-
-        rows_html = ""
-        for i, (factor, base, drone, source) in enumerate(rows):
-            bg = "#f9fafb" if i % 2 == 0 else "#ffffff"
-            rows_html += f"""
-  <tr style="background:{bg};">
-    <td style="padding:9px 12px; font-size:13px; color:#333; border-bottom:1px solid #e5e7eb; width:34%;">{factor}</td>
-    <td style="padding:9px 12px; font-size:13px; color:#666; border-bottom:1px solid #e5e7eb; width:20%; text-align:right;">{base}</td>
-    <td style="padding:9px 12px; font-size:13px; color:#00695c; font-weight:700; border-bottom:1px solid #e5e7eb; width:20%; text-align:right;">{drone}</td>
-    <td style="padding:9px 12px; font-size:11px; color:#888; border-bottom:1px solid #e5e7eb; width:26%;">{source}</td>
-  </tr>"""
-
-        # ── Top event types ───────────────────────────────────────────────────
-        type_labels, type_vals = [], []
-        for _c in ['call_type_desc','agencyeventtypecodedesc','eventdesc','calldesc','description','nature','event_desc']:
-            if _c in df_calls.columns and df_calls[_c].dropna().nunique() > 2:
-                tc = df_calls[_c].dropna().str.strip().value_counts().head(10)
-                type_labels = tc.index.tolist()
-                type_vals   = tc.values.tolist()
-                break
-
-        import json
-        type_labels_js = json.dumps(type_labels)
-        type_vals_js   = json.dumps(type_vals)
-        has_types      = "true" if type_vals else "false"
-        bar_height     = max(260, len(type_labels) * 28 + 60) if type_labels else 260
-
-        return f"""
-<h2 style="color:#111; font-size:22px; font-weight:800; margin-top:40px; margin-bottom:20px;
-           padding-bottom:10px; border-bottom:2px solid #eee;">Incident Data Analysis</h2>
-<p style="font-size:13px; color:#666; margin-bottom:20px;">
-  Summary of <strong>{total_calls:,}</strong> calls for service used to optimise drone placement.
-</p>
-
-<p style="font-size:12px; font-weight:700; color:#333; text-transform:uppercase;
-          letter-spacing:0.6px; margin:0 0 8px;">🎯 Drone Apprehension Impact Value</p>
-<p style="font-size:12px; color:#666; margin:0 0 12px 0;">
-  How drone deployment improves suspect apprehension — derived from your call volume and DFR
-  dispatch rate. Baseline figures from national law enforcement benchmarks.
-</p>
-<div style="overflow-x:auto; border-radius:8px; border:1px solid #e5e7eb; margin-bottom:10px;">
-<table style="width:100%; border-collapse:collapse; font-family:inherit;">
-  <thead>
-    <tr style="background:#f0faf8;">
-      <th style="padding:10px 12px; font-size:11px; font-weight:700; text-transform:uppercase;
-                 letter-spacing:0.6px; color:#555; border-bottom:1px solid #d1d5db; text-align:left;">Factor</th>
-      <th style="padding:10px 12px; font-size:11px; font-weight:700; text-transform:uppercase;
-                 letter-spacing:0.6px; color:#555; border-bottom:1px solid #d1d5db; text-align:right;">Without Drone</th>
-      <th style="padding:10px 12px; font-size:11px; font-weight:700; text-transform:uppercase;
-                 letter-spacing:0.6px; color:#555; border-bottom:1px solid #d1d5db; text-align:right;">With Drone</th>
-      <th style="padding:10px 12px; font-size:11px; font-weight:700; text-transform:uppercase;
-                 letter-spacing:0.6px; color:#555; border-bottom:1px solid #d1d5db; text-align:left;">Basis</th>
-    </tr>
-  </thead>
-  <tbody>
-{rows_html}
-    <tr style="background:#e6f4f1;">
-      <td style="padding:10px 12px; font-size:14px; font-weight:700; color:#111; border-bottom:1px solid #d1d5db;">
-        Apprehension Value Score
-      </td>
-      <td style="padding:10px 12px; color:#888; border-bottom:1px solid #d1d5db; text-align:right;">—</td>
-      <td colspan="2" style="padding:10px 12px; font-size:18px; font-weight:800;
-          color:{score_color}; border-bottom:1px solid #d1d5db;">
-        {score_label} &nbsp;<span style="font-size:12px; font-weight:400; color:#888;">({score}/100 composite)</span>
-      </td>
-    </tr>
-  </tbody>
-</table>
-</div>
-<p style="font-size:10px; color:#aaa; margin:4px 0 28px 0;">
-  Score weighted: 40% geographic coverage · 35% time saved vs patrol · 25% DFR dispatch rate.
-  Arrest estimates are model projections; actual results vary by deployment, terrain, and incident type.
-</p>
-
-<p style="font-size:12px; font-weight:700; color:#555; text-transform:uppercase;
-          letter-spacing:0.5px; margin:0 0 8px;">Top Call Types</p>
-<div style="position:relative; height:{bar_height}px; margin-bottom:24px;">
-  <canvas id="expTypeChart"></canvas>
-</div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-<script>
-(function(){{
-  var typL={type_labels_js}, typV={type_vals_js};
-  var hasTypes={has_types};
-  if(hasTypes && typL.length) {{
-    new Chart(document.getElementById('expTypeChart'), {{
-      type:'bar',
-      data:{{
-        labels:typL,
-        datasets:[{{data:typV,backgroundColor:'#00D2FF',borderRadius:3,borderSkipped:false}}]
-      }},
-      options:{{responsive:true,maintainAspectRatio:false,indexAxis:'y',
-        plugins:{{legend:{{display:false}}}},
-        scales:{{
-          x:{{ticks:{{callback:function(v){{return v>=1000?Math.round(v/1000)+'k':v}}}}}},
-          y:{{ticks:{{font:{{size:11}}}}}}
-        }}
-      }}
-    }});
-  }}
-}})();
-</script>
-"""
-    except Exception as e:
-        print(f"[BRINC] _build_cad_charts_html failed: {e}\n{traceback.format_exc()}")
-        return "<div style='color:#888;padding:20px;text-align:center;font-size:13px;'>Chart unavailable — data could not be rendered.</div>"
+        return _build_apprehension_tables_html(model, theme='light')
+    except Exception:
+        return ""
 
 
-def _get_annualized_calls(raw_count: int) -> int:
-    """Return raw_count scaled to a full year using the uploaded file's date span.
-
-    If the file covers less than a full year (and at least 14 days), the raw
-    count is extrapolated to 365 days.  Falls back to raw_count when no date
-    span is available (simulated data, unknown span, or span ≥ 330 days).
-    """
-    span_days = int(st.session_state.get('file_meta', {}).get('file_date_span_days', 0) or 0)
-    if 14 <= span_days < 330:
-        return round(raw_count * 365 / span_days)
-    return raw_count
-
-
-def _build_apprehension_table(df_calls, text_main, text_muted, card_bg, card_border, accent_color):
-    """Compute and render the Drone Apprehension Impact Value table.
-
-    Derived metrics use call volume, DFR dispatch rate, and coverage percentage
-    stored in session state — no static placeholders.
-    """
+def _build_cad_charts(df_calls, text_main, text_muted, card_bg, card_border, accent_color, total_calls_annual=0, calls_covered_perc=0.0, annual_savings=0.0, specialty_savings=0.0):
+    """Render executive apprehension and value tables in the main UI."""
     if df_calls is None or df_calls.empty:
         return
-
-    # ── Pull session values ───────────────────────────────────────────────────
-    total_calls      = int(st.session_state.get('total_original_calls', len(df_calls)) or len(df_calls))
-    dfr_rate         = float(st.session_state.get('dfr_rate', 12)) / 100.0   # fraction dispatched by drone
-    calls_per_year   = _get_annualized_calls(total_calls)
-
-    # Pursuit-eligible calls: incidents where a suspect is potentially fleeing
-    # — conservatively 18% of all calls (PERF national average for patrol pursuits)
-    pursuit_rate     = 0.18
-    pursuit_calls    = round(calls_per_year * pursuit_rate)
-
-    # Apprehension lift: drone raises locate-before-arrival from 18 % → 62 %
-    # (+20 pp net apprehension rate lift per BRINC field deployments)
-    baseline_arr_rate  = 0.34   # officer-only apprehension rate per pursuit incident
-    drone_arr_rate     = 0.54   # with drone aerial ID + perimeter intel
-    arr_lift_pp        = round((drone_arr_rate - baseline_arr_rate) * 100, 0)
-
-    # Annual additional arrests from DFR-dispatched pursuit calls
-    dfr_pursuit_calls   = round(pursuit_calls * dfr_rate)
-    additional_arrests  = round(dfr_pursuit_calls * (drone_arr_rate - baseline_arr_rate))
-
-    # Apprehension Value Score: composite of speed + coverage + thermal (0–100)
-    coverage_pct  = float(st.session_state.get('calls_covered_perc', 70) or 70)
-    time_saved    = float(st.session_state.get('avg_time_saved_min', 6) or 6)
-    # Weighted: 40% coverage, 35% time saved (normalized to 10-min max), 25% DFR rate
-    score = round(
-        0.40 * min(coverage_pct, 100) +
-        0.35 * min(time_saved / 10.0 * 100, 100) +
-        0.25 * min(dfr_rate * 100 / 30.0 * 100, 100)
-    )
-    score = max(0, min(score, 100))
-    if score >= 75:
-        score_label = "🟢 HIGH"
-        score_color = "#00D2FF"
-    elif score >= 50:
-        score_label = "🟡 MODERATE"
-        score_color = "#EF9F27"
-    else:
-        score_label = "🔴 LOW"
-        score_color = "#E24B4A"
-
-    # ── HTML table ────────────────────────────────────────────────────────────
-    row_style_a = f"background:{card_bg};"
-    row_style_b = f"background:rgba(0,210,255,0.04);"
-    th_style    = (f"padding:10px 14px; text-align:left; font-size:11px; font-weight:700; "
-                   f"text-transform:uppercase; letter-spacing:0.6px; color:{text_muted}; "
-                   f"border-bottom:1px solid {card_border};")
-    td_l_style  = (f"padding:10px 14px; font-size:13px; color:{text_muted}; "
-                   f"border-bottom:1px solid {card_border}; width:36%;")
-    td_b_style  = (f"padding:10px 14px; font-size:13px; color:{text_main}; "
-                   f"border-bottom:1px solid {card_border}; width:19%; text-align:right;")
-    td_d_style  = (f"padding:10px 14px; font-size:13px; color:{accent_color}; font-weight:700; "
-                   f"border-bottom:1px solid {card_border}; width:19%; text-align:right;")
-    td_s_style  = (f"padding:10px 14px; font-size:11px; color:{text_muted}; "
-                   f"border-bottom:1px solid {card_border}; width:26%;")
-
-    rows = [
-        ("row_a", "Average officer response time",
-         "8 – 12 min", "2 – 4 min (DFR first on scene)",
-         "BRINC field deployments; avg aerial ETA"),
-        ("row_b", "Suspect located before officer arrival",
-         "~18% of pursuits", "~62% of pursuits",
-         "Drone situational awareness + thermal"),
-        ("row_a", "Apprehension rate per pursuit incident",
-         f"{int(baseline_arr_rate*100)}%", f"{int(drone_arr_rate*100)}%  (+{int(arr_lift_pp)} pp)",
-         "Aerial ID, perimeter intel, real-time relay"),
-        ("row_b", "Additional arrests per 100 pursuit calls",
-         "—", f"+{int(arr_lift_pp)} apprehensions",
-         "Net lift applied to DFR-covered incidents"),
-        ("row_a", "Thermal imaging (nighttime pursuits)",
-         "Unavailable", "100% of flight hours",
-         "Eliminates blind foot searches in darkness"),
-        ("row_b", "Perimeter containment established",
-         "4 – 6 officers required", "Drone in < 90 sec",
-         "Officers freed for contact; drone holds perimeter"),
-        ("row_a", "DFR-dispatched pursuit calls / year",
-         "—", f"{dfr_pursuit_calls:,}",
-         f"{int(dfr_rate*100)}% DFR rate × {pursuit_calls:,} pursuit-eligible calls"),
-        ("row_b", "Est. additional arrests / year",
-         "—", f"+ {additional_arrests:,} arrests",
-         "DFR pursuit calls × +20 pp apprehension lift"),
-    ]
-
-    table_html = f"""
-<div style="margin-top:4px; margin-bottom:20px;">
-  <p style="font-size:13px; font-weight:700; color:{text_main}; text-transform:uppercase;
-            letter-spacing:0.6px; margin:0 0 10px 0;">🎯 Drone Apprehension Impact Value</p>
-  <p style="font-size:12px; color:{text_muted}; margin:0 0 14px 0;">
-    How drone deployment improves suspect apprehension — derived from your call volume,
-    DFR dispatch rate, and coverage. Baseline figures from national law enforcement benchmarks.
-  </p>
-  <div style="overflow-x:auto; border-radius:8px; border:1px solid {card_border};">
-  <table style="width:100%; border-collapse:collapse; font-family:inherit;">
-    <thead>
-      <tr style="background:rgba(0,210,255,0.08);">
-        <th style="{th_style}">Factor</th>
-        <th style="{th_style} text-align:right;">Without Drone</th>
-        <th style="{th_style} text-align:right;">With Drone</th>
-        <th style="{th_style}">Basis</th>
-      </tr>
-    </thead>
-    <tbody>
-"""
-    for i, (variant, factor, base, drone, source) in enumerate(rows):
-        bg = row_style_b if i % 2 else row_style_a
-        table_html += f"""
-      <tr style="{bg}">
-        <td style="{td_l_style}">{factor}</td>
-        <td style="{td_b_style}">{base}</td>
-        <td style="{td_d_style}">{drone}</td>
-        <td style="{td_s_style}">{source}</td>
-      </tr>"""
-
-    # Final composite score row
-    table_html += f"""
-      <tr style="background:rgba(0,210,255,0.10);">
-        <td style="{td_l_style} font-weight:700; color:{text_main}; font-size:14px;">
-          Apprehension Value Score
-        </td>
-        <td style="{td_b_style}">—</td>
-        <td colspan="2" style="padding:10px 14px; font-size:16px; font-weight:800;
-            color:{score_color}; border-bottom:1px solid {card_border};">
-          {score_label} &nbsp;<span style="font-size:12px; font-weight:400;
-          color:{text_muted};">({score}/100 composite)</span>
-        </td>
-      </tr>
-    </tbody>
-  </table>
-  </div>
-  <p style="font-size:10px; color:{text_muted}; margin:6px 0 0 0;">
-    Score weighted: 40% geographic coverage · 35% time saved vs patrol · 25% DFR dispatch rate.
-    Arrest estimates are model projections — actual results depend on deployment, terrain, and incident type.
-  </p>
-</div>
-"""
-    # Wrap in a full HTML document so components.html renders the table faithfully.
-    # st.markdown strips <table> tags in recent Streamlit versions.
-    full_html = f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-  body {{
-    margin: 0; padding: 0;
-    background: transparent;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  }}
-</style>
-</head>
-<body>
-{table_html}
-</body>
-</html>"""
-    # Height: header ~60px + description ~40px + 9 rows × 44px + score row 54px + footnote 30px
-    _table_height = 60 + 40 + (len(rows) * 44) + 54 + 44 + 30
-    import streamlit.components.v1 as _comp
-    _comp.html(full_html, height=_table_height, scrolling=False)
-
-
-def _build_cad_charts(df_calls, text_main, text_muted, card_bg, card_border, accent_color):
-    """Render apprehension impact table + top call types chart."""
-    import plotly.graph_objects as go
-
-    if df_calls is None or df_calls.empty:
-        return
-
-    layout_base = dict(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color=text_muted, size=11),
-        margin=dict(l=10, r=10, t=32, b=10),
-        hoverlabel=dict(bgcolor=card_bg, font_size=12, font_color=text_main, bordercolor=accent_color),
-    )
-    grid_color = card_border
-
-    # ── Apprehension Impact Value table (replaces priority donut + density curve) ──
-    _build_apprehension_table(df_calls, text_main, text_muted, card_bg, card_border, accent_color)
-
-    # ── Top event types (horizontal bar) ──────────────────────────────────────
-    desc_col = None
-    for _c in ['call_type_desc','agencyeventtypecodedesc','eventdesc','calldesc','description','nature','event_desc']:
-        if _c in df_calls.columns and df_calls[_c].dropna().nunique() > 2:
-            desc_col = _c
-            break
-
-    if desc_col:
-        top_types = df_calls[desc_col].dropna().str.strip().value_counts().head(12)
-        if not top_types.empty:
-            fig_types = go.Figure(go.Bar(
-                x=top_types.values, y=top_types.index,
-                orientation='h',
-                marker_color=accent_color,
-                text=[f'{v:,}' for v in top_types.values],
-                textposition='outside',
-                hovertemplate='<b>%{y}</b><br>%{x:,} calls<extra></extra>',
-            ))
-            fig_types.update_layout(**layout_base,
-                height=max(280, len(top_types) * 30 + 60),
-                title=dict(text='Top Call Types', font=dict(size=13, color=text_main), x=0),
-                xaxis=dict(showgrid=True, gridcolor=grid_color, title='Calls'),
-                yaxis=dict(showgrid=False, autorange='reversed'),
-                showlegend=False,
-            )
-            st.plotly_chart(fig_types, use_container_width=True, config={'displayModeBar': False})
-
+    try:
+        model = _build_apprehension_value_model(
+            total_calls_annual=(total_calls_annual or len(df_calls)),
+            calls_covered_perc=calls_covered_perc,
+            annual_savings=annual_savings,
+            specialty_savings=specialty_savings,
+        )
+        st.markdown(_build_apprehension_tables_html(model, theme='dark'), unsafe_allow_html=True)
+    except Exception:
+        pass
 
 
 def _safe_df_to_records(df):
@@ -2605,21 +1830,24 @@ def _make_random_stations(df_calls, n=40, boundary_geom=None, epsg_code=None):
         'type': types,
     })
 
-@st.cache_data(show_spinner=False)
-def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations: int = 100):
-    """Cache-friendly OSM query keyed on rounded centroid (2 dp ≈ 1 km grid).
-    Returns (list_of_dicts | None, note_str).  Timeout is kept short so the
-    UI falls back to random stations quickly if Overpass is unresponsive.
-    """
-    osm_urls = [
-        'https://overpass-api.de/api/interpreter',
-        'https://overpass.kumi.systems/api/interpreter',
-        'https://overpass.openstreetmap.ru/api/interpreter',
-    ]
+def generate_stations_from_calls(df_calls, max_stations=100):
+    """Query OpenStreetMap for real stations; fall back gracefully if unavailable."""
+    lats = df_calls['lat'].dropna().values
+    lons = df_calls['lon'].dropna().values
+    if len(lats) == 0: return None, "No coordinates available to generate stations."
+
+    q1_la, q3_la = np.percentile(lats, 25), np.percentile(lats, 75)
+    q1_lo, q3_lo = np.percentile(lons, 25), np.percentile(lons, 75)
+    iqr_la = q3_la - q1_la
+    iqr_lo = q3_lo - q1_lo
+    mask = (lats >= q1_la - 2.5 * iqr_la) & (lats <= q3_la + 2.5 * iqr_la) & (lons >= q1_lo - 2.5 * iqr_lo) & (lons <= q3_lo + 2.5 * iqr_lo)
+    cen_lat, cen_lon = lats[mask].mean(), lons[mask].mean()
+
+    # Try a slightly larger radius first, then fall back to tighter if too many results
     for R in [0.25, 0.45]:
-        bbox = f"{cen_lat_r - R},{cen_lon_r - R},{cen_lat_r + R},{cen_lon_r + R}"
+        bbox = f"{cen_lat - R},{cen_lon - R},{cen_lat + R},{cen_lon + R}"
         query = (
-            f'[out:json][timeout:20];'
+            f'[out:json][timeout:30];'
             f'(node["amenity"="fire_station"]({bbox});'
             f'node["amenity"="police"]({bbox});'
             f'node["amenity"="school"]({bbox});'
@@ -2628,42 +1856,45 @@ def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations:
             f'way["amenity"="school"]({bbox});'
             f');out center;'
         )
+
         data = None
+        osm_urls = [
+            'https://overpass-api.de/api/interpreter',
+            'https://overpass.kumi.systems/api/interpreter',
+            'https://overpass.openstreetmap.ru/api/interpreter',  # third mirror
+        ]
         for osm_url in osm_urls:
-            for _attempt in range(2):  # one retry per mirror before moving on
-                try:
-                    req = urllib.request.Request(
-                        f"{osm_url}?data={urllib.parse.quote(query)}",
-                        headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'}
-                    )
-                    with urllib.request.urlopen(req, timeout=8) as resp:  # fail fast
-                        data = json.loads(resp.read().decode('utf-8'))
-                    break
-                except Exception:
-                    if _attempt == 0:
-                        import time as _t; _t.sleep(1)
-                    continue
-            if data is not None:
+            try:
+                req = urllib.request.Request(
+                    f"{osm_url}?data={urllib.parse.quote(query)}",
+                    headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'}
+                )
+                with urllib.request.urlopen(req, timeout=25) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
                 break
+            except Exception:
+                continue
 
         if data is None:
-            continue
+            continue  # try next radius / give up
 
+        elements = data.get('elements', [])
         rows = []
-        for el in data.get('elements', []):
+        for el in elements:
             tags = el.get('tags', {})
             lat = el.get('lat') or (el.get('center') or {}).get('lat')
             lon = el.get('lon') or (el.get('center') or {}).get('lon')
-            if lat is None or lon is None:
-                continue
+            if lat is None or lon is None: continue
             amenity = tags.get('amenity', '')
             type_label = 'Fire' if amenity == 'fire_station' else 'Police' if amenity == 'police' else 'School'
-            rows.append({'name': tags.get('name', f"{type_label} Station"),
-                         'lat': round(lat, 6), 'lon': round(lon, 6), 'type': type_label})
+            fac_name = tags.get('name', f"{type_label} Station")
+            rows.append({'name': fac_name, 'lat': round(lat, 6), 'lon': round(lon, 6), 'type': type_label})
 
         if rows:
             df_s = pd.DataFrame(rows).drop_duplicates(subset=['lat', 'lon']).reset_index(drop=True)
-            counts, new_names = {}, []
+            # Enforce unique names
+            counts = {}
+            new_names = []
             for n in df_s['name']:
                 if n in counts:
                     counts[n] += 1
@@ -2673,41 +1904,18 @@ def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations:
                     new_names.append(n)
             df_s['name'] = new_names
             if len(df_s) > max_stations:
-                pri = {'Police': 0, 'Fire': 1, 'School': 2}
-                df_s['_pri'] = df_s['type'].map(pri).fillna(3)
+                priority_order = {'Police': 0, 'Fire': 1, 'School': 2}
+                df_s['_pri'] = df_s['type'].map(priority_order).fillna(3)
                 df_s = df_s.sort_values('_pri').head(max_stations).drop(columns='_pri').reset_index(drop=True)
-            return df_s.to_dict('records'), f"Found {len(df_s)} stations from OpenStreetMap."
+            return df_s, f"Auto-generated {len(df_s)} stations from OpenStreetMap."
 
-    return None, "OSM unavailable"
-
-
-def generate_stations_from_calls(df_calls, max_stations=100):
-    """Query OpenStreetMap for real stations; fall back gracefully if unavailable."""
-    lats = df_calls['lat'].dropna().values
-    lons = df_calls['lon'].dropna().values
-    if len(lats) == 0:
-        return None, "No coordinates available to generate stations."
-
-    q1_la, q3_la = np.percentile(lats, 25), np.percentile(lats, 75)
-    q1_lo, q3_lo = np.percentile(lons, 25), np.percentile(lons, 75)
-    iqr_la, iqr_lo = q3_la - q1_la, q3_lo - q1_lo
-    mask = (
-        (lats >= q1_la - 2.5 * iqr_la) & (lats <= q3_la + 2.5 * iqr_la) &
-        (lons >= q1_lo - 2.5 * iqr_lo) & (lons <= q3_lo + 2.5 * iqr_lo)
-    )
-    # Round to 2 dp (~1 km) so the same city always hits the cache
-    cen_lat_r = round(float(lats[mask].mean()), 2)
-    cen_lon_r = round(float(lons[mask].mean()), 2)
-
-    rows, note = _fetch_osm_stations_cached(cen_lat_r, cen_lon_r, max_stations)
-    if rows:
-        return pd.DataFrame(rows), note
-
-    # All OSM attempts failed — derive candidate sites from call density
+    # ── All OSM attempts failed — use random stations from call locations ──
     df_fallback = _make_random_stations(df_calls, n=40)
     if not df_fallback.empty:
         return df_fallback, "⚠️ OpenStreetMap unavailable — using estimated station locations from call data. Upload a stations CSV for accuracy."
     return None, "Could not generate stations — no valid call coordinates."
+
+    return df_s, f"Auto-generated {len(df_s)} stations from OpenStreetMap."
 
 # ============================================================
 # CACHED DATA FUNCTIONS
@@ -2795,52 +2003,6 @@ def lookup_county_for_city(city_name, state_abbr):
         return county_name if county_name else None
     except Exception:
         return None
-
-def fetch_county_by_centroid(df_calls, state_abbr):
-    """Find the county boundary that contains the median centroid of the call data.
-
-    Uses a pure spatial lookup against counties_lite.parquet — no network calls,
-    no name-matching.  Returns (True, GeoDataFrame) or (False, None).
-    """
-    local_file = "counties_lite.parquet"
-    if not os.path.exists(local_file):
-        return False, None
-
-    state_fips = STATE_FIPS.get(state_abbr)
-    if not state_fips:
-        return False, None
-
-    try:
-        lat = float(df_calls['lat'].dropna().median())
-        lon = float(df_calls['lon'].dropna().median())
-    except Exception:
-        return False, None
-
-    try:
-        gdf = gpd.read_parquet(local_file)
-        state_rows = gdf[gdf['STATEFP'] == state_fips].copy()
-        if state_rows.empty:
-            return False, None
-
-        from shapely.geometry import Point
-        pt = Point(lon, lat)  # geographic order: (x=lon, y=lat)
-
-        containing = state_rows[state_rows.geometry.contains(pt)]
-        if containing.empty:
-            # Fall back to nearest centroid in case the point lands on a boundary
-            state_rows = state_rows.copy()
-            state_rows['_dist'] = state_rows.geometry.distance(pt)
-            containing = state_rows.nsmallest(1, '_dist')
-
-        if not containing.empty:
-            result = containing[['NAME', 'geometry']].copy()
-            result['NAME'] = result['NAME'].astype(str) + " County"
-            return True, result
-    except Exception as e:
-        print(f"[BRINC] fetch_county_by_centroid failed: {e}")
-
-    return False, None
-
 
 @st.cache_data
 def fetch_county_boundary_local(state_abbr, county_name_input):
@@ -3130,13 +2292,13 @@ def add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=True):
         colors = FAA_CEILING_COLORS.get(snapped, FAA_DEFAULT_COLOR)
         coords = geom["coordinates"][0]
         bx, by = zip(*coords)
-        fig.add_trace(go.Scattermap(mode="lines", lon=list(bx), lat=list(by), fill="toself", fillcolor=colors["fill"], line=dict(color=colors["line"], width=1.5), hoverinfo="text", text=f"<b>{ceiling} ft AGL</b><br>{arpt}", name=f"LAANC {ceiling}ft", showlegend=False))
+        fig.add_trace(go.Scattermapbox(mode="lines", lon=list(bx), lat=list(by), fill="toself", fillcolor=colors["fill"], line=dict(color=colors["line"], width=1.5), hoverinfo="text", text=f"<b>{ceiling} ft AGL</b><br>{arpt}", name=f"LAANC {ceiling}ft", showlegend=False))
         try:
             centroid = shape(geom).centroid
             text_lons.append(centroid.x); text_lats.append(centroid.y); text_strings.append(str(ceiling)); text_hovers.append(f"{ceiling} ft — {arpt}")
         except Exception: pass
     if text_lons:
-        fig.add_trace(go.Scattermap(mode="text", lon=text_lons, lat=text_lats, text=text_strings, hovertext=text_hovers, hoverinfo="text", textfont=dict(size=10, color="#ffffff" if is_dark else "#000000"), showlegend=False, name="LAANC Labels"))
+        fig.add_trace(go.Scattermapbox(mode="text", lon=text_lons, lat=text_lats, text=text_strings, hovertext=text_hovers, hoverinfo="text", textfont=dict(size=10, color="#ffffff" if is_dark else "#000000"), showlegend=False, name="LAANC Labels"))
 
 def get_station_faa_ceiling(lat, lon, faa_geojson):
     if not faa_geojson or 'features' not in faa_geojson: return "400 ft (Class G)"
@@ -3189,9 +2351,6 @@ def get_nearest_airfield(lat, lon, airfields):
     return "No data"
 
 def generate_random_points_in_polygon(polygon, num_points):
-    # Flatten MultiPolygon to its largest component so bbox sampling stays efficient
-    if isinstance(polygon, MultiPolygon):
-        polygon = max(polygon.geoms, key=lambda p: p.area)
     points = []
     minx, miny, maxx, maxy = polygon.bounds
     while len(points) < num_points:
@@ -3203,8 +2362,6 @@ def generate_random_points_in_polygon(polygon, num_points):
     return points
 
 def generate_clustered_calls(polygon, num_points):
-    if isinstance(polygon, MultiPolygon):
-        polygon = max(polygon.geoms, key=lambda p: p.area)
     points = []
     minx, miny, maxx, maxy = polygon.bounds
     hotspots = []
@@ -3251,7 +2408,7 @@ def format_3_lines(name_str):
             return f"{parts[0].strip()},<br>{parts[1].strip()},<br>{','.join(parts[2:]).strip()}"
     return name_str
 
-def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2, simple=False, deflection_rate=0.25):
+def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2):
     if not active_drones:
         return ""
     # Per-type daily airtime budgets derived from CONFIG duty cycles:
@@ -3270,8 +2427,6 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     _THERMAL_PER_CALL = float(CONFIG.get("THERMAL_SAVINGS_PER_CALL", 38) or 0)
     _K9_RATE = float(CONFIG.get("K9_DEFAULT_APPLICABLE_RATE", 0.03) or 0)
     _K9_PER_CALL = float(CONFIG.get("K9_SAVINGS_PER_CALL", 155) or 0)
-    _FIRE_RATE = float(CONFIG.get("FIRE_DEFAULT_APPLICABLE_RATE", 0.05) or 0)
-    _FIRE_PER_CALL = float(CONFIG.get("FIRE_SAVINGS_PER_CALL", 450) or 0)
 
     cards_html = []
     for d in active_drones:
@@ -3282,8 +2437,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_savings   = d["annual_savings"]
         d_flights   = d["marginal_flights"]
         d_shared    = d["shared_flights"]
-        # Resolved/day = total station flights (exclusive + shared) × deflection rate.
-        d_deflected  = (d_flights + d_shared) * deflection_rate
+        d_deflected = d["marginal_deflected"]
         d_time      = d["avg_time_min"]
         d_faa       = d["faa_ceiling"]
         d_airport   = d["nearest_airport"]
@@ -3316,19 +2470,10 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         total_daily_flights = d_flights + d_shared
         d_zone_calls = float(d.get("zone_calls_annual", 0) or 0)
         d_zone_flights_annual = float(d.get("zone_flights_annual", total_daily_flights * 365.0) or 0)
-        # Cap thermal/K9 base to physically serviceable flights (max_flights_cap * 365)
-        # zone_flights_annual is raw DEMANDED flights — thermal/K9 assists can only
-        # happen on flights actually flown within the 10-min scene-floor capacity.
-        _serviceable_annual = float(d.get("max_flights_cap", 0) or 0) * 365.0
-        _flight_base = min(d_zone_flights_annual, _serviceable_annual) if _serviceable_annual > 0 else d_zone_flights_annual
-        # Further cap: assists cannot exceed total zone calls in range
-        _flight_base = min(_flight_base, d_zone_calls) if d_zone_calls > 0 else _flight_base
-        d_thermal_calls = _flight_base * _THERMAL_RATE
-        d_k9_calls      = _flight_base * _K9_RATE
-        d_fire_calls    = _flight_base * _FIRE_RATE
+        d_thermal_calls = d_zone_flights_annual * _THERMAL_RATE
+        d_k9_calls = d_zone_flights_annual * _K9_RATE
         d_thermal = d_thermal_calls * _THERMAL_PER_CALL
-        d_k9      = d_k9_calls      * _K9_PER_CALL
-        d_fire    = d_fire_calls    * _FIRE_PER_CALL
+        d_k9 = d_k9_calls * _K9_PER_CALL
         patrol_time_line = ""
         if total_daily_flights > 0:
             # Raw calculation: patrol budget / flights = available min per flight
@@ -3340,48 +2485,24 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             # Always show the line so low-volume Responders display correctly
             patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= max_single_flight * 0.9 else "#00D2FF"
             cap_note = f" (max {max_single_flight}min)" if capped else ""
-            _annual_flights = total_daily_flights * 365
             patrol_time_line = (
                 f'<div style="font-size:0.65rem; color:{text_muted}; text-align:right; line-height:1.2;" '
                 f'title="{uptime_tooltip}">'
-                f'<span style="font-weight:800; color:{patrol_color};">{total_daily_flights:.1f} flights/day</span> '
-                f'<span style="font-weight:400; color:{text_muted}; font-size:0.60rem;">({_annual_flights:,.0f}/yr)</span><br>'
-                f'<span style="font-weight:600; color:{patrol_color};">{mins_per_flight:.1f} min/flight{cap_note}</span></div>'
+                f'{total_daily_flights:.1f} flights<br>'
+                f'<span style="font-weight:800; color:{patrol_color};">{mins_per_flight:.1f} min/flight{cap_note}</span></div>'
             )
 
         # Concurrency / value breakdown
         d_util         = d.get('utilization', 0)
-        d_true_util    = d.get('true_util', d_util)
-        d_on_scene     = d.get('on_scene_min', 99.0)
-        d_max_cap      = d.get('max_flights_cap', 0)
-        d_has_deficit  = d.get('has_deficit', False)
-        d_deficit_f    = d.get('deficit_flights', 0)
-        d_unserv_day   = d.get('unserv_calls_day', 0)
-        d_unserv_yr    = d.get('unserv_calls_yr', 0)
-        d_total_flights_possible_yr = max(0.0, float(d_max_cap or 0) * 365.0)
-        d_total_uncovered_flights_yr = max(0.0, float(d_zone_flights_annual or 0) - d_total_flights_possible_yr)
-        d_extra_same   = d.get('extra_same', 0)
-        d_extra_alt    = d.get('extra_alt', 0)
-        d_extra_same_capex = d.get('extra_same_capex', 0)
-        d_extra_alt_capex  = d.get('extra_alt_capex', 0)
-        d_same_lbl     = d.get('same_type_label', d_type.title())
-        d_alt_lbl      = d.get('alt_type_label', 'Guardian' if d_type == 'RESPONDER' else 'Responder')
         d_blocked      = d.get('blocked_per_day', 0)
         d_base_annual  = d.get('base_annual', d_savings)
         d_conc_annual  = d.get('concurrent_annual', 0)
         d_best         = d.get('best_case_annual', d_savings)
         d_best_be      = d.get('best_be_text', d_be)
-        # True utilization display — uncapped so it can show > 100% in deficit
-        util_pct       = f"{d_true_util*100:.1f}%"
-        util_color     = "#dc3545" if d_has_deficit or d_true_util > 0.75 else "#F0B429" if d_true_util > 0.4 else "#2ecc71"
-        # On-scene time color coding
-        if d_on_scene < 10.0:
-            scene_color = "#dc3545"
-        elif d_on_scene < 20.0:
-            scene_color = "#F0B429"
-        else:
-            scene_color = "#2ecc71"
+        util_pct       = f"{d_util*100:.1f}%"
+        util_color     = "#dc3545" if d_util > 0.75 else "#F0B429" if d_util > 0.4 else "#2ecc71"
         has_concurrent = d_shared > 0.1 and d_conc_annual > 0
+        # Breakdown label for the value box
         if has_concurrent:
             _excl_str = f"${d_base_annual:,.0f} exclusive"
             _conc_str = f"+ ${d_conc_annual:,.0f} concurrent"
@@ -3389,94 +2510,21 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             _excl_str = "exclusive zone coverage"
             _conc_str = ""
 
-        # ── DEFICIT FOOTER (compact strip at card bottom) ─────────────────────────────
-        _sc_fmt = f"${d_extra_same_capex:,}" if d_has_deficit else ""
-        _ac_fmt = f"${d_extra_alt_capex:,}" if d_has_deficit else ""
-
-        # ── SIMPLE CARD (toggled from Display Options) ───────────────────────
-        if simple:
-            _pin_badge = (
-                f'<span style="font-size:0.55rem;background:rgba(255,215,0,0.15);color:#FFD700;border:1px solid rgba(255,215,0,0.4);border-radius:3px;padding:1px 5px;margin-left:4px;">🔒 Guardian</span>'
-                if (d.get("pinned") and d_type == "GUARDIAN") else
-                f'<span style="font-size:0.55rem;background:rgba(0,210,255,0.15);color:#00D2FF;border:1px solid rgba(0,210,255,0.4);border-radius:3px;padding:1px 5px;margin-left:4px;">🔒 Responder</span>'
-                if (d.get("pinned") and d_type == "RESPONDER") else ""
-            )
-            _deficit_strip = (
-                f'<div style="font-size:0.60rem;color:#dc3545;font-weight:700;margin-top:6px;padding-top:5px;border-top:1px solid rgba(220,53,69,0.3);">⚠️ Capacity deficit — {d_on_scene:.1f} min on-scene</div>'
-                if d_has_deficit else ""
-            )
-            _specialty_total = d_thermal + d_k9 + d_fire
-            _cap_strip = (
-                f'<div style="display:flex;align-items:center;gap:5px;margin-top:6px;padding-top:5px;border-top:1px solid rgba(220,53,69,0.3);">'
-                f'<span style="font-size:0.60rem;color:#dc3545;font-weight:700;">⚠️ Over capacity</span>'
-                f'<span style="font-size:0.59rem;color:{text_muted};">· {d_unserv_day:.0f} calls/day unserviceable</span></div>'
-                if d_has_deficit else
-                f'<div style="display:flex;align-items:center;gap:5px;margin-top:6px;padding-top:5px;border-top:1px solid rgba(34,197,94,0.2);">'
-                f'<span style="font-size:0.60rem;color:#2ecc71;font-weight:700;">✓ Within capacity</span>'
-                f'<span style="font-size:0.59rem;color:{text_muted};">· {d_on_scene:.1f} min on-scene</span></div>'
-            )
-            cards_html.append(f'''
-<div class="unit-card" style="background:{card_bg};border:1px solid {"#dc3545" if d_has_deficit else card_border};border-top:3px solid {d_color};border-radius:8px;padding:10px 12px;box-sizing:border-box;">
-  <div style="display:flex;align-items:baseline;justify-content:space-between;gap:4px;margin-bottom:2px;">
-    <span style="font-weight:700;font-size:0.78rem;color:{card_title};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">{"🔒 " if d.get("pinned") else ""}{d["name"]}</span>
-    <span style="font-size:0.58rem;color:#666;text-transform:uppercase;white-space:nowrap;flex-shrink:0;">{d_type} · #{d_step}</span>
-  </div>
-  <div style="font-size:0.62rem;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-    <a href="{gmaps_url}" target="_blank" style="color:{accent_color};text-decoration:none;opacity:0.85;">📍 {d_address} ↗</a>
-  </div>
-  <!-- Response time hero -->
-  <div style="background:rgba(255,255,255,0.05);border:1px solid {card_border};border-radius:6px;padding:7px 10px;text-align:center;margin-bottom:6px;">
-    <div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:1px;">Avg Aerial Response<span class="tip" data-tip="Average travel time from this station to incidents in its zone, based on drone speed and straight-line distance with a 1.4x routing factor.">?</span></div>
-    <div style="font-size:1.6rem;font-weight:900;color:{card_title};line-height:1.1;">{d_time:.1f}<span style="font-size:0.9rem;font-weight:600;"> min</span></div>
-  </div>
-  <!-- 2x2 key metrics -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:6px;">
-    <div style="background:rgba(0,210,255,0.07);border:1px solid rgba(0,210,255,0.18);border-radius:5px;padding:6px 8px;text-align:center;">
-      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Annual Value<span class="tip" data-tip="Best-case annual savings from calls this drone resolves without sending a ground unit. Includes both exclusive and concurrent zone coverage.">?</span></div>
-      <div style="font-size:0.95rem;font-weight:900;color:{accent_color};">${d_best:,.0f}</div>
-    </div>
-    <div style="background:rgba(0,210,255,0.07);border:1px solid rgba(0,210,255,0.18);border-radius:5px;padding:6px 8px;text-align:center;">
-      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Break-Even<span class="tip" data-tip="Months to recover the unit CapEx from annual capacity savings at current DFR and deflection rates.">?</span></div>
-      <div style="font-size:0.95rem;font-weight:900;color:{accent_color};">{d_be}</div>
-    </div>
-    <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
-      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Resolved/day<span class="tip" data-tip="Calls per day closed without dispatching an officer: total station flights/day (exclusive + shared zone) × deflection rate. Drone arrived, assessed, and dispatch stood down.">?</span></div>
-      <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{d_deflected:.1f} calls</div>
-    </div>
-    <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
-      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Zone Calls/yr<span class="tip" data-tip="Total historical calls for service within this drone's patrol radius. Used as the ceiling for thermal, K-9, and fire assist estimates.">?</span></div>
-      <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{int(d_zone_calls):,}</div>
-    </div>
-  </div>
-  <!-- Specialty total -->
-  <div style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.18);border-radius:5px;padding:5px 10px;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-    <span style="font-size:0.60rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">🔥🐕🚒 Specialty Value<span class="tip" data-tip="Combined value from thermal imaging assists (12% of flights), K-9 replacement (3% of flights), and fire scene support (5% of flights). Separate from Annual Capacity Value.">?</span></span>
-    <span style="font-size:0.85rem;font-weight:800;color:#fbbf24;">${_specialty_total:,.0f}/yr</span>
-  </div>
-  <!-- CapEx footer -->
-  <div style="display:flex;justify-content:space-between;align-items:center;padding-top:5px;border-top:1px solid {card_border};font-size:0.65rem;">
-    <span style="color:{text_muted};">CapEx<span class="tip" data-tip="One-time hardware cost for this unit. Responder: $80,000. Guardian: $160,000.">?</span></span>
-    <span style="font-weight:700;color:{card_title};">${d_cost:,.0f}</span>
-  </div>
-  {_cap_strip}
-</div>''')
-            continue
-
         cards_html.append(f'''
-<div class="unit-card" style="background:{card_bg}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-top:3px solid {d_color}; border-radius:8px; padding:10px 12px; display:flex; flex-direction:column; box-sizing:border-box;">
-  <!-- Header: single compact row -->
-  <div style="margin-bottom:5px; flex-shrink:0;">
-    <div style="display:flex; align-items:baseline; gap:5px; overflow:hidden;">
-      <span style="font-weight:700; font-size:0.78rem; color:{card_title}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0;">{"🔒 " if d.get("pinned") else ""}{d["name"]}</span>
-      <span style="font-size:0.58rem; color:#666; text-transform:uppercase; letter-spacing:0.3px; white-space:nowrap; flex-shrink:0;">{d_type} · #{d_step}</span>
-    </div>
-    <div style="font-size:0.65rem; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-      <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:500; opacity:0.85;">📍 {d_address} ↗</a>
+<div class="unit-card" style="background:{card_bg}; border-top:3px solid {d_color}; border:1px solid {card_border}; border-top:3px solid {d_color}; border-radius:8px; padding:12px; display:flex; flex-direction:column; box-sizing:border-box; min-height:440px; height:100%;">
+  <!-- Header: name + type badge -->
+  <div style="margin-bottom:8px; min-height:82px;">
+    <div style="font-weight:700; font-size:0.88rem; color:{card_title}; line-height:1.3; margin-bottom:2px;">{short_name}</div>
+    <div style="font-size:0.70rem; color:#777; text-transform:uppercase; letter-spacing:0.5px;">{"🔒 " if d.get("pinned") else ""}{d_type} · Phase #{d_step}</div>
+    <div style="font-size:0.72rem; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+      <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:600;">📍 {d_address} ↗</a>
     </div>
   </div>
+
+  <!-- Annual capacity value box -->
   <div style="background:rgba(0,210,255,0.07); border:1px solid rgba(0,210,255,0.15); border-radius:6px; padding:8px 10px; margin-bottom:6px;"
        title="Annual Capacity Value is based on calls handled without sending a squad.">
-    <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Annual Capacity Value<span class="tip" data-tip="Estimated annual savings from calls this drone resolves without sending a ground unit. Capped at physical flight capacity.">?</span>{"  ⚠️ capped at physical max" if d_has_deficit else ""}</div>
+    <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Annual Capacity Value</div>
     <div style="display:flex; align-items:baseline; justify-content:space-between; gap:6px;">
       <div>
         <div style="font-size:1.3rem; font-weight:900; color:{accent_color}; line-height:1.1;">${d_best:,.0f}</div>
@@ -3486,31 +2534,21 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:7px;">
       <div title="Calls assisted by thermal are modeled from this station's own flights and calls for service in range." style="background:rgba(251,191,36,0.08); border:1px solid rgba(251,191,36,0.22); border-radius:6px; padding:6px 8px;">
-        <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:1px;">🔥 Thermal Response Value<span class="tip" data-tip="Flights where thermal imaging aided the response - est. 12% of serviceable flights. Capped to actual zone calls in range.">?</span></div>
+        <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:1px;">🔥 Calls Assisted by Thermal</div>
         <div style="font-size:0.72rem; font-weight:700; color:{card_title}; line-height:1.15;">{d_thermal_calls:,.0f} calls assisted</div>
         <div style="font-size:0.85rem; font-weight:800; color:#fbbf24; line-height:1.1; margin-top:2px;">${d_thermal:,.0f}/yr</div>
       </div>
       <div title="K-9 calls assisted are modeled from this station's own flights and calls for service in range." style="background:rgba(57,255,20,0.06); border:1px solid rgba(57,255,20,0.18); border-radius:6px; padding:6px 8px;">
-        <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:1px;">🐕 K-9 Replacement Value<span class="tip" data-tip="Flights where drone thermal support replaced a K-9 deployment - est. 3% of serviceable flights. Capped to zone calls in range.">?</span></div>
+        <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:1px;">🐕 K-9 Calls Assisted</div>
         <div style="font-size:0.72rem; font-weight:700; color:{card_title}; line-height:1.15;">{d_k9_calls:,.0f} calls assisted</div>
         <div style="font-size:0.85rem; font-weight:800; color:#39FF14; line-height:1.1; margin-top:2px;">${d_k9:,.0f}/yr</div>
-      </div>
-    </div>
-    <div title="Fire response value is modeled from fire/smoke/alarm calls in this station's zone." style="background:rgba(251,113,33,0.07); border:1px solid rgba(251,113,33,0.25); border-radius:6px; padding:6px 10px; margin-top:6px;">
-      <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:3px;">🚒 Fire Department Value<span class="tip" data-tip="Est. 5% of serviceable flights assist fire calls. Value = aerial scene size-up (avoids premature aerial ladder deployment at ~$4,500/deploy) + overhaul hotspot detection (~$90/call crew time saved). Blended: $450/fire call assisted.">?</span></div>
-      <div style="display:flex; justify-content:space-between; align-items:baseline; margin-top:2px;">
-        <div>
-          <div style="font-size:0.62rem; color:{text_muted};">Fire calls assisted</div>
-          <div style="font-size:0.78rem; font-weight:700; color:{card_title};">{d_fire_calls:,.0f}</div>
-        </div>
-        <div style="font-size:0.85rem; font-weight:800; color:#fb7121;">${d_fire:,.0f}/yr</div>
       </div>
     </div>
   </div>
 
   <!-- Value breakdown box -->
-  <div style="border:1px solid rgba(57,255,20,0.18); border-radius:6px; padding:6px 10px; margin-bottom:8px; background:rgba(57,255,20,0.04);">
-    <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px;">Value Breakdown<span class="tip" data-tip="EXCLUSIVE: savings from calls only this drone can reach. Formula: exclusive flights/day x deflection rate x $76/call x 365. Guaranteed regardless of other drones. CONCURRENT: savings from shared-zone calls captured only when the partner drone is already busy. Same formula but conditional — if partner is free it handles those calls instead. Combined = best-case Annual Capacity Value.">?</span></div>
+  <div style="border:1px solid rgba(57,255,20,0.18); border-radius:6px; padding:6px 10px; margin-bottom:8px; background:rgba(57,255,20,0.04);"
+       title="Exclusive: calls only this drone covers. Concurrent: calls handled while partner is airborne.">
     <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:4px; align-items:center; margin-bottom:4px;">
       <div style="text-align:center;">
         <div style="color:{accent_color}; font-weight:700; font-size:0.78rem;">${d_base_annual:,.0f}</div>
@@ -3522,83 +2560,39 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         <div style="color:{text_muted}; font-size:0.63rem;">concurrent</div>
       </div>
     </div>
-    <div style="font-size:0.65rem; color:{text_muted}; opacity:0.8; border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px; text-align:center;">{util_pct} utilization{"  ·  ⚠️ over capacity" if d_has_deficit else ""} · ROI {d_best_be}</div>
+    <div style="font-size:0.65rem; color:{text_muted}; opacity:0.8; border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px; text-align:center;">{util_pct} utilization · ROI {d_best_be}</div>
   </div>
 
-  <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.68rem; flex:1; margin-bottom:8px; align-content:start;">
-    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Zone Flights/day<span class="tip" data-tip="Flights demanded per day in this zone: zone_pct x daily_calls x DFR_rate. This is demand, not actual flights flown.">?</span></div>
-      <div style="font-weight:800; color:{accent_color}; font-size:0.82rem;">{d.get("zone_flights",d_flights):.1f}/day</div>
-      <div style="font-size:0.59rem; color:{text_muted};">({d.get("zone_flights",d_flights)*365:,.0f}/yr)</div>
-    </div>
-    <div style="background:{"rgba(220,53,69,0.08)" if d_has_deficit else "rgba(255,255,255,0.04)"}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">{"Effective" if d.get("effective_dfr_rate", dfr_dispatch_rate) < dfr_dispatch_rate - 0.001 else "Max"} DFR Rate<span class="tip" data-tip="The DFR dispatch rate at which this drone hits exactly 100% utilization. Enable Auto-cap in Deployment Strategy to apply this limit per-station without affecting others. Formula: max_flights_cap / (zone_perc × daily_calls).">?</span></div>
-      <div style="font-weight:800; color:{"#dc3545" if d_has_deficit else "#2ecc71"}; font-size:0.82rem;">{(d_max_cap / max(d.get("zone_flights", d_flights+d_shared), 0.001)) * dfr_dispatch_rate * 100:.1f}%</div>
-      <div style="font-size:0.59rem; color:{text_muted};">{"▼ reduce to clear" if d_has_deficit else ("⚡ auto-capped" if d.get("effective_dfr_rate", dfr_dispatch_rate) < dfr_dispatch_rate - 0.001 else "✓ current rate ok")}</div>
-    </div>
-    <div style="background:{"rgba(220,53,69,0.08)" if d_has_deficit else "rgba(255,255,255,0.04)"}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Utilization<span class="tip" data-tip="Flight time demanded as % of daily capacity using the 10-min on-scene floor model. Over 100% means this drone cannot serve all calls in its zone.">?</span></div>
-      <div style="font-weight:800; color:{util_color}; font-size:0.82rem;">{util_pct}</div>
-    </div>
-    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Resolved/day<span class="tip" data-tip="Calls per day closed without dispatching an officer: total station flights/day (exclusive + shared zone) × deflection rate. Drone arrived, assessed, and dispatch stood down.">?</span></div>
-      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_deflected:.1f}</div>
-    </div>
-    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Avg Response<span class="tip" data-tip="Average travel time from this station to incidents in its zone, based on drone speed and straight-line distance with a 1.4x routing factor.">?</span></div>
-      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_time:.1f} min</div>
-    </div>
-    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Zone Calls/yr<span class="tip" data-tip="Total historical calls for service within this drone's patrol radius. Ceiling for thermal and K-9 assist estimates.">?</span></div>
-      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{int(d_zone_calls):,}</div>
-    </div>
-    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">FAA Ceiling<span class="tip" data-tip="Max authorized altitude from FAA LAANC maps at this location. 0 ft = controlled airspace requiring coordination before flight.">?</span></div>
-      <div style="font-weight:700; color:{card_title}; font-size:0.72rem; line-height:1.2;">{d_faa}</div>
-    </div>
-    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Nearest Airfield<span class="tip" data-tip="Closest airport or airfield. Affects LAANC authorization altitude and Part 107 waiver requirements.">?</span></div>
-      <div style="font-weight:600; color:{card_title}; font-size:0.68rem; line-height:1.2; word-break:break-word;">{d_airport}</div>
-    </div>
-
+  <!-- Stats grid -->
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 8px; font-size:0.68rem; flex:1; margin-bottom:8px; align-content:start;">
+    <div style="color:{text_muted};">Zone Flights/day</div>
+    <div style="text-align:right; font-weight:700; color:{accent_color};">{d.get("zone_flights",d_flights):.1f}</div>
+    <div style="color:{text_muted};">Shared Flights</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_shared:.1f}</div>
+    <div style="color:{text_muted};">Utilization</div>
+    <div style="text-align:right; font-weight:700; color:{util_color};">{util_pct}</div>
+    <div style="color:{text_muted};">Resolved/day</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_deflected:.1f}</div>
+    <div style="color:{text_muted};">Avg Response</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_time:.1f} min</div>
+    <div style="color:{text_muted};">FAA Ceiling</div>
+    <div style="text-align:right; font-weight:700; color:{card_title};">{d_faa}</div>
+    <div style="color:{text_muted};">Airfield</div>
+    <div style="text-align:right; font-weight:600; color:{card_title}; word-break:break-word;">{d_airport}</div>
   </div>
 
   <!-- CapEx + ROI footer -->
   <div style="border-top:1px solid {card_border}; padding-top:6px; display:grid; grid-template-columns:1fr 1fr; gap:4px 8px; font-size:0.68rem; margin-bottom:8px;">
-    <div style="color:{text_muted};">CapEx<span class="tip" data-tip="One-time hardware cost for this unit. Responder: $80,000. Guardian: $160,000.">?</span></div>
+    <div style="color:{text_muted};">CapEx</div>
     <div style="text-align:right; font-weight:700; color:{card_title};">${d_cost:,.0f}</div>
-    <div style="color:{text_muted};">Base ROI<span class="tip" data-tip="Months to recover unit CapEx from exclusive-zone savings alone at current DFR and deflection rates.">?</span></div>
+    <div style="color:{text_muted};">Base ROI</div>
     <div style="text-align:right; font-weight:800; color:{accent_color};">{d_be}</div>
   </div>
 
-  { (f'<div style="border-top:1px solid rgba(220,53,69,0.35);margin-top:4px;padding-top:5px;">'  
-       f'<div style="font-size:0.62rem;font-weight:800;color:#dc3545;margin-bottom:3px;">⚠️ CAPACITY DEFICIT · {d_on_scene:.1f} min on-scene (min 10)</div>'  
-       f'<div style="font-size:0.59rem;color:{text_muted};margin-bottom:4px;">{d_unserv_day:.0f} calls/day unserviceable · {d_unserv_yr:,.0f}/yr</div>'  
-       f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:4px;">'  
-       f'<div style="background:rgba(220,53,69,0.08);border:1px solid rgba(220,53,69,0.2);border-radius:4px;padding:3px 6px;font-size:0.59rem;">'  
-       f'<div style="color:{text_muted};">Total Flights Possible</div>'  
-       f'<div style="font-weight:700;color:{card_title};">{d_total_flights_possible_yr:,.0f}/yr</div></div>'  
-       f'<div style="background:rgba(220,53,69,0.08);border:1px solid rgba(220,53,69,0.2);border-radius:4px;padding:3px 6px;font-size:0.59rem;">'  
-       f'<div style="color:{text_muted};">Uncovered Flights</div>'  
-       f'<div style="font-weight:700;color:#dc3545;">{d_total_uncovered_flights_yr:,.0f}/yr</div></div>'  
-       f'</div>'  
-       f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;">'  
-       f'<div style="background:rgba(220,53,69,0.08);border:1px solid rgba(220,53,69,0.2);border-radius:4px;padding:3px 6px;font-size:0.59rem;">'  
-       f'<div style="color:{text_muted};">+{d_extra_same} {d_same_lbl}</div>'  
-       f'<div style="font-weight:700;color:#F0B429;">{_sc_fmt}</div></div>'  
-       f'<div style="background:rgba(220,53,69,0.08);border:1px solid rgba(220,53,69,0.2);border-radius:4px;padding:3px 6px;font-size:0.59rem;">'  
-       f'<div style="color:{text_muted};">+{d_extra_alt} {d_alt_lbl}</div>'  
-       f'<div style="font-weight:700;color:#F0B429;">{_ac_fmt}</div></div>'  
-       f'</div></div>')  
-    if d_has_deficit else  
-    (f'<div style="border-top:1px solid rgba(34,197,94,0.2);margin-top:4px;padding-top:4px;display:flex;align-items:center;gap:5px;">'  
-     f'<span style="font-size:0.60rem;color:#2ecc71;font-weight:700;">✓ WITHIN CAPACITY</span>'  
-     f'<span style="font-size:0.60rem;color:{scene_color};font-weight:600;">· {d_on_scene:.1f} min on-scene</span>'  
-     f'</div>') }
-  <!-- Inline lock status indicators -->
-  <div style="display:grid; grid-template-columns:1fr 1fr; gap:3px; margin-top:auto; padding-top:4px; flex-shrink:0;">
-    <div style="{"background:rgba(255,215,0,0.15);border:1px solid rgba(255,215,0,0.5);" if (d.get("pinned") and d_type=="GUARDIAN") else "background:rgba(255,255,255,0.03);border:1px dashed rgba(255,215,0,0.18);"} border-radius:4px; padding:3px 6px; font-size:0.57rem; color:{"#FFD700" if (d.get("pinned") and d_type=="GUARDIAN") else "rgba(255,215,0,0.35)"}; text-align:center; line-height:1.5; white-space:nowrap;">{"🔒 Guardian" if (d.get("pinned") and d_type=="GUARDIAN") else "🦅 lock guard"}</div>
-    <div style="{"background:rgba(0,210,255,0.15);border:1px solid rgba(0,210,255,0.5);" if (d.get("pinned") and d_type=="RESPONDER") else "background:rgba(255,255,255,0.03);border:1px dashed rgba(0,210,255,0.18);"} border-radius:4px; padding:3px 6px; font-size:0.57rem; color:{"#00D2FF" if (d.get("pinned") and d_type=="RESPONDER") else "rgba(0,210,255,0.35)"}; text-align:center; line-height:1.5; white-space:nowrap;">{"🔒 Responder" if (d.get("pinned") and d_type=="RESPONDER") else "🚁 lock resp"}</div>
+  <!-- Pin buttons — rendered via session_state keys set by JS postMessage -->
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+    {"'''<div style=\'background:rgba(255,215,0,0.15); border:1px solid rgba(255,215,0,0.4); border-radius:4px; padding:4px 6px; font-size:0.65rem; font-weight:700; color:#FFD700; text-align:center; cursor:pointer;\'>&nbsp;🔒 GUARDIAN LOCKED</div>'''" if d.get("pinned") and d_type=="GUARDIAN" else "'''<div style=\'border:1px dashed rgba(255,215,0,0.25); border-radius:4px; padding:4px 6px; font-size:0.65rem; color:rgba(255,215,0,0.5); text-align:center;\'><span style=\'opacity:0.6\'>🦅 lock as guard</span></div>'''" }
+    {"'''<div style=\'background:rgba(0,210,255,0.15); border:1px solid rgba(0,210,255,0.4); border-radius:4px; padding:4px 6px; font-size:0.65rem; font-weight:700; color:#00D2FF; text-align:center; cursor:pointer;\'>&nbsp;🔒 RESPONDER LOCKED</div>'''" if d.get("pinned") and d_type=="RESPONDER" else "'''<div style=\'border:1px dashed rgba(0,210,255,0.25); border-radius:4px; padding:4px 6px; font-size:0.65rem; color:rgba(0,210,255,0.5); text-align:center;\'><span style=\'opacity:0.6\'>🚁 lock as resp</span></div>'''" }
   </div>
 </div>''')
 
@@ -3610,34 +2604,14 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     )
     # Wrap in a style-scoped div to prevent Streamlit container from collapsing width.
     # overflow:visible is required so the 1.5x hover scale isn't clipped by the grid container.
-    grid_id = f"ucg_{abs(hash(str([d.get('name') for d in active_drones]))) % 100000}"
     return (
         '<style>'
-        '.unit-card-grid { display:grid; gap:10px; width:100%; box-sizing:border-box; overflow:visible; }'
-        '.unit-card-grid > .unit-card { min-width:0; box-sizing:border-box; overflow:visible; }'
-        '.tip { display:inline-flex; align-items:center; justify-content:center; width:11px; height:11px; border-radius:50%; background:rgba(255,255,255,0.12); color:#888; font-size:8px; font-weight:700; cursor:default; margin-left:3px; vertical-align:middle; position:relative; flex-shrink:0; }'
-        '.tip:hover::after { content:attr(data-tip); position:absolute; bottom:130%; left:50%; transform:translateX(-50%); background:#1a1a2e; color:#e0e0e0; font-size:10px; font-weight:400; padding:5px 8px; border-radius:5px; white-space:normal; width:200px; line-height:1.4; z-index:9999; border:1px solid #333; box-shadow:0 4px 12px rgba(0,0,0,0.5); pointer-events:none; text-transform:none; letter-spacing:normal; }'
+        '.unit-card-grid { display:grid; gap:10px; align-items:stretch; width:100%; box-sizing:border-box; overflow:visible; }'
+        '.unit-card-grid > .unit-card { min-width:0; height:100%; overflow:visible; }'
         '</style>'
-        f'<div id="{grid_id}" class="unit-card-grid" style="grid-template-columns:repeat({columns_per_row}, minmax(0,1fr)); overflow:visible;">'
+        '<div class="unit-card-grid" style="grid-template-columns:repeat(' + str(columns_per_row) + ', minmax(0,1fr)); overflow:visible;">'
         + "".join(cards_html)
         + '</div>'
-        f'<script>'
-        f'(function(){{'
-        f'  function eq(){{'
-        f'    var g=document.getElementById("{grid_id}");'
-        f'    if(!g)return;'
-        f'    var cards=g.querySelectorAll(".unit-card");'
-        f'    if(!cards.length)return;'
-        f'    cards.forEach(function(c){{c.style.height="auto";}});'
-        f'    var maxH=0;'
-        f'    cards.forEach(function(c){{maxH=Math.max(maxH,c.getBoundingClientRect().height);}});'
-        f'    cards.forEach(function(c){{c.style.height=maxH+"px";}});'
-        f'  }}'
-        f'  if(document.readyState==="complete"){{eq();}}else{{window.addEventListener("load",eq);}}'
-        f'  setTimeout(eq,150);'
-        f'  setTimeout(eq,600);'
-        f'}})();'
-        f'</script>'
     )
 
 def to_kml_color(hex_str):
@@ -3706,30 +2680,14 @@ def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir, preferred_
     scan_points = full_points.sample(50000, random_state=42) if len(full_points) > 50000 else full_points
     points_gdf = gpd.GeoDataFrame(scan_points, geometry=gpd.points_from_xy(scan_points.lon, scan_points.lat), crs="EPSG:4326")
     total_bounds = points_gdf.total_bounds
-
-    # Always scan all saved shapefiles in the directory so multi-jurisdiction
-    # uploads show every boundary, not just the first one saved.
-    shp_files = glob.glob(os.path.join(shapefile_dir, "*.shp"))
-    # If no shapefiles exist at all and a preferred path was given, use just that
-    if not shp_files and preferred_shp and os.path.exists(preferred_shp):
+    # If a specific boundary was already fetched and saved, use ONLY that file.
+    # This prevents a leftover county .shp from overriding the desired city/place shape.
+    if preferred_shp and os.path.exists(preferred_shp):
         shp_files = [preferred_shp]
-
+    else:
+        shp_files = glob.glob(os.path.join(shapefile_dir, "*.shp"))
     relevant_polys = []
-    _calls_minx, _calls_miny, _calls_maxx, _calls_maxy = total_bounds
     for shp_path in shp_files:
-        try:
-            import fiona
-            with fiona.open(shp_path) as _shp_src:
-                _shp_bounds = _shp_src.bounds
-            _no_overlap = (
-                _shp_bounds[2] < _calls_minx or _shp_bounds[0] > _calls_maxx or
-                _shp_bounds[3] < _calls_miny or _shp_bounds[1] > _calls_maxy
-            )
-            if _no_overlap:
-                continue
-        except Exception:
-            pass
-
         try:
             gdf_chunk = gpd.read_file(shp_path, bbox=tuple(total_bounds))
             if not gdf_chunk.empty:
@@ -3756,7 +2714,7 @@ def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir, preferred_
     return master_gdf
 
 @st.cache_data(show_spinner=False)
-def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, seed=42, bounds_hash=''):
+def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, seed=42):
     if df_calls_full is None or len(df_calls_full) == 0:
         return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
@@ -3773,10 +2731,7 @@ def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, se
     gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon, df.lat), crs="EPSG:4326")
     try:
         gdf_m = gdf.to_crs(epsg=int(epsg_code))
-        # Buffer 300 m so calls at polygon edges aren't clipped by precision gaps
-        # (especially common when switching to a county boundary)
-        _clip_geom = _city_m.buffer(300) if _city_m is not None else None
-        calls_in_city = gdf_m[gdf_m.within(_clip_geom)] if _clip_geom is not None else gdf_m
+        calls_in_city = gdf_m[gdf_m.within(_city_m)] if _city_m is not None else gdf_m
     except Exception:
         calls_in_city = gdf
 
@@ -3828,10 +2783,8 @@ def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, se
 def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash):
     gdf_calls = gpd.GeoDataFrame(df_calls, geometry=gpd.points_from_xy(df_calls.lon, df_calls.lat), crs="EPSG:4326")
     gdf_calls_utm = gdf_calls.to_crs(epsg=int(epsg_code))
-    try:
-        calls_in_city = gdf_calls_utm[gdf_calls_utm.within(_city_m)]
-    except Exception:
-        calls_in_city = gdf_calls_utm
+    try: calls_in_city = gdf_calls_utm[gdf_calls_utm.within(_city_m)]
+    except: calls_in_city = gdf_calls_utm
     radius_resp_m = resp_radius_mi * 1609.34
     radius_guard_m = guard_radius_mi * 1609.34
     station_metadata = []
@@ -3841,20 +2794,13 @@ def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, e
     guard_matrix = np.zeros((n, total_calls), dtype=bool)
     dist_matrix_r = np.zeros((n, total_calls))
     dist_matrix_g = np.zeros((n, total_calls))
-    display_calls = build_display_calls(df_calls_full if df_calls_full is not None else df_calls, _city_m, epsg_code, max_points=300000, bounds_hash=bounds_hash)
-    max_dist = max(
-        (((row['lon'] - center_lon) ** 2 + (row['lat'] - center_lat) ** 2) ** 0.5 for _, row in df_stations_all.iterrows()),
-        default=1.0
-    ) or 1.0
-    calls_array = None
-    if total_calls > 0:
+    display_calls = build_display_calls(df_calls_full if df_calls_full is not None else df_calls, _city_m, epsg_code, max_points=300000)
+    max_dist = max(((row['lon']-center_lon)**2 + (row['lat']-center_lat)**2)**0.5 for _, row in df_stations_all.iterrows()) or 1.0
+    if not calls_in_city.empty:
         calls_array = np.array(list(zip(calls_in_city.geometry.x, calls_in_city.geometry.y)))
-
-    for idx_pos, (_, row) in enumerate(df_stations_all.iterrows()):
-        s_pt_m = gpd.GeoSeries([Point(row['lon'], row['lat'])], crs="EPSG:4326").to_crs(epsg=int(epsg_code)).iloc[0]
-
-        if calls_array is not None:
-            dists = np.sqrt((calls_array[:, 0] - s_pt_m.x) ** 2 + (calls_array[:, 1] - s_pt_m.y) ** 2)
+        for idx_pos, (i, row) in enumerate(df_stations_all.iterrows()):
+            s_pt_m = gpd.GeoSeries([Point(row['lon'], row['lat'])], crs="EPSG:4326").to_crs(epsg=int(epsg_code)).iloc[0]
+            dists = np.sqrt((calls_array[:,0]-s_pt_m.x)**2 + (calls_array[:,1]-s_pt_m.y)**2)
             dists_mi = dists / 1609.34
             mask_r = dists <= radius_resp_m
             mask_g = dists <= radius_guard_m
@@ -3862,31 +2808,20 @@ def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, e
             guard_matrix[idx_pos, :] = mask_g
             dist_matrix_r[idx_pos, :] = dists_mi
             dist_matrix_g[idx_pos, :] = dists_mi
-            avg_dist_r = dists_mi[mask_r].mean() if mask_r.any() else resp_radius_mi * (2 / 3)
-            avg_dist_g = dists_mi[mask_g].mean() if mask_g.any() else guard_radius_mi * (2 / 3)
-        else:
-            avg_dist_r = resp_radius_mi * (2 / 3)
-            avg_dist_g = guard_radius_mi * (2 / 3)
-
-        full_buf_2m = s_pt_m.buffer(radius_resp_m)
-        try:
-            clipped_2m = full_buf_2m.intersection(_city_m)
-        except Exception:
-            clipped_2m = full_buf_2m
-        full_buf_guard = s_pt_m.buffer(radius_guard_m)
-        try:
-            clipped_guard = full_buf_guard.intersection(_city_m)
-        except Exception:
-            clipped_guard = full_buf_guard
-        dist_c = ((row['lon'] - center_lon) ** 2 + (row['lat'] - center_lat) ** 2) ** 0.5
-        station_metadata.append({
-            'name': row['name'], 'lat': row['lat'], 'lon': row['lon'],
-            'clipped_2m': clipped_2m, 'clipped_guard': clipped_guard,
-            'avg_dist_r': avg_dist_r,
-            'avg_dist_g': avg_dist_g,
-            'centrality': 1.0 - (dist_c / max_dist)
-        })
-
+            full_buf_2m = s_pt_m.buffer(radius_resp_m)
+            try: clipped_2m = full_buf_2m.intersection(_city_m)
+            except: clipped_2m = full_buf_2m
+            full_buf_guard = s_pt_m.buffer(radius_guard_m)
+            try: clipped_guard = full_buf_guard.intersection(_city_m)
+            except: clipped_guard = full_buf_guard
+            dist_c = ((row['lon']-center_lon)**2 + (row['lat']-center_lat)**2)**0.5
+            station_metadata.append({
+                'name': row['name'], 'lat': row['lat'], 'lon': row['lon'],
+                'clipped_2m': clipped_2m, 'clipped_guard': clipped_guard,
+                'avg_dist_r': dists_mi[mask_r].mean() if mask_r.any() else resp_radius_mi*(2/3),
+                'avg_dist_g': dists_mi[mask_g].mean() if mask_g.any() else guard_radius_mi*(2/3),
+                'centrality': 1.0 - (dist_c / max_dist)
+            })
     return calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls
 
 def solve_mclp(resp_matrix, guard_matrix, dist_r, dist_g, num_resp, num_guard, allow_redundancy, incremental=True, forced_r=None, forced_g=None):
@@ -4236,11 +3171,11 @@ if not st.session_state['csvs_ready']:
         _h_state.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>State</div>", unsafe_allow_html=True)
 
         while len(st.session_state['target_cities']) < st.session_state.city_count:
-            st.session_state['target_cities'].append({"city": "", "state": st.session_state.get('active_state', 'IL')})
+            st.session_state['target_cities'].append({"city": "", "state": st.session_state.get('active_state', 'TX')})
 
         for i in range(st.session_state.city_count):
             c_val = st.session_state['target_cities'][i]['city'] if i < len(st.session_state['target_cities']) else ""
-            s_val = st.session_state['target_cities'][i]['state'] if i < len(st.session_state['target_cities']) else "IL"
+            s_val = st.session_state['target_cities'][i]['state'] if i < len(st.session_state['target_cities']) else "TX"
 
             col_city, col_state = st.columns([3, 1])
 
@@ -4252,7 +3187,7 @@ if not st.session_state['csvs_ready']:
                 help="Official municipality or county name."
             )
 
-            default_state_idx = _state_keys.index(s_val) if s_val in _state_keys else _state_keys.index("IL")
+            default_state_idx = _state_keys.index(s_val) if s_val in _state_keys else _state_keys.index("TX")
             s_name = col_state.selectbox(
                 f"state_{i}",
                 options=_state_keys,
@@ -4276,7 +3211,7 @@ if not st.session_state['csvs_ready']:
         )
 
         station_template_bytes = base64.b64decode(
-            "TkFNRSxUWVBFLEFERFJFU1MsQ0FQQUNJVFksTk9URVMsTEFULExPTgpTYW1wbGUgMSBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjQyMCBXIFN0YXRlIFN0LCBSb2NrZm9yZCwgSUwgNjExMDEiLDIsUHJpbWFyeSBkb3dudG93biBkaXNwYXRjaCBodWIsNDIuMjcxMSwtODkuMDk0MApTYW1wbGUgMiBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjM0MDEgTiBNYWluIFN0LCBSb2NrZm9yZCwgSUwgNjExMDMiLDIsTm9ydGggc2lkZSBwYXRyb2wgYmFzZSw0Mi4zMTA1LC04OS4wODg3ClNhbXBsZSAzIFBvbGljZSBTdGF0aW9uLFBvbGljZSwiMTcwNyBTIE11bGZvcmQgUmQsIFJvY2tmb3JkLCBJTCA2MTEwOCIsMSxTb3V0aGVhc3QgY29ycmlkb3IgY292ZXJhZ2UsNDIuMjQ4OCwtODguOTk5OApTYW1wbGUgNCBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjQzNDAgVyBTdGF0ZSBTdCwgUm9ja2ZvcmQsIElMIDYxMTAyIiwxLFdlc3Qgc2lkZSByYXBpZCByZXNwb25zZSB1bml0LDQyLjI3MTIsLTg5LjEyNDEKU2FtcGxlIDEgRmlyZSBTdGF0aW9uLEZpcmUsIjcwOCBDbGludG9uIFN0LCBSb2NrZm9yZCwgSUwgNjExMDEiLDIsQ2VudHJhbCBmaXJlIGRpc3BhdGNoIC0gU3RhdGlvbiAxLDQyLjI3MjAsLTg5LjA4OTgKU2FtcGxlIDIgRmlyZSBTdGF0aW9uLEZpcmUsIjE0MDIgTiBDb3VydCBTdCwgUm9ja2ZvcmQsIElMIDYxMTAzIiwxLE5vcnRoIFJvY2tmb3JkIGZpcmUgY292ZXJhZ2UsNDIuMjk1MSwtODkuMDgyNgpTYW1wbGUgMyBGaXJlIFN0YXRpb24sRmlyZSwiMjI1MCBTIEFscGluZSBSZCwgUm9ja2ZvcmQsIElMIDYxMTA4IiwxLFNvdXRoIEFscGluZSBmaXJlIHJlc3BvbnNlLDQyLjI0MDEsLTg4Ljk5NjQKU2FtcGxlIDQgRmlyZSBTdGF0aW9uLEZpcmUsIjUyODUgU2FmZm9yZCBSZCwgUm9ja2ZvcmQsIElMIDYxMTAxIiwxLFdlc3QgZGlzdHJpY3QgZmlyZSBzdGF0aW9uLDQyLjI2OTgsLTg5LjE0MDIKU2FtcGxlIDEgRU1TIFN0YXRpb24sRU1TLCIxNDAxIEUgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwNCIsMixFYXN0IHNpZGUgRU1TIHJhcGlkIHJlc3BvbnNlLDQyLjI2OTQsLTg5LjA2MjEKU2FtcGxlIDIgRU1TIFN0YXRpb24sRU1TLCIzNzIwIENoYXJsZXMgU3QsIFJvY2tmb3JkLCBJTCA2MTEwOCIsMSxTb3V0aGVhc3QgRU1TIGNvdmVyYWdlIHpvbmUsNDIuMjUyMiwtODkuMDA1OApTYW1wbGUgMyBFTVMgU3RhdGlvbixFTVMsIjQ4MjUgTiBCZWxsIFNjaG9vbCBSZCwgUm9ja2ZvcmQsIElMIDYxMTA3IiwxLE5vcnRoZWFzdCBFTVMgcmVzcG9uc2UgaHViLDQyLjMwMjEsLTg4Ljk4OTEKU2FtcGxlIDEgR292IFN0YXRpb24sR292ZXJubWVudCwiNDI1IEUgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwNCIsMSxXaW5uZWJhZ28gQ291bnR5IGFkbWluIGJ1aWxkaW5nLDQyLjI3MTUsLTg5LjA4NDgKU2FtcGxlIDIgR292IFN0YXRpb24sR292ZXJubWVudCwiMzAwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMSIsMSxDaXR5IEhhbGwgLSBSb2NrZm9yZCBtdW5pY2lwYWwgY2VudGVyLDQyLjI3MTEsLTg5LjA5NTcKU2FtcGxlIDMgR292IFN0YXRpb24sR292ZXJubWVudCwiNjUwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMiIsMSxQdWJsaWMgd29ya3MgYW5kIGVtZXJnZW5jeSBtZ210LDQyLjI3MTMsLTg5LjEwMTgK"
+            "77u/c3RhdGlvbl9pZCxuYW1lLGxhdCxsb24NCjEsIlBvbGljZSAxMjMgUyBFYXN0IFN0LCBCZW50b24sIEFSIDcyMDE1IiwzNC41NjI4NzIyMiwtOTIuNTg1MDM3MDQNCjIsIlNjaG9vbCAgMTIzIFMgRWFzdCBTdCwgQmVudG9uLCBBUiA3MjAxNiIsMzQuNTgxNDAzNDEsLTkyLjU4MjA4MTA5DQo0LCJGaXJlICAxMjMgUyBFYXN0IFN0LCBCZW50b24sIEFSIDcyMDE3IiwzNC42MDkzNDY3OSwtOTIuNTM3MDUyNTkNCjUsIlB1YmxpYyBXb3JrcyAxMjMgUyBFYXN0IFN0LCBCZW50b24sIEFSIDcyMDE4IiwzNC41NjM3NTMzOSwtOTIuNTcyODcyMzENCjYsIlByaXZhdGUgIDEyMyBTIEVhc3QgU3QsIEJlbnRvbiwgQVIgNzIwMTkiLDM0LjU0OTc0ODcxLC05Mi42MDcxMjMyNQ0K"
         )
         st.download_button(
             label="⬇️ Download sample stations.csv",
@@ -4331,7 +3266,7 @@ if not st.session_state['csvs_ready']:
 
         def _looks_like_stations(fname):
             n = fname.lower()
-            return any(k in n for k in ['station','facility','loc'])
+            return any(k in n for k in ['station','dept','agency','facility','police','fire','loc'])
 
         if uploaded_files and len(uploaded_files) >= 1:
             
@@ -4363,46 +3298,25 @@ if not st.session_state['csvs_ready']:
                         st.session_state['k_guard'] = save_data.get('k_guard', 0)
                         st.session_state['r_resp'] = save_data.get('r_resp', 2.0)
                         st.session_state['r_guard'] = save_data.get('r_guard', 8.0)
-                        st.session_state['dfr_rate'] = save_data.get('dfr_rate', 12)
-                        st.session_state['deflect_rate'] = save_data.get('deflect_rate', 25)
+                        st.session_state['dfr_rate'] = save_data.get('dfr_rate', 25)
+                        st.session_state['deflect_rate'] = save_data.get('deflect_rate', 30)
                         
                         if save_data.get('calls_data'):
                             df_c = pd.DataFrame(save_data['calls_data'])
-                            if 'lat' not in df_c.columns or 'lon' not in df_c.columns:
-                                st.error("❌ .brinc file is missing required 'lat'/'lon' columns in calls data.")
-                                st.stop()
-                            df_c['lat'] = pd.to_numeric(df_c['lat'], errors='coerce')
-                            df_c['lon'] = pd.to_numeric(df_c['lon'], errors='coerce')
-                            df_c = df_c.dropna(subset=['lat', 'lon']).reset_index(drop=True)
-                            if df_c.empty:
-                                st.error("❌ .brinc file contains no valid coordinate data after parsing.")
-                                st.stop()
+                            # Safely cast to numeric so the map geometry doesn't crash
+                            if 'lat' in df_c.columns: df_c['lat'] = pd.to_numeric(df_c['lat'], errors='coerce')
+                            if 'lon' in df_c.columns: df_c['lon'] = pd.to_numeric(df_c['lon'], errors='coerce')
                             st.session_state['df_calls'] = df_c
                             st.session_state['df_calls_full'] = df_c.copy()
                             st.session_state['total_original_calls'] = len(df_c)
                             st.session_state['total_modeled_calls'] = len(df_c)
-
+                        
                         if save_data.get('stations_data'):
                             df_s = pd.DataFrame(save_data['stations_data'])
-                            if 'lat' not in df_s.columns or 'lon' not in df_s.columns:
-                                st.warning("⚠️ .brinc stations data missing lat/lon — stations will be re-generated.")
-                            else:
-                                df_s['lat'] = pd.to_numeric(df_s['lat'], errors='coerce')
-                                df_s['lon'] = pd.to_numeric(df_s['lon'], errors='coerce')
-                                df_s = df_s.dropna(subset=['lat', 'lon']).reset_index(drop=True)
-                                st.session_state['df_stations'] = df_s
-
-                        if save_data.get('boundary_geojson'):
-                            try:
-                                import io as _io
-                                _bgdf = gpd.read_file(_io.StringIO(save_data['boundary_geojson']))
-                                if not _bgdf.empty:
-                                    st.session_state['master_gdf_override'] = _bgdf
-                            except Exception:
-                                pass
-                        st.session_state['boundary_kind'] = save_data.get('boundary_kind', 'place')
-                        st.session_state['boundary_source_path'] = save_data.get('boundary_source_path', '')
-
+                            if 'lat' in df_s.columns: df_s['lat'] = pd.to_numeric(df_s['lat'], errors='coerce')
+                            if 'lon' in df_s.columns: df_s['lon'] = pd.to_numeric(df_s['lon'], errors='coerce')
+                            st.session_state['df_stations'] = df_s
+                            
                         st.session_state['data_source'] = 'brinc_file'
                         st.session_state['demo_mode_used'] = False
                         st.session_state['sim_mode_used'] = False
@@ -4450,17 +3364,15 @@ if not st.session_state['csvs_ready']:
                         st.stop()
 
                     df_c_full = df_c.reset_index(drop=True).copy()
+                    st.session_state['total_original_calls'] = len(df_c_full)
 
                     if len(df_c_full) > 25000:
                         df_c = df_c_full.sample(25000, random_state=42).reset_index(drop=True)
+                        st.session_state['total_modeled_calls'] = len(df_c)
                         st.toast(f"⚠️ Optimization modeled with {len(df_c):,} representative calls out of {len(df_c_full):,} total incidents.")
                     else:
                         df_c = df_c_full.copy()
-
-                    st.session_state.update({
-                        'total_original_calls': len(df_c_full),
-                        'total_modeled_calls': len(df_c),
-                    })
+                        st.session_state['total_modeled_calls'] = len(df_c)
 
                     if station_file is not None:
                         with st.spinner("🔍 Reading stations file…"):
@@ -4504,14 +3416,12 @@ if not st.session_state['csvs_ready']:
                                 if 'type' not in df_s.columns: df_s['type'] = 'Police'
                                 df_s = df_s.dropna(subset=['lat', 'lon']).reset_index(drop=True)
                                 osm_note = "Loaded stations from file."
-                                st.session_state['stations_user_uploaded'] = True
                             except Exception as e:
                                 df_s, osm_note = None, f"Failed: {e}"
                         if df_s is None or df_s.empty:
                             st.error(f"❌ Stations file error: {osm_note}")
                             st.stop()
                     else:
-                        st.session_state['stations_user_uploaded'] = False
                         with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools…"):
                             df_s, osm_note = generate_stations_from_calls(df_c)
                         if df_s is None or df_s.empty:
@@ -4527,7 +3437,6 @@ if not st.session_state['csvs_ready']:
 
                     detected_city = None
                     detected_state = None
-                    detection_source = 'unknown'
 
                     with st.spinner(get_jurisdiction_message()):
                         # Priority 1: city/state extracted directly from the CAD export
@@ -4535,16 +3444,13 @@ if not st.session_state['csvs_ready']:
                             city_val = str(df_c['_csv_city'].iloc[0]).strip().title()
                             if city_val and city_val.lower() not in ('nan', 'none', ''):
                                 detected_city = city_val
-                                detection_source = 'file'
 
                         if '_csv_state' in df_c.columns:
                             state_val = str(df_c['_csv_state'].iloc[0]).strip().upper()
                             if state_val in STATE_FIPS:
                                 detected_state = state_val
-                                detection_source = 'file'
                             elif state_val.title() in US_STATES_ABBR:
                                 detected_state = US_STATES_ABBR[state_val.title()]
-                                detection_source = 'file'
 
                         # If the export gives us a city but not a state, forward-geocode the city name.
                         if detected_city and not detected_state:
@@ -4559,7 +3465,6 @@ if not st.session_state['csvs_ready']:
                                     state_full = parts[2] if len(parts) >= 3 else ''
                                     if state_full in US_STATES_ABBR:
                                         detected_state = US_STATES_ABBR[state_full]
-                                        detection_source = 'file'
                             except Exception:
                                 pass
 
@@ -4574,102 +3479,6 @@ if not st.session_state['csvs_ready']:
                                         detected_state = US_STATES_ABBR[detected_state_full]
                                     if not detected_city and detected_city_rg and detected_city_rg != 'Unknown City':
                                         detected_city = detected_city_rg
-                                    detection_source = 'centroid'
-                            except Exception:
-                                pass
-
-                        # ── Fallback: derive city/state from coordinate centroid bbox ──
-                        # If Nominatim failed or returned nothing, try the Census FCC API
-                        # which is reliable and returns county + state from a lat/lon.
-                        if not detected_city or not detected_state:
-                            try:
-                                cen_lat_fb = float(df_c['lat'].median())
-                                cen_lon_fb = float(df_c['lon'].median())
-                                _fcc_url = (
-                                    f"https://geo.fcc.gov/api/census/block/find"
-                                    f"?latitude={cen_lat_fb}&longitude={cen_lon_fb}"
-                                    f"&format=json&showall=false"
-                                )
-                                _fcc_req = urllib.request.Request(
-                                    _fcc_url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"}
-                                )
-                                with urllib.request.urlopen(_fcc_req, timeout=8) as _fcc_resp:
-                                    _fcc_data = json.loads(_fcc_resp.read().decode("utf-8"))
-                                _fcc_county = _fcc_data.get("County", {}).get("name", "")
-                                _fcc_state  = _fcc_data.get("State", {}).get("code", "")
-                                if _fcc_county and _fcc_state and _fcc_state in STATE_FIPS:
-                                    if not detected_state:
-                                        detected_state = _fcc_state
-                                    if not detected_city:
-                                        # Use "County Name County" so fetch_county_boundary_local can find it
-                                        detected_city = _fcc_county
-                                    detection_source = "fcc_centroid"
-                            except Exception:
-                                pass
-
-                        # Last resort: derive state from coordinate range alone
-                        # (FL: lat 24-31, lon -87 to -80; this catches most US states uniquely)
-                        if not detected_state:
-                            try:
-                                _cen_lat = float(df_c['lat'].median())
-                                _cen_lon = float(df_c['lon'].median())
-                                _BBOX_STATES = [
-                                    ("FL", 24.5, 31.0, -87.6, -79.9),
-                                    ("CA", 32.5, 42.0, -124.5, -114.1),
-                                    ("TX", 25.8, 36.5, -106.6, -93.5),
-                                    ("NY", 40.5, 45.0, -79.8, -71.9),
-                                    ("IL", 36.9, 42.5, -91.5, -87.0),
-                                    ("GA", 30.4, 35.0, -85.6, -80.8),
-                                    ("NC", 33.8, 36.6, -84.3, -75.5),
-                                    ("OH", 38.4, 42.0, -84.8, -80.5),
-                                    ("PA", 39.7, 42.3, -80.5, -74.7),
-                                    ("WA", 45.5, 49.0, -124.7, -116.9),
-                                    ("AZ", 31.3, 37.0, -114.8, -109.0),
-                                    ("CO", 36.9, 41.0, -109.1, -102.0),
-                                    ("MO", 35.9, 40.6, -95.8, -89.1),
-                                    ("NM", 31.3, 37.0, -109.1, -103.0),
-                                    ("OR", 41.9, 46.2, -124.6, -116.5),
-                                    ("TN", 34.9, 36.7, -90.3, -81.6),
-                                    ("VA", 36.5, 39.5, -83.7, -75.2),
-                                    ("SC", 32.0, 35.2, -83.4, -78.5),
-                                    ("MI", 41.7, 48.3, -90.4, -82.4),
-                                    ("WI", 42.5, 47.1, -92.9, -86.2),
-                                    ("MN", 43.5, 49.4, -97.2, -89.5),
-                                    ("IA", 40.4, 43.5, -96.6, -90.1),
-                                    ("KS", 36.9, 40.0, -102.1, -94.6),
-                                    ("NE", 40.0, 43.0, -104.1, -95.3),
-                                    ("OK", 33.6, 37.0, -103.0, -94.4),
-                                    ("AR", 33.0, 36.5, -94.6, -89.6),
-                                    ("LA", 28.9, 33.0, -94.0, -88.8),
-                                    ("MS", 30.2, 35.0, -91.7, -88.1),
-                                    ("AL", 30.2, 35.0, -88.5, -84.9),
-                                    ("IN", 37.8, 41.8, -88.1, -84.8),
-                                    ("KY", 36.5, 39.1, -89.6, -81.9),
-                                    ("WV", 37.2, 40.6, -82.6, -77.7),
-                                    ("MD", 37.9, 39.7, -79.5, -75.0),
-                                    ("DE", 38.4, 39.8, -75.8, -75.0),
-                                    ("NJ", 38.9, 41.4, -75.6, -73.9),
-                                    ("CT", 41.0, 42.1, -73.7, -71.8),
-                                    ("RI", 41.1, 42.0, -71.9, -71.1),
-                                    ("MA", 41.2, 42.9, -73.5, -69.9),
-                                    ("VT", 42.7, 45.0, -73.4, -71.5),
-                                    ("NH", 42.7, 45.3, -72.6, -70.7),
-                                    ("ME", 43.1, 47.5, -71.1, -66.9),
-                                    ("NV", 35.0, 42.0, -120.0, -114.0),
-                                    ("UT", 36.9, 42.0, -114.1, -109.0),
-                                    ("ID", 41.9, 49.0, -117.2, -111.0),
-                                    ("MT", 44.4, 49.0, -116.1, -104.0),
-                                    ("WY", 40.9, 45.0, -111.1, -104.0),
-                                    ("ND", 45.9, 49.0, -104.1, -96.6),
-                                    ("SD", 42.5, 45.9, -104.1, -96.4),
-                                    ("AK", 54.0, 71.5, -168.0, -130.0),
-                                    ("HI", 18.9, 22.2, -160.2, -154.8),
-                                ]
-                                for _st, _lat0, _lat1, _lon0, _lon1 in _BBOX_STATES:
-                                    if _lat0 <= _cen_lat <= _lat1 and _lon0 <= _cen_lon <= _lon1:
-                                        detected_state = _st
-                                        detection_source = "coord_bbox"
-                                        break
                             except Exception:
                                 pass
 
@@ -4677,73 +3486,55 @@ if not st.session_state['csvs_ready']:
                             st.session_state['active_city'] = detected_city
                             st.session_state['active_state'] = detected_state
                             st.session_state['target_cities'] = [{"city": detected_city, "state": detected_state}]
-                            st.session_state['location_detection_source'] = detection_source
                             st.toast(f"📍 Detected: {detected_city}, {detected_state}")
-                        elif detected_state:
-                            # We have state but no city — store state and let boundary
-                            # selection use the FCC county name as a county lookup
-                            st.session_state['active_state'] = detected_state
-                            st.session_state['location_detection_source'] = detection_source
 
-                    # Keep uploaded calls intact here. Boundary validation should be the first real geographic filter.
+                    # Only clip calls to the station bbox once we know the correct jurisdiction.
+                    if detected_city and detected_state:
+                        lat_min, lat_max = df_s['lat'].min(), df_s['lat'].max()
+                        lon_min, lon_max = df_s['lon'].min(), df_s['lon'].max()
+                        clip_mask_modeled = (
+                            (df_c['lat'] >= lat_min - 0.5) & (df_c['lat'] <= lat_max + 0.5) &
+                            (df_c['lon'] >= lon_min - 0.5) & (df_c['lon'] <= lon_max + 0.5)
+                        )
+                        df_c = df_c[clip_mask_modeled].reset_index(drop=True)
+                        clip_mask_full = (
+                            (df_c_full['lat'] >= lat_min - 0.5) & (df_c_full['lat'] <= lat_max + 0.5) &
+                            (df_c_full['lon'] >= lon_min - 0.5) & (df_c_full['lon'] <= lon_max + 0.5)
+                        )
+                        df_c_full = df_c_full[clip_mask_full].reset_index(drop=True)
+
                     st.session_state['df_calls']             = df_c
                     st.session_state['df_calls_full']        = df_c_full
                     st.session_state['df_stations']          = df_s
                     st.session_state['total_original_calls'] = len(df_c_full)
                     st.session_state['total_modeled_calls']  = len(df_c)
 
-                    # ── Clear stale shapefiles from previous sessions ──────────────
-                    # Old .shp files from prior cities (e.g. Bernalillo) would otherwise
-                    # be picked up by find_relevant_jurisdictions when no fresh boundary
-                    # is saved, causing completely wrong jurisdiction boundaries.
-                    try:
-                        import glob as _glob
-                        for _stale in _glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp")):
-                            for _ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
-                                _f = _stale.replace(".shp", _ext)
-                                try:
-                                    if os.path.exists(_f): os.remove(_f)
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-                    st.session_state['boundary_source_path'] = ''
-                    st.session_state['master_gdf_override'] = None
-
                     with st.spinner(get_jurisdiction_message()):
-                        _calls_for_boundary = df_c_full if df_c_full is not None and len(df_c_full) > 0 else df_c
-
-                        # ── PRIMARY: pure coordinate spatial join against local parquets ──
-                        # Works for any file regardless of whether city/state was detected.
-                        # Returns ALL jurisdictions that contain ≥1% of calls.
-                        coord_gdf = find_jurisdictions_by_coordinates(_calls_for_boundary)
-
-                        if coord_gdf is not None and not coord_gdf.empty:
-                            # Store the GeoDataFrame directly in session state — no disk
-                            # round-trip needed. The render pass reads it back directly.
-                            st.session_state['master_gdf_override'] = coord_gdf
-                            st.session_state['boundary_source_path'] = 'local_parquet'
-                            st.session_state['boundary_kind'] = 'place'
-                            st.session_state['active_city'] = coord_gdf.iloc[0]['DISPLAY_NAME']
-
-                        else:
-                            st.session_state['master_gdf_override'] = None
-                            # ── FALLBACK: name-based lookup (original path) ──
-                            detected_city_for_boundary = st.session_state.get('active_city', '')
-                            detected_state_for_boundary = st.session_state.get('active_state', '')
-                            if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
-                                city_text = str(detected_city_for_boundary or '').strip()
-                                prefer_county = str(st.session_state.get('location_detection_source', '')) == 'centroid'
-                                b_success, b_gdf, b_kind, b_hits = _select_best_boundary_for_calls(
-                                    _calls_for_boundary,
-                                    city_text,
-                                    detected_state_for_boundary,
-                                    prefer_county=prefer_county
-                                )
-                                st.session_state['boundary_kind'] = b_kind
-                                if b_success and b_gdf is not None:
-                                    _saved = save_boundary_gdf(b_gdf, b_kind, city_text, detected_state_for_boundary)
-                                    st.session_state['boundary_source_path'] = _saved or ''
+                        # ── BOUNDARY LOOKUP: fetch & save shapefile NOW so
+                        # find_relevant_jurisdictions() can use it on the map page.
+                        # Auto-detect: try place first, fall back to county automatically.
+                        detected_city_for_boundary = st.session_state.get('active_city', '')
+                        detected_state_for_boundary = st.session_state.get('active_state', '')
+                        if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
+                            city_text = str(detected_city_for_boundary or '').strip()
+                            is_county_name = city_text.lower().endswith(" county")
+                            if is_county_name:
+                                b_success, b_gdf = fetch_county_boundary_local(detected_state_for_boundary, city_text)
+                                b_kind = 'county'
+                            else:
+                                b_success, b_gdf = fetch_place_boundary_local(detected_state_for_boundary, city_text)
+                                b_kind = 'place'
+                                if not b_success:
+                                    b_success, b_gdf = fetch_county_boundary_local(detected_state_for_boundary, city_text)
+                                    if not b_success:
+                                        b_success, b_gdf = fetch_county_boundary_local(detected_state_for_boundary, city_text + " County")
+                                    b_kind = 'county' if b_success else 'place'
+                            st.session_state['boundary_kind'] = b_kind
+                            if not b_success:
+                                st.warning(f"Boundary not found for {city_text}, {detected_state_for_boundary}.")
+                            if b_success and b_gdf is not None:
+                                _saved = save_boundary_gdf(b_gdf, b_kind, city_text, detected_state_for_boundary)
+                                st.session_state['boundary_source_path'] = _saved or ''
 
                     st.session_state['data_source'] = 'cad_upload'
                     st.session_state['demo_mode_used'] = False
@@ -5043,80 +3834,19 @@ def generate_community_impact_dashboard_html(
     drone_min  = float(avg_resp_time_min or 0)
     saved_min  = float(avg_time_saved_min or 0)
     ground_min = drone_min + saved_min
-    drone_wins_pct = min(99, max(CONFIG['DRONE_WINS_FLOOR'], round(calls_covered_perc * CONFIG['DRONE_WINS_MULTIPLIER']))) if calls_covered_perc > 0 else 0
-
-    # Per-type response time breakdown for the bar chart
-    _RESP_SPEED   = float(CONFIG.get('RESPONDER_SPEED', 42.0))
-    _GUARD_SPEED  = float(CONFIG.get('GUARDIAN_SPEED', 60.0))
-    _GROUND_SPEED = float(CONFIG.get('DEFAULT_TRAFFIC_SPEED', 35.0))
-    _resp_drones  = [d for d in active_drones if d.get('type') == 'RESPONDER']
-    _guard_drones = [d for d in active_drones if d.get('type') == 'GUARDIAN']
-    resp_drone_min  = (sum(d['avg_time_min'] for d in _resp_drones)  / len(_resp_drones))  if _resp_drones  else None
-    guard_drone_min = (sum(d['avg_time_min'] for d in _guard_drones) / len(_guard_drones)) if _guard_drones else None
-    # Ground time uses the corrected formula: avg_dist × 1.4 / ground_speed
-    # avg_dist = avg_time_min × drone_speed / 60  →  ground_time = avg_time_min × drone_speed × 1.4 / ground_speed
-    resp_ground_min  = (resp_drone_min  * _RESP_SPEED  * 1.4 / _GROUND_SPEED) if resp_drone_min  is not None else None
-    guard_ground_min = (guard_drone_min * _GUARD_SPEED * 1.4 / _GROUND_SPEED) if guard_drone_min is not None else None
-    # Reference ground time for the chart = best available single ground estimate
-    _chart_ground_min = ground_min if ground_min > 0 else max(
-        (resp_ground_min or 0), (guard_ground_min or 0)
-    )
-    _chart_max = max(_chart_ground_min, resp_drone_min or 0, guard_drone_min or 0, 0.1)
-
-    # Pre-build per-type bar HTML so we avoid nested f-strings in the template
-    if resp_drone_min is not None:
-        _resp_bar_h = min(100, resp_drone_min / _chart_max * 100)
-        _resp_bar_html = (
-            '<div class="rt-bar-wrap">'
-            '<div class="rt-bar-outer">'
-            f'<div class="rt-bar-fill" style="height:{_resp_bar_h:.0f}%;background:linear-gradient(180deg,var(--accent-blue),#3b82f6);"></div>'
-            '</div>'
-            '<div class="rt-bar-label">&#x1F681; Responder '
-            '<span class="tip-cid" data-tip="Avg flight time for Responder drones (42 mph airspeed, 2-mile zone). Direct line-of-sight flight — no traffic, no turns.">?</span></div>'
-            f'<div class="rt-bar-value" style="color:var(--accent-blue);">{resp_drone_min:.1f} min</div>'
-            '</div>'
-        )
-    else:
-        _resp_bar_html = ''
-
-    if guard_drone_min is not None:
-        _guard_bar_h = min(100, guard_drone_min / _chart_max * 100)
-        _guard_bar_html = (
-            '<div class="rt-bar-wrap">'
-            '<div class="rt-bar-outer">'
-            f'<div class="rt-bar-fill" style="height:{_guard_bar_h:.0f}%;background:linear-gradient(180deg,var(--accent-gold),#ca8a04);"></div>'
-            '</div>'
-            '<div class="rt-bar-label">&#x1F985; Guardian '
-            '<span class="tip-cid" data-tip="Avg flight time for Guardian drones (60 mph airspeed, up to 8-mile zone). Longer range means slightly longer avg flight, still far faster than road travel over that distance.">?</span></div>'
-            f'<div class="rt-bar-value" style="color:var(--accent-gold);">{guard_drone_min:.1f} min</div>'
-            '</div>'
-        )
-    else:
-        _guard_bar_html = ''
-
-    _ground_bar_h = min(100, _chart_ground_min / _chart_max * 100)
-    _ground_bar_html = (
-        '<div class="rt-bar-wrap">'
-        '<div class="rt-bar-outer">'
-        f'<div class="rt-bar-fill" style="height:{_ground_bar_h:.0f}%;background:linear-gradient(180deg,#f59e0b,#d97706);"></div>'
-        '</div>'
-        f'<div class="rt-bar-label">&#x1F694; Ground Unit (est.) '
-        f'<span class="tip-cid" data-tip="Patrol car travel time over the same avg incident distance at {_GROUND_SPEED:.0f} mph road speed with a 1.4\u00d7 tortuosity factor. Actual response varies by unit availability.">?</span></div>'
-        f'<div class="rt-bar-value" style="color:#f59e0b;">{_chart_ground_min:.1f} min</div>'
-        '</div>'
-    )
+    drone_wins_pct = min(99, max(60, round(calls_covered_perc * 0.72))) if calls_covered_perc > 0 else 0
 
     # Outcomes counter (modeled estimates)
     total_annual_dfr = int(annual_flights * float(dfr_dispatch_rate or 0.25))
-    arrests_est      = int(total_annual_dfr * CONFIG['OUTCOME_ARREST_RATE'])
-    rescues_est      = int(total_annual_dfr * CONFIG['OUTCOME_RESCUE_RATE'])
-    deescalation_est = int(total_annual_dfr * CONFIG['OUTCOME_DEESCALATION_RATE'])
-    missing_est      = int(total_annual_dfr * CONFIG['OUTCOME_MISSING_RATE'])
+    arrests_est      = int(total_annual_dfr * 0.043)
+    rescues_est      = int(total_annual_dfr * 0.021)
+    deescalation_est = int(total_annual_dfr * 0.11)
+    missing_est      = int(total_annual_dfr * 0.008)
 
     # ROI
     roi_multiple = round(float(annual_savings or 0) / max(float(fleet_capex or 1), 1), 2)
-    cost_per_call_drone   = CONFIG['DRONE_COST_PER_CALL']
-    cost_per_call_officer = CONFIG['OFFICER_COST_PER_CALL']
+    cost_per_call_drone  = 6
+    cost_per_call_officer = 82
     cost_saved_per_resolved = cost_per_call_officer - cost_per_call_drone
     total_resolved_annually = int(float(daily_drone_only_calls or 0) * 365)
 
@@ -5530,49 +4260,6 @@ def generate_community_impact_dashboard_html(
     animation: pulse 2s ease-in-out infinite;
     vertical-align: middle;
   }}
-
-  /* ── Tooltip badges ── */
-  .tip-cid {{
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 13px; height: 13px;
-    border-radius: 50%;
-    background: rgba(128,128,128,0.18);
-    color: #888;
-    font-size: 8px;
-    font-weight: 700;
-    cursor: default;
-    margin-left: 4px;
-    vertical-align: middle;
-    position: relative;
-    flex-shrink: 0;
-    font-style: normal;
-    line-height: 1;
-  }}
-  .tip-cid:hover::after {{
-    content: attr(data-tip);
-    position: absolute;
-    bottom: 130%;
-    left: 50%;
-    transform: translateX(-50%);
-    background: #0d0d1a;
-    color: #e0e0f0;
-    font-size: 11px;
-    font-weight: 400;
-    padding: 7px 11px;
-    border-radius: 7px;
-    white-space: normal;
-    width: 240px;
-    line-height: 1.5;
-    z-index: 9999;
-    border: 1px solid #333355;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.6);
-    pointer-events: none;
-    text-transform: none;
-    letter-spacing: normal;
-    font-family: 'DM Sans', sans-serif;
-  }}
 </style>
 </head>
 <body>
@@ -5597,12 +4284,12 @@ def generate_community_impact_dashboard_html(
 <!-- ══════════════════════════════════════════════════════════════════
      SECTION 1 — FLIGHT HOURS & UPTIME
 ══════════════════════════════════════════════════════════════════ -->
-<div class="section-label">01 &nbsp;·&nbsp; Flight Hours &amp; Uptime <span class="tip-cid" data-tip="Total daily airtime, annual flight hours, and dispatch frequency for the deployed drone fleet. Based on Guardian and Responder duty cycles.">?</span></div>
+<div class="section-label">01 &nbsp;·&nbsp; Flight Hours &amp; Uptime</div>
 <div class="grid-3">
 
   <div class="stat-card">
     <div class="accent-bar" style="background:var(--accent-blue);"></div>
-    <div class="card-label">Daily Airtime (Fleet) <span class="tip-cid" data-tip="Total hours all drones are airborne per day. Guardians run a 60-min flight / 3-min charge cycle (~22.9 hrs/day). Responders operate on an 11.6-hr patrol shift.">?</span></div>
+    <div class="card-label">Daily Airtime (Fleet)</div>
     <div class="card-value"><span class="counter" data-target="{total_daily_flight_hrs:.1f}">{total_daily_flight_hrs:.1f}</span> hrs</div>
     <div class="card-sub">{g_count} Guardian × {GUARDIAN_FLIGHT_HOURS_PER_DAY}h &nbsp;+&nbsp; {r_count} Responder × 11.6h</div>
     <span class="card-badge" style="background:var(--accent-blue-lt);color:var(--accent-blue);">Modeled duty cycle</span>
@@ -5610,7 +4297,7 @@ def generate_community_impact_dashboard_html(
 
   <div class="stat-card">
     <div class="accent-bar" style="background:var(--accent-blue);"></div>
-    <div class="card-label">Annual Flight Hours <span class="tip-cid" data-tip="Daily fleet airtime × 365 days. Represents the total drone capacity available across the full year for incident response.">?</span></div>
+    <div class="card-label">Annual Flight Hours</div>
     <div class="card-value"><span class="counter" data-target="{annual_flight_hrs:,.0f}">{annual_flight_hrs:,.0f}</span></div>
     <div class="card-sub">Across full fleet, 365 days</div>
     <span class="card-badge" style="background:var(--accent-blue-lt);color:var(--accent-blue);">Fleet total</span>
@@ -5618,7 +4305,7 @@ def generate_community_impact_dashboard_html(
 
   <div class="stat-card">
     <div class="accent-bar" style="background:var(--accent-blue);"></div>
-    <div class="card-label">DFR Flights / Day <span class="tip-cid" data-tip="Drone-First-Response dispatches per day. Calculated as: calls in coverage zone × DFR dispatch rate. The DFR rate is the fraction of 911 calls where a drone launches before a patrol car.">?</span></div>
+    <div class="card-label">DFR Flights / Day</div>
     <div class="card-value"><span class="counter" data-target="{daily_flights:.1f}">{daily_flights:.1f}</span></div>
     <div class="card-sub">At {int(dfr_dispatch_rate*100)}% dispatch rate · {int(calls_covered_perc)}% call coverage</div>
     <span class="card-badge" style="background:var(--accent-blue-lt);color:var(--accent-blue);">{annual_flights:,.0f}/yr projected</span>
@@ -5629,13 +4316,13 @@ def generate_community_impact_dashboard_html(
 <!-- Uptime progress bars -->
 <div class="stat-card" style="margin-bottom:20px;">
   <div class="accent-bar" style="background:var(--accent-slate);"></div>
-  <div class="card-label" style="margin-bottom:14px;">Guardian Fleet — Daily Uptime Breakdown <span class="tip-cid" data-tip="Shows how each Guardian drone splits its 24 hours between active flying and auto-recharging. The rapid 3-min charge cycle enables near-continuous availability.">?</span></div>
+  <div class="card-label" style="margin-bottom:14px;">Guardian Fleet — Daily Uptime Breakdown</div>
   <div class="prog-row">
-    <div class="prog-meta"><span class="prog-label">Airborne (flight) <span class="tip-cid" data-tip="Hours per day each Guardian is actively flying. The 60-min flight / 3-min charge cycle yields ~22.9 hrs of airtime per Guardian per day.">?</span></span><span class="prog-val">{GUARDIAN_FLIGHT_HOURS_PER_DAY:.1f} hrs / 24 hrs</span></div>
+    <div class="prog-meta"><span class="prog-label">Airborne (flight)</span><span class="prog-val">{GUARDIAN_FLIGHT_HOURS_PER_DAY:.1f} hrs / 24 hrs</span></div>
     <div class="prog-track"><div class="prog-fill" style="width:{GUARDIAN_FLIGHT_HOURS_PER_DAY/24*100:.1f}%;background:var(--accent-blue);"></div></div>
   </div>
   <div class="prog-row">
-    <div class="prog-meta"><span class="prog-label">Charging / Docked <span class="tip-cid" data-tip="Time spent in the automated recharging dock between sorties. The 3-minute recharge gap between 60-min flights is the only downtime — drone is available for re-dispatch within seconds of landing.">?</span></span><span class="prog-val">{24-GUARDIAN_FLIGHT_HOURS_PER_DAY:.1f} hrs / 24 hrs</span></div>
+    <div class="prog-meta"><span class="prog-label">Charging / Docked</span><span class="prog-val">{24-GUARDIAN_FLIGHT_HOURS_PER_DAY:.1f} hrs / 24 hrs</span></div>
     <div class="prog-track"><div class="prog-fill" style="width:{(24-GUARDIAN_FLIGHT_HOURS_PER_DAY)/24*100:.1f}%;background:var(--rule);"></div></div>
   </div>
   <div class="card-sub" style="margin-top:6px;">Guardian duty cycle: {CONFIG['GUARDIAN_FLIGHT_MIN']} min flight → {CONFIG['GUARDIAN_CHARGE_MIN']} min auto-recharge → repeat</div>
@@ -5645,13 +4332,24 @@ def generate_community_impact_dashboard_html(
 <!-- ══════════════════════════════════════════════════════════════════
      SECTION 2 — RESPONSE TIME VS GROUND UNITS
 ══════════════════════════════════════════════════════════════════ -->
-<div class="section-label">02 &nbsp;·&nbsp; Response Time vs. Ground Units <span class="tip-cid" data-tip="Compares estimated drone arrival time to typical ground unit response for incidents within the coverage zone. Drone speed, direct flight path, and instant launch give a systematic time advantage.">?</span></div>
+<div class="section-label">02 &nbsp;·&nbsp; Response Time vs. Ground Units</div>
 <div class="rt-compare">
-  <div class="card-label" style="margin-bottom:0;">Estimated Average Response to In-Range Incidents <span class="tip-cid" data-tip="Average distance from each station to incidents in its zone ÷ drone airspeed = flight time. Ground unit uses the same average distance but at road speed with a 1.4× road-tortuosity factor. Both are model averages.">?</span></div>
+  <div class="card-label" style="margin-bottom:0;">Estimated Average Response to In-Range Incidents</div>
   <div class="rt-bars">
-    {_resp_bar_html}
-    {_guard_bar_html}
-    {_ground_bar_html}
+    <div class="rt-bar-wrap">
+      <div class="rt-bar-outer">
+        <div class="rt-bar-fill" style="height:{min(100, drone_min / max(ground_min,0.1) * 100):.0f}%;background:linear-gradient(180deg,var(--accent-blue),#3b82f6);"></div>
+      </div>
+      <div class="rt-bar-label">🚁 Drone First Responder</div>
+      <div class="rt-bar-value" style="color:var(--accent-blue);">{drone_min:.1f} min</div>
+    </div>
+    <div class="rt-bar-wrap">
+      <div class="rt-bar-outer">
+        <div class="rt-bar-fill" style="height:100%;background:linear-gradient(180deg,#94a3b8,#cbd5e1);"></div>
+      </div>
+      <div class="rt-bar-label">🚔 Ground Unit (est.)</div>
+      <div class="rt-bar-value" style="color:var(--ink-mid);">{ground_min:.1f} min</div>
+    </div>
     <div class="rt-bar-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:28px;">
       <div style="font-family:'DM Mono',monospace;font-size:32px;font-weight:500;color:var(--accent-green);">−{saved_min:.1f}m</div>
       <div style="font-size:11px;color:var(--ink-light);text-align:center;margin-top:4px;">avg time saved<br>per call</div>
@@ -5668,19 +4366,19 @@ def generate_community_impact_dashboard_html(
 <div class="grid-3" style="margin-bottom:20px;">
   <div class="stat-card">
     <div class="accent-bar" style="background:var(--accent-green);"></div>
-    <div class="card-label">Minutes Saved / Call <span class="tip-cid" data-tip="Difference between estimated ground unit response time and drone response time for incidents in the coverage zone. Faster first eyes on scene can reduce harm, improve officer safety, and increase apprehension rates.">?</span></div>
+    <div class="card-label">Minutes Saved / Call</div>
     <div class="card-value" style="color:var(--accent-green);">{saved_min:.1f} min</div>
     <div class="card-sub">vs. estimated ground response</div>
   </div>
   <div class="stat-card">
     <div class="accent-bar" style="background:var(--accent-gold);"></div>
-    <div class="card-label">Geographic Coverage <span class="tip-cid" data-tip="Percentage of the total jurisdiction area that falls within at least one drone's operational radius. Reflects spatial reach — a high percentage means most of the city has drone access, not just the dense call-volume areas.">?</span></div>
+    <div class="card-label">Geographic Coverage</div>
     <div class="card-value" style="color:var(--accent-gold);">{area_covered_perc:.1f}%</div>
     <div class="card-sub">of jurisdiction area within drone range</div>
   </div>
   <div class="stat-card">
     <div class="accent-bar" style="background:var(--accent-blue);"></div>
-    <div class="card-label">Call Coverage <span class="tip-cid" data-tip="Percentage of historical 911 incidents (from uploaded CAD data) that fall within at least one drone's coverage zone. Higher than geographic coverage because stations are positioned near call-volume hotspots.">?</span></div>
+    <div class="card-label">Call Coverage</div>
     <div class="card-value" style="color:var(--accent-blue);">{calls_covered_perc:.1f}%</div>
     <div class="card-sub">of historical incidents in coverage zones</div>
   </div>
@@ -5690,7 +4388,7 @@ def generate_community_impact_dashboard_html(
 <!-- ══════════════════════════════════════════════════════════════════
      SECTION 3 — 4TH AMENDMENT SAFEGUARDS
 ══════════════════════════════════════════════════════════════════ -->
-<div class="section-label">03 &nbsp;·&nbsp; Fourth Amendment &amp; Civil Liberties Safeguards <span class="tip-cid" data-tip="Plain-language summary of constitutional and policy guardrails governing every flight. These policies align the program with the 4th Amendment's protections against unreasonable search and the Baltimore Circuit ruling on mass surveillance.">?</span></div>
+<div class="section-label">03 &nbsp;·&nbsp; Fourth Amendment &amp; Civil Liberties Safeguards</div>
 <div class="amend-panel">
   <div class="amend-title">
     <span>🔒</span>
@@ -5705,42 +4403,42 @@ def generate_community_impact_dashboard_html(
     <div class="amend-item">
       <div class="amend-icon">🎯</div>
       <div>
-        <div class="amend-item-title">Reactive Dispatch Only <span class="tip-cid" data-tip="Drones only launch in response to active 911 calls or officer requests. No loitering, no speculative patrol, no geofenced monitoring of specific addresses.">?</span></div>
+        <div class="amend-item-title">Reactive Dispatch Only</div>
         <div class="amend-item-desc">Drones launch in response to 911 calls and officer requests — never for proactive surveillance or random patrol.</div>
       </div>
     </div>
     <div class="amend-item">
       <div class="amend-icon">📷</div>
       <div>
-        <div class="amend-item-title">In-Transit Camera Policy <span class="tip-cid" data-tip="Camera gimbal is locked forward-facing during flight to the scene. Recording and active observation only begin once the drone is confirmed on-station at the incident location — preventing incidental surveillance of bystanders en route.">?</span></div>
+        <div class="amend-item-title">In-Transit Camera Policy</div>
         <div class="amend-item-desc">Cameras remain forward-facing during transit and only orient toward a scene upon confirmed arrival at the incident location.</div>
       </div>
     </div>
     <div class="amend-item">
       <div class="amend-icon">🗑️</div>
       <div>
-        <div class="amend-item-title">{retention_days}-Day Data Retention <span class="tip-cid" data-tip="All footage is automatically purged after {retention_days} days unless flagged for an active investigation. This prevents the accumulation of persistent video libraries that courts have found to constitute mass surveillance.">?</span></div>
+        <div class="amend-item-title">{retention_days}-Day Data Retention</div>
         <div class="amend-item-desc">Footage is retained for a maximum of {retention_days} days absent evidentiary hold. No indefinite video libraries are maintained.</div>
       </div>
     </div>
     <div class="amend-item">
       <div class="amend-icon">🚫</div>
       <div>
-        <div class="amend-item-title">No Facial Recognition <span class="tip-cid" data-tip="Drone video is not processed through facial recognition AI. Officers review footage manually. This avoids the bias, error rates, and warrant issues associated with automated biometric identification from aerial imagery.">?</span></div>
+        <div class="amend-item-title">No Facial Recognition</div>
         <div class="amend-item-desc">This program does not integrate facial recognition technology with drone footage. Identification is performed by responding officers, not AI.</div>
       </div>
     </div>
     <div class="amend-item">
       <div class="amend-icon">⚖️</div>
       <div>
-        <div class="amend-item-title">No 1st Amendment Targeting <span class="tip-cid" data-tip="Drones are prohibited from being dispatched to protests, rallies, or free-speech gatherings. Dispatch logs are auditable and would show any violation of this policy as a policy breach reviewable by the oversight board.">?</span></div>
+        <div class="amend-item-title">No 1st Amendment Targeting</div>
         <div class="amend-item-desc">Drones will not be dispatched to monitor, document, or surveil lawful protest, assembly, or free-speech activities.</div>
       </div>
     </div>
     <div class="amend-item">
       <div class="amend-icon">📋</div>
       <div>
-        <div class="amend-item-title">Public Flight Logs <span class="tip-cid" data-tip="Every sortie is logged: call type, GPS location, duration, and pilot/operator. Records are available to any resident under applicable public records law — providing a transparency trail that deters misuse.">?</span></div>
+        <div class="amend-item-title">Public Flight Logs</div>
         <div class="amend-item-desc">Every sortie is logged with call type, location, duration, and purpose. Logs are published and available to any resident on request.</div>
       </div>
     </div>
@@ -5756,30 +4454,30 @@ def generate_community_impact_dashboard_html(
 <!-- ══════════════════════════════════════════════════════════════════
      SECTION 4 — LIVES SAVED / OUTCOMES
 ══════════════════════════════════════════════════════════════════ -->
-<div class="section-label">04 &nbsp;·&nbsp; Estimated Annual Community Outcomes <span class="tip-cid" data-tip="Model-based projections of public-safety outcomes derived from national DFR program benchmarks applied to this deployment's projected annual flight count. Not guarantees — actual results depend on staffing, call types, and policy.">?</span></div>
+<div class="section-label">04 &nbsp;·&nbsp; Estimated Annual Community Outcomes</div>
 <div class="grid-4" style="margin-bottom:4px;">
   <div class="outcome-card" style="animation-delay:0.0s;">
     <span class="outcome-icon">🚔</span>
     <div class="outcome-val"><span class="counter" data-target="{arrests_est}">{arrests_est:,}</span></div>
-    <div class="outcome-label">Arrest Assists <span class="tip-cid" data-tip="Estimated arrests aided by live aerial reconnaissance — suspect tracking, real-time officer guidance, perimeter confirmation. Modeled at ~4.3% of annual DFR flights per national benchmark data.">?</span></div>
+    <div class="outcome-label">Arrest Assists</div>
     <div class="outcome-note">Aerial intel aiding officer apprehension</div>
   </div>
   <div class="outcome-card" style="animation-delay:0.1s;">
     <span class="outcome-icon">🆘</span>
     <div class="outcome-val"><span class="counter" data-target="{rescues_est}">{rescues_est:,}</span></div>
-    <div class="outcome-label">Active Rescues <span class="tip-cid" data-tip="Estimated searches or medical emergencies where drone overhead view or thermal imaging directly enabled a successful rescue. Modeled at ~2.1% of annual DFR flights.">?</span></div>
+    <div class="outcome-label">Active Rescues</div>
     <div class="outcome-note">Missing persons, medical, extrication</div>
   </div>
   <div class="outcome-card" style="animation-delay:0.2s;">
     <span class="outcome-icon">🕊️</span>
     <div class="outcome-val"><span class="counter" data-target="{deescalation_est}">{deescalation_est:,}</span></div>
-    <div class="outcome-label">De-escalations <span class="tip-cid" data-tip="Estimated incidents where real-time aerial awareness allowed officers to approach with better situational intel, reducing the likelihood of a use-of-force incident. Modeled at ~11% of annual DFR flights.">?</span></div>
+    <div class="outcome-label">De-escalations</div>
     <div class="outcome-note">Drone intel prevented use-of-force</div>
   </div>
   <div class="outcome-card" style="animation-delay:0.3s;">
     <span class="outcome-icon">🔍</span>
     <div class="outcome-val"><span class="counter" data-target="{missing_est}">{missing_est:,}</span></div>
-    <div class="outcome-label">Missing Person Locates <span class="tip-cid" data-tip="Estimated successful locate events using thermal imaging or wide-area overhead search. Thermal signatures allow drones to find people in the dark or in obscured terrain. Modeled at ~1.7% of annual DFR flights.">?</span></div>
+    <div class="outcome-label">Missing Person Locates</div>
     <div class="outcome-note">Thermal / overhead search assist</div>
   </div>
 </div>
@@ -5792,9 +4490,9 @@ def generate_community_impact_dashboard_html(
 <!-- ══════════════════════════════════════════════════════════════════
      SECTION 5 — CALL TYPE BREAKDOWN
 ══════════════════════════════════════════════════════════════════ -->
-<div class="section-label">05 &nbsp;·&nbsp; Call Type Distribution <span class="tip-cid" data-tip="Distribution of 911 call types from your uploaded CAD data, or national DFR benchmark estimates if no data is loaded. Shows the incident mix the program will most commonly respond to.">?</span></div>
+<div class="section-label">05 &nbsp;·&nbsp; Call Type Distribution</div>
 <div class="ct-panel">
-  <div class="card-label" style="margin-bottom:14px;">Incident Categories in Coverage Zone <span class="tip-cid" data-tip="Each bar shows the count and share of incidents by type within the drone coverage zones. Bar width is proportional to the highest-volume category. Actual CAD data is used when uploaded; defaults to national DFR benchmarks otherwise.">?</span></div>
+  <div class="card-label" style="margin-bottom:14px;">Incident Categories in Coverage Zone</div>
   <div id="callTypeBars"></div>
 </div>
 
@@ -5802,7 +4500,7 @@ def generate_community_impact_dashboard_html(
 <!-- ══════════════════════════════════════════════════════════════════
      SECTION 6 — EQUITY NOTE
 ══════════════════════════════════════════════════════════════════ -->
-<div class="section-label">06 &nbsp;·&nbsp; Geographic Equity &amp; Deployment Distribution <span class="tip-cid" data-tip="Documents where drones are deployed and the policy commitments that prevent disproportionate targeting of specific communities. Station locations are determined solely by call-volume density, not demographic data.">?</span></div>
+<div class="section-label">06 &nbsp;·&nbsp; Geographic Equity &amp; Deployment Distribution</div>
 <div class="amend-panel" style="border-left-color:var(--accent-gold);">
   <div class="amend-title"><span>⚖️</span> Equitable Deployment Commitment</div>
   <p style="font-size:12.5px;color:var(--ink-mid);line-height:1.6;margin-bottom:12px;">
@@ -5811,11 +4509,11 @@ def generate_community_impact_dashboard_html(
   </p>
   <div style="display:flex;gap:12px;flex-wrap:wrap;">
     <div style="flex:1;min-width:180px;background:var(--bg-inset);border-radius:8px;padding:12px 14px;">
-      <div style="font-size:11px;font-weight:700;color:var(--accent-gold);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Deployed Stations <span class="tip-cid" data-tip="The drone stations currently active in this deployment plan. Responder (🚁) covers a 2-mile radius; Guardian (🦅) covers up to 8 miles. Station positions are optimized for maximum call coverage.">?</span></div>
+      <div style="font-size:11px;font-weight:700;color:var(--accent-gold);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Deployed Stations</div>
       <div id="stationList" style="font-size:11.5px;color:var(--ink-mid);line-height:1.8;"></div>
     </div>
     <div style="flex:2;min-width:200px;background:var(--bg-inset);border-radius:8px;padding:12px 14px;">
-      <div style="font-size:11px;font-weight:700;color:var(--accent-gold);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Equity Safeguards <span class="tip-cid" data-tip="Policy commitments that prevent demographic bias in drone deployment. Placement is data-driven (call volume), not population-profile-driven. Audit results and complaint data are published annually.">?</span></div>
+      <div style="font-size:11px;font-weight:700;color:var(--accent-gold);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Equity Safeguards</div>
       <ul style="font-size:11.5px;color:var(--ink-mid);padding-left:16px;line-height:2.0;">
         <li>Coverage zones set by call-volume density, not demographic profile</li>
         <li>Annual deployment audit published in program transparency report</li>
@@ -5830,37 +4528,37 @@ def generate_community_impact_dashboard_html(
 <!-- ══════════════════════════════════════════════════════════════════
      SECTION 7 — TAXPAYER ROI
 ══════════════════════════════════════════════════════════════════ -->
-<div class="section-label">07 &nbsp;·&nbsp; Taxpayer Return on Investment <span class="tip-cid" data-tip="Compares the one-time fleet hardware cost to the annual operational savings from drone-handled calls. ROI reflects savings from reduced patrol-car dispatches only — does not include specialty response, apprehension impact, or injury prevention value.">?</span></div>
+<div class="section-label">07 &nbsp;·&nbsp; Taxpayer Return on Investment</div>
 <div class="roi-panel">
   <div class="roi-row">
     <div class="roi-big">
       <div class="roi-big-val">{roi_multiple:.1f}×</div>
-      <div class="roi-big-label">Annual ROI multiple <span class="tip-cid" data-tip="Annual operational savings ÷ total fleet hardware cost. A 2.5× multiple means the program saves $2.50 in recurring operational costs for every $1 of one-time capital investment.">?</span></div>
+      <div class="roi-big-label">Annual ROI multiple</div>
       <div style="margin-top:10px;font-size:11px;color:var(--ink-light);">For every $1 invested in fleet CapEx, the program generates <strong>${roi_multiple:.2f}</strong> in annual operational savings.</div>
     </div>
     <div class="roi-details">
       <div class="roi-line">
-        <span class="roi-line-label">Total Fleet CapEx <span class="tip-cid" data-tip="One-time hardware acquisition cost — Responder ($80K each) + Guardian ($160K each). Does not include subscription, maintenance, insurance, or training costs.">?</span></span>
+        <span class="roi-line-label">Total Fleet CapEx</span>
         <span class="roi-line-val">${fleet_capex:,.0f}</span>
       </div>
       <div class="roi-line">
-        <span class="roi-line-label">Annual Operational Savings <span class="tip-cid" data-tip="Savings from calls resolved without a patrol car dispatch. Formula: (daily drone-only resolved calls) × ($82 officer cost − $6 drone cost) × 365 days.">?</span></span>
+        <span class="roi-line-label">Annual Operational Savings</span>
         <span class="roi-line-val" style="color:var(--accent-green);">${annual_savings:,.0f}</span>
       </div>
       <div class="roi-line">
-        <span class="roi-line-label">Break-Even Timeline <span class="tip-cid" data-tip="Months until cumulative operational savings fully offset the initial fleet hardware investment. Calculated as fleet CapEx ÷ monthly savings.">?</span></span>
+        <span class="roi-line-label">Break-Even Timeline</span>
         <span class="roi-line-val">{break_even_text}</span>
       </div>
       <div class="roi-line">
-        <span class="roi-line-label">Cost per Drone Response <span class="tip-cid" data-tip="Direct per-dispatch cost comparison. Drone: ~$6 (power, maintenance amortized). Patrol officer: ~$82 (salary, vehicle, fuel, overhead). The $76 difference per resolved call drives the annual savings figure.">?</span></span>
+        <span class="roi-line-label">Cost per Drone Response</span>
         <span class="roi-line-val">${cost_per_call_drone} vs ${cost_per_call_officer} (patrol)</span>
       </div>
       <div class="roi-line">
-        <span class="roi-line-label">Annual Calls Resolved Without Patrol Car <span class="tip-cid" data-tip="Calls where drone assessment was sufficient — no officer dispatch needed. Formula: DFR flights/day × deflection rate (% of drone-handled calls that don't escalate) × 365 days.">?</span></span>
+        <span class="roi-line-label">Annual Calls Resolved Without Patrol Car</span>
         <span class="roi-line-val">{total_resolved_annually:,}</span>
       </div>
       <div class="roi-line" style="border-bottom:none;">
-        <span class="roi-line-label">Savings Per Resolved Call <span class="tip-cid" data-tip="Net cost delta for each call resolved by drone without a patrol car: $82 (officer dispatch) − $6 (drone dispatch) = $76 saved per resolved call.">?</span></span>
+        <span class="roi-line-label">Savings Per Resolved Call</span>
         <span class="roi-line-val" style="color:var(--accent-green);">${cost_saved_per_resolved}</span>
       </div>
     </div>
@@ -5965,7 +4663,7 @@ if st.session_state['csvs_ready']:
     else:
         df_calls_full = df_calls_full.copy()
     df_stations_all = st.session_state['df_stations'].copy()
-    full_total_calls = _get_annualized_calls(int(st.session_state.get('total_original_calls', len(df_calls_full) if df_calls_full is not None else len(df_calls)) or 0))
+    full_total_calls = int(st.session_state.get('total_original_calls', len(df_calls_full) if df_calls_full is not None else len(df_calls)) or 0)
     full_daily_calls = max(1, int(full_total_calls / 365)) if full_total_calls else 1
 
     # ── MAP BUILD EVENT: log to sheets once per session ──────────────────────
@@ -6018,46 +4716,13 @@ if st.session_state['csvs_ready']:
         except Exception:
             pass
 
-    # ── Jurisdiction boundary: use coordinate-lookup result if available,
-    #    otherwise fall back to shapefile scan (demo/brinc restore paths) ──
-    #    When the user enables "County Boundary" in Display Options, swap in the
-    #    county-level polygon for the active city/state instead.
-    _use_county    = st.session_state.get('use_county_boundary', False)
-    _master_override = st.session_state.get('master_gdf_override')
-
-    if _use_county:
-        _active_state = st.session_state.get('active_state', '')
-        _county_cache_key = f"{_active_state}|county"
-        if (st.session_state.get('_county_boundary_cache_key') == _county_cache_key
-                and st.session_state.get('_county_boundary_gdf') is not None):
-            master_gdf = st.session_state['_county_boundary_gdf'].copy()
-        else:
-            with st.spinner("Loading county boundary…"):
-                _ok, _cgdf = fetch_county_by_centroid(df_calls, _active_state)
-            if _ok and _cgdf is not None:
-                _cgdf = _cgdf.copy()
-                _cgdf['DISPLAY_NAME'] = _cgdf['NAME'].astype(str)
-                _cgdf['data_count']   = len(df_calls)
-                st.session_state['_county_boundary_gdf'] = _cgdf.copy()
-                st.session_state['_county_boundary_cache_key'] = _county_cache_key
-                master_gdf = _cgdf.copy()
-            else:
-                st.warning("County boundary not found — check that counties_lite.parquet is present.")
-                if _master_override is not None and not _master_override.empty:
-                    master_gdf = _master_override.copy()
-                else:
-                    with st.spinner(get_jurisdiction_message()):
-                        _preferred_shp = st.session_state.get('boundary_source_path', '') or None
-                        master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
-    elif _master_override is not None and not _master_override.empty:
-        master_gdf = _master_override.copy()
-    else:
-        with st.spinner(get_jurisdiction_message()):
-            _preferred_shp = st.session_state.get('boundary_source_path', '') or None
-            master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
+    with st.spinner(get_jurisdiction_message()):
+        _preferred_shp = st.session_state.get('boundary_source_path', '') or None
+        master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
 
     _boundary_kind_note = st.session_state.get('boundary_kind', 'place')
     _boundary_src_note = st.session_state.get('boundary_source_path', '')
+    st.caption(f"Boundary kind: {_boundary_kind_note} | Source: {_boundary_src_note or 'live lookup / none'}")
 
     if master_gdf is None or master_gdf.empty:
         # ── Fallback 1: load any saved shapefile directly (spatial join may have
@@ -6093,36 +4758,7 @@ if st.session_state['csvs_ready']:
                             break
 
                 if best is None:
-                    # Before falling back to shp_files[0], verify it overlaps
-                    # the call coordinate bounding box — skip stale files from
-                    # prior sessions that are geographically unrelated
-                    _fb_lat_min = df_calls['lat'].min()
-                    _fb_lat_max = df_calls['lat'].max()
-                    _fb_lon_min = df_calls['lon'].min()
-                    _fb_lon_max = df_calls['lon'].max()
-                    _overlap_pad = 2.0  # degrees
-                    for _sf_cand in shp_files:
-                        try:
-                            import fiona as _fiona
-                            with _fiona.open(_sf_cand) as _sc:
-                                _sb = _sc.bounds
-                            _overlaps = not (
-                                _sb[2] < _fb_lon_min - _overlap_pad or
-                                _sb[0] > _fb_lon_max + _overlap_pad or
-                                _sb[3] < _fb_lat_min - _overlap_pad or
-                                _sb[1] > _fb_lat_max + _overlap_pad
-                            )
-                            if _overlaps:
-                                best = _sf_cand
-                                break
-                        except Exception:
-                            best = _sf_cand
-                            break
-                    # If every file failed the overlap check, skip loading —
-                    # let Fallback 2 (bbox polygon) handle it cleanly
-                    if best is None:
-                        master_gdf = None
-                        raise ValueError("No overlapping shapefiles found")
+                    best = shp_files[0]
 
                 fallback_gdf = gpd.read_file(best)
                 if fallback_gdf.crs is None:
@@ -6161,13 +4797,6 @@ if st.session_state['csvs_ready']:
         """, unsafe_allow_html=True)
 
     st.sidebar.markdown('<div class="sidebar-section-header">① Configure</div>', unsafe_allow_html=True)
-    _jur_src_file = st.session_state.get('_jur_source_file', '')
-    _boundary_src_display = (
-        _jur_src_file if _boundary_src_note == 'local_parquet' and _jur_src_file
-        else 'local_parquet' if _boundary_src_note == 'local_parquet'
-        else (_boundary_src_note.split(chr(47))[-1].split(chr(92))[-1] if _boundary_src_note else 'live lookup')
-    )
-    st.sidebar.caption(f"Boundary: {_boundary_kind_note} · {_boundary_src_display}")
 
     total_pts = master_gdf['data_count'].sum()
     master_gdf['LABEL'] = master_gdf['DISPLAY_NAME'] + " (" + (master_gdf['data_count']/total_pts*100).round(1).astype(str) + "%)"
@@ -6177,11 +4806,6 @@ if st.session_state['csvs_ready']:
     default_selection = [all_options[0]] if all_options else []
     selected_labels = st.sidebar.multiselect("Jurisdictions", options=all_options, default=default_selection,
                                              help="Select which geographic areas to include in coverage analysis.")
-
-    _jur_debug = st.session_state.get('_jur_debug', [])
-    _jur_source = next((m.split(': ')[1].split(' ')[0] for m in _jur_debug if 'parquet exists' in m and 'True' in m), None)
-    if _jur_source:
-        st.session_state['_jur_source_file'] = _jur_source
 
     if not selected_labels:
         st.warning("Please select at least one jurisdiction from the sidebar.")
@@ -6225,16 +4849,10 @@ if st.session_state['csvs_ready']:
     disp_expander = st.sidebar.expander("👁️ Display Options", expanded=False)
     with disp_expander:
         show_boundaries = st.toggle("Jurisdiction Boundaries", value=True)
-        st.toggle("County Boundary", value=False, key='use_county_boundary',
-                  help="Redraw the map using the county boundary instead of the city/place boundary.")
         show_heatmap    = st.toggle("911 Call Heatmap", value=False)
         show_health     = st.toggle("Health Score", value=False)
         show_satellite  = st.toggle("Satellite Imagery", value=False)
         show_cards      = True
-        simple_cards    = st.toggle("Simple Cards", value=False,
-                                    help="Show a compact card with just the key numbers — name, type, response time, annual savings, and CapEx.")
-        show_dots       = st.toggle("Incident Dots", value=True,
-                                    help="Show individual 911 call locations as dots on the map.")
         show_faa        = st.toggle("FAA LAANC Airspace", value=False)
         simulate_traffic = st.toggle("Simulate Ground Traffic", value=False)
         traffic_level   = st.slider("Traffic Congestion", 0, 100, 40) if simulate_traffic else 40
@@ -6243,10 +4861,6 @@ if st.session_state['csvs_ready']:
     with strat_expander:
         incremental_build = st.toggle("Phased Rollout", value=True,
             help="Place drones one at a time in priority order. Disable to find the global optimum in a single pass.")
-        auto_cap_dfr = st.toggle("Auto-cap over-utilized stations", value=True,
-            key='auto_cap_dfr',
-            help="When on, each station's DFR rate is clamped to its own physical capacity limit — "
-                 "over-utilized stations run at their personal max without reducing the rate for all other stations.")
 
         st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:8px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Deployment Mode</div>", unsafe_allow_html=True)
         deployment_mode = st.radio(
@@ -6292,10 +4906,6 @@ if st.session_state['csvs_ready']:
         st.session_state['resp_strat_idx'] = 0 if resp_strategy_raw == "Call Coverage" else 1
         resp_strategy = "Maximize Call Coverage" if resp_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
 
-        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Coverage Ranges</div>", unsafe_allow_html=True)
-        resp_radius_mi  = st.slider("🚁 Responder Range (mi)", 2.0, 3.0, float(st.session_state.get('r_resp', 2.0)), step=0.5)
-        guard_radius_mi = st.slider("🦅 Guardian Range (mi) [⚡ 5mi Rapid]", 1, 8, int(st.session_state.get('r_guard', 8)), help="The 5-mile rapid response focus zone will automatically be highlighted inside the maximum perimeter.")
-
     # Keep opt_strategy for any code that still references it (used in export/logs)
     opt_strategy = guard_strategy  # primary strategy label for reporting
 
@@ -6331,8 +4941,6 @@ if st.session_state['csvs_ready']:
     # If OSM found nothing inside the boundary (e.g. small cities with few public
     # buildings tagged), fall back to call-density-derived synthetic stations so
     # the tool never dead-ends on legitimate data.
-    # User-uploaded station files are never silently replaced — they are trusted as-is.
-    _stations_user_uploaded = st.session_state.get('stations_user_uploaded', False)
     if not df_stations_all.empty and city_m is not None:
         st_gdf = gpd.GeoDataFrame(df_stations_all,
                                    geometry=gpd.points_from_xy(df_stations_all.lon, df_stations_all.lat),
@@ -6344,23 +4952,13 @@ if st.session_state['csvs_ready']:
         df_inside = df_stations_all[mask].reset_index(drop=True)
 
         if df_inside.empty:
-            if _stations_user_uploaded:
-                # Try a 5 km buffer before giving up — handles county-boundary
-                # mode where the active polygon differs from the original city extent.
-                mask_buf = st_gdf_utm.within(city_m.buffer(5000))
-                df_inside_buf = df_stations_all[mask_buf].reset_index(drop=True)
-                if not df_inside_buf.empty:
-                    df_stations_all = df_inside_buf
-                # else: keep all uploaded stations — user knows their data
-            else:
-                st.info(
-                    "ℹ️ No OSM public buildings were found inside the jurisdiction boundary. "
-                    "Using call-density station placement — stations are snapped to incident "
-                    "locations that fall inside the city limits."
-                )
+            st.info(
+                "ℹ️ No OSM public buildings were found inside the jurisdiction boundary. "
+                "Using call-density station placement — stations are snapped to incident "
+                "locations that fall inside the city limits."
+            )
             try:
-                if not _stations_user_uploaded:
-                    df_stations_all = _make_random_stations(df_calls, n=60, boundary_geom=city_m, epsg_code=epsg_code)
+                df_stations_all = _make_random_stations(df_calls, n=60, boundary_geom=city_m, epsg_code=epsg_code)
             except Exception:
                 df_stations_all = pd.DataFrame()
 
@@ -6383,7 +4981,7 @@ if st.session_state['csvs_ready']:
         else:
             df_stations_all = df_inside
 
-        if not df_stations_all.empty and not _stations_user_uploaded:
+        if not df_stations_all.empty:
             try:
                 _final_st_gdf = gpd.GeoDataFrame(df_stations_all, geometry=gpd.points_from_xy(df_stations_all.lon, df_stations_all.lat), crs="EPSG:4326").to_crs(epsg=epsg_code)
                 _final_mask = _final_st_gdf.within(city_m)
@@ -6446,49 +5044,28 @@ if st.session_state['csvs_ready']:
 
     k_responder = st.sidebar.slider("🚁 Responder Count", 0, max(1, max_resp_calc), val_r, help="Short-range tactical drones (2-3mi radius).")
     k_guardian  = st.sidebar.slider("🦅 Guardian Count", 0, max(1, max_guard_calc), val_g, help="Long-range overwatch drones (5-8mi radius).")
+    
+    resp_radius_mi  = st.sidebar.slider("🚁 Responder Range (mi)", 2.0, 3.0, float(st.session_state.get('r_resp', 2.0)), step=0.5)
+    guard_radius_mi = st.sidebar.slider("🦅 Guardian Range (mi) [⚡ 5mi Rapid]", 1, 8, int(st.session_state.get('r_guard', 8)), help="The 5-mile rapid response focus zone will automatically be highlighted inside the maximum perimeter.")
 
     st.session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
     st.sidebar.caption('Minimum fleet default: 1 Guardian + Responders to 85% call coverage (minimum 2).')
 
-    # ── LOCK STATIONS (sidebar multiselect) ──────────────────────────────────
+    # ── MANUAL STATION PINS ───────────────────────────────────────────────────
+    # ── Sync pinned station lists (expander removed — pinning via card buttons) ──
     _station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
     _saved_g = [s for s in st.session_state.get('pinned_guard_names', []) if s in _station_names]
     _saved_r = [s for s in st.session_state.get('pinned_resp_names',  []) if s in _station_names]
+    st.session_state['pinned_guard_names'] = _saved_g
+    st.session_state['pinned_resp_names']  = _saved_r
+    pinned_guard_names = _saved_g
+    pinned_resp_names  = _saved_r
 
-    lock_expander = st.sidebar.expander("🔒 Lock Stations", expanded=bool(_saved_g or _saved_r))
-    with lock_expander:
-        st.caption("Force specific stations into the optimized solution.")
-        _new_g = st.multiselect(
-            "🦅 Lock as Guardian",
-            options=_station_names,
-            default=_saved_g,
-            key="lock_guard_ms",
-            help="These stations will always be assigned a Guardian drone regardless of optimizer output."
-        )
-        _new_r = st.multiselect(
-            "🚁 Lock as Responder",
-            options=[s for s in _station_names if s not in _new_g],
-            default=[s for s in _saved_r if s not in _new_g],
-            key="lock_resp_ms",
-            help="These stations will always be assigned a Responder drone regardless of optimizer output."
-        )
-        if _new_g != _saved_g or _new_r != [s for s in _saved_r if s not in _new_g]:
-            st.session_state['pinned_guard_names'] = _new_g
-            st.session_state['pinned_resp_names']  = _new_r
-            if '_opt_cache_key' in st.session_state:
-                del st.session_state['_opt_cache_key']
-            st.rerun()
-
-    st.session_state['pinned_guard_names'] = _new_g
-    st.session_state['pinned_resp_names']  = _new_r
-    pinned_guard_names = _new_g
-    pinned_resp_names  = _new_r
-
-    # Warn if locked count exceeds slider
+    # Warn in sidebar if pin count exceeds slider
     if len(pinned_guard_names) > k_guardian:
-        st.sidebar.warning(f"⚠️ Raise Guardian Count ≥ {len(pinned_guard_names)} to honour all Guardian locks.")
+        st.sidebar.warning(f"⚠️ Raise Guardian Count ≥ {len(pinned_guard_names)} to use all Guardian pins.")
     if len(pinned_resp_names) > k_responder:
-        st.sidebar.warning(f"⚠️ Raise Responder Count ≥ {len(pinned_resp_names)} to honour all Responder locks.")
+        st.sidebar.warning(f"⚠️ Raise Responder Count ≥ {len(pinned_resp_names)} to use all Responder pins.")
 
     # ── ADD CUSTOM STATION BY ADDRESS ─────────────────────────────────────────
     add_expander = st.sidebar.expander("➕ Add Custom Station", expanded=False)
@@ -6661,8 +5238,6 @@ if st.session_state['csvs_ready']:
     calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls = precompute_spatial_data(
         df_calls, df_calls_full, df_stations_all, city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash
     )
-    if total_calls == 0 and len(df_calls) > 0:
-        st.warning("No uploaded calls fell inside the selected jurisdiction boundary. Coverage rings can still render, but call coverage will be 0%. Check city/state selection or clean outlier coordinates in the CAD file.")
     df_curve = compute_all_elbow_curves(
         total_calls, resp_matrix, guard_matrix,
         [s['clipped_2m'] for s in station_metadata],
@@ -6698,11 +5273,11 @@ if st.session_state['csvs_ready']:
 
         st.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>DFR Dispatch Rate (%)</div>", unsafe_allow_html=True)
         st.markdown(f"<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>What % of in-range calls will the drone be sent to?</div>", unsafe_allow_html=True)
-        dfr_dispatch_rate = st.slider("DFR Dispatch Rate", 1, 100, st.session_state.get('dfr_rate',12), label_visibility="collapsed") / 100.0
+        dfr_dispatch_rate = st.slider("DFR Dispatch Rate", 1, 100, st.session_state.get('dfr_rate',25), label_visibility="collapsed") / 100.0
 
         st.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>Calls Resolved Without Officer Dispatch (%)</div>", unsafe_allow_html=True)
         st.markdown(f"<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>Of drone-attended calls, what % close without a patrol car?</div>", unsafe_allow_html=True)
-        deflection_rate = st.slider("Resolution Rate", 0, 100, st.session_state.get('deflect_rate',25), label_visibility="collapsed") / 100.0
+        deflection_rate = st.slider("Resolution Rate", 0, 100, st.session_state.get('deflect_rate',30), label_visibility="collapsed") / 100.0
 
         st.session_state['dfr_rate']    = int(dfr_dispatch_rate * 100)
         st.session_state['deflect_rate'] = int(deflection_rate * 100)
@@ -6767,7 +5342,7 @@ if st.session_state['csvs_ready']:
                 else:
                     g_best, chrono_g = _greedy_area(
                         guard_matrix,
-                        [station_metadata[i]['clipped_guard'] for i in range(len(station_metadata))],
+                        [station_metadata[i]['clipped_guard'] for i in range(n)],
                         k_guardian, locked_g_pins, set()
                     )
                 g_best = list(g_best)
@@ -6810,7 +5385,7 @@ if st.session_state['csvs_ready']:
                     _excl_resp = set(g_best) if complement_mode else set()
                     r_best, chrono_r = _greedy_area(
                         resp_matrix_eff,
-                        [station_metadata[i]['clipped_2m'] for i in range(len(station_metadata))],
+                        [station_metadata[i]['clipped_2m'] for i in range(n)],
                         k_responder, locked_r_pins, _excl_resp
                     )
             else:
@@ -6890,7 +5465,6 @@ if st.session_state['csvs_ready']:
         area_covered_perc = (unary_union(active_geos).area / city_area) * 100
     if total_calls > 0:
         calls_covered_perc = (np.logical_or(cov_r, cov_g).sum() / total_calls) * 100
-        st.session_state['calls_covered_perc'] = calls_covered_perc
     if len(active_geos) >= 2:
         inters = [active_geos[i].intersection(active_geos[j])
                   for i in range(len(active_geos))
@@ -6928,13 +5502,50 @@ if st.session_state['csvs_ready']:
         calls_covered_perc=calls_covered_perc
     )
     thermal_savings = float(specialty_savings.get('thermal_savings', 0) or 0)
-    k9_savings      = float(specialty_savings.get('k9_savings', 0) or 0)
-    fire_savings    = float(specialty_savings.get('fire_savings', 0) or 0)
-    fire_calls_annual = float(specialty_savings.get('fire_calls_annual', 0) or 0)
+    k9_savings = float(specialty_savings.get('k9_savings', 0) or 0)
     possible_additional_savings = float(specialty_savings.get('additional_savings_total', 0) or 0)
 
-    _sidebar_annual_cap_placeholder = st.sidebar.empty()
-    if fleet_capex <= 0:
+    if fleet_capex > 0:
+        st.sidebar.markdown(f"""
+        <div style="background:{budget_box_bg}; border:1px solid {budget_box_border}; padding:12px; border-radius:4px;
+             text-align:center; margin:8px 0 12px 0; box-shadow:0 2px 5px {budget_box_shadow};">
+            <div style="font-size:0.7rem; color:{text_muted}; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
+            <div style="font-size:1.8rem; font-weight:900; color:{budget_box_border}; font-family:monospace;">${annual_savings:,.0f}</div>
+            <div style="font-size:0.68rem; color:{text_muted}; margin-top:4px;">+ possible specialty upside</div>
+            <div style="font-size:1.05rem; font-weight:800; color:#39FF14; font-family:monospace; margin-top:2px;">${possible_additional_savings:,.0f}</div>
+            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-top:6px;">
+                <span style="color:{text_muted};">Thermal:</span>
+                <span style="color:{text_main}; font-weight:700;">${thermal_savings:,.0f}/yr</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-bottom:2px;">
+                <span style="color:{text_muted};">K-9 avoided:</span>
+                <span style="color:{text_main}; font-weight:700;">${k9_savings:,.0f}/yr</span>
+            </div>
+            <div style="border-top:1px solid {card_border}; margin:8px 0;"></div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
+                <span style="color:{text_muted};">Calls in range:</span>
+                <span style="color:{text_main}; font-weight:700;">{covered_daily_calls:.1f}/day</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
+                <span style="color:{text_muted};">DFR flights ({int(dfr_dispatch_rate*100)}%):</span>
+                <span style="color:{text_main}; font-weight:700;">{daily_dfr_responses:.1f}/day</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:8px;">
+                <span style="color:{text_muted};">Resolved no dispatch:</span>
+                <span style="color:{text_main}; font-weight:700;">{daily_drone_only_calls:.1f}/day</span>
+            </div>
+            <div style="border-top:1px dashed {card_border}; margin:6px 0;"></div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
+                <span style="color:{text_muted};">Fleet CapEx:</span>
+                <span style="color:{text_main}; font-weight:700;">${fleet_capex:,.0f}</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem;">
+                <span style="color:{text_muted};">Break-even:</span>
+                <span style="color:{budget_box_border}; font-weight:700;">{break_even_text}</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
         st.sidebar.info("👈 Set Responder/Guardian counts above to calculate budget impact.")
 
     # ── BUILD DRONE OBJECTS ───────────────────────────────────────────
@@ -6991,106 +5602,27 @@ if st.session_state['csvs_ready']:
             _is_guard    = (d_type == 'GUARDIAN')
             _budget_min  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] if _is_guard else (CONFIG["RESPONDER_PATROL_HOURS"] * 60)
             _zone_flights = _raw_zone_perc * calls_per_day * dfr_dispatch_rate
-
-            # ── CAPACITY MODEL: 10-minute on-scene floor ──────────────────────
-            # Every sortie consumes travel_time + on_scene_time from the daily budget.
-            # We require at least 10 min on-scene so the drone isn't rushing back.
-            # Deficit triggers when available on-scene time per flight drops below 10 min.
-            #
-            #   max_flights   = budget_min / (avg_time_min + 10)
-            #   on_scene_min  = (budget_min / zone_flights) - avg_time_min   [if zone_flights > 0]
-            #   deficit       = on_scene_min < 10  ↔  zone_flights > max_flights
-            _MIN_SCENE_MIN   = 10.0
-            _g_budget        = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]
-            _r_budget        = CONFIG["RESPONDER_PATROL_HOURS"] * 60
-            _alt_is_guard    = not _is_guard   # cross-type recommendation
-            _alt_budget      = _g_budget if _alt_is_guard else _r_budget
-            _alt_max_single  = CONFIG["GUARDIAN_FLIGHT_MIN"] if _alt_is_guard else CONFIG["RESPONDER_FLIGHT_MIN"]
-
-            # Capacity of THIS drone type (flights/day with 10-min scene floor)
-            # Guardian is continuously airborne — a response costs round-trip travel
-            # (fly TO scene + on-scene + fly BACK to patrol), so use 2×avg_time.
-            # Guardian is also bounded by its duty cycle: 22.857 sorties/day,
-            # each sortie fitting floor(60 / response_cost) responses max.
-            import math as _math2
-            _SORTIES_PER_DAY = (24 * 60) / (CONFIG["GUARDIAN_FLIGHT_MIN"] + CONFIG["GUARDIAN_CHARGE_MIN"])
-            if _is_guard:
-                _response_cost_g  = 2 * avg_time_min + _MIN_SCENE_MIN  # round-trip + scene
-                _airtime_cap_g    = _budget_min / _response_cost_g
-                _per_sortie_g     = max(1, _math2.floor(CONFIG["GUARDIAN_FLIGHT_MIN"] / _response_cost_g))
-                _duty_cap_g       = _SORTIES_PER_DAY * _per_sortie_g
-                _max_flights_cap  = min(_airtime_cap_g, _duty_cap_g)
-            else:
-                _max_flights_cap  = _budget_min / (avg_time_min + _MIN_SCENE_MIN)
-            # Alternate type cap (for cross-type deficit recommendation)
-            if _alt_is_guard:
-                _response_cost_ag = 2 * avg_time_min + _MIN_SCENE_MIN
-                _airtime_cap_ag   = _alt_budget / _response_cost_ag
-                _per_sortie_ag    = max(1, _math2.floor(CONFIG["GUARDIAN_FLIGHT_MIN"] / _response_cost_ag))
-                _duty_cap_ag      = _SORTIES_PER_DAY * _per_sortie_ag
-                _alt_max_flights  = min(_airtime_cap_ag, _duty_cap_ag)
-            else:
-                _alt_max_flights  = _alt_budget / (avg_time_min + _MIN_SCENE_MIN)
-
-            # ── Auto-cap: clamp this station's effective DFR rate to its
-            #    physical capacity limit so it doesn't show a deficit while
-            #    leaving every other station's rate untouched.
-            _raw_demand = _raw_zone_perc * calls_per_day
-            if auto_cap_dfr and _max_flights_cap > 0 and _raw_demand > 0:
-                _station_max_rate = _max_flights_cap / _raw_demand
-                _effective_dfr    = min(dfr_dispatch_rate, _station_max_rate)
-                _zone_flights     = _raw_demand * _effective_dfr
-            else:
-                _effective_dfr = dfr_dispatch_rate
-
-            # On-scene minutes available per flight given current demand
-            _on_scene_min = (_budget_min / max(_zone_flights, 0.001)) - avg_time_min if _zone_flights > 0 else 99.0
-
-            # True (uncapped) utilization using scene-inclusive budget
-            _true_util = (_zone_flights * (avg_time_min + _MIN_SCENE_MIN)) / max(1.0, _budget_min)
-            # Display util capped at 1.0 (100%) for progress bars; deficit shown separately
-            _util = min(1.0, _true_util)
-
-            # Deficit: flights demanded beyond physical capacity
-            import math as _math
-            _deficit_flights  = max(0.0, _zone_flights - _max_flights_cap)
-            _has_deficit      = _deficit_flights > 0.01
-            _unserv_calls_day = _deficit_flights / max(dfr_dispatch_rate, 0.01) if _has_deficit else 0.0
-            _unserv_calls_yr  = _unserv_calls_day * 365
-
-            # Extra stations needed to clear deficit (same type and alternate type)
-            _extra_same = int(_math.ceil(_deficit_flights / _max_flights_cap)) if _has_deficit else 0
-            _extra_alt  = int(_math.ceil(_deficit_flights / _alt_max_flights))  if _has_deficit else 0
-
-            # CapEx cost of each resolution path
-            _same_type_cost = CONFIG["GUARDIAN_COST"] if _is_guard else CONFIG["RESPONDER_COST"]
-            _alt_type_cost  = CONFIG["RESPONDER_COST"] if _is_guard else CONFIG["GUARDIAN_COST"]
-            _extra_same_capex = _extra_same * _same_type_cost
-            _extra_alt_capex  = _extra_alt  * _alt_type_cost
-            _same_type_label  = "Guardian"  if _is_guard else "Responder"
-            _alt_type_label   = "Responder" if _is_guard else "Guardian"
+            _util = min(0.99, (_zone_flights * avg_time_min) / max(1.0, _budget_min))
 
             # ── BASE VALUE: calls uniquely covered (non-shared zone) ──────────
-            # Cap savings to physically serviceable flights when in deficit
+            # These calls have no other drone to fall back on — pure incremental value.
             _excl_daily        = (_excl_calls / total_calls) * calls_per_day
-            _excl_flights_raw  = _excl_daily * dfr_dispatch_rate
-            # Clamp exclusive flights to what the drone can actually serve
-            _excl_flights      = min(_excl_flights_raw, _max_flights_cap) if _has_deficit else _excl_flights_raw
+            _excl_flights      = _excl_daily * dfr_dispatch_rate
             _excl_deflected    = _excl_flights * deflection_rate
             _cost_delta        = CONFIG["OFFICER_COST_PER_CALL"] - CONFIG["DRONE_COST_PER_CALL"]
             _base_monthly      = _cost_delta * _excl_deflected * 30.4
             _base_annual       = _base_monthly * 12
 
             # ── CONCURRENT VALUE: shared-zone calls captured while partner is busy ─
+            # Guardian is airborne util% of the time → Responder handles that fraction.
+            # Responder is airborne util% of the time → Guardian handles that fraction.
+            # Net concurrent gain = shared_calls × partner_util × deflection × cost_delta
+            # For a Responder sharing zone with a Guardian: partner = Guardian utilization
+            # We approximate partner utilization as _util (symmetric; use actual if available)
             _shared_daily      = (_shared_calls / total_calls) * calls_per_day
             _shared_dfr        = _shared_daily * dfr_dispatch_rate
+            # Calls this drone handles while its partner is busy (partner util ≈ _util)
             _concurrent_daily  = _shared_dfr * _util
-            # In deficit, the drone is already at or over capacity from exclusive zone
-            # flights alone. Cap concurrent to whatever flight capacity remains so the
-            # Annual Capacity Value reflects only calls the drone can physically service.
-            if _has_deficit:
-                _remaining_cap_day = max(0.0, _max_flights_cap - _excl_flights)
-                _concurrent_daily  = min(_concurrent_daily, _remaining_cap_day)
             _concurrent_month  = _cost_delta * (_concurrent_daily * deflection_rate) * 30.4
             _concurrent_annual = _concurrent_month * 12
 
@@ -7099,46 +5631,29 @@ if st.session_state['csvs_ready']:
             _best_annual   = _base_annual  + _concurrent_annual
 
             # ── STORE — use best_case as primary display value ─────────────────
-            d['marginal_perc']       = marginal_historic / total_calls
-            d['marginal_flights']    = _excl_flights
-            d['marginal_deflected']  = _excl_deflected
-            d['shared_flights']      = _shared_dfr
-            d['zone_flights']        = _zone_flights
-            d['zone_calls_annual']   = _raw_zone_calls
-            d['zone_flights_annual'] = _zone_flights * 365.0
-            d['utilization']         = _util
-            d['true_util']           = _true_util
-            d['on_scene_min']        = _on_scene_min
-            d['max_flights_cap']     = _max_flights_cap
-            d['effective_dfr_rate']  = _effective_dfr
-            d['has_deficit']         = _has_deficit
-            d['deficit_flights']     = _deficit_flights
-            d['unserv_calls_day']    = _unserv_calls_day
-            d['unserv_calls_yr']     = _unserv_calls_yr
-            d['extra_same']          = _extra_same
-            d['extra_alt']           = _extra_alt
-            d['extra_same_capex']    = _extra_same_capex
-            d['extra_alt_capex']     = _extra_alt_capex
-            d['same_type_label']     = _same_type_label
-            d['alt_type_label']      = _alt_type_label
-            d['blocked_per_day']     = _concurrent_daily
-            d['monthly_savings']     = _best_monthly
-            d['annual_savings']      = _best_annual
-            d['base_annual']         = _base_annual
-            d['concurrent_annual']   = _concurrent_annual
-            d['best_case_annual']    = _best_annual
-            d['concurrent_monthly']  = _concurrent_month
-            d['be_text']     = f"{d['cost']/_best_monthly:.1f} MO" if _best_monthly > 0 else "N/A"
-            d['best_be_text']= d['be_text']
+            # Base (excl-only) is the conservative floor.
+            # Best case is the headline figure shown in the card.
+            d['marginal_perc']     = marginal_historic / total_calls  # for KPI dedup only
+            d['marginal_flights']  = _excl_flights          # exclusive zone flights
+            d['marginal_deflected']= _excl_deflected
+            d['shared_flights']    = _shared_dfr             # shared zone DFR flights
+            d['zone_flights']      = _zone_flights           # total zone flights (for util)
+            d['zone_calls_annual'] = _raw_zone_calls         # annual calls for service in this drone's range
+            d['zone_flights_annual'] = _zone_flights * 365.0 # annual drone flights generated by that zone
+            d['utilization']       = _util
+            d['blocked_per_day']   = _concurrent_daily
+            d['monthly_savings']   = _best_monthly           # headline = best case
+            d['annual_savings']    = _best_annual
+            d['base_annual']       = _base_annual            # conservative floor
+            d['concurrent_annual'] = _concurrent_annual
+            d['best_case_annual']  = _best_annual            # same as headline now
+            d['concurrent_monthly']= _concurrent_month
+            d['be_text']   = f"{d['cost']/_best_monthly:.1f} MO" if _best_monthly > 0 else "N/A"
+            d['best_be_text'] = d['be_text']
         else:
             d.update({'assigned_indices':[],'annual_savings':0,'marginal_flights':0,
                       'marginal_deflected':0,'shared_flights':0,'be_text':"N/A",
-                      'utilization':0,'true_util':0,'on_scene_min':99,'max_flights_cap':0,
-                      'has_deficit':False,'deficit_flights':0,'unserv_calls_day':0,
-                      'unserv_calls_yr':0,'extra_same':0,'extra_alt':0,
-                      'extra_same_capex':0,'extra_alt_capex':0,
-                      'same_type_label':'Responder','alt_type_label':'Guardian',
-                      'concurrent_monthly':0,'best_case_annual':0,
+                      'utilization':0,'concurrent_monthly':0,'best_case_annual':0,
                       'blocked_per_day':0,'best_be_text':"N/A",'base_annual':0,
                       'concurrent_annual':0,'zone_flights':0,'zone_calls_annual':0,
                       'zone_flights_annual':0})
@@ -7168,11 +5683,7 @@ if st.session_state['csvs_ready']:
                     _d['be_text'] = f"{_d['cost']/_alloc_monthly:.1f} MO" if _alloc_monthly > 0 else "N/A"
                     _d['best_be_text'] = _d['be_text']
             else:
-                # Cap scale at 1.0: never inflate per-unit values above their raw
-                # pre-reconciliation figures. When _fleet_target_annual exceeds
-                # _raw_total_annual (low-utilisation / no-overlap case) the gap is
-                # handled by the drift correction below rather than by scaling up.
-                _scale = min(1.0, _fleet_target_annual / _raw_total_annual)
+                _scale = _fleet_target_annual / _raw_total_annual
                 for _d in active_drones:
                     _base = float(_d.get('base_annual', 0) or 0)
                     _conc = float(_d.get('concurrent_annual', 0) or 0)
@@ -7193,94 +5704,12 @@ if st.session_state['csvs_ready']:
             _drift = _fleet_target_annual - _reconciled_total
             if abs(_drift) > 0.01 and active_drones:
                 _lead = max(active_drones, key=lambda x: float(x.get('annual_savings', 0) or 0))
-                _lead['annual_savings']   = float(_lead.get('annual_savings',   0) or 0) + _drift
+                _lead['annual_savings'] = float(_lead.get('annual_savings', 0) or 0) + _drift
                 _lead['best_case_annual'] = float(_lead.get('best_case_annual', 0) or 0) + _drift
-                _lead['monthly_savings']  = float(_lead.get('monthly_savings',  0) or 0) + (_drift / 12.0)
-                # Distribute drift into base first; overflow goes into concurrent so that
-                # base_annual + concurrent_annual always equals best_case_annual (keeps the
-                # Value Breakdown box consistent with the headline figure).
-                _lead_base = float(_lead.get('base_annual', 0) or 0)
-                _lead_conc = float(_lead.get('concurrent_annual', 0) or 0)
-                _drift_to_base = max(-_lead_base, min(_drift, _drift))  # full drift to base …
-                _new_base = _lead_base + _drift_to_base
-                if _new_base < 0:                                        # … unless base would go negative
-                    _drift_to_base = -_lead_base
-                    _new_base = 0.0
-                _drift_to_conc = _drift - _drift_to_base
-                _lead['base_annual']       = _new_base
-                _lead['concurrent_annual'] = max(0.0, _lead_conc + _drift_to_conc)
-                _lead['be_text']      = f"{_lead['cost']/_lead['monthly_savings']:.1f} MO" if _lead['monthly_savings'] > 0 else "N/A"
+                _lead['monthly_savings'] = float(_lead.get('monthly_savings', 0) or 0) + (_drift / 12.0)
+                _lead['base_annual'] = max(0.0, float(_lead.get('base_annual', 0) or 0) + _drift)
+                _lead['be_text'] = f"{_lead['cost']/_lead['monthly_savings']:.1f} MO" if _lead['monthly_savings'] > 0 else "N/A"
                 _lead['best_be_text'] = _lead['be_text']
-
-    # ── SIDEBAR: fill Annual Capacity Value box with specialty values that match unit cards ──
-    if fleet_capex > 0:
-        _s_THERMAL_RATE     = float(CONFIG.get("THERMAL_DEFAULT_APPLICABLE_RATE", 0.12) or 0)
-        _s_THERMAL_PER_CALL = float(CONFIG.get("THERMAL_SAVINGS_PER_CALL", 38) or 0)
-        _s_K9_RATE          = float(CONFIG.get("K9_DEFAULT_APPLICABLE_RATE", 0.03) or 0)
-        _s_K9_PER_CALL      = float(CONFIG.get("K9_SAVINGS_PER_CALL", 155) or 0)
-        _s_FIRE_RATE        = float(CONFIG.get("FIRE_DEFAULT_APPLICABLE_RATE", 0.05) or 0)
-        _s_FIRE_PER_CALL    = float(CONFIG.get("FIRE_SAVINGS_PER_CALL", 450) or 0)
-
-        _s_thermal_total = 0.0
-        _s_k9_total      = 0.0
-        _s_fire_total    = 0.0
-        for _sd in active_drones:
-            _sd_flights  = float(_sd.get("marginal_flights", 0) or 0)
-            _sd_shared   = float(_sd.get("shared_flights", 0) or 0)
-            _sd_zone_calls          = float(_sd.get("zone_calls_annual", 0) or 0)
-            _sd_zone_flights_annual = float(_sd.get("zone_flights_annual", (_sd_flights + _sd_shared) * 365.0) or 0)
-            _sd_serviceable_annual  = float(_sd.get("max_flights_cap", 0) or 0) * 365.0
-            _sd_flight_base = min(_sd_zone_flights_annual, _sd_serviceable_annual) if _sd_serviceable_annual > 0 else _sd_zone_flights_annual
-            _sd_flight_base = min(_sd_flight_base, _sd_zone_calls) if _sd_zone_calls > 0 else _sd_flight_base
-            _s_thermal_total += _sd_flight_base * _s_THERMAL_RATE * _s_THERMAL_PER_CALL
-            _s_k9_total      += _sd_flight_base * _s_K9_RATE      * _s_K9_PER_CALL
-            _s_fire_total    += _sd_flight_base * _s_FIRE_RATE    * _s_FIRE_PER_CALL
-
-        _s_specialty_total = _s_thermal_total + _s_k9_total + _s_fire_total
-
-        _sidebar_annual_cap_placeholder.markdown(f"""
-        <div style="background:{budget_box_bg}; border:1px solid {budget_box_border}; padding:12px; border-radius:4px;
-             text-align:center; margin:8px 0 12px 0; box-shadow:0 2px 5px {budget_box_shadow};">
-            <div style="font-size:0.7rem; color:{text_muted}; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
-            <div style="font-size:1.8rem; font-weight:900; color:{budget_box_border}; font-family:monospace;">${annual_savings:,.0f}</div>
-            <div style="font-size:0.68rem; color:{text_muted}; margin-top:4px;">+ specialty response upside</div>
-            <div style="font-size:1.05rem; font-weight:800; color:#39FF14; font-family:monospace; margin-top:2px;">${_s_specialty_total:,.0f}</div>
-            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-top:6px;">
-                <span style="color:{text_muted};">🔥 Thermal response:</span>
-                <span style="color:#fbbf24; font-weight:700;">${_s_thermal_total:,.0f}/yr</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-top:2px;">
-                <span style="color:{text_muted};">🐕 K-9 replacement:</span>
-                <span style="color:#39FF14; font-weight:700;">${_s_k9_total:,.0f}/yr</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-bottom:2px; margin-top:2px;">
-                <span style="color:{text_muted};">🚒 Fire dept value:</span>
-                <span style="color:#fb7121; font-weight:700;">${_s_fire_total:,.0f}/yr</span>
-            </div>
-            <div style="border-top:1px solid {card_border}; margin:8px 0;"></div>
-            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
-                <span style="color:{text_muted};">Calls in range:</span>
-                <span style="color:{text_main}; font-weight:700;">{covered_daily_calls:.1f}/day</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
-                <span style="color:{text_muted};">DFR flights ({int(dfr_dispatch_rate*100)}%):</span>
-                <span style="color:{text_main}; font-weight:700;">{daily_dfr_responses:.1f}/day</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:8px;">
-                <span style="color:{text_muted};">Resolved no dispatch:</span>
-                <span style="color:{text_main}; font-weight:700;">{daily_drone_only_calls:.1f}/day</span>
-            </div>
-            <div style="border-top:1px dashed {card_border}; margin:6px 0;"></div>
-            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
-                <span style="color:{text_muted};">Fleet CapEx:</span>
-                <span style="color:{text_main}; font-weight:700;">${fleet_capex:,.0f}</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:0.72rem;">
-                <span style="color:{text_muted};">Break-even:</span>
-                <span style="color:{budget_box_border}; font-weight:700;">{break_even_text}</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
 
     pop_metric = st.session_state.get('estimated_pop', 250000)
     grant_bracket = estimate_grants(pop_metric)
@@ -7345,15 +5774,9 @@ if st.session_state['csvs_ready']:
     # Keep executive-summary time-saved metric available before later export blocks.
     try:
         _avg_ground_speed_exec = float(CONFIG["DEFAULT_TRAFFIC_SPEED"]) * (1 - float(traffic_level) / 100.0)
-        # Ground time = same avg distance drone covers, but at road speed with 1.4× road-tortuosity factor.
-        # avg_time_min = (avg_dist / speed_mph)*60  →  avg_dist = avg_time_min * speed_mph / 60
-        # ground_time  = avg_dist * 1.4 / ground_speed * 60 = avg_time_min * speed_mph * 1.4 / ground_speed
-        avg_time_saved = (max(0.0, (sum(d['avg_time_min'] * d['speed_mph'] * 1.4 / _avg_ground_speed_exec for d in active_drones) / len(active_drones)) - avg_resp_time)) if active_drones and _avg_ground_speed_exec > 0 else 0.0
+        avg_time_saved = ((sum((d['radius_m']/1609.34*1.4/_avg_ground_speed_exec)*60 for d in active_drones) / len(active_drones)) - avg_resp_time) if active_drones and _avg_ground_speed_exec > 0 else 0.0
     except Exception:
         avg_time_saved = 0.0
-    # ── Persist live deployment metrics so the apprehension table reads real values ──
-    st.session_state['avg_time_saved_min'] = avg_time_saved
-    st.session_state['avg_resp_time_min']  = avg_resp_time
 
     # 1. THE SINGLE-LINE EXECUTIVE HEADER
     logo_b64 = get_transparent_product_base64("gigs.png")
@@ -7471,30 +5894,21 @@ if st.session_state['csvs_ready']:
             geoms_to_draw = [city_boundary_geom] if isinstance(city_boundary_geom, Polygon) else list(city_boundary_geom.geoms)
             for gi, geom in enumerate(geoms_to_draw):
                 bx, by = geom.exterior.coords.xy
-                fig.add_trace(go.Scattermap(mode="lines", lon=list(bx), lat=list(by),
+                fig.add_trace(go.Scattermapbox(mode="lines", lon=list(bx), lat=list(by),
                     line=dict(color=map_boundary_color, width=2), name="Jurisdiction Boundary",
                     hoverinfo='skip', showlegend=(gi==0)))
 
         if show_heatmap and not display_calls.empty:
-            fig.add_trace(go.Densitymap(lat=display_calls.geometry.y, lon=display_calls.geometry.x,
+            fig.add_trace(go.Densitymapbox(lat=display_calls.geometry.y, lon=display_calls.geometry.x,
                 z=np.ones(len(display_calls)), radius=12, colorscale='Inferno', opacity=0.6,
                 showscale=False, name="Heatmap", hoverinfo='skip'))
 
-        if show_dots and not display_calls.empty:
+        if not display_calls.empty:
             point_size = 1 if len(display_calls) > 150000 else 2 if len(display_calls) > 50000 else 3 if len(display_calls) > 20000 else 4
             point_opacity = 0.06 if len(display_calls) > 150000 else 0.10 if len(display_calls) > 50000 else 0.18 if len(display_calls) > 20000 else 0.28 if len(display_calls) > 10000 else 0.4
-            # Split by agency so fire calls render red and police calls use the theme colour
-            _has_agency = 'agency' in display_calls.columns
-            _fire_calls   = display_calls[display_calls['agency'].str.lower() == 'fire'] if _has_agency else display_calls.iloc[0:0]
-            _police_calls = display_calls[display_calls['agency'].str.lower() != 'fire'] if _has_agency else display_calls
-            if not _police_calls.empty:
-                fig.add_trace(go.Scattermap(lat=_police_calls.geometry.y, lon=_police_calls.geometry.x,
-                    mode='markers', marker=dict(size=point_size, color=map_incident_color, opacity=point_opacity),
-                    name="Police Incidents", hoverinfo='skip'))
-            if not _fire_calls.empty:
-                fig.add_trace(go.Scattermap(lat=_fire_calls.geometry.y, lon=_fire_calls.geometry.x,
-                    mode='markers', marker=dict(size=point_size, color='#ff3b3b', opacity=point_opacity),
-                    name="Fire Incidents", hoverinfo='skip'))
+            fig.add_trace(go.Scattermapbox(lat=display_calls.geometry.y, lon=display_calls.geometry.x,
+                mode='markers', marker=dict(size=point_size, color=map_incident_color, opacity=point_opacity),
+                name="Incident Data", hoverinfo='skip'))
 
         if show_faa and faa_geojson:
             add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=not show_satellite)
@@ -7510,7 +5924,7 @@ if st.session_state['csvs_ready']:
             outer_width = 1.5 if is_extended_guardian else 4.5
             outer_opac = 0.4 if is_extended_guardian else 1.0
             
-            fig.add_trace(go.Scattermap(
+            fig.add_trace(go.Scattermapbox(
                 lat=list(clats)+[None,d['lat']], lon=list(clons)+[None,d['lon']],
                 mode='lines+markers',
                 opacity=outer_opac,
@@ -7521,7 +5935,7 @@ if st.session_state['csvs_ready']:
             # The 5-mile Rapid Response ring gets the "Important" styling (thick, solid, heavier fill)
             if is_extended_guardian:
                 f_lats, f_lons = get_circle_coords(d['lat'], d['lon'], r_mi=5.0)
-                fig.add_trace(go.Scattermap(
+                fig.add_trace(go.Scattermapbox(
                     lat=list(f_lats), lon=list(f_lons),
                     mode='lines',
                     line=dict(color=d['color'], width=4.5),
@@ -7536,7 +5950,7 @@ if st.session_state['csvs_ready']:
 
             # Star marker for manually pinned stations
             if d.get('pinned'):
-                fig.add_trace(go.Scattermap(
+                fig.add_trace(go.Scattermapbox(
                     lat=[d['lat']], lon=[d['lon']], mode='markers',
                     marker=dict(size=18, color=d['color'], symbol='star'),
                     name=f"📍 {d['name'].split(',')[0]} (Pinned)",
@@ -7552,21 +5966,21 @@ if st.session_state['csvs_ready']:
                 if gs > 0:
                     gr_mi = (gs/60) * (d['radius_m']/1609.34/d['speed_mph'])*60
                     ga = np.linspace(0,2*np.pi,9)
-                    fig.add_trace(go.Scattermap(
+                    fig.add_trace(go.Scattermapbox(
                         lat=list(d['lat']+(gr_mi/69.172)*np.sin(ga)),
                         lon=list(d['lon']+(gr_mi/(69.172*np.cos(np.radians(d['lat']))))*np.cos(ga)),
                         mode='lines', line=dict(color=t_color, width=2.5),
                         fill='toself', fillcolor=t_fill,
                         name=f"Ground ({t_label})", hoverinfo='skip'))
 
-        map_cfg = dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style=map_style)
+        mapbox_cfg = dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style=map_style)
         if show_satellite:
-            map_cfg["style"] = "carto-positron"
-            map_cfg["layers"] = [{"below":"traces","sourcetype":"raster",
+            mapbox_cfg["style"] = "carto-positron"
+            mapbox_cfg["layers"] = [{"below":"traces","sourcetype":"raster",
                 "sourceattribution":"Esri, Maxar, Earthstar Geographics",
                 "source":["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"]}]
 
-        fig.update_layout(uirevision="LOCKED_MAP", map=map_cfg,
+        fig.update_layout(uirevision="LOCKED_MAP", mapbox=mapbox_cfg,
             margin=dict(l=0,r=0,t=0,b=0), height=800, font=dict(size=18),
             showlegend=True,
             legend=dict(yanchor="top", y=0.98, xanchor="left", x=0.02,
@@ -7577,7 +5991,7 @@ if st.session_state['csvs_ready']:
 
     # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────
     st.markdown("---")
-    st.markdown(f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics <span class='tip' data-tip='Per-drone financial breakdown — annual capacity value, specialty response savings, utilization, break-even, and response time for each deployed unit. Hover each ? badge for metric definitions.'>?</span></h4>", unsafe_allow_html=True)
+    st.markdown(f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics</h4>", unsafe_allow_html=True)
     st.markdown(
         f"<div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:10px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>",
         unsafe_allow_html=True
@@ -7601,14 +6015,82 @@ if st.session_state['csvs_ready']:
         unsafe_allow_html=True
     )
     if active_drones:
-        st.markdown(
-            _build_unit_cards_html(
-                active_drones, text_main, text_muted, card_bg, card_border,
-                card_title, accent_color, columns_per_row=4,
-                simple=simple_cards, deflection_rate=deflection_rate
-            ),
-            unsafe_allow_html=True
-        )
+        _n_cols = 4  # always 4 columns — minimum 4 on first row, overflow wraps to next rows
+        _saved_gnames = list(st.session_state.get('pinned_guard_names', []))
+        _saved_rnames = list(st.session_state.get('pinned_resp_names',  []))
+
+        # Render card HTML + lock buttons together inside st.columns so buttons
+        # are always directly below their card in the same Streamlit column.
+        import math as _math
+        _n_rows = _math.ceil(len(active_drones) / _n_cols)
+        for _row_idx in range(_n_rows):
+            _row_drones = active_drones[_row_idx * _n_cols : (_row_idx + 1) * _n_cols]
+            _row_cols   = st.columns(_n_cols)
+            for _slot, _d in enumerate(_row_drones):
+                _ci    = _row_idx * _n_cols + _slot
+                _dname = _d['name']
+                _dtype = _d['type']
+                _is_pg = _dname in _saved_gnames
+                _is_pr = _dname in _saved_rnames
+                with _row_cols[_slot]:
+                    # ── Card HTML ─────────────────────────────────────────────
+                    st.markdown(
+                        _build_unit_cards_html(
+                            [_d], text_main, text_muted, card_bg, card_border,
+                            card_title, accent_color, columns_per_row=1
+                        ),
+                        unsafe_allow_html=True
+                    )
+                    # ── Lock / Switch / Unpin buttons ─────────────────────────
+                    if _is_pg or _is_pr:
+                        _switch_label = "🚁 Switch to Resp" if _is_pg else "🦅 Switch to Guard"
+                        _bc1, _bc2 = st.columns([3, 2])
+                        with _bc1:
+                            if st.button(_switch_label, key=f"switch_{_ci}",
+                                         use_container_width=True):
+                                if _is_pg:
+                                    st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
+                                    _pr = list(st.session_state.get('pinned_resp_names', []))
+                                    if _dname not in _pr: _pr.append(_dname)
+                                    st.session_state['pinned_resp_names'] = _pr
+                                    if st.session_state.get('k_resp', 0) < len(_pr):
+                                        st.session_state['k_resp'] = len(_pr)
+                                else:
+                                    st.session_state['pinned_resp_names'] = [x for x in _saved_rnames if x != _dname]
+                                    _pg = list(st.session_state.get('pinned_guard_names', []))
+                                    if _dname not in _pg: _pg.append(_dname)
+                                    st.session_state['pinned_guard_names'] = _pg
+                                    if st.session_state.get('k_guard', 0) < len(_pg):
+                                        st.session_state['k_guard'] = len(_pg)
+                                st.rerun()
+                        with _bc2:
+                            if st.button("✕ Unpin", key=f"unpin_{_ci}",
+                                         use_container_width=True, type="primary"):
+                                st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
+                                st.session_state['pinned_resp_names']  = [x for x in _saved_rnames if x != _dname]
+                                st.rerun()
+                    else:
+                        _ba, _bb = st.columns(2)
+                        with _ba:
+                            if st.button("🦅 lock as guard", key=f"pin_g_{_ci}",
+                                         use_container_width=True):
+                                _pg = list(st.session_state.get('pinned_guard_names', []))
+                                if _dname not in _pg: _pg.append(_dname)
+                                st.session_state['pinned_guard_names'] = _pg
+                                st.session_state['pinned_resp_names']  = [x for x in _saved_rnames if x != _dname]
+                                if st.session_state.get('k_guard', 0) < len(_pg):
+                                    st.session_state['k_guard'] = len(_pg)
+                                st.rerun()
+                        with _bb:
+                            if st.button("🚁 lock as resp", key=f"pin_r_{_ci}",
+                                         use_container_width=True):
+                                _pr = list(st.session_state.get('pinned_resp_names', []))
+                                if _dname not in _pr: _pr.append(_dname)
+                                st.session_state['pinned_resp_names']  = _pr
+                                st.session_state['pinned_guard_names'] = [x for x in _saved_gnames if x != _dname]
+                                if st.session_state.get('k_resp', 0) < len(_pr):
+                                    st.session_state['k_resp'] = len(_pr)
+                                st.rerun()
     else:
         st.markdown(
             f"""
@@ -7625,7 +6107,7 @@ if st.session_state['csvs_ready']:
 
     # ── COVERAGE CURVE + STATION RING CHART (side by side, directly below cards) ──
     st.markdown("---")
-    st.markdown(f"<h4 style='border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Coverage Curve <span class='tip' data-tip='Shows marginal call and area coverage as you add more Responder or Guardian drones. The curve flattens as overlap increases — use this to find the point of diminishing returns for your fleet size.'>?</span></h4>", unsafe_allow_html=True)
+    st.markdown(f"<h4 style='border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Coverage Curve</h4>", unsafe_allow_html=True)
     st.markdown(f"<div style='font-size:0.8rem; color:{text_muted}; margin-bottom:8px;'>How added drones improve coverage — and where returns flatten.</div>", unsafe_allow_html=True)
 
     _curve_col, _ring_col = st.columns([3, 2], gap="medium")
@@ -7663,11 +6145,6 @@ if st.session_state['csvs_ready']:
             st.info("Run optimization to generate coverage curve.")
 
     with _ring_col:
-        st.markdown(
-            f"<div style='font-size:0.7rem; color:{text_muted}; margin-bottom:4px;'>"
-            f"Call coverage by station <span class='tip' data-tip='Donut chart showing how historical 911 calls are distributed across deployed stations. Each slice is one station&apos;s marginal (non-overlapping) call count. The center % is combined fleet coverage. Hover slices for exact counts.'>?</span></div>",
-            unsafe_allow_html=True
-        )
         # Split ring: outer ring = Guardians (gold), inner ring = Responders (cyan)
         if active_drones and total_calls > 0:
             _g_drones = [d for d in active_drones if d['type'] == 'GUARDIAN']
@@ -7762,7 +6239,7 @@ if st.session_state['csvs_ready']:
     # ── 3D SWARM SIMULATION ───────────────────────────────────────────
     if fleet_capex > 0:
         st.markdown("---")
-        st.markdown(f"<h3 style='color:{text_main};'>🚁 3D Swarm Simulation <span class='tip' data-tip='Deck.gl-powered 3D animation of all DFR flights compressed into a single 24-hour day. Each arc represents a dispatch flight from station to incident. Use the speed slider to control playback. Best viewed fullscreen for council presentations.'>?</span></h3>", unsafe_allow_html=True)
+        st.markdown(f"<h3 style='color:{text_main};'>🚁 3D Swarm Simulation</h3>", unsafe_allow_html=True)
         st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Animated deck.gl simulation of all DFR flights over a compressed 24-hour day. Use the speed slider to accelerate or slow the simulation. Great for council presentations.</div>", unsafe_allow_html=True)
 
         show_sim = st.toggle("🎬 Enable 3D Simulation", value=False)
@@ -7922,7 +6399,7 @@ if st.session_state['csvs_ready']:
 
     # ── COMMAND CENTER ANALYTICS DASHBOARD ──
     st.markdown("---")
-    st.markdown(f"<h3 style='color:{text_main};'>📊 CAD Ingestion Analytics <span class='tip' data-tip='Temporal analysis of your uploaded CAD (Computer-Aided Dispatch) data. Shows when calls are most frequent by hour and day, identifies optimal DFR shift windows, and renders a call-volume calendar heatmap.'>?</span></h3>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color:{text_main};'>📊 CAD Ingestion Analytics</h3>", unsafe_allow_html=True)
     st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Temporal patterns derived from your uploaded CAD data — hourly volumes, day-of-week distribution, optimal DFR shift windows, and a higher-contrast 5-band call-volume calendar.</div>", unsafe_allow_html=True)
 
     _analytics_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
@@ -7950,10 +6427,10 @@ if st.session_state['csvs_ready']:
         _n_months = max(1, min(_n_months, 12))
         _cal_cols = 3                        # columns at typical sidebar-open viewport
         _cal_rows = _math.ceil(_n_months / _cal_cols)
-        _cal_px   = _cal_rows * 260          # ~260px per calendar row (tightened)
+        _cal_px   = _cal_rows * 290          # ~290px per calendar row (header + up to 6 week rows + gap)
         # Fixed chrome above the calendar:
         #   section header 60 + controls bar 70 + KPI cards 110 + shift/dow panel 210 + legend+label 55
-        _fixed_px = 460
+        _fixed_px = 505
         _analytics_height = _fixed_px + _cal_px
     components.html(analytics_html_block, height=_analytics_height, scrolling=False)
 
@@ -7962,13 +6439,19 @@ if st.session_state['csvs_ready']:
         st.markdown("<div style='margin-top:-6px;'></div>", unsafe_allow_html=True)
     elif _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
         # Collapse gap between components.html block and the plotly charts below
-        st.markdown("<div style='margin-top:-80px;'></div>", unsafe_allow_html=True)
-        _build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
+        st.markdown("<div style='margin-top:-48px;'></div>", unsafe_allow_html=True)
+        _build_cad_charts(
+            _analytics_df, text_main, text_muted, card_bg, card_border, accent_color,
+            total_calls_annual=st.session_state.get('total_original_calls', full_total_calls or total_calls),
+            calls_covered_perc=float(calls_covered_perc or 0),
+            annual_savings=float(annual_savings or 0),
+            specialty_savings=float(possible_additional_savings or 0),
+        )
 
     # ── COMMUNITY IMPACT DASHBOARD ────────────────────────────────────────────
     st.markdown("---")
     st.markdown(
-        f"<h3 style='color:{text_main};'>🏛️ Community Impact Dashboard <span class='tip' data-tip='Public-facing transparency report for city council presentations and community portals. Hover the ? badges inside each section for detailed explanations of every metric.'>?</span></h3>",
+        f"<h3 style='color:{text_main};'>🏛️ Community Impact Dashboard</h3>",
         unsafe_allow_html=True
     )
     st.markdown(
@@ -8000,7 +6483,7 @@ if st.session_state['csvs_ready']:
         active_drones=active_drones or [],
         df_calls_full=df_calls_full,
     )
-    components.html(_cid_html, height=5200, scrolling=False)
+    components.html(_cid_html, height=2400, scrolling=True)
 
     # ── EXPORT BUTTONS — always visible in sidebar ──
     st.sidebar.markdown("---")
@@ -8050,7 +6533,7 @@ if st.session_state['csvs_ready']:
 
         avg_resp_time    = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
         avg_ground_speed = CONFIG["DEFAULT_TRAFFIC_SPEED"] * (1 - traffic_level / 100)
-        avg_time_saved   = (max(0.0, (sum(d['avg_time_min'] * d['speed_mph'] * 1.4 / avg_ground_speed for d in active_drones) / len(active_drones)) - avg_resp_time)) if active_drones and avg_ground_speed > 0 else 0.0
+        avg_time_saved   = ((sum((d['radius_m']/1609.34*1.4/avg_ground_speed)*60 for d in active_drones) / len(active_drones)) - avg_resp_time) if active_drones and avg_ground_speed > 0 else 0.0
         _calls_lons = (df_calls_full if df_calls_full is not None else df_calls)['lon'].dropna()
         _calls_lats = (df_calls_full if df_calls_full is not None else df_calls)['lat'].dropna()
         minx = float(_calls_lons.min()) if len(_calls_lons) else 0
@@ -8123,14 +6606,6 @@ if st.session_state['csvs_ready']:
             } for d in active_drones],
         }
 
-        _mgdf_export = st.session_state.get('master_gdf_override')
-        _boundary_geojson_export = None
-        if _mgdf_export is not None and not _mgdf_export.empty:
-            try:
-                _boundary_geojson_export = _mgdf_export.to_crs(epsg=4326).to_json()
-            except Exception:
-                _boundary_geojson_export = None
-
         export_dict = {
             "city": prop_city, "state": prop_state,
             "_disclaimer": (
@@ -8146,29 +6621,22 @@ if st.session_state['csvs_ready']:
                 else st.session_state.get('df_calls')
             ),
             "stations_data": _safe_df_to_records(st.session_state.get('df_stations')),
-            "faa_geojson": faa_geojson,
-            "boundary_geojson": _boundary_geojson_export,
-            "boundary_kind": st.session_state.get('boundary_kind', 'place'),
-            "boundary_source_path": st.session_state.get('boundary_source_path', ''),
+            "faa_geojson": faa_geojson
         }
 
         fig_for_export = go.Figure()
         for d in active_drones:
             clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
-            fig_for_export.add_trace(go.Scattermap(
+            fig_for_export.add_trace(go.Scattermapbox(
                 lat=list(clats)+[None,d['lat']], lon=list(clons)+[None,d['lon']],
                 mode='lines+markers', line=dict(color=d['color'], width=3),
                 marker=dict(size=[0]*len(clats)+[0,16], color=d['color']),
                 fill='toself', fillcolor='rgba(0,0,0,0)', name=d['name'][:30]
             ))
         fig_for_export.update_layout(
-            map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
+            mapbox=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
             margin=dict(l=0,r=0,t=0,b=0), height=500, showlegend=True,
-            legend=dict(
-                yanchor="top", y=0.98, xanchor="left", x=0.02,
-                bgcolor=legend_bg, bordercolor="#444444", borderwidth=1,
-                font=dict(color=legend_text, size=11)
-            )
+            legend=dict(bgcolor=legend_bg, font=dict(color=legend_text, size=11))
         )
         map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
         station_rows = "".join(f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>" for d in active_drones)
@@ -8219,7 +6687,13 @@ if st.session_state['csvs_ready']:
         police_names_str = (", ".join([n.replace('[Police] ','') for n in police_dept_names[:6]]) + ("..." if len(police_dept_names)>6 else "")) if police_dept_names else "municipal facilities"
         total_fleet = actual_k_responder + actual_k_guardian
         analytics_html_export = generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls), export_mode=True)
-        cad_charts_html_export = _build_cad_charts_html(df_calls_full if df_calls_full is not None else df_calls)
+        cad_charts_html_export = _build_cad_charts_html(
+            df_calls_full if df_calls_full is not None else df_calls,
+            total_calls_annual=st.session_state.get('total_original_calls', full_total_calls or total_calls),
+            calls_covered_perc=float(calls_covered_perc or 0),
+            annual_savings=float(annual_savings or 0),
+            specialty_savings=float(possible_additional_savings or 0),
+        )
         staffing_pressure_html_export = ""
 
         prepared_for_city = st.session_state.get('active_city', prop_city) or prop_city
@@ -8328,19 +6802,6 @@ body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text)
   display:flex;align-items:center;gap:10px;
   margin-bottom:32px;
 }}
-.copy-section-btn{{
-  margin-left:auto;
-  display:inline-flex;align-items:center;gap:6px;
-  font-size:10px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
-  color:var(--cyan);border:1px solid rgba(0,210,255,0.35);
-  background:rgba(0,210,255,0.06);
-  padding:4px 12px;border-radius:100px;cursor:pointer;
-  font-family:'IBM Plex Mono',monospace;
-  transition:background 0.15s,border-color 0.15s;
-  user-select:none;
-}}
-.copy-section-btn:hover{{background:rgba(0,210,255,0.14);border-color:rgba(0,210,255,0.6);}}
-.copy-section-btn.copied{{color:#39FF14;border-color:rgba(57,255,20,0.5);background:rgba(57,255,20,0.07);}}
 .section-eyebrow .pg-num{{
   font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;
   color:var(--cyan);border:1px solid rgba(0,210,255,0.3);
@@ -8377,30 +6838,29 @@ body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text)
 .cover-headline h1 span{{color:var(--cyan)}}
 .cover-headline p{{font-size:16px;color:#888;max-width:480px;line-height:1.7}}
 .cover-meta{{
-  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+  display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;
   background:#1a1a2a;border:1px solid #1a1a2a;border-radius:10px;overflow:hidden;
-  margin-top:4px;
 }}
 .cover-meta-cell{{
-  background:var(--ink);padding:16px 14px;
+  background:var(--ink);padding:20px 24px;
 }}
-.cover-meta-cell .label{{font-size:9px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#555;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-.cover-meta-cell .value{{font-size:clamp(11px,1vw,14px);font-weight:800;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'IBM Plex Mono',monospace;letter-spacing:-0.3px}}
+.cover-meta-cell .label{{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#555;margin-bottom:6px}}
+.cover-meta-cell .value{{font-size:clamp(12px,1.4vw,15px);font-weight:700;color:#fff;word-break:break-word;overflow-wrap:anywhere}}
 .cover-meta-cell .value.accent{{color:var(--cyan)}}
 .cover-meta-cell .value.gold{{color:var(--gold)}}
 .cover-bottom{{margin-top:40px;font-size:12px;color:#444;border-top:1px solid #1a1a2a;padding-top:24px;display:flex;justify-content:space-between}}
 
 /* ── METRICS SECTION ─────────────────────────────────────────── */
 .metrics-hero{{
-  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1px;
   background:var(--border);border-radius:12px;overflow:hidden;
   margin-bottom:40px;box-shadow:0 1px 3px rgba(0,0,0,0.04);
 }}
 .metric-cell{{
-  background:#fff;padding:24px 16px;text-align:center;min-width:0;
+  background:#fff;padding:28px 24px;text-align:center;
 }}
-.metric-cell .m-label{{font-size:9px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-.metric-cell .m-value{{font-size:clamp(16px,1.8vw,28px);font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1.1;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.metric-cell .m-label{{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}}
+.metric-cell .m-value{{font-size:clamp(18px,2.4vw,36px);font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1.1;color:var(--text);word-break:break-word;overflow-wrap:anywhere}}
 .metric-cell .m-value.cyan{{color:var(--cyan)}}
 .metric-cell .m-value.gold{{color:var(--gold)}}
 .metric-cell .m-value.green{{color:var(--green)}}
@@ -8595,7 +7055,6 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
         <div class="cover-meta-cell"><div class="label">Call Coverage</div><div class="value accent">{calls_covered_perc:.1f}%</div></div>
         <div class="cover-meta-cell"><div class="label">Avg Response</div><div class="value">{avg_resp_time:.1f} min</div></div>
         <div class="cover-meta-cell"><div class="label">Time Saved</div><div class="value gold">{avg_time_saved:.1f} min</div></div>
-        <div class="cover-meta-cell" style="background:rgba(0,210,255,0.04)"><div class="label" style="color:#1a4a5a">Fleet Size</div><div class="value" style="color:#00a0bf">{actual_k_responder + actual_k_guardian} Units</div></div>
       </div>
     </div>
     <div class="cover-right">
@@ -8614,12 +7073,11 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
   <div class="metrics-hero">
     <div class="metric-cell"><div class="m-label">Fleet Capital Expenditure</div><div class="m-value cyan">${fleet_capex:,.0f}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
     <div class="metric-cell"><div class="m-label">Annual Savings Capacity</div><div class="m-value gold">${annual_savings:,.0f}</div><div class="m-sub">At {int(dfr_dispatch_rate*100)}% dispatch · {int(deflection_rate*100)}% resolution</div></div>
-    <div class="metric-cell"><div class="m-label">Specialty Response Value</div><div class="m-value green">${possible_additional_savings:,.0f}</div><div class="m-sub">Thermal ${thermal_savings:,.0f} · K-9 ${k9_savings:,.0f} · Fire ${fire_savings:,.0f}</div></div>
+    <div class="metric-cell"><div class="m-label">Possible Add'l Thermal + K-9</div><div class="m-value green">${possible_additional_savings:,.0f}</div><div class="m-sub">Thermal ${thermal_savings:,.0f} · K-9 ${k9_savings:,.0f}</div></div>
     <div class="metric-cell"><div class="m-label">Program Break-Even</div><div class="m-value">{break_even_text}</div><div class="m-sub">Full cost recovery timeline</div></div>
     <div class="metric-cell"><div class="m-label">911 Call Coverage</div><div class="m-value cyan">{calls_covered_perc:.1f}%</div><div class="m-sub">of {st.session_state.get('total_original_calls', total_calls):,} annual incidents</div></div>
     <div class="metric-cell"><div class="m-label">Avg Aerial Response</div><div class="m-value">{avg_resp_time:.1f} min</div><div class="m-sub">vs. ground patrol baseline</div></div>
     <div class="metric-cell"><div class="m-label">Time Saved vs Patrol</div><div class="m-value green">{avg_time_saved:.1f} min</div><div class="m-sub">per incident, on average</div></div>
-    <div class="metric-cell" style="background:#fafbfc"><div class="m-label">Total Fleet Units</div><div class="m-value" style="color:#374151">{actual_k_responder + actual_k_guardian}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
   </div>
   <p style="font-size:15px;color:#444;line-height:1.8;max-width:680px">
     The {jurisdiction_list} proposes a BRINC Drones Drone as a First Responder (DFR) program deploying
@@ -8687,43 +7145,8 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
   <div class="section-eyebrow"><span class="pg-num">06</span><span class="pg-title">Grant Narrative</span></div>
   <div class="disc"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission.</div>
 
-  <script>
-  function copyGrantText(id, btn) {{
-    var el = document.getElementById(id);
-    var text = el.innerText;
-    var origLabel = btn.innerHTML;
-    function confirm() {{
-      btn.innerHTML = '&#10003; Copied!';
-      btn.style.background = '#22c55e';
-      btn.style.color = '#fff';
-      setTimeout(function() {{ btn.innerHTML = origLabel; btn.style.background = ''; btn.style.color = ''; }}, 2200);
-    }}
-    if (navigator.clipboard && window.isSecureContext) {{
-      navigator.clipboard.writeText(text).then(confirm).catch(function() {{ fallback(text, confirm); }});
-    }} else {{ fallback(text, confirm); }}
-  }}
-  function fallback(text, cb) {{
-    var ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
-    document.body.appendChild(ta);
-    ta.focus(); ta.select();
-    try {{ document.execCommand('copy'); cb(); }} catch(e) {{ alert('Press Ctrl+C / Cmd+C to copy.'); }}
-    document.body.removeChild(ta);
-  }}
-  </script>
-
-  <div style="margin-bottom:10px;">
-    <button onclick="copyGrantText('grant-body-law', this)"
-      style="background:#1e40af;color:#fff;border:none;border-radius:6px;padding:8px 18px;
-             font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
-      &#128203; Copy Grant Text
-    </button>
-    <span style="font-size:11px;color:#888;margin-left:10px;">Paste directly into Word or Google Docs</span>
-  </div>
-
   <div class="grant-layout">
-  <div class="grant-body" id="grant-body-law">
+  <div class="grant-body">
     <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — {prepared_for_city}, {prop_state}</p>
 
     <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully requests funding to establish a Drone as a First Responder (DFR) program deploying {actual_k_responder + actual_k_guardian} purpose-built BRINC aerial units — {actual_k_responder} BRINC Responder and {actual_k_guardian} BRINC Guardian — across {dept_summary} serving {pop_metric:,} residents. Modeled against {st.session_state.get('total_original_calls', total_calls):,} historical incidents from {_exp_date_range}, the program is projected to cover <strong>{calls_covered_perc:.1f}%</strong> of calls for service, arrive an average of <strong>{avg_time_saved:.1f} minutes faster</strong> than ground patrol, and generate <strong>${annual_savings:,.0f} in annual operational savings</strong>, with an additional modeled specialty-response upside of <strong>${possible_additional_savings:,.0f}</strong> from thermal-supported searches and avoided K-9 deployments, reaching full cost recovery in <strong>{break_even_text.lower()}</strong>.</p>
@@ -8736,7 +7159,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 
     <p><strong>Technology Platform:</strong> BRINC Drones provides fully automated launch-on-dispatch, live-streaming HD and thermal video to dispatch and responding officers, FAA-compliant Beyond Visual Line of Sight (BVLOS) operations, chain-of-custody flight logging, and integrated data analytics. All hardware is manufactured in the United States. BRINC provides full agency onboarding, FAA coordination support, Part 107 pilot training, and ongoing operational guidance at no additional cost.</p>
 
-    <p><strong>Fiscal Impact &amp; Return on Investment:</strong> Total program capital expenditure is <strong>${fleet_capex:,.0f}</strong> ({actual_k_responder} Responder × ${CONFIG["RESPONDER_COST"]:,} + {actual_k_guardian} Guardian × ${CONFIG["GUARDIAN_COST"]:,}). At a <strong>{int(dfr_dispatch_rate*100)}% DFR dispatch rate</strong> and <strong>{int(deflection_rate*100)}% call resolution rate</strong> (no officer dispatch required), the program is projected to generate <strong>${annual_savings:,.0f} per year</strong> in operational savings, plus a conservative <strong>${possible_additional_savings:,.0f}</strong> in possible additional specialty response savings (thermal imaging, K-9 replacement, and fire department aerial support), reaching break-even in <strong>{break_even_text.lower()}</strong>. Cost per drone response is ${CONFIG["DRONE_COST_PER_CALL"]} versus ${CONFIG["OFFICER_COST_PER_CALL"]} for a ground patrol dispatch — a <strong>{int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}% cost reduction</strong> per incident. The program also reduces officer exposure to unknown-risk calls, decreasing liability and improving officer retention outcomes.</p>
+    <p><strong>Fiscal Impact &amp; Return on Investment:</strong> Total program capital expenditure is <strong>${fleet_capex:,.0f}</strong> ({actual_k_responder} Responder × ${CONFIG["RESPONDER_COST"]:,} + {actual_k_guardian} Guardian × ${CONFIG["GUARDIAN_COST"]:,}). At a <strong>{int(dfr_dispatch_rate*100)}% DFR dispatch rate</strong> and <strong>{int(deflection_rate*100)}% call resolution rate</strong> (no officer dispatch required), the program is projected to generate <strong>${annual_savings:,.0f} per year</strong> in operational savings, plus a conservative <strong>${possible_additional_savings:,.0f}</strong> in possible additional thermal and K-9 related savings, reaching break-even in <strong>{break_even_text.lower()}</strong>. Cost per drone response is ${CONFIG["DRONE_COST_PER_CALL"]} versus ${CONFIG["OFFICER_COST_PER_CALL"]} for a ground patrol dispatch — a <strong>{int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}% cost reduction</strong> per incident. The program also reduces officer exposure to unknown-risk calls, decreasing liability and improving officer retention outcomes.</p>
 
     <p><strong>Evaluation Plan:</strong> Program outcomes will be tracked quarterly across four dimensions: (1) response time comparison vs. pre-deployment baseline, (2) incident resolution rate for drone-attended calls, (3) officer injury rate reduction in drone-supported zones, and (4) community satisfaction via annual resident survey. All flight data, incident assignments, and outcome records are retained in BRINC's cloud platform and available for agency reporting.</p>
 
@@ -8776,121 +7199,6 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
   </div>
 </section>
 
-<!-- ── 06B: FIRE DEPARTMENT VALUE ─────────────────────────────── -->
-<section class="doc-section" id="fire-value">
-  <div class="section-eyebrow"><span class="pg-num">06B</span><span class="pg-title">Fire Department Value</span></div>
-
-  <div class="metrics-hero">
-    <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
-      <div class="m-label">Fire Calls Assisted</div>
-      <div class="m-value" style="color:#fb7121">{fire_calls_annual:,.0f}</div>
-      <div class="m-sub">Est. {int(CONFIG["FIRE_DEFAULT_APPLICABLE_RATE"]*100)}% of covered incidents</div>
-    </div>
-    <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
-      <div class="m-label">Scene Size-Up Savings</div>
-      <div class="m-value" style="color:#fb7121">${fire_savings * 0.8:,.0f}/yr</div>
-      <div class="m-sub">Avoided premature aerial ladder deployment</div>
-    </div>
-    <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
-      <div class="m-label">Overhaul Hotspot Savings</div>
-      <div class="m-value" style="color:#fb7121">${fire_savings * 0.2:,.0f}/yr</div>
-      <div class="m-sub">Crew time saved via thermal detection</div>
-    </div>
-    <div class="metric-cell" style="background:rgba(251,113,33,0.12);border:1px solid rgba(251,113,33,0.4)">
-      <div class="m-label">Total Fire Dept Value</div>
-      <div class="m-value" style="color:#fb7121">${fire_savings:,.0f}/yr</div>
-      <div class="m-sub">${CONFIG["FIRE_SAVINGS_PER_CALL"]} blended savings per fire call</div>
-    </div>
-  </div>
-
-  <h3 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:#1e293b">How Drones Deliver Fire Department Value</h3>
-  <table style="font-size:12px;margin-bottom:20px">
-    <thead><tr><th>Value Driver</th><th>Mechanism</th><th>Est. Savings</th><th>Source Basis</th></tr></thead>
-    <tbody>
-      <tr>
-        <td><strong>Aerial Scene Size-Up</strong></td>
-        <td>Drone arrives before engine company, streams live roof and exterior view. Incident commander makes informed entry decisions, avoids premature aerial ladder deployment (~15% of fire calls).</td>
-        <td style="color:#fb7121;font-weight:700">${fire_savings * 0.8:,.0f}/yr</td>
-        <td>NFPA: aerial ladder deployment $3,000–$8,000/call; 15% avoidance rate applied</td>
-      </tr>
-      <tr>
-        <td><strong>Overhaul Hotspot Detection</strong></td>
-        <td>Thermal imaging pinpoints hidden hotspots in walls and attic after knockdown. Reduces overhaul crew time by ~45 min (4-person crew) per fire call.</td>
-        <td style="color:#fb7121;font-weight:700">${fire_savings * 0.2:,.0f}/yr</td>
-        <td>IAFC: avg. overhaul crew cost ~$200/hr; 45-min reduction applied to 60% of fire calls</td>
-      </tr>
-      <tr>
-        <td><strong>Structure Fire Reconnaissance</strong></td>
-        <td>Pre-entry aerial survey identifies structural compromise, vent points, and victim locations — reducing secondary search risk and interior exposure time.</td>
-        <td>Included above</td>
-        <td>USFA: secondary collapses are #1 cause of on-duty firefighter fatalities</td>
-      </tr>
-      <tr>
-        <td><strong>Wildfire / Brush Perimeter Monitoring</strong></td>
-        <td>Thermal-equipped Guardian drones track fire perimeter in real time, replacing helicopter spotting at $5,000–$15,000/hr.</td>
-        <td>Situational; not modeled</td>
-        <td>CAL FIRE, NWCG: helicopter spotting costs $8,000–$15,000/flight hour</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <h3 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:#1e293b">🚒 Fire Department Grant Narrative</h3>
-  <div class="disc"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission.</div>
-
-  <div style="margin-bottom:10px;">
-    <button onclick="copyGrantText('grant-body-fire', this)"
-      style="background:#c2410c;color:#fff;border:none;border-radius:6px;padding:8px 18px;
-             font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
-      &#128203; Copy Fire Grant Text
-    </button>
-    <span style="font-size:11px;color:#888;margin-left:10px;">Paste directly into Word or Google Docs</span>
-  </div>
-
-  <div class="grant-layout">
-  <div class="grant-body" id="grant-body-fire">
-    <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — Fire Department Aerial Operations Enhancement — {prepared_for_city}, {prop_state}</p>
-
-    <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully requests funding to extend its Drone as a First Responder (DFR) program to support fire department operations in {prepared_for_city}, {prop_state}. Deploying {actual_k_responder + actual_k_guardian} BRINC aerial units across {dept_summary}, the program is projected to assist an estimated <strong>{fire_calls_annual:,.0f} fire-related calls annually</strong> — delivering <strong>${fire_savings:,.0f} per year</strong> in fire department operational value through aerial scene size-up, avoided aerial ladder deployments, and thermal-guided overhaul support. The program reaches full capital cost recovery in <strong>{break_even_text.lower()}</strong> when combined with law enforcement operational savings.</p>
-
-    <p><strong>Statement of Need — Fire Operations:</strong> {jurisdiction_list} fire personnel respond to an estimated {fire_calls_annual:,.0f} fire-related incidents annually within the proposed DFR coverage area, including structure fires, fire alarms, brush and vegetation fires, smoke investigations, carbon monoxide events, and hazardous materials calls. Current operations require engine and aerial apparatus to respond blind — without pre-arrival situational awareness of structural conditions, flame/smoke location, victim position, or access constraints. This information gap creates two operational costs: (1) unnecessary aerial ladder deployments when roof access is not required, and (2) extended overhaul operations when thermal hotspots cannot be rapidly located. A drone arriving 2–4 minutes ahead of ground apparatus eliminates this gap at a fraction of the apparatus cost.</p>
-
-    <p><strong>Operational Application:</strong> Upon dispatch of a fire call within the coverage zone, the nearest BRINC drone auto-launches and arrives on scene in an average of <strong>{avg_resp_time:.1f} minutes</strong> — typically before the first engine company. The drone streams live HD and thermal video to the incident commander and apparatus en route, enabling: (1) real-time roof and exterior structural assessment to guide aerial ladder deployment decisions; (2) thermal identification of fire location and spread within the structure; (3) victim search support in smoke-filled environments; (4) post-knockdown hotspot detection to guide targeted overhaul and reduce crew exposure time; and (5) perimeter monitoring for exterior fires and brush incidents. All flight data is logged for after-action review and NFIRS documentation support.</p>
-
-    <p><strong>Fiscal Impact — Fire Department:</strong> The modeled fire department value of <strong>${fire_savings:,.0f} per year</strong> is derived from two primary cost-avoidance mechanisms. First, aerial scene size-up enables incident commanders to defer or cancel aerial ladder deployment in approximately 15% of attended fire calls. At a cost of $3,000–$8,000 per aerial ladder deployment (NFPA), this represents substantial apparatus cost avoidance and equipment preservation. Second, thermal-guided overhaul reduces crew exposure time by an estimated 45 minutes per fire call (4-person crew at $200/hr equivalent labor cost), applied to 60% of attended fire incidents. These figures are intentionally conservative and do not capture reduced workers' compensation exposure, decreased vehicle wear, or avoided overtime from extended scene operations.</p>
-
-    <p><strong>Officer and Firefighter Safety:</strong> The U.S. Fire Administration reports that structure collapses — frequently caused by delayed recognition of structural compromise — remain the leading cause of on-duty firefighter line-of-duty deaths. Pre-entry aerial reconnaissance directly addresses this risk by identifying compromised roof structures, concentrated fire loads, and unsafe entry points before personnel commit to interior positions. Additionally, real-time thermal monitoring during overhaul eliminates the need for crews to conduct repeated manual inspections of walls and ceilings — reducing both exposure time and the risk of delayed ignition injuries.</p>
-
-    <p><strong>Applicable Fire Department Grant Sources:</strong><br>
-    <strong>FEMA Assistance to Firefighters Grant (AFG)</strong> — Equipment and technology procurement for fire departments; drones qualify under the Operations &amp; Safety category.<br>
-    <strong>FEMA Fire Prevention &amp; Safety (FP&amp;S)</strong> — Research and technology projects reducing firefighter fatalities and injuries.<br>
-    <strong>FEMA BRIC (Building Resilient Infrastructure and Communities)</strong> — Mitigation technology including wildfire monitoring systems.<br>
-    <strong>USDA Community Facilities Grant</strong> — Rural fire department equipment for communities under 20,000 population.<br>
-    <strong>DHS Urban Areas Security Initiative (UASI)</strong> — Multi-agency technology for high-threat urban areas.<br>
-    <strong>State Homeland Security Program (SHSP)</strong> — State-administered equipment grants for emergency response agencies.</p>
-
-    <p><strong>10-Year Fire Department Value Projection:</strong></p>
-    <table style="font-size:12px;margin-bottom:16px">
-      <thead><tr><th>Metric</th><th>Year 1</th><th>Year 3</th><th>Year 5</th><th>Year 10</th></tr></thead>
-      <tbody>
-        <tr><td>Fire Calls Assisted</td><td>{fire_calls_annual:,.0f}</td><td>{fire_calls_annual*1.03:,.0f}</td><td>{fire_calls_annual*1.06:,.0f}</td><td>{fire_calls_annual*1.13:,.0f}</td></tr>
-        <tr><td>Annual Fire Dept Value</td><td>${fire_savings:,.0f}</td><td>${fire_savings*1.05:,.0f}</td><td>${fire_savings*1.10:,.0f}</td><td>${fire_savings*1.22:,.0f}</td></tr>
-        <tr><td>Cumulative Fire Value</td><td>${fire_savings:,.0f}</td><td>${fire_savings*3.15:,.0f}</td><td>${fire_savings*5.53:,.0f}</td><td>${fire_savings*12.58:,.0f}</td></tr>
-        <tr><td>Scene Size-Up Savings</td><td>${fire_savings*0.8:,.0f}</td><td>${fire_savings*0.8*1.05:,.0f}</td><td>${fire_savings*0.8*1.10:,.0f}</td><td>${fire_savings*0.8*1.22:,.0f}</td></tr>
-        <tr><td>Overhaul Crew Savings</td><td>${fire_savings*0.2:,.0f}</td><td>${fire_savings*0.2*1.05:,.0f}</td><td>${fire_savings*0.2*1.10:,.0f}</td><td>${fire_savings*0.2*1.22:,.0f}</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <div class="grant-sidebar">
-    <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Fire Calls/Year</div><div class="gs-val" style="color:#fb7121">{fire_calls_annual:,.0f}</div><div class="gs-sub">within coverage zone</div></div>
-    <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Scene Size-Up Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*0.8:,.0f}</div><div class="gs-sub">aerial ladder cost avoidance</div></div>
-    <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Overhaul Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*0.2:,.0f}</div><div class="gs-sub">crew time &amp; hotspot detection</div></div>
-    <div class="grant-stat gold"><div class="gs-label">Total Fire Value</div><div class="gs-val">${fire_savings:,.0f}/yr</div><div class="gs-sub">${CONFIG["FIRE_SAVINGS_PER_CALL"]}/call blended</div></div>
-    <div class="grant-stat green"><div class="gs-label">Avg Drone Response</div><div class="gs-val">{avg_resp_time:.1f} min</div><div class="gs-sub">{avg_time_saved:.1f} min faster than apparatus</div></div>
-    <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">10-Year Fire Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*12.58:,.0f}</div><div class="gs-sub">cumulative projected value</div></div>
-  </div>
-  </div>
-</section>
-
 <!-- ── 07: INFRASTRUCTURE DIRECTORY ──────────────────────────── -->
 <section class="doc-section" id="infrastructure">
   <div class="section-eyebrow"><span class="pg-num">07</span><span class="pg-title">Infrastructure Directory</span></div>
@@ -8900,14 +7208,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 
 <!-- ── 08: COMMUNITY PARTNERSHIP ─────────────────────────────── -->
 <section class="doc-section" id="community">
-  <div class="section-eyebrow">
-    <span class="pg-num">08</span>
-    <span class="pg-title">Community Business Partnership</span>
-    <button class="copy-section-btn" id="copyPartnershipBtn" onclick="copyCommunitySection()">
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
-      Copy Letter
-    </button>
-  </div>
+  <div class="section-eyebrow"><span class="pg-num">08</span><span class="pg-title">Community Business Partnership</span></div>
 
   <!-- Letter header -->
   <div style="background:#f0f8ff;border-left:4px solid var(--cyan);padding:18px 22px;border-radius:0 8px 8px 0;margin-bottom:24px;font-size:13px;color:#333">
@@ -9018,54 +7319,6 @@ const obs=new IntersectionObserver(entries=>{{
   }})
 }},{{threshold:0.3}});
 sections.forEach(s=>obs.observe(s));
-
-// ── Copy Community Business Partnership letter ──────────────────────────────
-function copyCommunitySection() {{
-  const section = document.getElementById('community');
-  const btn = document.getElementById('copyPartnershipBtn');
-  if (!section || !btn) return;
-
-  // Build clean plain-text version by walking the section's text nodes
-  // but skipping the button itself
-  function getTextContent(node) {{
-    if (node === btn) return '';
-    if (node.nodeType === Node.TEXT_NODE) return node.textContent;
-    if (node.nodeType !== Node.ELEMENT_NODE) return '';
-    const tag = node.tagName.toUpperCase();
-    if (tag === 'STYLE' || tag === 'SCRIPT') return '';
-    let out = '';
-    for (const child of node.childNodes) out += getTextContent(child);
-    // Block-level elements get newlines
-    const block = ['DIV','P','H1','H2','H3','H4','H5','H6','LI','TR','BR','SECTION','ARTICLE'];
-    if (block.includes(tag)) out = '\n' + out.trimEnd() + '\n';
-    if (tag === 'TH' || tag === 'TD') out = out.trim() + '\t';
-    return out;
-  }}
-
-  const rawText = getTextContent(section)
-    .replace(/\n{{3,}}/g, '\n\n')   // collapse excess blank lines
-    .trim();
-
-  navigator.clipboard.writeText(rawText).then(() => {{
-    const orig = btn.innerHTML;
-    btn.classList.add('copied');
-    btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg> Copied!';
-    setTimeout(() => {{ btn.classList.remove('copied'); btn.innerHTML = orig; }}, 2000);
-  }}).catch(() => {{
-    // Fallback for non-https / older browsers
-    const ta = document.createElement('textarea');
-    ta.value = rawText;
-    ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0;';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    const orig = btn.innerHTML;
-    btn.classList.add('copied');
-    btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg> Copied!';
-    setTimeout(() => {{ btn.classList.remove('copied'); btn.innerHTML = orig; }}, 2000);
-  }});
-}}
 </script>
 </body></html>"""
 
@@ -9163,7 +7416,7 @@ function copyCommunitySection() {{
                            prop_name, prop_email, details=export_details)
     # 2. Executive Summary / proposal HTML export
     if fleet_capex > 0:
-        if st.sidebar.download_button(f"📄 {prop_city}, {prop_state} — Executive Summary",
+        if st.sidebar.download_button("📄 Download Executive Summary HTML",
                                       data=export_html,
                                       file_name=f"BRINC_Executive_Summary_{_safe_city}_{_ts}.html",
                                       mime="text/html",

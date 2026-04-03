@@ -39,7 +39,6 @@ defaults = {
     'boundary_source_path': '',
     'location_detection_source': '',
     'boundary_detection_mode': '',
-    'master_gdf_override': None,  # GeoDataFrame from coordinate-based jurisdiction lookup
     # ── NEW: file ingestion metadata & engagement tracking ──────────────────
     'file_meta': {},            # populated by aggressive_parse_calls; see _extract_file_meta()
     'export_event_log': [],     # ordered list of export types clicked this session
@@ -452,303 +451,6 @@ def _count_points_within_boundary(df_calls, boundary_gdf):
         return 0
 
 
-def find_jurisdictions_by_coordinates(df_calls, min_call_share=0.001, min_call_count=3):
-    """
-    Purely coordinate-driven jurisdiction lookup.
-
-    Spatially joins call points against places_lite.parquet (and
-    counties_lite.parquet as fallback) to find every jurisdiction that
-    contains at least `min_call_share` of the uploaded calls OR at least
-    `min_call_count` absolute calls.  Returns a GeoDataFrame with columns
-    [DISPLAY_NAME, data_count, geometry] sorted descending by data_count,
-    or None if nothing is found.
-    """
-    import traceback as _tb
-    _debug_msgs = []
-    try:
-        if df_calls is None or df_calls.empty:
-            _debug_msgs.append("df_calls is None or empty")
-            st.session_state['_jur_debug'] = _debug_msgs
-            return None
-
-        pts = df_calls.copy()
-        pts['lat'] = pd.to_numeric(pts['lat'], errors='coerce')
-        pts['lon'] = pd.to_numeric(pts['lon'], errors='coerce')
-        pts = pts.dropna(subset=['lat', 'lon'])
-        if pts.empty:
-            _debug_msgs.append("no valid lat/lon after cleaning")
-            st.session_state['_jur_debug'] = _debug_msgs
-            return None
-
-        _debug_msgs.append(f"pts count: {len(pts)}, lat range: {pts['lat'].min():.3f}–{pts['lat'].max():.3f}, lon range: {pts['lon'].min():.3f}–{pts['lon'].max():.3f}")
-
-        sample = pts.sample(min(len(pts), 5000), random_state=42) if len(pts) > 5000 else pts
-        pts_gdf = gpd.GeoDataFrame(sample, geometry=gpd.points_from_xy(sample.lon, sample.lat), crs='EPSG:4326')
-        bbox = tuple(pts_gdf.total_bounds)
-        _debug_msgs.append(f"bbox: {bbox}")
-
-        results = []
-
-        for parquet_file, name_col, kind in [
-            ('places_lite.parquet',  'NAME', 'place'),
-            ('counties_lite.parquet','NAME', 'county'),
-        ]:
-            _exists = os.path.exists(parquet_file)
-            _debug_msgs.append(f"{parquet_file} exists: {_exists}")
-            if not _exists:
-                continue
-            try:
-                # Full read then cx filter — bbox kwarg not supported by this parquet build
-                poly_gdf = gpd.read_parquet(parquet_file)
-                poly_gdf = poly_gdf.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]
-
-                _debug_msgs.append(f"{parquet_file} rows in bbox: {len(poly_gdf)}")
-                if poly_gdf is None or poly_gdf.empty:
-                    continue
-                if poly_gdf.crs is None:
-                    poly_gdf = poly_gdf.set_crs(epsg=4326)
-                poly_gdf = poly_gdf.to_crs(epsg=4326)
-
-                joined = gpd.sjoin(pts_gdf[['geometry']], poly_gdf[[name_col, 'geometry']], how='left', predicate='within')
-                hit_counts = joined[name_col].value_counts().dropna()
-                _debug_msgs.append(f"sjoin hits: {dict(list(hit_counts.items())[:10])}")
-                if hit_counts.empty:
-                    continue
-
-                total = hit_counts.sum()
-                for jname, cnt in hit_counts.items():
-                    # Include if meets share threshold OR absolute minimum count
-                    if cnt / total < min_call_share and cnt < min_call_count:
-                        continue
-                    row = poly_gdf[poly_gdf[name_col] == jname].copy()
-                    if row.empty:
-                        continue
-                    display = str(jname)
-                    if kind == 'county' and not display.lower().endswith('county'):
-                        display = display + ' County'
-                    already = any(r['DISPLAY_NAME'] == display for r in results)
-                    if not already:
-                        results.append({
-                            'DISPLAY_NAME': display,
-                            'data_count': int(cnt),
-                            'geometry': row.geometry.iloc[0],
-                        })
-            except Exception as _e:
-                _debug_msgs.append(f"{parquet_file} ERROR: {_e}\n{_tb.format_exc()[-300:]}")
-                continue
-
-            if results and parquet_file.startswith('places'):
-                break
-
-        _debug_msgs.append(f"total results: {len(results)}, names: {[r['DISPLAY_NAME'] for r in results]}")
-        st.session_state['_jur_debug'] = _debug_msgs
-
-        if not results:
-            return None
-
-        out = gpd.GeoDataFrame(results, crs='EPSG:4326')
-        out = out.sort_values('data_count', ascending=False).reset_index(drop=True)
-        return out
-
-    except Exception as _e:
-        _debug_msgs.append(f"OUTER ERROR: {_e}\n{_tb.format_exc()[-400:]}")
-        st.session_state['_jur_debug'] = _debug_msgs
-        return None
-    """
-    Purely coordinate-driven jurisdiction lookup.
-
-    Spatially joins call points against places_lite.parquet (and
-    counties_lite.parquet as fallback) to find every jurisdiction that
-    contains at least `min_call_share` of the uploaded calls.  Returns a
-    GeoDataFrame with columns [DISPLAY_NAME, data_count, geometry] sorted
-    descending by data_count, or None if nothing is found.
-
-    This is the primary boundary-detection path for uploaded CAD files.
-    It requires no city/state name inference — it works purely from lat/lon.
-    """
-    import traceback as _tb
-    _debug_msgs = []
-    try:
-        if df_calls is None or df_calls.empty:
-            _debug_msgs.append("df_calls is None or empty")
-            st.session_state['_jur_debug'] = _debug_msgs
-            return None
-
-        pts = df_calls.copy()
-        pts['lat'] = pd.to_numeric(pts['lat'], errors='coerce')
-        pts['lon'] = pd.to_numeric(pts['lon'], errors='coerce')
-        pts = pts.dropna(subset=['lat', 'lon'])
-        if pts.empty:
-            _debug_msgs.append("no valid lat/lon after cleaning")
-            st.session_state['_jur_debug'] = _debug_msgs
-            return None
-
-        _debug_msgs.append(f"pts count: {len(pts)}, lat range: {pts['lat'].min():.3f}–{pts['lat'].max():.3f}, lon range: {pts['lon'].min():.3f}–{pts['lon'].max():.3f}")
-
-        # Sample for speed on large files (spatial join is O(n·m))
-        sample = pts.sample(min(len(pts), 5000), random_state=42) if len(pts) > 5000 else pts
-        pts_gdf = gpd.GeoDataFrame(sample, geometry=gpd.points_from_xy(sample.lon, sample.lat), crs='EPSG:4326')
-        bbox = tuple(pts_gdf.total_bounds)  # (minx, miny, maxx, maxy)
-        _debug_msgs.append(f"bbox: {bbox}")
-
-        results = []
-
-        for parquet_file, name_col, kind in [
-            ('places_lite.parquet',  'NAME', 'place'),
-            ('counties_lite.parquet','NAME', 'county'),
-        ]:
-            _exists = os.path.exists(parquet_file)
-            _debug_msgs.append(f"{parquet_file} exists: {_exists}")
-            if not _exists:
-                continue
-            try:
-                try:
-                    poly_gdf = gpd.read_parquet(parquet_file, bbox=bbox)
-                except Exception as _be:
-                    _debug_msgs.append(f"bbox read failed ({_be}), falling back to full read")
-                    poly_gdf = gpd.read_parquet(parquet_file)
-                    poly_gdf = poly_gdf.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]
-
-                _debug_msgs.append(f"{parquet_file} rows in bbox: {len(poly_gdf)}")
-                if poly_gdf is None or poly_gdf.empty:
-                    continue
-                if poly_gdf.crs is None:
-                    poly_gdf = poly_gdf.set_crs(epsg=4326)
-                poly_gdf = poly_gdf.to_crs(epsg=4326)
-
-                joined = gpd.sjoin(pts_gdf[['geometry']], poly_gdf[[name_col, 'geometry']], how='left', predicate='within')
-                hit_counts = joined[name_col].value_counts().dropna()
-                _debug_msgs.append(f"sjoin hits: {dict(list(hit_counts.items())[:5])}")
-                if hit_counts.empty:
-                    continue
-
-                total = hit_counts.sum()
-                for jname, cnt in hit_counts.items():
-                    if cnt / total < min_call_share:
-                        continue
-                    row = poly_gdf[poly_gdf[name_col] == jname].copy()
-                    if row.empty:
-                        continue
-                    display = str(jname)
-                    if kind == 'county' and not display.lower().endswith('county'):
-                        display = display + ' County'
-                    already = any(r['DISPLAY_NAME'] == display for r in results)
-                    if not already:
-                        results.append({
-                            'DISPLAY_NAME': display,
-                            'data_count': int(cnt),
-                            'geometry': row.geometry.iloc[0],
-                        })
-            except Exception as _e:
-                _debug_msgs.append(f"{parquet_file} ERROR: {_e}\n{_tb.format_exc()[-300:]}")
-                continue
-
-            if results and parquet_file.startswith('places'):
-                break
-
-        _debug_msgs.append(f"total results: {len(results)}, names: {[r['DISPLAY_NAME'] for r in results]}")
-        st.session_state['_jur_debug'] = _debug_msgs
-
-        if not results:
-            return None
-
-        out = gpd.GeoDataFrame(results, crs='EPSG:4326')
-        out = out.sort_values('data_count', ascending=False).reset_index(drop=True)
-        return out
-
-    except Exception as _e:
-        _debug_msgs.append(f"OUTER ERROR: {_e}\n{_tb.format_exc()[-400:]}")
-        st.session_state['_jur_debug'] = _debug_msgs
-        return None
-    """
-    Purely coordinate-driven jurisdiction lookup.
-
-    Spatially joins call points against places_lite.parquet (and
-    counties_lite.parquet as fallback) to find every jurisdiction that
-    contains at least `min_call_share` of the uploaded calls.  Returns a
-    GeoDataFrame with columns [DISPLAY_NAME, data_count, geometry] sorted
-    descending by data_count, or None if nothing is found.
-
-    This is the primary boundary-detection path for uploaded CAD files.
-    It requires no city/state name inference — it works purely from lat/lon.
-    """
-    try:
-        if df_calls is None or df_calls.empty:
-            return None
-
-        pts = df_calls.copy()
-        pts['lat'] = pd.to_numeric(pts['lat'], errors='coerce')
-        pts['lon'] = pd.to_numeric(pts['lon'], errors='coerce')
-        pts = pts.dropna(subset=['lat', 'lon'])
-        if pts.empty:
-            return None
-
-        # Sample for speed on large files (spatial join is O(n·m))
-        sample = pts.sample(min(len(pts), 5000), random_state=42) if len(pts) > 5000 else pts
-        pts_gdf = gpd.GeoDataFrame(sample, geometry=gpd.points_from_xy(sample.lon, sample.lat), crs='EPSG:4326')
-        bbox = tuple(pts_gdf.total_bounds)  # (minx, miny, maxx, maxy)
-
-        results = []
-
-        for parquet_file, name_col, kind in [
-            ('places_lite.parquet',  'NAME', 'place'),
-            ('counties_lite.parquet','NAME', 'county'),
-        ]:
-            if not os.path.exists(parquet_file):
-                continue
-            try:
-                poly_gdf = gpd.read_parquet(parquet_file, bbox=bbox)
-                if poly_gdf is None or poly_gdf.empty:
-                    # bbox kwarg not supported by all versions — fall back to full read + filter
-                    poly_gdf = gpd.read_parquet(parquet_file)
-                    poly_gdf = poly_gdf.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]
-                if poly_gdf.empty:
-                    continue
-                if poly_gdf.crs is None:
-                    poly_gdf = poly_gdf.set_crs(epsg=4326)
-                poly_gdf = poly_gdf.to_crs(epsg=4326)
-
-                joined = gpd.sjoin(pts_gdf[['geometry']], poly_gdf[[name_col, 'geometry']], how='left', predicate='within')
-                hit_counts = joined[name_col].value_counts().dropna()
-                if hit_counts.empty:
-                    continue
-
-                total = hit_counts.sum()
-                for jname, cnt in hit_counts.items():
-                    if cnt / total < min_call_share:
-                        continue
-                    row = poly_gdf[poly_gdf[name_col] == jname].copy()
-                    if row.empty:
-                        continue
-                    display = str(jname)
-                    if kind == 'county' and not display.lower().endswith('county'):
-                        display = display + ' County'
-                    # Avoid duplicating a place already captured from places_lite
-                    already = any(r['DISPLAY_NAME'] == display for r in results)
-                    if not already:
-                        results.append({
-                            'DISPLAY_NAME': display,
-                            'data_count': int(cnt),
-                            'geometry': row.geometry.iloc[0],
-                        })
-            except Exception:
-                continue
-
-            # If places gave us results, don't also add county duplicates
-            if results and parquet_file.startswith('places'):
-                break
-
-        if not results:
-            return None
-
-        out = gpd.GeoDataFrame(results, crs='EPSG:4326')
-        out = out.sort_values('data_count', ascending=False).reset_index(drop=True)
-        return out
-
-    except Exception:
-        return None
-
-
 def _select_best_boundary_for_calls(df_calls, city_text, state_abbr, prefer_county=False):
     """Try place and county boundaries and keep the candidate containing the most uploaded calls."""
     candidates = []
@@ -774,21 +476,6 @@ def _select_best_boundary_for_calls(df_calls, city_text, state_abbr, prefer_coun
             pass
 
     if not candidates:
-        # ── TIGER fallback: parquet not present or city not found — download from Census ──
-        state_fips = STATE_FIPS.get(state_abbr)
-        if state_fips:
-            try:
-                tiger_success, tiger_gdf = fetch_tiger_city_shapefile(state_fips, city_text, SHAPEFILE_DIR)
-                if tiger_success and tiger_gdf is not None and not tiger_gdf.empty:
-                    tiger_gdf = tiger_gdf.copy()
-                    if 'NAME' not in tiger_gdf.columns:
-                        tiger_gdf['NAME'] = city_text
-                    hits = _count_points_within_boundary(df_calls, tiger_gdf)
-                    candidates.append(('place', tiger_gdf, hits))
-            except Exception:
-                pass
-
-    if not candidates:
         return False, None, 'place', 0
 
     if prefer_county:
@@ -798,6 +485,63 @@ def _select_best_boundary_for_calls(df_calls, city_text, state_abbr, prefer_coun
 
     best_kind, best_gdf, best_hits = candidates[0]
     return True, best_gdf, best_kind, int(best_hits)
+
+
+def _resolve_upload_boundary_with_fallback(df_calls, city_text, state_abbr, prefer_county=False):
+    """Prefer the detected city boundary for uploaded CAD files, then fall back safely.
+
+    This protects upload behavior from ending up at an auto-generated polygon when the
+    detected city exists locally but hit-count heuristics are noisy or zero.
+    Returns (success, gdf, kind, hits, mode_used).
+    """
+    city_text = str(city_text or '').strip()
+    state_abbr = str(state_abbr or '').strip()
+    if not city_text or not state_abbr:
+        return False, None, 'place', 0, 'missing_input'
+
+    # 1) Strongly prefer the exact city/place boundary when it contains any uploaded calls.
+    try:
+        place_success, place_gdf = fetch_place_boundary_local(state_abbr, city_text)
+        if place_success and place_gdf is not None and not place_gdf.empty:
+            place_hits = _count_points_within_boundary(df_calls, place_gdf)
+            if place_hits > 0:
+                return True, place_gdf, 'place', int(place_hits), 'place_hits'
+    except Exception:
+        pass
+
+    # 2) Use the existing blended selector.
+    try:
+        best_success, best_gdf, best_kind, best_hits = _select_best_boundary_for_calls(
+            df_calls, city_text, state_abbr, prefer_county=prefer_county
+        )
+        if best_success and best_gdf is not None:
+            return True, best_gdf, best_kind, int(best_hits), 'best_selector'
+    except Exception:
+        pass
+
+    # 3) If the selector misses, retry city/place directly before allowing any later fallback.
+    try:
+        place_success, place_gdf = fetch_place_boundary_local(state_abbr, city_text)
+        if place_success and place_gdf is not None and not place_gdf.empty:
+            place_hits = _count_points_within_boundary(df_calls, place_gdf)
+            return True, place_gdf, 'place', int(place_hits), 'place_fallback'
+    except Exception:
+        pass
+
+    # 4) Final local fallback: county boundary.
+    county_names = [city_text]
+    if not city_text.lower().endswith(' county'):
+        county_names.append(f"{city_text} County")
+    for cname in county_names:
+        try:
+            county_success, county_gdf = fetch_county_boundary_local(state_abbr, cname)
+            if county_success and county_gdf is not None and not county_gdf.empty:
+                county_hits = _count_points_within_boundary(df_calls, county_gdf)
+                return True, county_gdf, 'county', int(county_hits), 'county_fallback'
+        except Exception:
+            pass
+
+    return False, None, 'place', 0, 'not_found'
 
 def get_base64_of_bin_file(bin_file):
     try:
@@ -2058,12 +1802,7 @@ def aggressive_parse_calls(uploaded_files):
             if not inferred_state:
                 for _addr_col in ['input_address', 'matched_address', 'address', 'location']:
                     if _addr_col in raw_df.columns:
-                        _addr_series = raw_df[_addr_col].astype(str)
-                        # Pattern 1: "..., ST, ZIPCODE" (comma-separated state and zip)
-                        _states = _addr_series.str.extract(r',\s*([A-Z]{2})\s*,\s*\d{5}(?:-\d{4})?')[0].dropna()
-                        if _states.empty:
-                            # Pattern 2: "..., ST ZIPCODE" (state and zip in same segment, common format)
-                            _states = _addr_series.str.extract(r',\s*([A-Z]{2})\s+\d{5}(?:-\d{4})?')[0].dropna()
+                        _states = raw_df[_addr_col].astype(str).str.extract(r',\s*([A-Z]{2})\s*,\s*\d{5}(?:-\d{4})?')[0].dropna()
                         if not _states.empty:
                             inferred_state = _states.value_counts().idxmax()
                             break
@@ -3611,29 +3350,31 @@ def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir, preferred_
     scan_points = full_points.sample(50000, random_state=42) if len(full_points) > 50000 else full_points
     points_gdf = gpd.GeoDataFrame(scan_points, geometry=gpd.points_from_xy(scan_points.lon, scan_points.lat), crs="EPSG:4326")
     total_bounds = points_gdf.total_bounds
-
-    # Always scan all saved shapefiles in the directory so multi-jurisdiction
-    # uploads show every boundary, not just the first one saved.
-    shp_files = glob.glob(os.path.join(shapefile_dir, "*.shp"))
-    # If no shapefiles exist at all and a preferred path was given, use just that
-    if not shp_files and preferred_shp and os.path.exists(preferred_shp):
+    # If a specific boundary was already fetched and saved, use ONLY that file.
+    # This prevents a leftover county .shp from overriding the desired city/place shape.
+    if preferred_shp and os.path.exists(preferred_shp):
         shp_files = [preferred_shp]
-
+    else:
+        shp_files = glob.glob(os.path.join(shapefile_dir, "*.shp"))
     relevant_polys = []
     _calls_minx, _calls_miny, _calls_maxx, _calls_maxy = total_bounds
     for shp_path in shp_files:
         try:
+            # Quick bbox pre-check: skip shapefiles whose extent doesn't overlap
+            # the call-point bounding box at all. This prevents stale shapefiles
+            # from prior sessions (e.g. Bernalillo NM when data is from FL) from
+            # being selected as the jurisdiction boundary.
             import fiona
             with fiona.open(shp_path) as _shp_src:
-                _shp_bounds = _shp_src.bounds
+                _shp_bounds = _shp_src.bounds  # (minx, miny, maxx, maxy)
             _no_overlap = (
                 _shp_bounds[2] < _calls_minx or _shp_bounds[0] > _calls_maxx or
                 _shp_bounds[3] < _calls_miny or _shp_bounds[1] > _calls_maxy
             )
             if _no_overlap:
-                continue
+                continue  # shapefile is geographically unrelated — skip it
         except Exception:
-            pass
+            pass  # if fiona check fails, proceed normally and let geopandas filter
 
         try:
             gdf_chunk = gpd.read_file(shp_path, bbox=tuple(total_bounds))
@@ -4597,42 +4338,29 @@ if not st.session_state['csvs_ready']:
                     except Exception:
                         pass
                     st.session_state['boundary_source_path'] = ''
-                    st.session_state['master_gdf_override'] = None
 
                     with st.spinner(get_jurisdiction_message()):
-                        _calls_for_boundary = df_c_full if df_c_full is not None and len(df_c_full) > 0 else df_c
-
-                        # ── PRIMARY: pure coordinate spatial join against local parquets ──
-                        # Works for any file regardless of whether city/state was detected.
-                        # Returns ALL jurisdictions that contain ≥1% of calls.
-                        coord_gdf = find_jurisdictions_by_coordinates(_calls_for_boundary)
-
-                        if coord_gdf is not None and not coord_gdf.empty:
-                            # Store the GeoDataFrame directly in session state — no disk
-                            # round-trip needed. The render pass reads it back directly.
-                            st.session_state['master_gdf_override'] = coord_gdf
-                            st.session_state['boundary_source_path'] = 'local_parquet'
-                            st.session_state['boundary_kind'] = 'place'
-                            st.session_state['active_city'] = coord_gdf.iloc[0]['DISPLAY_NAME']
-
-                        else:
-                            st.session_state['master_gdf_override'] = None
-                            # ── FALLBACK: name-based lookup (original path) ──
-                            detected_city_for_boundary = st.session_state.get('active_city', '')
-                            detected_state_for_boundary = st.session_state.get('active_state', '')
-                            if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
-                                city_text = str(detected_city_for_boundary or '').strip()
-                                prefer_county = str(st.session_state.get('location_detection_source', '')) == 'centroid'
-                                b_success, b_gdf, b_kind, b_hits = _select_best_boundary_for_calls(
-                                    _calls_for_boundary,
-                                    city_text,
-                                    detected_state_for_boundary,
-                                    prefer_county=prefer_county
-                                )
-                                st.session_state['boundary_kind'] = b_kind
-                                if b_success and b_gdf is not None:
-                                    _saved = save_boundary_gdf(b_gdf, b_kind, city_text, detected_state_for_boundary)
-                                    st.session_state['boundary_source_path'] = _saved or ''
+                        # Choose the boundary that actually contains uploaded calls.
+                        detected_city_for_boundary = st.session_state.get('active_city', '')
+                        detected_state_for_boundary = st.session_state.get('active_state', '')
+                        if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
+                            city_text = str(detected_city_for_boundary or '').strip()
+                            prefer_county = str(st.session_state.get('location_detection_source', '')) == 'centroid'
+                            b_success, b_gdf, b_kind, b_hits, b_mode = _resolve_upload_boundary_with_fallback(
+                                df_c_full if df_c_full is not None and len(df_c_full) > 0 else df_c,
+                                city_text,
+                                detected_state_for_boundary,
+                                prefer_county=prefer_county
+                            )
+                            st.session_state['boundary_kind'] = b_kind
+                            st.session_state['boundary_detection_mode'] = b_mode
+                            if not b_success:
+                                st.warning(f"Boundary not found for {city_text}, {detected_state_for_boundary}.")
+                            if b_success and b_gdf is not None:
+                                _saved = save_boundary_gdf(b_gdf, b_kind, city_text, detected_state_for_boundary)
+                                st.session_state['boundary_source_path'] = _saved or ''
+                                if b_hits == 0:
+                                    st.warning(f"Detected {city_text}, {detected_state_for_boundary}, but the chosen {b_kind} boundary contains 0 uploaded calls.")
 
                     st.session_state['data_source'] = 'cad_upload'
                     st.session_state['demo_mode_used'] = False
@@ -5814,15 +5542,9 @@ if st.session_state['csvs_ready']:
         except Exception:
             pass
 
-    # ── Jurisdiction boundary: use coordinate-lookup result if available,
-    #    otherwise fall back to shapefile scan (demo/brinc restore paths) ──
-    _master_override = st.session_state.get('master_gdf_override')
-    if _master_override is not None and not _master_override.empty:
-        master_gdf = _master_override.copy()
-    else:
-        with st.spinner(get_jurisdiction_message()):
-            _preferred_shp = st.session_state.get('boundary_source_path', '') or None
-            master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
+    with st.spinner(get_jurisdiction_message()):
+        _preferred_shp = st.session_state.get('boundary_source_path', '') or None
+        master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
 
     _boundary_kind_note = st.session_state.get('boundary_kind', 'place')
     _boundary_src_note = st.session_state.get('boundary_source_path', '')
@@ -5929,13 +5651,7 @@ if st.session_state['csvs_ready']:
         """, unsafe_allow_html=True)
 
     st.sidebar.markdown('<div class="sidebar-section-header">① Configure</div>', unsafe_allow_html=True)
-    _jur_src_file = st.session_state.get('_jur_source_file', '')
-    _boundary_src_display = (
-        _jur_src_file if _boundary_src_note == 'local_parquet' and _jur_src_file
-        else 'local_parquet' if _boundary_src_note == 'local_parquet'
-        else (_boundary_src_note.split(chr(47))[-1].split(chr(92))[-1] if _boundary_src_note else 'live lookup')
-    )
-    st.sidebar.caption(f"Boundary: {_boundary_kind_note} · {_boundary_src_display}")
+    st.sidebar.caption(f"Boundary: {_boundary_kind_note} · {_boundary_src_note.split(chr(47))[-1].split(chr(92))[-1] if _boundary_src_note else 'live lookup'}")
 
     total_pts = master_gdf['data_count'].sum()
     master_gdf['LABEL'] = master_gdf['DISPLAY_NAME'] + " (" + (master_gdf['data_count']/total_pts*100).round(1).astype(str) + "%)"
@@ -5945,11 +5661,6 @@ if st.session_state['csvs_ready']:
     default_selection = [all_options[0]] if all_options else []
     selected_labels = st.sidebar.multiselect("Jurisdictions", options=all_options, default=default_selection,
                                              help="Select which geographic areas to include in coverage analysis.")
-
-    _jur_debug = st.session_state.get('_jur_debug', [])
-    _jur_source = next((m.split(': ')[1].split(' ')[0] for m in _jur_debug if 'parquet exists' in m and 'True' in m), None)
-    if _jur_source:
-        st.session_state['_jur_source_file'] = _jur_source
 
     if not selected_labels:
         st.warning("Please select at least one jurisdiction from the sidebar.")

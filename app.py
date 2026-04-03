@@ -25,7 +25,7 @@ st.set_page_config(page_title="BRINC COS Drone Optimizer", layout="wide", initia
 # This MUST run before any st.session_state checks to prevent KeyError
 defaults = {
     'csvs_ready': False, 'df_calls': None, 'df_calls_full': None, 'df_stations': None,
-    'active_city': "Victoria", 'active_state': "TX", 'estimated_pop': 65000,
+    'active_city': "Rockford", 'active_state': "IL", 'estimated_pop': 65000,
     'k_resp': 2, 'k_guard': 0, 'r_resp': 2.0, 'r_guard': 8.0,
     'dfr_rate': 12, 'deflect_rate': 25, 'total_original_calls': 0, 'total_modeled_calls': 0,
     'onboarding_done': False, 'trigger_sim': False, 'city_count': 1,
@@ -53,7 +53,7 @@ for k, v in defaults.items():
 
 
 if 'target_cities' not in st.session_state:
-    st.session_state['target_cities'] = [{"city": "", "state": st.session_state.get('active_state', 'TX')}]
+    st.session_state['target_cities'] = [{"city": "", "state": st.session_state.get('active_state', 'IL')}]
 
 
 GUARDIAN_FLIGHT_HOURS_PER_DAY = 23.5
@@ -4236,11 +4236,11 @@ if not st.session_state['csvs_ready']:
         _h_state.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>State</div>", unsafe_allow_html=True)
 
         while len(st.session_state['target_cities']) < st.session_state.city_count:
-            st.session_state['target_cities'].append({"city": "", "state": st.session_state.get('active_state', 'TX')})
+            st.session_state['target_cities'].append({"city": "", "state": st.session_state.get('active_state', 'IL')})
 
         for i in range(st.session_state.city_count):
             c_val = st.session_state['target_cities'][i]['city'] if i < len(st.session_state['target_cities']) else ""
-            s_val = st.session_state['target_cities'][i]['state'] if i < len(st.session_state['target_cities']) else "TX"
+            s_val = st.session_state['target_cities'][i]['state'] if i < len(st.session_state['target_cities']) else "IL"
 
             col_city, col_state = st.columns([3, 1])
 
@@ -4252,7 +4252,7 @@ if not st.session_state['csvs_ready']:
                 help="Official municipality or county name."
             )
 
-            default_state_idx = _state_keys.index(s_val) if s_val in _state_keys else _state_keys.index("TX")
+            default_state_idx = _state_keys.index(s_val) if s_val in _state_keys else _state_keys.index("IL")
             s_name = col_state.selectbox(
                 f"state_{i}",
                 options=_state_keys,

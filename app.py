@@ -3251,7 +3251,7 @@ def format_3_lines(name_str):
             return f"{parts[0].strip()},<br>{parts[1].strip()},<br>{','.join(parts[2:]).strip()}"
     return name_str
 
-def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2, simple=False):
+def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2, simple=False, deflection_rate=0.25):
     if not active_drones:
         return ""
     # Per-type daily airtime budgets derived from CONFIG duty cycles:
@@ -3282,7 +3282,8 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_savings   = d["annual_savings"]
         d_flights   = d["marginal_flights"]
         d_shared    = d["shared_flights"]
-        d_deflected = d["marginal_deflected"]
+        # Resolved/day = total station flights (exclusive + shared) × deflection rate.
+        d_deflected  = (d_flights + d_shared) * deflection_rate
         d_time      = d["avg_time_min"]
         d_faa       = d["faa_ceiling"]
         d_airport   = d["nearest_airport"]
@@ -3439,7 +3440,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
       <div style="font-size:0.95rem;font-weight:900;color:{accent_color};">{d_be}</div>
     </div>
     <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
-      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Resolved/day<span class="tip" data-tip="Calls per day closed without dispatching an officer: zone flights/day x deflection rate. Drone arrived, assessed, and dispatch stood down.">?</span></div>
+      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Resolved/day<span class="tip" data-tip="Calls per day closed without dispatching an officer: total station flights/day (exclusive + shared zone) × deflection rate. Drone arrived, assessed, and dispatch stood down.">?</span></div>
       <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{d_deflected:.1f} calls</div>
     </div>
     <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
@@ -3540,7 +3541,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
       <div style="font-weight:800; color:{util_color}; font-size:0.82rem;">{util_pct}</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Resolved/day<span class="tip" data-tip="Calls per day closed without dispatching an officer: exclusive_zone_flights x deflection_rate. Drone arrived, assessed, and dispatch stood down.">?</span></div>
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Resolved/day<span class="tip" data-tip="Calls per day closed without dispatching an officer: total station flights/day (exclusive + shared zone) × deflection rate. Drone arrived, assessed, and dispatch stood down.">?</span></div>
       <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_deflected:.1f}</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
@@ -3755,7 +3756,7 @@ def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir, preferred_
     return master_gdf
 
 @st.cache_data(show_spinner=False)
-def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, seed=42):
+def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, seed=42, bounds_hash=''):
     if df_calls_full is None or len(df_calls_full) == 0:
         return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
@@ -3840,7 +3841,7 @@ def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, e
     guard_matrix = np.zeros((n, total_calls), dtype=bool)
     dist_matrix_r = np.zeros((n, total_calls))
     dist_matrix_g = np.zeros((n, total_calls))
-    display_calls = build_display_calls(df_calls_full if df_calls_full is not None else df_calls, _city_m, epsg_code, max_points=300000)
+    display_calls = build_display_calls(df_calls_full if df_calls_full is not None else df_calls, _city_m, epsg_code, max_points=300000, bounds_hash=bounds_hash)
     max_dist = max(
         (((row['lon'] - center_lon) ** 2 + (row['lat'] - center_lat) ** 2) ** 0.5 for _, row in df_stations_all.iterrows()),
         default=1.0
@@ -7593,7 +7594,7 @@ if st.session_state['csvs_ready']:
             _build_unit_cards_html(
                 active_drones, text_main, text_muted, card_bg, card_border,
                 card_title, accent_color, columns_per_row=4,
-                simple=simple_cards
+                simple=simple_cards, deflection_rate=deflection_rate
             ),
             unsafe_allow_html=True
         )

@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(python3:*)",
-      "Bash(grep -E \"\\\\.py$|\\\\.csv$|\\\\.txt$\")"
+      "Bash(grep -E \"\\\\.py$|\\\\.csv$|\\\\.txt$\")",
+      "Bash(ccusage:*)"
     ]
   }
 }

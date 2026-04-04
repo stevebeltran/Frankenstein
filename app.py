@@ -8435,7 +8435,7 @@ if st.session_state['csvs_ready']:
         active_drones=active_drones or [],
         df_calls_full=df_calls_full,
     )
-    components.html(_cid_html, height=5200, scrolling=False)
+    components.html(_cid_html, height=3500, scrolling=False)
 
     # ── SCHOOL SAFETY IMPACT MATRIX ──────────────────────────────────────────
     st.markdown("---")
@@ -8676,7 +8676,15 @@ if st.session_state['csvs_ready']:
       </div>
     </div>
     """
-    st.markdown(_school_html, unsafe_allow_html=True)
+    _school_full_html = (
+        "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1.0'>"
+        "</head>"
+        f"<body style='margin:0;padding:12px 4px 16px;background:#000000;"
+        "font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;'>"
+        f"{_school_html}</body></html>"
+    )
+    components.html(_school_full_html, height=1300, scrolling=False)
 
     # ── EXPORT BUTTONS — always visible in sidebar ──
     st.sidebar.markdown("---")
@@ -10132,34 +10140,6 @@ function copyCommunitySection() {{
         ),
         "stations_data": _safe_df_to_records(st.session_state.get('df_stations')),
     })
-    # ── CUSTOMIZE DOCUMENT ───────────────────────────────────────────────────
-    with st.sidebar.expander("✏️ Customize Document", expanded=False):
-        st.markdown(
-            f"<div style='font-size:0.7rem;color:{text_muted};margin-bottom:8px;'>"
-            "Personalize the exported HTML proposal before sending to your customer. "
-            "All fields are optional — leave blank to use auto-generated defaults.</div>",
-            unsafe_allow_html=True
-        )
-        st.markdown(f"<div style='font-size:0.65rem;color:{text_muted};font-weight:600;text-transform:uppercase;margin:6px 0 4px;'>Recipient</div>", unsafe_allow_html=True)
-        st.text_input("Contact Name / Title",    key="pd_chief_name",  placeholder=f"Chief of Police, {prop_city}")
-        st.text_input("Department Name",          key="pd_dept_name",   placeholder=f"{prop_city} Police Department")
-        st.text_input("Department Email",         key="pd_dept_email",  placeholder="chief@pd.gov")
-        st.text_input("Department Phone",         key="pd_dept_phone",  placeholder="(555) 555-0100")
-        st.markdown(f"<div style='font-size:0.65rem;color:{text_muted};font-weight:600;text-transform:uppercase;margin:10px 0 4px;'>Custom Content</div>", unsafe_allow_html=True)
-        st.text_area("Opening paragraph",         key="doc_custom_intro",
-                     placeholder="Add context specific to this department or city…",
-                     height=90)
-        st.text_input("Talking point 1",          key="doc_talking_pt_1",
-                      placeholder="e.g. First DFR deployment in this region")
-        st.text_input("Talking point 2",          key="doc_talking_pt_2")
-        st.text_input("Talking point 3",          key="doc_talking_pt_3")
-        st.text_area("Closing paragraph",         key="doc_custom_closing",
-                     placeholder="e.g. We look forward to partnering with your department…",
-                     height=80)
-        st.markdown(f"<div style='font-size:0.65rem;color:{text_muted};font-weight:600;text-transform:uppercase;margin:10px 0 4px;'>Your Contact Info</div>", unsafe_allow_html=True)
-        st.text_input("Your phone number",        key="doc_ae_phone",   placeholder="(312) 555-0199")
-        st.caption("Changes apply immediately to the next HTML download.")
-
     if st.sidebar.download_button("💾 Save Deployment Plan", data=_brinc_data,
                                   file_name=f"Brinc_{_safe_city}_{_ts}.brinc",
                                   mime="application/json", use_container_width=True):

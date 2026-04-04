@@ -49,6 +49,13 @@ defaults = {
     'pin_drop_mode': False,     # True when map-click pin placement is active
     'pending_pin': None,        # dict(lat, lon) waiting for user confirmation
     'pin_drop_used': False,     # True once a station was added via pin-drop; suppresses auto-minimums
+    # ── Document customization fields ──────────────────────────────────────────
+    'doc_custom_intro':   '',   # Optional opening paragraph injected after exec summary
+    'doc_talking_pt_1':  '',   # Custom bullet 1
+    'doc_talking_pt_2':  '',   # Custom bullet 2
+    'doc_talking_pt_3':  '',   # Custom bullet 3
+    'doc_custom_closing': '',  # Optional closing paragraph before AE signature
+    'doc_ae_phone':       '',  # AE phone number shown in contact block
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -4399,8 +4406,68 @@ if not st.session_state['csvs_ready']:
             if col_add.button("＋ City", use_container_width=True, key="add_city_btn"):
                 st.session_state.city_count += 1
                 st.rerun()
-        submit_demo = col_run.button("▶ Run", use_container_width=True, key="run_sim_btn",
+        submit_demo = col_run.button("Deploy", use_container_width=True, key="run_sim_btn",
                                      help="Fetch boundaries and launch the simulation.")
+        components.html("""
+<script>
+(function(){
+  var _ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;display:inline-block;vertical-align:middle;">'
+    + '<circle cx="12" cy="12" r="9.5" stroke="currentColor" stroke-width="1.6"/>'
+    + '<circle cx="12" cy="12" r="5.5" stroke="currentColor" stroke-width="1.2" stroke-dasharray="3 2"/>'
+    + '<path d="M12 5.5C9.51 5.5 7.5 7.51 7.5 10C7.5 13.25 12 18.5 12 18.5C12 18.5 16.5 13.25 16.5 10C16.5 7.51 14.49 5.5 12 5.5Z" fill="currentColor"/>'
+    + '<circle cx="12" cy="10" r="2" fill="white"/>'
+    + '</svg>';
+
+  function style(){
+    var doc = parent.document;
+    var btns = doc.querySelectorAll('[data-testid="stButton"] > button');
+    btns.forEach(function(b){
+      var p = b.querySelector('p');
+      if(!p || p.textContent.trim() !== 'Deploy') return;
+      if(b.getAttribute('data-brinc-deploy')) return;
+      b.setAttribute('data-brinc-deploy','1');
+      b.style.background   = 'linear-gradient(135deg,#00bcd4 0%,#00D2FF 100%)';
+      b.style.color        = '#000';
+      b.style.border       = 'none';
+      b.style.borderRadius = '8px';
+      b.style.fontWeight   = '800';
+      b.style.fontSize     = '15px';
+      b.style.letterSpacing= '0.4px';
+      b.style.boxShadow    = '0 4px 20px rgba(0,210,255,0.55),0 2px 8px rgba(0,0,0,0.28)';
+      b.style.transition   = 'all 0.16s ease';
+      b.style.display      = 'flex';
+      b.style.alignItems   = 'center';
+      b.style.justifyContent = 'center';
+      b.style.gap          = '7px';
+      p.style.margin  = '0';
+      p.style.color   = '#000';
+      p.style.fontWeight = '800';
+      p.style.display = 'flex';
+      p.style.alignItems = 'center';
+      p.style.gap = '7px';
+      var icon = doc.createElement('span');
+      icon.innerHTML = _ICON;
+      p.insertBefore(icon, p.firstChild);
+      b.addEventListener('mouseenter',function(){
+        b.style.boxShadow  = '0 6px 30px rgba(0,210,255,0.75),0 2px 8px rgba(0,0,0,0.3)';
+        b.style.transform  = 'translateY(-1px)';
+        b.style.background = 'linear-gradient(135deg,#00d4ee 0%,#33e0ff 100%)';
+      });
+      b.addEventListener('mouseleave',function(){
+        b.style.boxShadow  = '0 4px 20px rgba(0,210,255,0.55),0 2px 8px rgba(0,0,0,0.28)';
+        b.style.transform  = 'translateY(0)';
+        b.style.background = 'linear-gradient(135deg,#00bcd4 0%,#00D2FF 100%)';
+      });
+    });
+  }
+
+  new MutationObserver(style).observe(parent.document.body,{childList:true,subtree:true});
+  style();
+  setTimeout(style,150);
+  setTimeout(style,500);
+})();
+</script>
+""", height=0)
 
     with path_upload_col:
         st.markdown(f"""
@@ -7698,7 +7765,7 @@ if st.session_state['csvs_ready']:
     kpi_html = (
         # ── Row 1: summary totals ──────────────────────────────────────────
         f'<div style="background:{card_bg}; border:1px solid {card_border}; border-radius:8px; padding:16px 20px; margin-bottom:8px;">'
-        f'<div style="font-size:0.65rem; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Fleet Summary</div>'
+        f'<div style="font-size:0.65rem; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Fleet Summary <span class="tip" data-tip="Sources: Coverage % and response time computed from uploaded CAD incident data using BRINC geospatial optimizer. Hardware specs: BRINC Drones (brincdrones.com). Response time uses drone speed with 1.4× routing factor to approximate real-world travel paths.">?</span></div>'
         f'<div style="display:grid; grid-template-columns:repeat(5,1fr); gap:8px;">'
         + _kpi_cell("Total Incidents", call_str, impact=_impact_incidents)
         + _kpi_cell("Combined Coverage", f"{calls_covered_perc:.1f}%", _COMB_COL, impact=_impact_coverage)
@@ -7945,7 +8012,7 @@ if st.session_state['csvs_ready']:
 
     # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────
     st.markdown("---")
-    st.markdown(f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics <span class='tip' data-tip='Per-drone financial breakdown — annual capacity value, specialty response savings, utilization, break-even, and response time for each deployed unit. Hover each ? badge for metric definitions.'>?</span></h4>", unsafe_allow_html=True)
+    st.markdown(f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics <span class='tip' data-tip='Per-drone financial breakdown — annual capacity value, specialty response savings, utilization, break-even, and response time for each deployed unit. Hover each ? badge for metric definitions.'>?</span> <span class='tip' data-tip='Sources: Annual savings formula — DFR dispatch rate × deflection rate × $76 officer dispatch cost × annual zone calls (IACP/DOJ benchmarks). Hardware CapEx — BRINC Drones MSRP. Specialty values — NFPA (fire), BLS (K-9), internal BRINC benchmarks. All figures are model estimates.'>src</span></h4>", unsafe_allow_html=True)
     st.markdown(
         f"<div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:10px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>",
         unsafe_allow_html=True
@@ -7993,7 +8060,7 @@ if st.session_state['csvs_ready']:
 
     # ── COVERAGE CURVE + STATION RING CHART (side by side, directly below cards) ──
     st.markdown("---")
-    st.markdown(f"<h4 style='border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Coverage Curve <span class='tip' data-tip='Shows marginal call and area coverage as you add more Responder or Guardian drones. The curve flattens as overlap increases — use this to find the point of diminishing returns for your fleet size.'>?</span></h4>", unsafe_allow_html=True)
+    st.markdown(f"<h4 style='border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Coverage Curve <span class='tip' data-tip='Shows marginal call and area coverage as you add more Responder or Guardian drones. The curve flattens as overlap increases — use this to find the point of diminishing returns for your fleet size.'>?</span> <span class='tip' data-tip='Sources: Coverage % derived from geospatial analysis of uploaded CAD incident locations. Optimizer tests each candidate station and measures incremental coverage gain. Map tiles: © OpenStreetMap contributors (ODbL). Station candidates: OSM + DHS HIFLD Open Data.'>src</span></h4>", unsafe_allow_html=True)
     st.markdown(f"<div style='font-size:0.8rem; color:{text_muted}; margin-bottom:8px;'>How added drones improve coverage — and where returns flatten.</div>", unsafe_allow_html=True)
 
     _curve_col, _ring_col = st.columns([3, 2], gap="medium")
@@ -8336,7 +8403,7 @@ if st.session_state['csvs_ready']:
     # ── COMMUNITY IMPACT DASHBOARD ────────────────────────────────────────────
     st.markdown("---")
     st.markdown(
-        f"<h3 style='color:{text_main};'>🏛️ Community Impact Dashboard <span class='tip' data-tip='Public-facing transparency report for city council presentations and community portals. Hover the ? badges inside each section for detailed explanations of every metric.'>?</span></h3>",
+        f"<h3 style='color:{text_main};'>🏛️ Community Impact Dashboard <span class='tip' data-tip='Public-facing transparency report for city council presentations and community portals. Hover the ? badges inside each section for detailed explanations of every metric.'>?</span> <span class='tip' data-tip='Sources: Population — US Census Bureau ACS. Officer wages — Bureau of Labor Statistics (BLS) OES. Flight hour projections — BRINC hardware specs. Financial figures — BRINC COS optimization model. Fourth Amendment framework — DOJ/ACLU DFR policy guidelines.'>src</span></h3>",
         unsafe_allow_html=True
     )
     st.markdown(
@@ -8369,6 +8436,247 @@ if st.session_state['csvs_ready']:
         df_calls_full=df_calls_full,
     )
     components.html(_cid_html, height=5200, scrolling=False)
+
+    # ── SCHOOL SAFETY IMPACT MATRIX ──────────────────────────────────────────
+    st.markdown("---")
+    _sro_cost_low   = 75_000
+    _sro_cost_high  = 120_000
+    _dfr_amortized  = int(fleet_capex / 7) if fleet_capex > 0 else 0
+    _dfr_amort_str  = f"${_dfr_amortized:,}/yr" if _dfr_amortized > 0 else "~$11K–22K/yr"
+
+    def _ss_row(label, sro_val, dfr_val, alt, cb, cbrd, tm, tmain, acc, last=False):
+        bg = f"background:rgba(255,255,255,0.02);" if alt else ""
+        brd = "" if last else f"border-bottom:1px solid {cbrd};"
+        sro_color = "#f59e0b"
+        dfr_color = acc
+        return (
+            f'<tr style="{bg}{brd}">'
+            f'<td style="padding:8px 12px;color:{tmain};font-weight:600;font-size:0.72rem;">{label}</td>'
+            f'<td style="padding:8px 12px;text-align:center;color:{sro_color};font-size:0.71rem;">{sro_val}</td>'
+            f'<td style="padding:8px 12px;text-align:center;color:{dfr_color};font-size:0.71rem;">{dfr_val}</td>'
+            f'</tr>'
+        )
+
+    _school_rows = (
+        _ss_row("Annual Cost / Campus",
+                f"${_sro_cost_low:,}–${_sro_cost_high:,} per officer",
+                f"{_dfr_amort_str} amortized (7-yr) · {actual_k_responder + actual_k_guardian} units",
+                False, card_bg, card_border, text_muted, text_main, accent_color) +
+        _ss_row("Coverage Hours / Year",
+                "~1,260 hrs/yr (school hours only)",
+                "8,760 hrs/yr — 24 / 7 / 365",
+                True, card_bg, card_border, text_muted, text_main, accent_color) +
+        _ss_row("Campuses Covered",
+                "1 building per officer",
+                f"Multi-campus — {actual_k_responder + actual_k_guardian} simultaneous coverage zones",
+                False, card_bg, card_border, text_muted, text_main, accent_color) +
+        _ss_row("On-Campus Response Time",
+                "2–5 min (foot/vehicle across campus)",
+                f"&lt;90 sec airborne · {avg_resp_time:.1f} min avg aerial",
+                True, card_bg, card_border, text_muted, text_main, accent_color) +
+        _ss_row("After-Hours / Weekend Coverage",
+                "❌ None",
+                "✅ Full thermal surveillance 24/7",
+                False, card_bg, card_border, text_muted, text_main, accent_color) +
+        _ss_row("Thermal / Night Vision",
+                "❌ Flashlight only",
+                "✅ 640px FLIR thermal (BRINC Responder)",
+                True, card_bg, card_border, text_muted, text_main, accent_color) +
+        _ss_row("Perimeter Monitoring",
+                "❌ Not feasible at scale",
+                "✅ Automated aerial patrol",
+                False, card_bg, card_border, text_muted, text_main, accent_color) +
+        _ss_row("Active Threat Intel",
+                "Single officer — blind hallway entry",
+                "✅ Live HD + thermal to dispatch before officer entry",
+                True, card_bg, card_border, text_muted, text_main, accent_color) +
+        _ss_row("Indoor Operations",
+                "✅ On foot",
+                "✅ BRINC LEMUR 2 — glass-breaker, perch mode, 2-way comms",
+                False, card_bg, card_border, text_muted, text_main, accent_color) +
+        _ss_row("Court-Admissible Evidence",
+                "Body cam (ground-level only)",
+                "✅ Aerial HD video + chain-of-custody flight log",
+                True, card_bg, card_border, text_muted, text_main, accent_color) +
+        _ss_row("Mass Shooting Prevention Evidence",
+                "❌ No proven effect (RAND, 2023)",
+                "✅ Pre-entry intel enables faster tactical coordination",
+                False, card_bg, card_border, text_muted, text_main, accent_color) +
+        _ss_row("Disciplinary Side Effects",
+                "⚠️ +35–80% suspensions · +25–90% expulsions (RAND)",
+                "✅ Zero school-discipline impact",
+                True, card_bg, card_border, text_muted, text_main, accent_color, last=True)
+    )
+
+    _school_html = f"""
+    <style>
+    .ss-tip {{
+      display:inline-flex;align-items:center;justify-content:center;
+      width:13px;height:13px;border-radius:50%;
+      background:rgba(255,255,255,0.12);color:#888;font-size:9px;font-weight:700;
+      cursor:default;margin-left:3px;vertical-align:middle;position:relative;flex-shrink:0;
+    }}
+    .ss-tip:hover::after {{
+      content:attr(data-tip);position:absolute;bottom:130%;left:50%;
+      transform:translateX(-50%);background:#1a1a2e;color:#e0e0e0;
+      font-size:10.5px;font-weight:400;padding:6px 10px;border-radius:5px;
+      white-space:normal;width:260px;line-height:1.5;z-index:9999;
+      border:1px solid #333;box-shadow:0 4px 12px rgba(0,0,0,0.5);
+      pointer-events:none;text-transform:none;letter-spacing:normal;
+    }}
+    </style>
+
+    <div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;">
+        <h3 style="color:{text_main};margin:0;">🏫 School Safety Impact <span class='tip' data-tip='Sources: FBI Crime in Schools 2020–2024 · NCES Indicators of School Crime &amp; Safety 2023 · FBI Active Shooter Study · RAND Corp. SRO Research (2023) · NIJ Effects of SROs on School Crime · K-12 School Shooting Database · BJS School Crime Statistics 2024 · ZipRecruiter/Volt.ai SRO salary data · BRINC technical specifications · Chula Vista PD DFR Program outcomes.'>src</span></h3>
+        <span style="font-size:0.7rem;color:{text_muted};">National statistics · DFR vs SRO analysis · cited sources</span>
+      </div>
+      <div style="font-size:0.78rem;color:{text_muted};margin-bottom:16px;max-width:740px;line-height:1.6;">
+        BRINC DFR delivers 24/7 aerial first-response to school campuses — faster and at lower total lifecycle cost than
+        traditional School Resource Officers, with no coverage blind spots, no off-hours gaps, and full HD + thermal
+        scene intelligence before any ground unit enters a building.
+      </div>
+
+      <!-- NATIONAL STATS HERO ROW -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;">
+
+        <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid #ef4444;border-radius:8px;padding:14px 12px;text-align:center;">
+          <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
+            School Crimes 2020–24
+            <span class="ss-tip" data-tip="Source: FBI Crime in Schools Special Report 2020–2024. Over 1.3 million criminal incidents recorded at K-12 school locations across the US over the five-year period, with approximately 1.5 million victims.">?</span>
+          </div>
+          <div style="font-size:1.75rem;font-weight:900;color:#ef4444;font-family:'IBM Plex Mono',monospace;">1.3M</div>
+          <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">criminal incidents on campus</div>
+        </div>
+
+        <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid #f59e0b;border-radius:8px;padding:14px 12px;text-align:center;">
+          <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
+            Student Victimization
+            <span class="ss-tip" data-tip="Source: NCES Indicators of School Crime &amp; Safety 2023 (NCES 2024-145). 22 nonfatal criminal victimizations per 1,000 students ages 12-18 in 2022 — includes theft, violent crime, and serious threats. Down from 52/1,000 in 2012 but remains elevated.">?</span>
+          </div>
+          <div style="font-size:1.75rem;font-weight:900;color:#f59e0b;font-family:'IBM Plex Mono',monospace;">22</div>
+          <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">per 1,000 students annually</div>
+        </div>
+
+        <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid #8b5cf6;border-radius:8px;padding:14px 12px;text-align:center;">
+          <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
+            Incidents End ≤5 min
+            <span class="ss-tip" data-tip="Source: FBI Active Shooter Study (64 incidents analyzed). 69% of active shooter events conclude within 5 minutes — 23 ended in under 2 minutes. Average incident duration at educational facilities: 3 min 18 sec. Most incidents end before police arrive.">?</span>
+          </div>
+          <div style="font-size:1.75rem;font-weight:900;color:#8b5cf6;font-family:'IBM Plex Mono',monospace;">69%</div>
+          <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">active shooter events ≤5 min</div>
+        </div>
+
+        <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid {accent_color};border-radius:8px;padding:14px 12px;text-align:center;">
+          <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
+            BRINC On-Scene
+            <span class="ss-tip" data-tip="Source: BRINC technical specifications; Chula Vista PD DFR Program outcomes. BRINC launches in &lt;20 sec and is on-scene in &lt;90 sec. Chula Vista documented average DFR response under 2 minutes citywide — vs. 14-15 min national ground average.">?</span>
+          </div>
+          <div style="font-size:1.75rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">&lt;90s</div>
+          <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">airborne &amp; streaming live video</div>
+        </div>
+
+      </div>
+
+      <!-- CRITICAL RESPONSE WINDOW -->
+      <div style="background:rgba(239,68,68,0.06);border-left:3px solid #ef4444;border-radius:0 6px 6px 0;padding:12px 16px;margin-bottom:16px;">
+        <div style="font-size:0.7rem;font-weight:700;color:#ef4444;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">
+          ⚠️ The Critical Response Window
+          <span class="ss-tip" data-tip="Sources: FBI Law Enforcement Bulletin 'Those Terrible First Few Minutes'; FBI Active Shooter Study (51-case median analysis); ALICE Training Institute; K-12 School Shooting Database (k12ssdb.org). Education-setting data: FBI subset of 51 incidents in schools.">?</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
+          <div style="text-align:center;background:rgba(0,0,0,0.25);border-radius:6px;padding:10px 8px;">
+            <div style="font-size:1.25rem;font-weight:900;color:#ef4444;font-family:'IBM Plex Mono',monospace;">14–15 min</div>
+            <div style="font-size:0.63rem;color:{text_muted};margin-top:3px;">National avg ground police<br>arrival to active shooter</div>
+          </div>
+          <div style="text-align:center;background:rgba(0,0,0,0.25);border-radius:6px;padding:10px 8px;">
+            <div style="font-size:1.25rem;font-weight:900;color:#f59e0b;font-family:'IBM Plex Mono',monospace;">3m 18s</div>
+            <div style="font-size:0.63rem;color:{text_muted};margin-top:3px;">Avg incident duration<br>at schools (FBI education subset)</div>
+          </div>
+          <div style="text-align:center;background:rgba(0,0,0,0.25);border-radius:6px;padding:10px 8px;">
+            <div style="font-size:1.25rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">&lt;90 sec</div>
+            <div style="font-size:0.63rem;color:{text_muted};margin-top:3px;">BRINC on-scene with live<br>HD + thermal to dispatch</div>
+          </div>
+        </div>
+        <div style="font-size:0.69rem;color:{text_muted};font-style:italic;line-height:1.55;">
+          "Most active shooter incidents in schools are over before a responding officer reaches the building entrance.
+          DFR doesn't replace the officer — it gives the officer eyes on every hallway, stairwell, and exit
+          before they open the first door." — FBI Law Enforcement Bulletin, 'Those Terrible First Few Minutes'
+        </div>
+      </div>
+
+      <!-- DFR vs SRO COMPARISON TABLE -->
+      <div style="font-size:0.7rem;font-weight:700;color:{text_main};text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
+        DFR vs. School Resource Officer (SRO) — Capability Matrix
+        <span class="ss-tip" data-tip="SRO data: RAND 'The Role and Impact of School Resource Officers' (2023); NIJ Effects of SROs on School Crime (OJP); ZipRecruiter SRO Salary 2025; Volt.ai SRO Cost Analysis. DFR data: BRINC technical specifications; Chula Vista PD DFR outcomes; Skydio Campus DFR documentation.">?</span>
+      </div>
+      <div style="overflow-x:auto;border-radius:8px;border:1px solid {card_border};">
+        <table style="width:100%;border-collapse:collapse;font-size:0.72rem;">
+          <thead>
+            <tr style="background:rgba(0,0,0,0.45);">
+              <th style="padding:10px 14px;text-align:left;font-size:0.61rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:{text_muted};">Capability</th>
+              <th style="padding:10px 14px;text-align:center;font-size:0.61rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#f59e0b;">School Resource Officer</th>
+              <th style="padding:10px 14px;text-align:center;font-size:0.61rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:{accent_color};">BRINC DFR</th>
+            </tr>
+          </thead>
+          <tbody>
+            {_school_rows}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- COST COMPARISON CARDS -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;margin-bottom:12px;">
+
+        <div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:16px;">
+          <div style="font-size:0.63rem;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
+            📋 10-School District — Traditional SRO Model
+            <span class="ss-tip" data-tip="Source: ZipRecruiter SRO Salary Data 2025; DeSoto County SRO detailed cost breakdown ($94,147/yr blended total); Volt.ai SRO Cost Analysis. 1 officer per campus at $75K–$120K total annual cost. School-hours coverage only: 7hr/day × 180 school days = 1,260 hrs/yr per campus.">?</span>
+          </div>
+          <div style="font-size:1.6rem;font-weight:900;color:#f59e0b;font-family:'IBM Plex Mono',monospace;">${940_000:,} – ${1_200_000:,}</div>
+          <div style="font-size:0.67rem;color:{text_muted};margin-top:3px;">per year · 10 officers · school hours only</div>
+          <div style="margin-top:10px;display:flex;flex-direction:column;gap:3px;font-size:0.65rem;color:{text_muted};">
+            <div>Coverage: ~1,260 hrs/campus/yr (14.4% of annual hours)</div>
+            <div>Nights, weekends, summer: ❌ no coverage</div>
+            <div>Perimeter / multi-campus: ❌ single building only</div>
+            <div>Proven mass-shooting impact: ❌ no evidence (RAND)</div>
+          </div>
+        </div>
+
+        <div style="background:rgba(0,210,255,0.06);border:1px solid rgba(0,210,255,0.2);border-radius:8px;padding:16px;">
+          <div style="font-size:0.63rem;font-weight:700;color:{accent_color};text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
+            🚁 BRINC DFR — Multi-Campus Deployment
+            <span class="ss-tip" data-tip="BRINC fleet CapEx amortized over 7 years. One hub station covers multiple campuses within patrol radius 24/7. Includes hardware and BRINC support onboarding. Does not include cellular/network costs.">?</span>
+          </div>
+          <div style="font-size:1.6rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">${fleet_capex:,.0f} CapEx</div>
+          <div style="font-size:0.67rem;color:{text_muted};margin-top:3px;">{_dfr_amort_str} amortized · {actual_k_responder + actual_k_guardian} units deployed</div>
+          <div style="margin-top:10px;display:flex;flex-direction:column;gap:3px;font-size:0.65rem;color:{text_muted};">
+            <div>Coverage: 8,760 hrs/yr — 24/7/365 per hub</div>
+            <div>Nights, weekends, summer: ✅ full thermal patrol</div>
+            <div>Multi-campus zones: ✅ {actual_k_responder + actual_k_guardian} simultaneous coverage areas</div>
+            <div>Response time advantage vs ground: +{avg_time_saved:.1f} min saved per incident</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- SOURCES FOOTER -->
+      <div style="font-size:0.6rem;color:{text_muted};border-top:1px solid {card_border};padding-top:8px;line-height:1.8;">
+        <strong style="color:{text_main};">Data Sources:</strong>
+        FBI Crime in Schools 2020–2024 Special Report ·
+        NCES Indicators of School Crime &amp; Safety 2023 (NCES 2024-145) ·
+        FBI Active Shooter Study (51-case &amp; 64-incident analyses) ·
+        RAND Corp. "The Role and Impact of School Resource Officers" (2023) ·
+        NIJ Effects of SROs on School Crime (OJP) ·
+        BJS School Crime Statistics 2024 ·
+        Chula Vista PD DFR Program outcomes ·
+        BRINC Drones technical specifications ·
+        K-12 School Shooting Database (k12ssdb.org) ·
+        ZipRecruiter / Volt.ai SRO Salary &amp; Cost Data 2025
+      </div>
+    </div>
+    """
+    st.markdown(_school_html, unsafe_allow_html=True)
 
     # ── EXPORT BUTTONS — always visible in sidebar ──
     st.sidebar.markdown("---")
@@ -8536,6 +8844,50 @@ if st.session_state['csvs_ready']:
         }
 
         fig_for_export = go.Figure()
+
+        # ── Boundary polygon ─────────────────────────────────────────────────
+        if city_boundary_geom is not None and not city_boundary_geom.is_empty:
+            _export_geoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
+                             else list(city_boundary_geom.geoms))
+            for _gi, _geom in enumerate(_export_geoms):
+                _bx, _by = _geom.exterior.coords.xy
+                fig_for_export.add_trace(go.Scattermap(
+                    mode="lines", lon=list(_bx), lat=list(_by),
+                    line=dict(color=map_boundary_color, width=2),
+                    name="Jurisdiction Boundary", hoverinfo='skip',
+                    showlegend=(_gi == 0)
+                ))
+
+        # ── Incident call dots ──────────────────────────────────────────��────
+        _export_calls = display_calls if (display_calls is not None and not display_calls.empty) else None
+        if _export_calls is not None:
+            # Cap at 40K for export file-size; sample deterministically
+            _EC_MAX = 40_000
+            if len(_export_calls) > _EC_MAX:
+                _export_calls = _export_calls.sample(_EC_MAX, random_state=42)
+            _exp_pt_size = (2 if len(_export_calls) > 20_000 else
+                            3 if len(_export_calls) > 8_000 else 4)
+            _exp_opacity = (0.18 if len(_export_calls) > 20_000 else
+                            0.28 if len(_export_calls) > 8_000 else 0.40)
+            _has_agency = 'agency' in _export_calls.columns
+            _exp_fire   = _export_calls[_export_calls['agency'].str.lower() == 'fire'] if _has_agency else _export_calls.iloc[0:0]
+            _exp_police = _export_calls[_export_calls['agency'].str.lower() != 'fire'] if _has_agency else _export_calls
+            if not _exp_police.empty:
+                fig_for_export.add_trace(go.Scattermap(
+                    lat=_exp_police.geometry.y, lon=_exp_police.geometry.x,
+                    mode='markers',
+                    marker=dict(size=_exp_pt_size, color=map_incident_color, opacity=_exp_opacity),
+                    name="Incidents", hoverinfo='skip'
+                ))
+            if not _exp_fire.empty:
+                fig_for_export.add_trace(go.Scattermap(
+                    lat=_exp_fire.geometry.y, lon=_exp_fire.geometry.x,
+                    mode='markers',
+                    marker=dict(size=_exp_pt_size, color='#ff3b3b', opacity=_exp_opacity),
+                    name="Fire Incidents", hoverinfo='skip'
+                ))
+
+        # ── Coverage circles + station pins ──────────────────────────────────
         for d in active_drones:
             clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
             fig_for_export.add_trace(go.Scattermap(
@@ -8544,6 +8896,7 @@ if st.session_state['csvs_ready']:
                 marker=dict(size=[0]*len(clats)+[0,16], color=d['color']),
                 fill='toself', fillcolor='rgba(0,0,0,0)', name=d['name'][:30]
             ))
+
         fig_for_export.update_layout(
             map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
             margin=dict(l=0,r=0,t=0,b=0), height=500, showlegend=True,
@@ -8607,6 +8960,41 @@ if st.session_state['csvs_ready']:
 
         prepared_for_city = st.session_state.get('active_city', prop_city) or prop_city
         prepared_by_name = prop_name
+
+        # ── School safety export variables ────────────────────────────────────────
+        _exp_dfr_amortized = int(fleet_capex / 7) if fleet_capex > 0 else 0
+        _dfr_amort_str     = f"${_exp_dfr_amortized:,}/yr" if _exp_dfr_amortized > 0 else "~$11K–22K/yr"
+
+        # ── Build custom-content HTML blocks from AE editable fields ────────────
+        _doc_intro   = st.session_state.get('doc_custom_intro',   '').strip()
+        _doc_pt1     = st.session_state.get('doc_talking_pt_1',  '').strip()
+        _doc_pt2     = st.session_state.get('doc_talking_pt_2',  '').strip()
+        _doc_pt3     = st.session_state.get('doc_talking_pt_3',  '').strip()
+        _doc_closing = st.session_state.get('doc_custom_closing', '').strip()
+        _doc_phone   = st.session_state.get('doc_ae_phone',       '').strip()
+
+        _custom_intro_html = (
+            f'<div style="margin-top:20px;padding:16px 20px;background:#f0f8ff;border-left:4px solid #00D2FF;'
+            f'border-radius:0 6px 6px 0;font-size:15px;color:#1a2a3a;line-height:1.8;">'
+            f'{_doc_intro}</div>'
+        ) if _doc_intro else ''
+
+        _pts = [p for p in [_doc_pt1, _doc_pt2, _doc_pt3] if p]
+        _custom_pts_html = (
+            '<ul style="margin-top:16px;padding-left:20px;font-size:14px;color:#374151;line-height:2;">'
+            + ''.join(f'<li>{p}</li>' for p in _pts)
+            + '</ul>'
+        ) if _pts else ''
+
+        _custom_closing_html = (
+            f'<div style="margin-top:24px;padding:16px 20px;background:#f9fafb;border:1px solid #e4e6ea;'
+            f'border-radius:6px;font-size:14px;color:#374151;line-height:1.8;">'
+            f'{_doc_closing}</div>'
+        ) if _doc_closing else ''
+
+        _ae_phone_html = (
+            f'<div style="margin-top:4px;font-size:13px;color:#555;">📞 {_doc_phone}</div>'
+        ) if _doc_phone else ''
         # ── Export personalization: extract call-type and priority stats ────────
         _exp_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
         _exp_top_calls, _exp_pri_str, _exp_date_range = [], "mixed priorities", "recent period"
@@ -8711,6 +9099,29 @@ body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text)
   display:flex;align-items:center;gap:10px;
   margin-bottom:32px;
 }}
+
+/* ── SOURCE BADGE ──────────────────────────────────────────────── */
+.src{{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:14px;height:14px;border-radius:50%;
+  background:rgba(100,116,139,0.1);color:#94a3b8;
+  border:1px solid rgba(100,116,139,0.28);
+  font-size:8px;font-weight:700;cursor:default;
+  margin-left:4px;vertical-align:middle;position:relative;
+  font-style:normal;text-decoration:none;flex-shrink:0;
+}}
+.src:hover::after{{
+  content:attr(data-src);
+  position:absolute;bottom:130%;left:50%;
+  transform:translateX(-50%);
+  background:#1e293b;color:#e2e8f0;
+  font-size:10.5px;font-weight:400;padding:7px 11px;
+  border-radius:6px;white-space:normal;width:270px;
+  line-height:1.55;z-index:9999;
+  border:1px solid #334155;
+  box-shadow:0 6px 20px rgba(0,0,0,0.4);
+  pointer-events:none;text-transform:none;letter-spacing:normal;
+}}
 .copy-section-btn{{
   margin-left:auto;
   display:inline-flex;align-items:center;gap:6px;
@@ -8724,6 +9135,12 @@ body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text)
 }}
 .copy-section-btn:hover{{background:rgba(0,210,255,0.14);border-color:rgba(0,210,255,0.6);}}
 .copy-section-btn.copied{{color:#39FF14;border-color:rgba(57,255,20,0.5);background:rgba(57,255,20,0.07);}}
+.copy-section-btn.grant-law{{color:#3b82f6;border-color:rgba(59,130,246,0.35);background:rgba(59,130,246,0.06);}}
+.copy-section-btn.grant-law:hover{{background:rgba(59,130,246,0.14);border-color:rgba(59,130,246,0.6);}}
+.copy-section-btn.grant-fire{{color:#f97316;border-color:rgba(249,115,22,0.35);background:rgba(249,115,22,0.06);}}
+.copy-section-btn.grant-fire:hover{{background:rgba(249,115,22,0.14);border-color:rgba(249,115,22,0.6);}}
+.copy-section-btn.community{{color:#22c55e;border-color:rgba(34,197,94,0.35);background:rgba(34,197,94,0.06);}}
+.copy-section-btn.community:hover{{background:rgba(34,197,94,0.14);border-color:rgba(34,197,94,0.6);}}
 .section-eyebrow .pg-num{{
   font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;
   color:var(--cyan);border:1px solid rgba(0,210,255,0.3);
@@ -8948,11 +9365,13 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
     <a href="#community"><span class="nav-num">08</span>Community Partnership</a>
     <a href="#analytics"><span class="nav-num">09</span>Analytics Dashboard</a>
     <a href="#community-impact"><span class="nav-num">10</span>Community Impact</a>
+    <a href="#school-safety"><span class="nav-num">11</span>School Safety</a>
   </nav>
   <div class="sidebar-footer">
     Prepared {datetime.datetime.now().strftime("%b %d, %Y")}<br>
     {prop_name}<br>
     <a href="mailto:{prop_email}">{prop_email}</a>
+    {_ae_phone_html}
   </div>
 </nav>
 
@@ -8993,7 +9412,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 
 <!-- ── 01: EXECUTIVE SUMMARY ──────────────────────────────────── -->
 <section class="doc-section" id="executive">
-  <div class="section-eyebrow"><span class="pg-num">01</span><span class="pg-title">Executive Summary</span></div>
+  <div class="section-eyebrow"><span class="pg-num">01</span><span class="pg-title">Executive Summary</span><span class="src" data-src="Sources: Incident coverage &amp; response time computed from uploaded CAD data via BRINC geospatial optimizer. Hardware pricing: BRINC Responder $80K · Guardian $160K (MSRP). Officer dispatch cost benchmark: $76–$120/call (IACP/DOJ). Population: US Census Bureau ACS.">ⓘ</span></div>
   <div class="metrics-hero">
     <div class="metric-cell"><div class="m-label">Fleet Capital Expenditure</div><div class="m-value cyan">${fleet_capex:,.0f}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
     <div class="metric-cell"><div class="m-label">Annual Savings Capacity</div><div class="m-value gold">${annual_savings:,.0f}</div><div class="m-sub">At {int(dfr_dispatch_rate*100)}% dispatch · {int(deflection_rate*100)}% resolution</div></div>
@@ -9012,11 +9431,13 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
     <strong>{avg_time_saved:.1f} minutes faster</strong> than ground patrol, and deliver
     <strong>${annual_savings:,.0f} in annual operational savings</strong> with a break-even horizon of {break_even_text.lower()}.
   </p>
+  {_custom_intro_html}
+  {_custom_pts_html}
 </section>
 
 <!-- ── 02: FLEET & COVERAGE ───────────────────────────────────── -->
 <section class="doc-section" id="fleet">
-  <div class="section-eyebrow"><span class="pg-num">02</span><span class="pg-title">Fleet &amp; Coverage</span></div>
+  <div class="section-eyebrow"><span class="pg-num">02</span><span class="pg-title">Fleet &amp; Coverage</span><span class="src" data-src="Source: BRINC Drones technical specifications. Responder: 60 mph, 1-mile radius, ~2-min avg response. Guardian: 45 mph, up to 8-mile Starlink-connected radius, 25-min flight cycles with auto-recharge. Coverage % derived from geospatial analysis of uploaded incident locations.">ⓘ</span></div>
   <div class="fleet-split">
     <div class="fleet-card guardian">
       <div class="fc-icon">🦅</div>
@@ -9045,20 +9466,20 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 
 <!-- ── 03: COVERAGE MAP ───────────────────────────────────────── -->
 <section class="doc-section" id="map">
-  <div class="section-eyebrow"><span class="pg-num">03</span><span class="pg-title">Coverage Map</span></div>
+  <div class="section-eyebrow"><span class="pg-num">03</span><span class="pg-title">Coverage Map</span><span class="src" data-src="Map tiles: © OpenStreetMap contributors (ODbL license). FAA airspace data: Federal Aviation Administration LAANC UAS Facility Maps. Incident dots: uploaded CAD data (up to 40K sampled). Coverage rings are operational radius estimates; actual deployment requires FAA LAANC authorization or Part 107 waiver.">ⓘ</span></div>
   <div class="map-wrap">{map_html_str}</div>
 </section>
 
 <!-- ── 04: INCIDENT ANALYSIS ─────────────────────────────────── -->
 <section class="doc-section" id="incident-data">
-  <div class="section-eyebrow"><span class="pg-num">04</span><span class="pg-title">Incident Data Analysis</span></div>
+  <div class="section-eyebrow"><span class="pg-num">04</span><span class="pg-title">Incident Data Analysis</span><span class="src" data-src="Source: Uploaded CAD export data. Call type classification, priority distribution, and temporal patterns are derived from the incident records provided. BRINC applies no external normalization — charts reflect your jurisdiction's raw CAD data.">ⓘ</span></div>
   {cad_charts_html_export}
   {staffing_pressure_html_export}
 </section>
 
 <!-- ── 05: DEPLOYMENT LOCATIONS ──────────────────────────────── -->
 <section class="doc-section" id="deployment">
-  <div class="section-eyebrow"><span class="pg-num">05</span><span class="pg-title">Deployment Locations</span></div>
+  <div class="section-eyebrow"><span class="pg-num">05</span><span class="pg-title">Deployment Locations</span><span class="src" data-src="Station candidates: OpenStreetMap (ODbL), DHS HIFLD Open Data public safety infrastructure, and user-defined pin-drop locations. FAA ceiling data: FAA LAANC UAS Facility Maps API. Optimizer selects stations to maximize coverage of uploaded CAD incidents.">ⓘ</span></div>
   <table>
     <thead><tr><th>Station</th><th>Type</th><th>Avg Response</th><th>FAA Ceiling</th><th>CapEx</th></tr></thead>
     <tbody>{station_rows}</tbody>
@@ -9067,7 +9488,15 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 
 <!-- ── 06: GRANT NARRATIVE ───────────────────────────────────── -->
 <section class="doc-section" id="grant">
-  <div class="section-eyebrow"><span class="pg-num">06</span><span class="pg-title">Grant Narrative</span></div>
+  <div class="section-eyebrow">
+    <span class="pg-num">06</span>
+    <span class="pg-title">Grant Narrative</span>
+    <span class="src" data-src="Grant programs referenced: DOJ Byrne JAG · FEMA HSGP · DOJ COPS Office · DOT RAISE · DOJ Smart Policing Initiative. Financial figures are BRINC model estimates. Narrative is AI-generated — must be reviewed, localized, and fact-checked by your grants administrator before submission.">ⓘ</span>
+    <button class="copy-section-btn grant-law" onclick="copyGrantText('grant-body-law', this)">
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
+      Copy Grant Text
+    </button>
+  </div>
   <div class="disc"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission.</div>
 
   <script>
@@ -9095,15 +9524,6 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
     document.body.removeChild(ta);
   }}
   </script>
-
-  <div style="margin-bottom:10px;">
-    <button onclick="copyGrantText('grant-body-law', this)"
-      style="background:#1e40af;color:#fff;border:none;border-radius:6px;padding:8px 18px;
-             font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
-      &#128203; Copy Grant Text
-    </button>
-    <span style="font-size:11px;color:#888;margin-left:10px;">Paste directly into Word or Google Docs</span>
-  </div>
 
   <div class="grant-layout">
   <div class="grant-body" id="grant-body-law">
@@ -9161,7 +9581,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 
 <!-- ── 06B: FIRE DEPARTMENT VALUE ─────────────────────────────── -->
 <section class="doc-section" id="fire-value">
-  <div class="section-eyebrow"><span class="pg-num">06B</span><span class="pg-title">Fire Department Value</span></div>
+  <div class="section-eyebrow"><span class="pg-num">06B</span><span class="pg-title">Fire Department Value</span><span class="src" data-src="Sources: NFPA Fire Loss Research (aerial ladder deployment costs $3K–$8K/deploy); USFA Firefighter Fatality Statistics; FEMA AFG program eligibility. Savings model: 15% of attended fire calls avoid aerial ladder deployment + thermal overhaul guidance (45 min/4-person crew saved at $200/hr, NFPA labor benchmarks).">ⓘ</span></div>
 
   <div class="metrics-hero">
     <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
@@ -9217,17 +9637,16 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
     </tbody>
   </table>
 
-  <h3 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:#1e293b">🚒 Fire Department Grant Narrative</h3>
-  <div class="disc"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission.</div>
-
-  <div style="margin-bottom:10px;">
-    <button onclick="copyGrantText('grant-body-fire', this)"
-      style="background:#c2410c;color:#fff;border:none;border-radius:6px;padding:8px 18px;
-             font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
-      &#128203; Copy Fire Grant Text
+  <div class="section-eyebrow" style="margin-top:28px;">
+    <span class="pg-num" style="color:#f97316;border-color:rgba(249,115,22,0.3);">🚒</span>
+    <span class="pg-title">Fire Department Grant Narrative</span>
+    <span class="src" data-src="Applicable grant programs: FEMA Assistance to Firefighters Grant (AFG) · FEMA Fire Prevention &amp; Safety (FP&amp;S) · FEMA BRIC · USDA Community Facilities · DHS UASI · State Homeland Security Program (SHSP). Narrative is AI-generated and must be reviewed by a certified grants professional.">ⓘ</span>
+    <button class="copy-section-btn grant-fire" onclick="copyGrantText('grant-body-fire', this)">
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
+      Copy Fire Grant
     </button>
-    <span style="font-size:11px;color:#888;margin-left:10px;">Paste directly into Word or Google Docs</span>
   </div>
+  <div class="disc"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission.</div>
 
   <div class="grant-layout">
   <div class="grant-body" id="grant-body-fire">
@@ -9276,7 +9695,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 
 <!-- ── 07: INFRASTRUCTURE DIRECTORY ──────────────────────────── -->
 <section class="doc-section" id="infrastructure">
-  <div class="section-eyebrow"><span class="pg-num">07</span><span class="pg-title">Infrastructure Directory</span></div>
+  <div class="section-eyebrow"><span class="pg-num">07</span><span class="pg-title">Infrastructure Directory</span><span class="src" data-src="Sources: OpenStreetMap (© contributors, ODbL license) · DHS HIFLD Open Data — Fire Stations &amp; Law Enforcement Locations datasets (public domain) · FAA LAANC UAS Facility Maps (FAA.gov). User-uploaded or pin-dropped stations are marked accordingly.">ⓘ</span></div>
   <p style="color:var(--muted);font-size:12px;margin-bottom:16px">Public facilities evaluated as candidate deployment locations during optimization. All coordinates verified against FAA LAANC facility maps.</p>
   <div class="infra-grid">{all_bldgs_rows}</div>
 </section>
@@ -9286,7 +9705,8 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
   <div class="section-eyebrow">
     <span class="pg-num">08</span>
     <span class="pg-title">Community Business Partnership</span>
-    <button class="copy-section-btn" id="copyPartnershipBtn" onclick="copyCommunitySection()">
+    <span class="src" data-src="Crime cost benchmarks: National Retail Federation 2023 Retail Security Survey ($559 avg shoplifting loss) · DOJ/NIJ commercial burglary cost estimates ($3K–$8.5K) · FBI UCR property crime data. Peer DFR outcomes: Chula Vista PD · El Cajon PD · Westerville OH PD (15–30% property crime reduction in covered zones).">ⓘ</span>
+    <button class="copy-section-btn community" id="copyPartnershipBtn" onclick="copyCommunitySection()">
       <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
       Copy Letter
     </button>
@@ -9364,15 +9784,196 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 
 <!-- ── 09: ANALYTICS DASHBOARD ───────────────────────────────── -->
 <section class="doc-section" id="analytics">
-  <div class="section-eyebrow"><span class="pg-num">09</span><span class="pg-title">Analytics Dashboard</span></div>
+  <div class="section-eyebrow"><span class="pg-num">09</span><span class="pg-title">Analytics Dashboard</span><span class="src" data-src="Source: Uploaded CAD export data. All charts — call type distribution, priority breakdown, hourly heat map, and month-over-month trends — are derived directly from incident records provided. No external data normalization is applied.">ⓘ</span></div>
   [ANALYTICS_HTML_EXPORT]
 </section>
 
 <!-- ── 10: COMMUNITY IMPACT DASHBOARD ────────────────────────── -->
 <section class="doc-section" id="community-impact">
-  <div class="section-eyebrow"><span class="pg-num">10</span><span class="pg-title">Community Impact &amp; Transparency</span></div>
+  <div class="section-eyebrow"><span class="pg-num">10</span><span class="pg-title">Community Impact &amp; Transparency</span><span class="src" data-src="Sources: Population — US Census Bureau American Community Survey (ACS). Officer wage benchmarks — Bureau of Labor Statistics (BLS) OES. Financial projections — BRINC COS optimization model. Flight hour estimates — BRINC hardware specifications. All figures are model estimates.">ⓘ</span></div>
   [COMMUNITY_IMPACT_HTML_EXPORT]
 </section>
+
+<!-- ── 11: SCHOOL SAFETY IMPACT ───────────���───────────────────── -->
+<section class="doc-section" id="school-safety">
+  <div class="section-eyebrow"><span class="pg-num">11</span><span class="pg-title">School Safety Impact</span><span class="src" data-src="Sources: FBI Crime in Schools 2020–2024 · NCES Indicators of School Crime &amp; Safety 2023 · FBI Active Shooter Study · RAND Corp. 'Role and Impact of SROs' (2023) · NIJ Effects of SROs on School Crime · K-12 School Shooting Database (k12ssdb.org) · BJS School Crime 2024 · ZipRecruiter/Volt.ai SRO salary data · BRINC technical specifications. See full source list at bottom of this section.">ⓘ</span></div>
+
+  <p style="font-size:14px;color:var(--muted);max-width:700px;line-height:1.7;margin-bottom:28px;">
+    BRINC DFR delivers 24/7 aerial first-response to school campuses — faster and at lower total lifecycle cost
+    than traditional School Resource Officers, with no coverage blind spots, no off-hours gaps, and full HD + thermal
+    scene intelligence before any officer enters a building.
+  </p>
+
+  <!-- NATIONAL STATS HERO -->
+  <div class="metrics-hero" style="margin-bottom:28px;">
+    <div class="metric-cell" style="border-top:3px solid #ef4444;">
+      <div class="m-label">School Crimes 2020–24 <abbr title="Source: FBI Crime in Schools Special Report 2020–2024. Over 1.3M criminal incidents at K-12 locations across the US over 5 years, with ~1.5M victims.">ⓘ</abbr></div>
+      <div class="m-value" style="color:#ef4444;">1.3M</div>
+      <div class="m-sub">criminal incidents on campus</div>
+    </div>
+    <div class="metric-cell" style="border-top:3px solid var(--amber);">
+      <div class="m-label">Student Victimization <abbr title="Source: NCES Indicators of School Crime &amp; Safety 2023 (NCES 2024-145). 22 nonfatal criminal victimizations per 1,000 students ages 12-18 in 2022 — includes theft, violent crime, and serious threats.">ⓘ</abbr></div>
+      <div class="m-value gold">22</div>
+      <div class="m-sub">per 1,000 students annually</div>
+    </div>
+    <div class="metric-cell" style="border-top:3px solid #8b5cf6;">
+      <div class="m-label">Incidents End ≤5 min <abbr title="Source: FBI Active Shooter Study (64 incidents analyzed). 69% of active shooter events conclude within 5 minutes — 23 ended in under 2 min. Avg duration at educational facilities: 3 min 18 sec.">ⓘ</abbr></div>
+      <div class="m-value" style="color:#8b5cf6;">69%</div>
+      <div class="m-sub">end before ground units arrive</div>
+    </div>
+    <div class="metric-cell" style="border-top:3px solid var(--resp);">
+      <div class="m-label">BRINC On-Scene Time <abbr title="Source: BRINC technical specs; Chula Vista PD DFR Program outcomes. Launches in &lt;20 sec, on-scene in &lt;90 sec — vs. 14-15 min national ground average.">ⓘ</abbr></div>
+      <div class="m-value cyan">&lt;90s</div>
+      <div class="m-sub">airborne &amp; streaming live video</div>
+    </div>
+    <div class="metric-cell">
+      <div class="m-label">K-12 Shootings 2024 <abbr title="Source: K-12 School Shooting Database (k12ssdb.org). 336 shooting incidents on K-12 campuses in 2024. FBI active-shooter defined incidents down 50% from 48 (2023) to 24 (2024).">ⓘ</abbr></div>
+      <div class="m-value" style="color:#ef4444;">336</div>
+      <div class="m-sub">K-12 shooting incidents in 2024</div>
+    </div>
+    <div class="metric-cell">
+      <div class="m-label">SRO Annual Cost <abbr title="Source: ZipRecruiter SRO Salary Data 2025; DeSoto County SRO cost breakdown ($94,147/yr blended); Volt.ai SRO Cost Analysis. Includes salary + benefits + equipment per officer.">ⓘ</abbr></div>
+      <div class="m-value gold">$94K+</div>
+      <div class="m-sub">per officer · school hours only</div>
+    </div>
+    <div class="metric-cell">
+      <div class="m-label">SRO Coverage Hours <abbr title="Source: Standard school calendar. 7 hours/day × 180 school days = 1,260 operational hours per year — 14.4% of annual hours. Nights, weekends, summers: unprotected.">ⓘ</abbr></div>
+      <div class="m-value">14.4%</div>
+      <div class="m-sub">of annual hours covered</div>
+    </div>
+    <div class="metric-cell" style="background:rgba(0,210,255,0.04);">
+      <div class="m-label">DFR Coverage Hours <abbr title="BRINC DFR operates 24 hours/day, 365 days/year = 8,760 hours/year. Full coverage including nights, weekends, summer, and after-school hours when SROs are absent.">ⓘ</abbr></div>
+      <div class="m-value cyan">100%</div>
+      <div class="m-sub">24/7/365 aerial coverage</div>
+    </div>
+  </div>
+
+  <!-- CRITICAL WINDOW CALLOUT -->
+  <div style="background:#fff8f8;border-left:4px solid #ef4444;padding:16px 22px;border-radius:0 8px 8px 0;margin-bottom:28px;">
+    <h4 style="color:#ef4444;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;">
+      ⚠️ The Critical Response Window
+      <abbr title="Sources: FBI Law Enforcement Bulletin 'Those Terrible First Few Minutes'; FBI Active Shooter Study (51-case median analysis); ALICE Training Institute; K-12 School Shooting Database.">ⓘ</abbr>
+    </h4>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;">
+      <div style="text-align:center;background:#fff;border:1px solid #f5c6c6;border-radius:6px;padding:12px;">
+        <div style="font-size:24px;font-weight:900;color:#ef4444;font-family:'IBM Plex Mono',monospace;">14–15 min</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Avg police arrival to<br>active shooter nationally</div>
+      </div>
+      <div style="text-align:center;background:#fff;border:1px solid #fde68a;border-radius:6px;padding:12px;">
+        <div style="font-size:24px;font-weight:900;color:var(--amber);font-family:'IBM Plex Mono',monospace;">3m 18s</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Avg incident duration<br>at schools (FBI)</div>
+      </div>
+      <div style="text-align:center;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:12px;">
+        <div style="font-size:24px;font-weight:900;color:var(--resp);font-family:'IBM Plex Mono',monospace;">&lt;90 sec</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">BRINC airborne with<br>live HD + thermal</div>
+      </div>
+    </div>
+    <p style="font-size:12px;color:#7a3a3a;font-style:italic;line-height:1.6;margin:0;">
+      "Most active shooter incidents in schools are over before a responding officer reaches the building entrance.
+      DFR doesn't replace the officer — it gives command staff eyes on every hallway, stairwell, and exit
+      before they open the first door." — FBI Law Enforcement Bulletin
+    </p>
+  </div>
+
+  <!-- DFR vs SRO COMPARISON TABLE -->
+  <h3 class="sh"><span class="sh-accent">DFR</span> vs. School Resource Officer — Capability Matrix
+    <abbr style="font-size:11px;font-weight:400;color:var(--muted);margin-left:8px;" title="SRO data: RAND 'The Role and Impact of School Resource Officers' (2023); NIJ Effects of SROs on School Crime (OJP); ZipRecruiter SRO Salary 2025. DFR data: BRINC technical specifications; Chula Vista PD DFR outcomes.">ⓘ Sources</abbr>
+  </h3>
+  <table style="margin-bottom:28px;">
+    <thead>
+      <tr>
+        <th style="width:30%;">Capability</th>
+        <th style="color:#b45309;text-align:center;">School Resource Officer</th>
+        <th style="color:var(--resp);text-align:center;">BRINC DFR</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Annual Cost / Campus</strong></td>
+          <td style="text-align:center;color:#b45309;">$75,000 – $120,000 per officer</td>
+          <td style="text-align:center;color:#0369a1;">${int(fleet_capex/7):,}/yr amortized (7-yr) · {actual_k_responder + actual_k_guardian} units</td></tr>
+      <tr><td><strong>Coverage Hours / Year</strong></td>
+          <td style="text-align:center;color:#b45309;">~1,260 hrs (school hours only)</td>
+          <td style="text-align:center;color:var(--green);">8,760 hrs — 24/7/365</td></tr>
+      <tr><td><strong>Campuses Covered</strong></td>
+          <td style="text-align:center;color:#b45309;">1 building per officer</td>
+          <td style="text-align:center;color:var(--green);">Multi-campus from 1 hub station</td></tr>
+      <tr><td><strong>On-Campus Response Time</strong></td>
+          <td style="text-align:center;color:#b45309;">2–5 min (foot/vehicle)</td>
+          <td style="text-align:center;color:var(--green);">&lt;90 sec airborne · {avg_resp_time:.1f} min avg aerial</td></tr>
+      <tr><td><strong>After-Hours / Weekend</strong></td>
+          <td style="text-align:center;color:#b45309;">❌ No coverage</td>
+          <td style="text-align:center;color:var(--green);">✅ Full thermal surveillance</td></tr>
+      <tr><td><strong>Thermal / Night Vision</strong></td>
+          <td style="text-align:center;color:#b45309;">❌ Flashlight only</td>
+          <td style="text-align:center;color:var(--green);">✅ 640px FLIR thermal</td></tr>
+      <tr><td><strong>Perimeter Monitoring</strong></td>
+          <td style="text-align:center;color:#b45309;">❌ Not feasible at scale</td>
+          <td style="text-align:center;color:var(--green);">✅ Automated aerial patrol</td></tr>
+      <tr><td><strong>Active Threat Intel</strong></td>
+          <td style="text-align:center;color:#b45309;">Single officer, blind entry</td>
+          <td style="text-align:center;color:var(--green);">✅ Live HD + thermal to dispatch</td></tr>
+      <tr><td><strong>Indoor Operations</strong></td>
+          <td style="text-align:center;">✅ On foot</td>
+          <td style="text-align:center;color:var(--green);">✅ LEMUR 2 — glass-breaker, perch, 2-way comms</td></tr>
+      <tr><td><strong>Court-Admissible Evidence</strong></td>
+          <td style="text-align:center;color:#b45309;">Body cam (ground-level)</td>
+          <td style="text-align:center;color:var(--green);">✅ HD aerial video + flight log</td></tr>
+      <tr><td><strong>Mass Shooting Prevention</strong>
+              <abbr title="Source: RAND Corporation 'The Role and Impact of School Resource Officers' (2023). Quote: 'There is no evidence about whether SROs prevent the types of mass shootings that often lead to the placement of SROs in school.'">ⓘ</abbr></td>
+          <td style="text-align:center;color:#b45309;">❌ No proven effect (RAND, 2023)</td>
+          <td style="text-align:center;color:var(--green);">✅ Pre-entry intel, faster coordination</td></tr>
+      <tr><td><strong>Disciplinary Side Effects</strong>
+              <abbr title="Source: RAND 'The Role and Impact of School Resource Officers' (2023). Schools with SROs saw 35-80% more out-of-school suspensions and 25-90% more expulsions than schools without SROs.">ⓘ</abbr></td>
+          <td style="text-align:center;color:#b45309;">⚠️ +35–80% suspensions, +25–90% expulsions</td>
+          <td style="text-align:center;color:var(--green);">✅ Zero school-discipline impact</td></tr>
+    </tbody>
+  </table>
+
+  <!-- COST COMPARISON -->
+  <div class="fleet-split" style="margin-bottom:24px;">
+    <div class="fleet-card guardian" style="border-top:3px solid var(--amber);">
+      <div class="fc-icon">📋</div>
+      <div class="fc-type" style="color:var(--amber);">10-School District — SRO Model</div>
+      <div class="fc-val">$940K – $1.2M/yr</div>
+      <div class="fc-sub">10 officers · school hours only</div>
+      <div style="margin-top:16px;">
+        <div class="fc-row"><span class="k">Annual hours covered</span><span class="v">1,260 hrs/campus (14.4%)</span></div>
+        <div class="fc-row"><span class="k">Nights / weekends / summer</span><span class="v" style="color:#ef4444;">❌ Unprotected</span></div>
+        <div class="fc-row"><span class="k">Multi-campus coverage</span><span class="v" style="color:#ef4444;">❌ One building/officer</span></div>
+        <div class="fc-row"><span class="k">Proven mass-shooting prevention</span><span class="v" style="color:#ef4444;">❌ No evidence</span></div>
+      </div>
+    </div>
+    <div class="fleet-card responder" style="border-top:3px solid var(--resp);">
+      <div class="fc-icon">🚁</div>
+      <div class="fc-type">BRINC DFR — Multi-Campus</div>
+      <div class="fc-val">${fleet_capex:,.0f} CapEx</div>
+      <div class="fc-sub">{_dfr_amort_str} amortized · {actual_k_responder + actual_k_guardian} units</div>
+      <div style="margin-top:16px;">
+        <div class="fc-row"><span class="k">Annual hours covered</span><span class="v" style="color:var(--resp);">8,760 hrs (24/7/365)</span></div>
+        <div class="fc-row"><span class="k">Nights / weekends / summer</span><span class="v" style="color:var(--green);">✅ Full thermal patrol</span></div>
+        <div class="fc-row"><span class="k">Multi-campus coverage</span><span class="v" style="color:var(--green);">✅ {actual_k_responder + actual_k_guardian} simultaneous zones</span></div>
+        <div class="fc-row"><span class="k">Response time advantage</span><span class="v" style="color:var(--green);">+{avg_time_saved:.1f} min faster per incident</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SOURCES -->
+  <div class="disc" style="font-size:11px;line-height:1.8;">
+    <strong>Data Sources:</strong>
+    <a href="https://www.fbi.gov/news/press-releases/fbi-releases-crime-in-schools-2020-2024-special-report" target="_blank">FBI Crime in Schools 2020–2024</a> ·
+    <a href="https://nces.ed.gov/pubs2024/2024145.pdf" target="_blank">NCES Indicators of School Crime &amp; Safety 2023</a> ·
+    <a href="https://leb.fbi.gov/articles/featured-articles/those-terrible-first-few-minutes-revisiting-active-shooter-protocols-for-schools" target="_blank">FBI LEB "Those Terrible First Few Minutes"</a> ·
+    <a href="https://www.rand.org/research/gun-policy/analysis/essays/school-resource-officers.html" target="_blank">RAND "The Role and Impact of School Resource Officers" (2023)</a> ·
+    <a href="https://nij.ojp.gov/library/publications/effects-school-resource-officers-school-crime-and-responses-school-crime" target="_blank">NIJ Effects of SROs on School Crime</a> ·
+    <a href="https://k12ssdb.org/" target="_blank">K-12 School Shooting Database</a> ·
+    <a href="https://www.fbi.gov/news/press-releases/fbi-releases-2024-active-shooter-incidents-in-the-united-states-report" target="_blank">FBI Active Shooter Report 2024</a> ·
+    <a href="https://brincdrones.com/responder/" target="_blank">BRINC Responder Technical Specs</a>
+  </div>
+
+</section>
+
+<!-- ── CUSTOM CLOSING (AE-authored, optional) ──────────────────── -->
+{_custom_closing_html}
 
 <!-- ── DISCLAIMER ─────────────────────────────────────────────── -->
 <div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:20px 60px;margin:0;font-size:11px;color:#7a5a00;line-height:1.7">
@@ -9383,7 +9984,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 <footer class="doc-footer">
   <span class="brand-mark">BRINC</span>
   <span>{"<img src='data:image/png;base64," + logo_b64_light + "' style='height:24px;vertical-align:middle;'>" if logo_b64_light else ""} BRINC Drones, Inc. · <a href="https://brincdrones.com">brincdrones.com</a> · <a href="mailto:sales@brincdrones.com">sales@brincdrones.com</a> · +1 (855) 950-0226</span>
-  <span>Prepared by {prop_name} · <a href="mailto:{prop_email}">{prop_email}</a></span>
+  <span>Prepared by {prop_name} · <a href="mailto:{prop_email}">{prop_email}</a>{" · " + _doc_phone if _doc_phone else ""}</span>
 </footer>
 
 </main>
@@ -9531,6 +10132,34 @@ function copyCommunitySection() {{
         ),
         "stations_data": _safe_df_to_records(st.session_state.get('df_stations')),
     })
+    # ── CUSTOMIZE DOCUMENT ───────────────────────────────────────────────────
+    with st.sidebar.expander("✏️ Customize Document", expanded=False):
+        st.markdown(
+            f"<div style='font-size:0.7rem;color:{text_muted};margin-bottom:8px;'>"
+            "Personalize the exported HTML proposal before sending to your customer. "
+            "All fields are optional — leave blank to use auto-generated defaults.</div>",
+            unsafe_allow_html=True
+        )
+        st.markdown(f"<div style='font-size:0.65rem;color:{text_muted};font-weight:600;text-transform:uppercase;margin:6px 0 4px;'>Recipient</div>", unsafe_allow_html=True)
+        st.text_input("Contact Name / Title",    key="pd_chief_name",  placeholder=f"Chief of Police, {prop_city}")
+        st.text_input("Department Name",          key="pd_dept_name",   placeholder=f"{prop_city} Police Department")
+        st.text_input("Department Email",         key="pd_dept_email",  placeholder="chief@pd.gov")
+        st.text_input("Department Phone",         key="pd_dept_phone",  placeholder="(555) 555-0100")
+        st.markdown(f"<div style='font-size:0.65rem;color:{text_muted};font-weight:600;text-transform:uppercase;margin:10px 0 4px;'>Custom Content</div>", unsafe_allow_html=True)
+        st.text_area("Opening paragraph",         key="doc_custom_intro",
+                     placeholder="Add context specific to this department or city…",
+                     height=90)
+        st.text_input("Talking point 1",          key="doc_talking_pt_1",
+                      placeholder="e.g. First DFR deployment in this region")
+        st.text_input("Talking point 2",          key="doc_talking_pt_2")
+        st.text_input("Talking point 3",          key="doc_talking_pt_3")
+        st.text_area("Closing paragraph",         key="doc_custom_closing",
+                     placeholder="e.g. We look forward to partnering with your department…",
+                     height=80)
+        st.markdown(f"<div style='font-size:0.65rem;color:{text_muted};font-weight:600;text-transform:uppercase;margin:10px 0 4px;'>Your Contact Info</div>", unsafe_allow_html=True)
+        st.text_input("Your phone number",        key="doc_ae_phone",   placeholder="(312) 555-0199")
+        st.caption("Changes apply immediately to the next HTML download.")
+
     if st.sidebar.download_button("💾 Save Deployment Plan", data=_brinc_data,
                                   file_name=f"Brinc_{_safe_city}_{_ts}.brinc",
                                   mime="application/json", use_container_width=True):

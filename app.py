@@ -6152,6 +6152,17 @@ if (stations.length === 0) {{
     sl.innerHTML += `<div>${{icon}} <span style="color:${{color}};font-weight:600;">${{s.type.charAt(0)+s.type.slice(1).toLowerCase()}}</span> — ${{s.name}}</div>`;
   }});
 }}
+
+// ── Auto-resize iframe to actual content height ────────────────────────────
+(function() {{
+  function reportHeight() {{
+    const h = document.documentElement.scrollHeight || document.body.scrollHeight;
+    window.parent.postMessage({{type: 'streamlit:setFrameHeight', height: h}}, '*');
+  }}
+  window.addEventListener('load', reportHeight);
+  setTimeout(reportHeight, 300);
+  setTimeout(reportHeight, 1000);
+}})();
 </script>
 </body>
 </html>"""
@@ -8435,7 +8446,7 @@ if st.session_state['csvs_ready']:
         active_drones=active_drones or [],
         df_calls_full=df_calls_full,
     )
-    components.html(_cid_html, height=3500, scrolling=False)
+    components.html(_cid_html, height=2800, scrolling=False)
 
     # ── SCHOOL SAFETY IMPACT MATRIX ──────────────────────────────────────────
     st.markdown("---")
@@ -9371,8 +9382,8 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
     <a href="#grant"><span class="nav-num">06</span>Grant Narrative</a>
     <a href="#infrastructure"><span class="nav-num">07</span>Infrastructure Directory</a>
     <a href="#community"><span class="nav-num">08</span>Community Partnership</a>
-    <a href="#analytics"><span class="nav-num">09</span>Analytics Dashboard</a>
-    <a href="#community-impact"><span class="nav-num">10</span>Community Impact</a>
+    [ANALYTICS_NAV]
+    [COMMUNITY_IMPACT_NAV]
     <a href="#school-safety"><span class="nav-num">11</span>School Safety</a>
   </nav>
   <div class="sidebar-footer">
@@ -9790,17 +9801,8 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
   <p><strong>{pd_chief}</strong><br>{pd_dept}</p>
 </section>
 
-<!-- ── 09: ANALYTICS DASHBOARD ───────────────────────────────── -->
-<section class="doc-section" id="analytics">
-  <div class="section-eyebrow"><span class="pg-num">09</span><span class="pg-title">Analytics Dashboard</span><span class="src" data-src="Source: Uploaded CAD export data. All charts — call type distribution, priority breakdown, hourly heat map, and month-over-month trends — are derived directly from incident records provided. No external data normalization is applied.">ⓘ</span></div>
-  [ANALYTICS_HTML_EXPORT]
-</section>
-
-<!-- ── 10: COMMUNITY IMPACT DASHBOARD ────────────────────────── -->
-<section class="doc-section" id="community-impact">
-  <div class="section-eyebrow"><span class="pg-num">10</span><span class="pg-title">Community Impact &amp; Transparency</span><span class="src" data-src="Sources: Population — US Census Bureau American Community Survey (ACS). Officer wage benchmarks — Bureau of Labor Statistics (BLS) OES. Financial projections — BRINC COS optimization model. Flight hour estimates — BRINC hardware specifications. All figures are model estimates.">ⓘ</span></div>
-  [COMMUNITY_IMPACT_HTML_EXPORT]
-</section>
+[ANALYTICS_SECTION]
+[COMMUNITY_IMPACT_SECTION]
 
 <!-- ── 11: SCHOOL SAFETY IMPACT ───────────���───────────────────── -->
 <section class="doc-section" id="school-safety">
@@ -10061,9 +10063,27 @@ function copyCommunitySection() {{
 </script>
 </body></html>"""
 
-        export_html = export_html.replace("[ANALYTICS_HTML_EXPORT]", analytics_html_export)
+        # ── Analytics section — use the light-themed export charts, not the dark command center ──
+        # cad_charts_html_export uses light backgrounds (#111 text, white/gray),
+        # while analytics_html_export (generate_command_center_html) uses background:#000 which
+        # creates a large black gap in the white export document.
+        if cad_charts_html_export:
+            _analytics_section_html = (
+                '\n<!-- \u2500\u2500 09: ANALYTICS DASHBOARD \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->\n'
+                '<section class="doc-section" id="analytics">\n'
+                '  <div class="section-eyebrow"><span class="pg-num">09</span><span class="pg-title">Analytics Dashboard</span>'
+                '<span class="src" data-src="Source: Uploaded CAD export data. All charts \u2014 call type distribution, priority breakdown, hourly heat map, and month-over-month trends \u2014 are derived directly from incident records provided. No external data normalization is applied.">\u24d8</span></div>\n'
+                f'  {cad_charts_html_export}\n'
+                '</section>'
+            )
+            _analytics_nav = '<a href="#analytics"><span class="nav-num">09</span>Analytics Dashboard</a>'
+        else:
+            _analytics_section_html = ''
+            _analytics_nav = ''
+        export_html = export_html.replace("[ANALYTICS_SECTION]", _analytics_section_html)
+        export_html = export_html.replace("[ANALYTICS_NAV]", _analytics_nav)
 
-        # ── Community Impact Dashboard (light theme for print/export) ────────
+        # ── Community Impact section (light theme for print/export) ─────────
         _cid_export_html = generate_community_impact_dashboard_html(
             city=prop_city,
             state=prop_state,
@@ -10124,7 +10144,16 @@ function copyCommunitySection() {{
         _cid_body = _body_match.group(1).strip() if _body_match else _cid_export_html
         # Build the scoped embed: scoped <style> + wrapper div
         _cid_embed = f'<style>{_scoped_style}</style>\n<div class="cid-wrap" style="font-family:\'DM Sans\',sans-serif;background:#f8f7f4;border-radius:10px;overflow:hidden;">{_cid_body}</div>'
-        export_html = export_html.replace("[COMMUNITY_IMPACT_HTML_EXPORT]", _cid_embed)
+        _community_impact_section_html = (
+            '\n<!-- \u2500\u2500 10: COMMUNITY IMPACT DASHBOARD \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->\n'
+            '<section class="doc-section" id="community-impact">\n'
+            '  <div class="section-eyebrow"><span class="pg-num">10</span><span class="pg-title">Community Impact &amp; Transparency</span>'
+            '<span class="src" data-src="Sources: Population \u2014 US Census Bureau American Community Survey (ACS). Officer wage benchmarks \u2014 Bureau of Labor Statistics (BLS) OES. Financial projections \u2014 BRINC COS optimization model. Flight hour estimates \u2014 BRINC hardware specifications. All figures are model estimates.">\u24d8</span></div>\n'
+            f'  {_cid_embed}\n'
+            '</section>'
+        )
+        export_html = export_html.replace("[COMMUNITY_IMPACT_SECTION]", _community_impact_section_html)
+        export_html = export_html.replace("[COMMUNITY_IMPACT_NAV]", '<a href="#community-impact"><span class="nav-num">10</span>Community Impact</a>')
 
     # ── Download buttons — always rendered so they're visible in the sidebar ──
     _safe_city   = _safe_city_base

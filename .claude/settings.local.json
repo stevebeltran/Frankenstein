@@ -4,7 +4,9 @@
       "Bash(python3:*)",
       "Bash(grep -E \"\\\\.py$|\\\\.csv$|\\\\.txt$\")",
       "Bash(ccusage:*)",
-      "Bash(pip show:*)"
+      "Bash(pip show:*)",
+      "WebSearch",
+      "Bash(python -c ':*)"
     ]
   }
 }

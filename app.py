@@ -2616,7 +2616,7 @@ def _make_random_stations(df_calls, n=40, boundary_geom=None, epsg_code=None):
     })
 
 @st.cache_data(show_spinner=False)
-def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations: int = 100):
+def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations: int = 200):
     """Cache-friendly OSM query keyed on rounded centroid (2 dp ≈ 1 km grid).
     Returns (list_of_dicts | None, note_str).  Timeout is kept short so the
     UI falls back to random stations quickly if Overpass is unresponsive.
@@ -2629,19 +2629,35 @@ def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations:
     for R in [0.25, 0.45]:
         bbox = f"{cen_lat_r - R},{cen_lon_r - R},{cen_lat_r + R},{cen_lon_r + R}"
         query = (
-            f'[out:json][timeout:25];'
+            f'[out:json][timeout:30];'
             f'(node["amenity"="fire_station"]({bbox});'
             f'node["amenity"="police"]({bbox});'
             f'node["amenity"="school"]({bbox});'
             f'node["amenity"="hospital"]({bbox});'
             f'node["amenity"="library"]({bbox});'
             f'node["building"="government"]({bbox});'
+            f'node["amenity"="ambulance_station"]({bbox});'
+            f'node["amenity"="university"]({bbox});'
+            f'node["amenity"="college"]({bbox});'
+            f'node["amenity"="bus_station"]({bbox});'
+            f'node["railway"="station"]({bbox});'
+            f'node["amenity"="community_centre"]({bbox});'
+            f'node["amenity"="courthouse"]({bbox});'
+            f'node["amenity"="social_facility"]({bbox});'
             f'way["amenity"="fire_station"]({bbox});'
             f'way["amenity"="police"]({bbox});'
             f'way["amenity"="school"]({bbox});'
             f'way["amenity"="hospital"]({bbox});'
             f'way["amenity"="library"]({bbox});'
             f'way["building"="government"]({bbox});'
+            f'way["amenity"="ambulance_station"]({bbox});'
+            f'way["amenity"="university"]({bbox});'
+            f'way["amenity"="college"]({bbox});'
+            f'way["amenity"="bus_station"]({bbox});'
+            f'way["railway"="station"]({bbox});'
+            f'way["amenity"="community_centre"]({bbox});'
+            f'way["amenity"="courthouse"]({bbox});'
+            f'way["amenity"="social_facility"]({bbox});'
             f');out center;'
         )
         data = None
@@ -2674,12 +2690,19 @@ def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations:
                 continue
             amenity  = tags.get('amenity', '')
             building = tags.get('building', '')
+            railway  = tags.get('railway', '')
             type_label = (
-                'Fire'       if amenity == 'fire_station' else
-                'Police'     if amenity == 'police'       else
-                'Hospital'   if amenity == 'hospital'     else
-                'Library'    if amenity == 'library'      else
-                'Government' if building == 'government'  else
+                'Fire'           if amenity == 'fire_station'                    else
+                'Police'         if amenity == 'police'                          else
+                'Hospital'       if amenity == 'hospital'                        else
+                'Library'        if amenity == 'library'                         else
+                'EMS'            if amenity == 'ambulance_station'               else
+                'University'     if amenity in ('university', 'college')         else
+                'Transit'        if amenity == 'bus_station' or railway == 'station' else
+                'Community'      if amenity == 'community_centre'                else
+                'Courthouse'     if amenity == 'courthouse'                      else
+                'Social Services' if amenity == 'social_facility'               else
+                'Government'     if building == 'government'                     else
                 'School'
             )
             rows.append({'name': tags.get('name', f"{type_label} Station"),
@@ -2697,7 +2720,7 @@ def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations:
                     new_names.append(n)
             df_s['name'] = new_names
             if len(df_s) > max_stations:
-                pri = {'Police': 0, 'Fire': 1, 'School': 2}
+                pri = {'Police': 0, 'Fire': 1, 'EMS': 2, 'School': 3, 'Hospital': 4, 'University': 5, 'Transit': 6, 'Courthouse': 7, 'Community': 8, 'Government': 9, 'Social Services': 10, 'Library': 11}
                 df_s['_pri'] = df_s['type'].map(pri).fillna(3)
                 df_s = df_s.sort_values('_pri').head(max_stations).drop(columns='_pri').reset_index(drop=True)
             return df_s.to_dict('records'), f"Found {len(df_s)} stations from OpenStreetMap."
@@ -5225,6 +5248,7 @@ def generate_community_impact_dashboard_html(
     active_drones,
     df_calls_full,
     theme='dark',
+    facility_counts=None,
 ):
     """
     Generate a Community Impact Dashboard HTML string.
@@ -5367,6 +5391,54 @@ def generate_community_impact_dashboard_html(
         {"name": d["name"].split(",")[0][:28], "type": d["type"]}
         for d in active_drones
     ] if active_drones else [])
+
+    # Facility type counts for the Protected Facilities section
+    _fac_icon_map = {
+        "Police": "🚔", "Fire": "🚒", "EMS": "🚑", "School": "🏫",
+        "Hospital": "🏥", "University": "🎓", "Transit": "🚌",
+        "Community": "🏛️", "Courthouse": "⚖️", "Social Services": "🤝",
+        "Government": "🏛️", "Library": "📚",
+    }
+    _fac_src_map = {
+        "Police":          "DHS HIFLD Law Enforcement Locations · OpenStreetMap (amenity=police, ODbL)",
+        "Fire":            "DHS HIFLD Fire Stations (public domain) · OpenStreetMap (amenity=fire_station)",
+        "EMS":             "OpenStreetMap (amenity=ambulance_station) · NEMSIS National EMS Database (nemsis.org)",
+        "School":          "OpenStreetMap (amenity=school) · NCES Common Core of Data (nces.ed.gov)",
+        "Hospital":        "OpenStreetMap (amenity=hospital) · CMS Hospital Compare (cms.gov)",
+        "University":      "OpenStreetMap (amenity=university/college) · IPEDS (nces.ed.gov/ipeds)",
+        "Transit":         "OpenStreetMap (amenity=bus_station · railway=station) · NTD (transit.dot.gov)",
+        "Community":       "OpenStreetMap (amenity=community_centre) · IMLS Public Libraries Survey",
+        "Courthouse":      "OpenStreetMap (amenity=courthouse) · US Courts PACER (uscourts.gov)",
+        "Social Services": "OpenStreetMap (amenity=social_facility) · HUD Location Affordability Index",
+        "Government":      "OpenStreetMap (building=government) · Census TIGER/Line (census.gov)",
+        "Library":         "OpenStreetMap (amenity=library) · IMLS Public Libraries Survey (imls.gov)",
+    }
+    _fac_color_map = {
+        "Police": "#00D2FF", "Fire": "#ef4444", "EMS": "#f97316",
+        "School": "#eab308", "Hospital": "#22c55e", "University": "#3b82f6",
+        "Transit": "#10b981", "Community": "#f59e0b", "Courthouse": "#8b5cf6",
+        "Social Services": "#ec4899", "Government": "#a78bfa", "Library": "#fb923c",
+    }
+    _total_facilities = sum((facility_counts or {}).values())
+    _fac_cards_html = ""
+    if facility_counts:
+        for _ft, _fcnt in sorted(facility_counts.items(), key=lambda x: -x[1]):
+            _fi = _fac_icon_map.get(_ft, "🏢")
+            _fc = _fac_color_map.get(_ft, "#888")
+            _fs = _fac_src_map.get(_ft, "OpenStreetMap contributors (ODbL)")
+            _fac_cards_html += (
+                f'<div style="background:var(--bg-card);border:1px solid var(--rule);border-top:3px solid {_fc};'
+                f'border-radius:8px;padding:12px 14px;text-align:center;">'
+                f'<div style="font-size:22px;margin-bottom:4px;">{_fi}</div>'
+                f'<div style="font-size:20px;font-weight:900;color:{_fc};font-family:\'DM Mono\',monospace;">{_fcnt}</div>'
+                f'<div style="font-size:10px;font-weight:700;color:var(--ink-light);text-transform:uppercase;'
+                f'letter-spacing:0.6px;margin-top:2px;">{_ft}</div>'
+                f'<div style="font-size:9px;color:var(--ink-light);margin-top:4px;font-style:italic;" '
+                f'title="Source: {_fs}">ⓘ {_fs[:38]}{"…" if len(_fs)>38 else ""}</div>'
+                f'</div>'
+            )
+    if not _fac_cards_html:
+        _fac_cards_html = '<p style="color:var(--ink-light);font-size:12px;">No facility data available.</p>'
 
     # Privacy policy data-retention badge values
     retention_days   = 30   # industry standard shown in transparency portals
@@ -6034,6 +6106,27 @@ def generate_community_impact_dashboard_html(
 
 
 <!-- ══════════════════════════════════════════════════════════════════
+     SECTION 6B — PROTECTED FACILITIES
+══════════════════════════════════════════════════════════════════ -->
+<div class="section-label" style="margin-top:20px;">06B &nbsp;·&nbsp; Protected Public Facilities
+  <span class="tip-cid" data-tip="Count of public facilities indexed within the city boundaries by type. Sources: OpenStreetMap (ODbL) · DHS HIFLD · NCES · CMS · NEMSIS · NTD · IMLS · US Courts PACER. Facility data is pulled from real-time public datasets at proposal generation time.">?</span>
+</div>
+<p style="font-size:11.5px;color:var(--ink-light);margin-bottom:14px;line-height:1.6;">
+  BRINC DFR provides aerial first-response coverage over <strong style="color:var(--ink);">{_total_facilities:,} indexed public facilities</strong>
+  in {city}, {state} — from schools and hospitals to transit hubs and social services.
+  Drone coverage zones protect these assets 24 / 7 without dedicated officers posted at each location.
+</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:20px;">
+  {_fac_cards_html}
+</div>
+<p style="font-size:10px;color:var(--ink-light);font-style:italic;margin-bottom:20px;">
+  ⓘ Facility counts sourced from OpenStreetMap (ODbL license), DHS HIFLD Open Data (public domain),
+  NCES Common Core of Data, CMS Hospital Compare, NEMSIS National EMS Database, NTD National Transit Database,
+  IMLS Public Libraries Survey, and US Courts PACER. Data reflects snapshot at time of report generation.
+</p>
+
+
+<!-- ══════════════════════════════════════════════════════════════════
      SECTION 7 — TAXPAYER ROI
 ══════════════════════════════════════════════════════════════════ -->
 <div class="section-label">07 &nbsp;·&nbsp; Taxpayer Return on Investment <span class="tip-cid" data-tip="Compares the one-time fleet hardware cost to the annual operational savings from drone-handled calls. ROI reflects savings from reduced patrol-car dispatches only — does not include specialty response, apprehension impact, or injury prevention value.">?</span></div>
@@ -6160,8 +6253,10 @@ if (stations.length === 0) {{
     window.parent.postMessage({{type: 'streamlit:setFrameHeight', height: h}}, '*');
   }}
   window.addEventListener('load', reportHeight);
-  setTimeout(reportHeight, 300);
-  setTimeout(reportHeight, 1000);
+  setTimeout(reportHeight, 100);
+  setTimeout(reportHeight, 400);
+  setTimeout(reportHeight, 900);
+  setTimeout(reportHeight, 2000);
 }})();
 </script>
 </body>
@@ -8425,6 +8520,10 @@ if st.session_state['csvs_ready']:
         "</div>",
         unsafe_allow_html=True
     )
+    _cid_fac_counts = {}
+    if 'type' in df_stations_all.columns:
+        for _t in df_stations_all['type'].dropna().astype(str):
+            _cid_fac_counts[_t] = _cid_fac_counts.get(_t, 0) + 1
     _cid_html = generate_community_impact_dashboard_html(
         city=st.session_state.get('active_city', 'City'),
         state=st.session_state.get('active_state', 'TX'),
@@ -8445,8 +8544,9 @@ if st.session_state['csvs_ready']:
         daily_drone_only_calls=float(daily_drone_only_calls or 0),
         active_drones=active_drones or [],
         df_calls_full=df_calls_full,
+        facility_counts=_cid_fac_counts or None,
     )
-    components.html(_cid_html, height=2800, scrolling=False)
+    components.html(_cid_html, height=4200, scrolling=False)
 
     # ── SCHOOL SAFETY IMPACT MATRIX ──────────────────────────────────────────
     st.markdown("---")
@@ -8930,22 +9030,75 @@ if st.session_state['csvs_ready']:
 
         all_bldgs_rows = ""
         _type_colors = {
-            "Police": ("rgba(0,210,255,0.1)","#0066aa"),
-            "Fire": ("rgba(220,53,69,0.1)","#aa0022"),
-            "School": ("rgba(255,215,0,0.12)","#7a6000"),
-            "Hospital": ("rgba(34,197,94,0.1)","#006622"),
-            "Government": ("rgba(139,92,246,0.1)","#4b0082"),
-            "Library": ("rgba(249,115,22,0.1)","#8a3300"),
+            "Police":          ("rgba(0,210,255,0.1)",    "#0066aa"),
+            "Fire":            ("rgba(220,53,69,0.1)",    "#aa0022"),
+            "EMS":             ("rgba(255,100,50,0.1)",   "#b33000"),
+            "School":          ("rgba(255,215,0,0.12)",   "#7a6000"),
+            "Hospital":        ("rgba(34,197,94,0.1)",    "#006622"),
+            "University":      ("rgba(59,130,246,0.1)",   "#1d4ed8"),
+            "Transit":         ("rgba(16,185,129,0.1)",   "#065f46"),
+            "Community":       ("rgba(245,158,11,0.1)",   "#92400e"),
+            "Courthouse":      ("rgba(139,92,246,0.12)",  "#5b21b6"),
+            "Social Services": ("rgba(236,72,153,0.1)",   "#9d174d"),
+            "Government":      ("rgba(139,92,246,0.1)",   "#4b0082"),
+            "Library":         ("rgba(249,115,22,0.1)",   "#8a3300"),
         }
+        # ── Facility type counts (for summary grid + community impact dashboard) ──
+        _fac_counts = {}
+        for _, _frow in df_stations_all.iterrows():
+            _ft = str(_frow.get('type', 'Other'))
+            _fac_counts[_ft] = _fac_counts.get(_ft, 0) + 1
+
+        # ── Facility type summary HTML (icons + counts) ──────────────────────
+        _FAC_ICONS = {
+            "Police": "🚔", "Fire": "🚒", "EMS": "🚑", "School": "🏫",
+            "Hospital": "🏥", "University": "🎓", "Transit": "🚌",
+            "Community": "🏛️", "Courthouse": "⚖️", "Social Services": "🤝",
+            "Government": "🏛️", "Library": "📚",
+        }
+        _FAC_SOURCES = {
+            "Police":          "DHS HIFLD Law Enforcement Locations · OpenStreetMap (amenity=police) · ODbL license",
+            "Fire":            "DHS HIFLD Fire Stations dataset (public domain) · OpenStreetMap (amenity=fire_station)",
+            "EMS":             "OpenStreetMap (amenity=ambulance_station) · NEMSIS National EMS Database (nemsis.org)",
+            "School":          "OpenStreetMap (amenity=school) · NCES Common Core of Data (nces.ed.gov)",
+            "Hospital":        "OpenStreetMap (amenity=hospital) · CMS Hospital Compare (cms.gov)",
+            "University":      "OpenStreetMap (amenity=university / college) · IPEDS (nces.ed.gov/ipeds)",
+            "Transit":         "OpenStreetMap (amenity=bus_station · railway=station) · NTD National Transit Database (transit.dot.gov)",
+            "Community":       "OpenStreetMap (amenity=community_centre) · IMLS Public Libraries Survey",
+            "Courthouse":      "OpenStreetMap (amenity=courthouse) · PACER / US Courts (uscourts.gov)",
+            "Social Services": "OpenStreetMap (amenity=social_facility) · HUD Location Affordability Index",
+            "Government":      "OpenStreetMap (building=government) · TIGER/Line Shapefiles (census.gov)",
+            "Library":         "OpenStreetMap (amenity=library) · IMLS Public Libraries Survey (imls.gov)",
+        }
+        _fac_summary_cells = ""
+        for _ft, _fcnt in sorted(_fac_counts.items(), key=lambda x: -x[1]):
+            _tc2 = _type_colors.get(_ft, ("rgba(0,0,0,0.04)", "#555"))
+            _icon = _FAC_ICONS.get(_ft, "🏢")
+            _src  = _FAC_SOURCES.get(_ft, "OpenStreetMap contributors (ODbL)")
+            _fac_summary_cells += (
+                f'<div style="background:{_tc2[0]};border:1px solid {_tc2[1]}33;border-radius:8px;'
+                f'padding:10px 14px;display:flex;align-items:center;gap:10px;">'
+                f'<span style="font-size:20px">{_icon}</span>'
+                f'<div><div style="font-size:11px;font-weight:700;color:{_tc2[1]};text-transform:uppercase;'
+                f'letter-spacing:0.5px;">{_ft}</div>'
+                f'<div style="font-size:18px;font-weight:900;color:#111;font-family:\'IBM Plex Mono\',monospace;">{_fcnt}</div>'
+                f'<div style="font-size:9px;color:#777;margin-top:1px;">facilities</div></div>'
+                f'<abbr title="Source: {_src}" style="margin-left:auto;font-size:10px;color:#aaa;'
+                f'text-decoration:none;cursor:help;">ⓘ</abbr>'
+                f'</div>'
+            )
+
         for _, row in df_stations_all.iterrows():
             gmaps_link = f"https://www.google.com/maps/search/?api=1&query={row['lat']},{row['lon']}"
             _rtype = str(row.get('type', 'Facility'))
             _tc = _type_colors.get(_rtype, ("rgba(0,0,0,0.04)","#555"))
             _short_name = str(row['name'])[:45] + ("…" if len(str(row['name']))>45 else "")
+            _src_tip = _FAC_SOURCES.get(_rtype, "OpenStreetMap contributors (ODbL)")
             all_bldgs_rows += (
                 f'''<div class="infra-item">
                   <span class="i-name" title="{row['name']}">{_short_name}</span>
                   <span class="i-type" style="background:{_tc[0]};color:{_tc[1]}">{_rtype}</span>
+                  <abbr title="Source: {_src_tip}" style="font-size:10px;color:#aaa;text-decoration:none;cursor:help;margin-left:auto;">ⓘ</abbr>
                   <a class="i-link" href="{gmaps_link}" target="_blank">↗</a>
                 </div>'''
             )
@@ -9194,7 +9347,12 @@ body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text)
   color:#fff;margin-bottom:16px;
 }}
 .cover-headline h1 span{{color:var(--cyan)}}
-.cover-headline p{{font-size:16px;color:#888;max-width:480px;line-height:1.7}}
+.cover-population{{
+  font-size:13px;color:#aaa;margin-bottom:14px;letter-spacing:0.2px;
+  border-left:3px solid var(--cyan);padding-left:10px;
+}}
+.cover-population strong{{color:#fff;font-weight:700}}
+.cover-headline p{{font-size:15px;color:#888;max-width:520px;line-height:1.7}}
 .cover-meta{{
   display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
   background:#1a1a2a;border:1px solid #1a1a2a;border-radius:10px;overflow:hidden;
@@ -9406,7 +9564,11 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
       <div class="cover-headline">
         <div class="cover-tag">Drone as a First Responder · Deployment Proposal</div>
         <h1>Protecting <span>{prop_city}</span>,<br>{prop_state}</h1>
-        <p>A data-driven deployment plan for {actual_k_responder + actual_k_guardian} BRINC aerial units covering {calls_covered_perc:.1f}% of incidents across {prop_city}.</p>
+        <div class="cover-population">
+          Serving <strong>{int(pop_metric):,}</strong> residents of {prop_city}, {prop_state}
+          <abbr title="Source: US Census Bureau American Community Survey (ACS) 5-Year Estimates · census.gov/programs-surveys/acs" style="font-size:11px;color:#666;margin-left:4px;text-decoration:none;cursor:help;">ⓘ</abbr>
+        </div>
+        <p>A data-driven deployment plan for <strong>{actual_k_responder + actual_k_guardian} BRINC aerial units</strong> covering {calls_covered_perc:.1f}% of {st.session_state.get('total_original_calls', total_calls):,} annual incidents · {len(df_stations_all):,} public facilities protected across {area_sq_mi_est:,} sq mi.</p>
       </div>
       <div class="cover-meta">
         <div class="cover-meta-cell"><div class="label">Fleet CapEx</div><div class="value accent">${fleet_capex:,.0f}</div></div>
@@ -9714,8 +9876,20 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 
 <!-- ── 07: INFRASTRUCTURE DIRECTORY ──────────────────────────── -->
 <section class="doc-section" id="infrastructure">
-  <div class="section-eyebrow"><span class="pg-num">07</span><span class="pg-title">Infrastructure Directory</span><span class="src" data-src="Sources: OpenStreetMap (© contributors, ODbL license) · DHS HIFLD Open Data — Fire Stations &amp; Law Enforcement Locations datasets (public domain) · FAA LAANC UAS Facility Maps (FAA.gov). User-uploaded or pin-dropped stations are marked accordingly.">ⓘ</span></div>
-  <p style="color:var(--muted);font-size:12px;margin-bottom:16px">Public facilities evaluated as candidate deployment locations during optimization. All coordinates verified against FAA LAANC facility maps.</p>
+  <div class="section-eyebrow"><span class="pg-num">07</span><span class="pg-title">Infrastructure Directory</span><span class="src" data-src="Sources: OpenStreetMap (© contributors, ODbL license) · DHS HIFLD Open Data — Fire Stations &amp; Law Enforcement Locations (public domain) · NCES Common Core of Data (schools) · CMS Hospital Compare · NEMSIS National EMS Database · NTD National Transit Database · IMLS Public Libraries Survey · US Courts PACER · FAA LAANC UAS Facility Maps. User-uploaded or pin-dropped stations marked accordingly.">ⓘ</span></div>
+  <p style="color:var(--muted);font-size:12px;margin-bottom:16px;">Public facilities evaluated as candidate deployment locations during optimization. Drone coverage prioritizes facilities most critical to public safety response. All coordinates verified against FAA LAANC facility maps.</p>
+
+  <!-- FACILITY TYPE SUMMARY -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:24px;">
+    {_fac_summary_cells}
+  </div>
+
+  <p style="font-size:11px;color:var(--muted);margin-bottom:14px;border-top:1px solid var(--border);padding-top:12px;">
+    <strong>{len(df_stations_all):,} total facilities</strong> indexed across {prop_city}, {prop_state} ·
+    <span style="color:var(--cyan);">{calls_covered_perc:.1f}% of annual incidents</span> fall within drone response zones ·
+    Source: OpenStreetMap, DHS HIFLD, NCES, CMS, NEMSIS, NTD, IMLS, user data
+  </p>
+
   <div class="infra-grid">{all_bldgs_rows}</div>
 </section>
 
@@ -10105,6 +10279,7 @@ function copyCommunitySection() {{
             active_drones=active_drones or [],
             df_calls_full=df_calls_full,
             theme='light',
+            facility_counts=_fac_counts or None,
         )
         # Extract <style> block and body content separately, then scope the styles
         # with a .cid-wrap prefix so they don't collide with the export document's CSS.

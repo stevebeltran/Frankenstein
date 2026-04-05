@@ -22,6 +22,32 @@ from PIL import Image
 # --- PAGE CONFIG & INITIALIZE SESSION STATE ---
 st.set_page_config(page_title="BRINC COS Drone Optimizer", layout="wide", initial_sidebar_state="expanded")
 
+# ── Mobile-responsive CSS (applied globally, activated by media queries) ──
+st.markdown("""
+<style>
+@media (max-width: 900px) {
+  /* Tighten block padding on small screens */
+  [data-testid="block-container"] { padding: 1rem 0.5rem !important; }
+  /* Stack columns vertically */
+  [data-testid="column"] { min-width: 100% !important; }
+  /* Shrink sidebar toggle area */
+  [data-testid="collapsedControl"] { top: 0.4rem !important; }
+  /* Scale down plotly charts so they don't overflow */
+  .js-plotly-plot { max-width: 100% !important; overflow-x: auto; }
+  /* Make metric values readable on small screens */
+  [data-testid="stMetricValue"] { font-size: 1.4rem !important; }
+  /* Reduce button font size */
+  [data-testid="baseButton-secondary"] { font-size: 0.72rem !important; }
+}
+@media (max-width: 600px) {
+  [data-testid="block-container"] { padding: 0.5rem 0.25rem !important; }
+  [data-testid="stMetricValue"] { font-size: 1.1rem !important; }
+  /* Hide non-essential sidebar elements on phone */
+  section[data-testid="stSidebar"] { width: 260px !important; }
+}
+</style>
+""", unsafe_allow_html=True)
+
 # This MUST run before any st.session_state checks to prevent KeyError
 defaults = {
     'csvs_ready': False, 'df_calls': None, 'df_calls_full': None, 'df_stations': None,
@@ -8835,6 +8861,83 @@ if st.session_state['csvs_ready']:
         f"{_school_html}</body></html>"
     )
     components.html(_school_full_html, height=1300, scrolling=False)
+
+    # ── MOBILE QR CODE ────────────────────────────────────────────────────────
+    st.markdown("---")
+    try:
+        import qrcode as _qrcode
+        from PIL import Image as _PILImage
+        import io as _io_qr, urllib.parse as _up, socket as _sock
+
+        # Build base URL from Streamlit context headers
+        try:
+            _qr_host = st.context.headers.get("host", "") or st.context.headers.get("Host", "")
+            _qr_proto = "https" if (_qr_host and ("streamlit.app" in _qr_host or "share" in _qr_host)) else "http"
+            if not _qr_host:
+                _qr_host = f"{_sock.gethostbyname(_sock.gethostname())}:8501"
+            _qr_base = f"{_qr_proto}://{_qr_host}"
+        except Exception:
+            try:
+                _qr_base = f"http://{_sock.gethostbyname(_sock.gethostname())}:8501"
+            except Exception:
+                _qr_base = "http://localhost:8501"
+
+        # Compute area inline (may not yet be in scope)
+        try:
+            _qr_df_c = df_calls_full if df_calls_full is not None else df_calls
+            _qr_lons = _qr_df_c["lon"].dropna(); _qr_lats = _qr_df_c["lat"].dropna()
+            _qr_area = max(1, int((float(_qr_lons.max()) - float(_qr_lons.min())) *
+                                   (float(_qr_lats.max()) - float(_qr_lats.min())) * 3280))
+        except Exception:
+            _qr_area = 0
+
+        _qr_params = _up.urlencode({
+            "city":  st.session_state.get("active_city", ""),
+            "state": st.session_state.get("active_state", ""),
+            "pop":   int(st.session_state.get("estimated_pop", 0) or 0),
+            "cov":   round(float(calls_covered_perc or 0), 1),
+            "resp":  round(float(avg_resp_time or 0), 2),
+            "saves": int(annual_savings or 0),
+            "capex": int(fleet_capex or 0),
+            "r":     int(actual_k_responder or 0),
+            "g":     int(actual_k_guardian or 0),
+            "calls": int(total_calls or 0),
+            "area":  _qr_area,
+            "tsav":  round(float(avg_time_saved or 0), 2),
+        })
+        _qr_url = f"{_qr_base}/Mobile_Summary?{_qr_params}"
+
+        # Generate BRINC-styled QR code (cyan on near-black)
+        _qr = _qrcode.QRCode(version=None, error_correction=_qrcode.constants.ERROR_CORRECT_M,
+                              box_size=8, border=3)
+        _qr.add_data(_qr_url)
+        _qr.make(fit=True)
+        _qr_img = _qr.make_image(fill_color="#00D2FF", back_color="#080c14")
+
+        # Convert to bytes
+        _qr_buf = _io_qr.BytesIO()
+        _qr_img.save(_qr_buf, format="PNG")
+        _qr_buf.seek(0)
+
+        # Display
+        _qr_col1, _qr_col2, _qr_col3 = st.columns([1, 1.2, 1])
+        with _qr_col2:
+            st.markdown("""
+            <div style="text-align:center;margin-bottom:6px;">
+              <span style="font-size:0.65rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;">
+                📱 Mobile Summary
+              </span><br>
+              <span style="font-size:0.60rem;color:#555;">Scan to view on your phone</span>
+            </div>
+            """, unsafe_allow_html=True)
+            st.image(_qr_buf, width=180)
+            st.markdown(f"""
+            <div style="text-align:center;margin-top:4px;">
+              <span style="font-size:0.55rem;color:#333;word-break:break-all;">{_qr_base}/Mobile_Summary</span>
+            </div>
+            """, unsafe_allow_html=True)
+    except Exception as _qr_err:
+        st.caption(f"📱 QR code unavailable — install `qrcode` package. ({_qr_err})")
 
     # ── EXPORT BUTTONS — always visible in sidebar ──
     st.sidebar.markdown("---")

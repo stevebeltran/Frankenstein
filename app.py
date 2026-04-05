@@ -9016,90 +9016,75 @@ if st.session_state['csvs_ready']:
             _map_html = f'<div style="width:{_MAP_W}px;height:{_MAP_H}px;background:#06101e;border-radius:10px;"></div>'
 
         # ── Render full-width banner ───────────────────────────────────────────
-        st.markdown(f"""
-        <div style="background:linear-gradient(160deg,#060c18 0%,#0b1525 60%,#060c18 100%);
-                    border:1px solid rgba(0,210,255,0.22);border-top:3px solid #00D2FF;
-                    border-radius:16px;padding:28px 32px 24px;margin-top:12px;overflow:hidden;">
+        # Build as a variable (no leading indentation) to avoid Markdown treating
+        # 4+ leading spaces as a code block, which renders HTML as raw text.
+        _qr_banner = (
+            '<div style="background:linear-gradient(160deg,#060c18 0%,#0b1525 60%,#060c18 100%);'
+            'border:1px solid rgba(0,210,255,0.22);border-top:3px solid #00D2FF;'
+            'border-radius:16px;padding:28px 32px 24px;margin-top:12px;overflow:hidden;">'
 
-          <!-- Header row -->
-          <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
-            <span style="font-size:1.5rem;font-weight:900;color:#00D2FF;letter-spacing:3px;font-family:sans-serif;">BRINC</span>
-            <span style="font-size:1.0rem;font-weight:700;color:#aabbcc;font-family:sans-serif;">Drone as First Responder</span>
-            <span style="font-size:0.75rem;color:#334;margin-left:auto;font-family:monospace;">{_qr_loc}</span>
-          </div>
+            # Header
+            '<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:20px;flex-wrap:wrap;">'
+            '<span style="font-size:1.5rem;font-weight:900;color:#00D2FF;letter-spacing:3px;font-family:sans-serif;">BRINC</span>'
+            '<span style="font-size:1.0rem;font-weight:700;color:#aabbcc;font-family:sans-serif;">Drone as First Responder</span>'
+            f'<span style="font-size:0.75rem;color:#334;margin-left:auto;font-family:monospace;">{_qr_loc}</span>'
+            '</div>'
 
-          <!-- Main content: map + QR -->
-          <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;margin-bottom:20px;">
+            # Main content: map + QR
+            '<div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;margin-bottom:20px;">'
 
-            <!-- Mini map -->
-            <div style="flex-shrink:0;">
-              {_map_html}
-              <div style="font-size:0.58rem;color:#334;text-align:center;margin-top:5px;letter-spacing:0.5px;">
-                DRONE COVERAGE MAP · {_qr_loc.upper()}
-              </div>
-            </div>
+            # Mini map column
+            '<div style="flex-shrink:0;">'
+            f'{_map_html}'
+            f'<div style="font-size:0.58rem;color:#334;text-align:center;margin-top:5px;letter-spacing:0.5px;">DRONE COVERAGE MAP · {_qr_loc.upper()}</div>'
+            '</div>'
 
-            <!-- QR + scan prompt -->
-            <div style="flex:1;min-width:220px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;">
-              <img src="data:image/png;base64,{_qr_b64}"
-                   style="width:240px;height:240px;border-radius:12px;display:block;"
-                   alt="BRINC Mobile Summary QR" />
-              <div style="text-align:center;">
-                <div style="font-size:1.0rem;font-weight:800;color:#ffffff;letter-spacing:0.5px;">📱 Scan for Mobile Summary</div>
-                <div style="font-size:0.65rem;color:#445566;margin-top:3px;">No login required · Opens on any phone</div>
-              </div>
-              <div style="font-size:0.52rem;color:#283444;font-family:monospace;word-break:break-all;
-                          background:#08111e;border:1px solid #1a2535;border-radius:5px;
-                          padding:5px 8px;max-width:260px;text-align:center;">
-                {_qr_base}/Mobile_Summary
-              </div>
-            </div>
+            # QR column
+            '<div style="flex:1;min-width:220px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;">'
+            f'<img src="data:image/png;base64,{_qr_b64}" style="width:240px;height:240px;border-radius:12px;display:block;" alt="BRINC Mobile Summary QR"/>'
+            '<div style="text-align:center;">'
+            '<div style="font-size:1.0rem;font-weight:800;color:#ffffff;letter-spacing:0.5px;">&#128241; Scan for Mobile Summary</div>'
+            '<div style="font-size:0.65rem;color:#445566;margin-top:3px;">No login required &middot; Opens on any phone</div>'
+            '</div>'
+            '<div style="font-size:0.52rem;color:#283444;font-family:monospace;word-break:break-all;'
+            'background:#08111e;border:1px solid #1a2535;border-radius:5px;padding:5px 8px;max-width:260px;text-align:center;">'
+            f'{_qr_base}/Mobile_Summary'
+            '</div>'
+            '</div>'
 
-          </div>
+            '</div>'  # end main content row
 
-          <!-- Contact footer -->
-          <div style="border-top:1px solid rgba(0,210,255,0.12);padding-top:16px;
-                      display:flex;flex-wrap:wrap;gap:18px;align-items:center;">
+            # Contact footer
+            '<div style="border-top:1px solid rgba(0,210,255,0.12);padding-top:16px;'
+            'display:flex;flex-wrap:wrap;gap:18px;align-items:center;">'
 
-            <!-- Rep info -->
-            <div style="flex:1;min-width:220px;">
-              <div style="font-size:0.6rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-bottom:5px;">Your BRINC Representative</div>
-              <div style="font-size:1.05rem;font-weight:800;color:#eef2f7;margin-bottom:2px;">{_qr_name}</div>
-              <div style="font-size:0.8rem;color:#00D2FF;">✉ <a href="mailto:{_qr_email}" style="color:#00D2FF;text-decoration:none;">{_qr_email}</a></div>
-            </div>
+            # Rep info
+            '<div style="flex:1;min-width:220px;">'
+            '<div style="font-size:0.6rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-bottom:5px;">Your BRINC Representative</div>'
+            f'<div style="font-size:1.05rem;font-weight:800;color:#eef2f7;margin-bottom:2px;">{_qr_name}</div>'
+            f'<div style="font-size:0.8rem;color:#00D2FF;">&#9993; <a href="mailto:{_qr_email}" style="color:#00D2FF;text-decoration:none;">{_qr_email}</a></div>'
+            '</div>'
 
-            <!-- BRINC contact -->
-            <div style="flex:1;min-width:220px;">
-              <div style="font-size:0.6rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-bottom:5px;">BRINC Drones, Inc.</div>
-              <div style="font-size:0.82rem;color:#aabbcc;margin-bottom:3px;">
-                🌐 <a href="https://brincdrones.com" target="_blank" style="color:#aabbcc;text-decoration:none;">brincdrones.com</a>
-                &nbsp;·&nbsp;
-                ✉ <a href="mailto:info@brincdrones.com" style="color:#aabbcc;text-decoration:none;">info@brincdrones.com</a>
-              </div>
-              <!-- Socials -->
-              <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;">
-                <a href="https://linkedin.com/company/brinc" target="_blank"
-                   style="font-size:0.72rem;color:#0a66c2;background:rgba(10,102,194,0.12);
-                          border:1px solid rgba(10,102,194,0.35);border-radius:5px;
-                          padding:3px 9px;text-decoration:none;font-weight:600;">in LinkedIn</a>
-                <a href="https://instagram.com/brincdrones" target="_blank"
-                   style="font-size:0.72rem;color:#e1306c;background:rgba(225,48,108,0.10);
-                          border:1px solid rgba(225,48,108,0.35);border-radius:5px;
-                          padding:3px 9px;text-decoration:none;font-weight:600;">&#x1F4F7; Instagram</a>
-                <a href="https://x.com/BRINCDrones" target="_blank"
-                   style="font-size:0.72rem;color:#d0d0d0;background:rgba(255,255,255,0.06);
-                          border:1px solid rgba(255,255,255,0.18);border-radius:5px;
-                          padding:3px 9px;text-decoration:none;font-weight:600;">&#x1D54F; Twitter / X</a>
-                <a href="https://youtube.com/@BRINCDrones" target="_blank"
-                   style="font-size:0.72rem;color:#ff0000;background:rgba(255,0,0,0.09);
-                          border:1px solid rgba(255,0,0,0.3);border-radius:5px;
-                          padding:3px 9px;text-decoration:none;font-weight:600;">&#x25B6; YouTube</a>
-              </div>
-            </div>
+            # BRINC contact
+            '<div style="flex:1;min-width:220px;">'
+            '<div style="font-size:0.6rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-bottom:5px;">BRINC Drones, Inc.</div>'
+            '<div style="font-size:0.82rem;color:#aabbcc;margin-bottom:3px;">'
+            '&#127760; <a href="https://brincdrones.com" target="_blank" style="color:#aabbcc;text-decoration:none;">brincdrones.com</a>'
+            ' &nbsp;&middot;&nbsp; '
+            '&#9993; <a href="mailto:info@brincdrones.com" style="color:#aabbcc;text-decoration:none;">info@brincdrones.com</a>'
+            '</div>'
+            '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;">'
+            '<a href="https://linkedin.com/company/brinc" target="_blank" style="font-size:0.72rem;color:#0a66c2;background:rgba(10,102,194,0.12);border:1px solid rgba(10,102,194,0.35);border-radius:5px;padding:3px 9px;text-decoration:none;font-weight:600;">in LinkedIn</a>'
+            '<a href="https://instagram.com/brincdrones" target="_blank" style="font-size:0.72rem;color:#e1306c;background:rgba(225,48,108,0.10);border:1px solid rgba(225,48,108,0.35);border-radius:5px;padding:3px 9px;text-decoration:none;font-weight:600;">&#128247; Instagram</a>'
+            '<a href="https://x.com/BRINCDrones" target="_blank" style="font-size:0.72rem;color:#d0d0d0;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.18);border-radius:5px;padding:3px 9px;text-decoration:none;font-weight:600;">X / Twitter</a>'
+            '<a href="https://youtube.com/@BRINCDrones" target="_blank" style="font-size:0.72rem;color:#ff0000;background:rgba(255,0,0,0.09);border:1px solid rgba(255,0,0,0.3);border-radius:5px;padding:3px 9px;text-decoration:none;font-weight:600;">&#9654; YouTube</a>'
+            '</div>'
+            '</div>'
 
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
+            '</div>'  # end contact footer
+            '</div>'  # end banner
+        )
+        st.markdown(_qr_banner, unsafe_allow_html=True)
     except Exception as _qr_err:
         st.caption(f"📱 QR code unavailable — install `qrcode` package. ({_qr_err})")
 

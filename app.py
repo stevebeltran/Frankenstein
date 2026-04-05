@@ -8940,80 +8940,6 @@ if st.session_state['csvs_ready']:
         _qr_state = st.session_state.get("active_state", "")
         _qr_loc   = f"{_qr_city}, {_qr_state}" if _qr_city else "your city"
 
-        # ── SVG mini-map of station coverage ──────────────────────────────────
-        _MAP_W, _MAP_H = 420, 260
-        _map_svg = ""
-        try:
-            if active_drones:
-                _m_lats = [d["lat"] for d in active_drones]
-                _m_lons = [d["lon"] for d in active_drones]
-                _max_r_deg = max(d["radius_m"] / 1609.34 / 69.0 for d in active_drones)
-                _lat_span = max(max(_m_lats) - min(_m_lats), _max_r_deg * 2.4)
-                _lon_span = max(max(_m_lons) - min(_m_lons), _max_r_deg * 2.4)
-                _pad = 0.18
-                _bminlat = min(_m_lats) - _lat_span * _pad
-                _bmaxlat = max(_m_lats) + _lat_span * _pad
-                _bminlon = min(_m_lons) - _lon_span * _pad
-                _bmaxlon = max(_m_lons) + _lon_span * _pad
-
-                def _mproj(lat, lon):
-                    x = (lon - _bminlon) / max(_bmaxlon - _bminlon, 1e-9) * _MAP_W
-                    y = _MAP_H - (lat - _bminlat) / max(_bmaxlat - _bminlat, 1e-9) * _MAP_H
-                    return round(x, 1), round(y, 1)
-
-                _els = []
-                # Call dots (random sample for density background)
-                try:
-                    _cd = (df_calls_full if df_calls_full is not None else df_calls)
-                    if _cd is not None and not _cd.empty and "lat" in _cd.columns:
-                        _samp = _cd[["lat","lon"]].dropna().sample(min(300, len(_cd)), random_state=42)
-                        for _, _cr in _samp.iterrows():
-                            _cx, _cy = _mproj(float(_cr["lat"]), float(_cr["lon"]))
-                            if -4 < _cx < _MAP_W+4 and -4 < _cy < _MAP_H+4:
-                                _els.append(f'<circle cx="{_cx}" cy="{_cy}" r="1.4" fill="#1e3a52" opacity="0.7"/>')
-                except Exception:
-                    pass
-                # Coverage circles
-                for _d in active_drones:
-                    _cx, _cy = _mproj(_d["lat"], _d["lon"])
-                    _r_deg = _d["radius_m"] / 1609.34 / 69.0
-                    _r_px  = _r_deg / max(_bmaxlat - _bminlat, 1e-9) * _MAP_H
-                    _col   = _d.get("color", "#00D2FF")
-                    # Hex to rgb for rgba
-                    try:
-                        _hr = int(_col[1:3],16); _hg = int(_col[3:5],16); _hb = int(_col[5:7],16)
-                        _fill_col = f"rgba({_hr},{_hg},{_hb},0.13)"
-                        _strk_col = f"rgba({_hr},{_hg},{_hb},0.75)"
-                    except Exception:
-                        _fill_col = "rgba(0,210,255,0.13)"; _strk_col = "rgba(0,210,255,0.75)"
-                    _els.append(f'<circle cx="{_cx}" cy="{_cy}" r="{round(_r_px,1)}" fill="{_fill_col}" stroke="{_strk_col}" stroke-width="1.5"/>')
-                # Station markers
-                for _d in active_drones:
-                    _cx, _cy = _mproj(_d["lat"], _d["lon"])
-                    _col = _d.get("color", "#00D2FF")
-                    _els.append(f'<circle cx="{_cx}" cy="{_cy}" r="6" fill="{_col}" stroke="#fff" stroke-width="1.8"/>')
-                    _els.append(f'<circle cx="{_cx}" cy="{_cy}" r="2.5" fill="#ffffff"/>')
-
-                _map_svg = (
-                    f'<svg width="{_MAP_W}" height="{_MAP_H}" xmlns="http://www.w3.org/2000/svg">'
-                    f'<defs><clipPath id="mc"><rect width="{_MAP_W}" height="{_MAP_H}" rx="10"/></clipPath></defs>'
-                    f'<rect width="{_MAP_W}" height="{_MAP_H}" fill="#06101e" rx="10"/>'
-                    + "".join(_els) +
-                    f'<rect width="{_MAP_W}" height="{_MAP_H}" fill="none" stroke="rgba(0,210,255,0.2)" stroke-width="1" rx="10"/>'
-                    f'<text x="8" y="{_MAP_H-8}" font-size="9" fill="rgba(0,210,255,0.4)" font-family="monospace">BRINC DFR · {_qr_loc}</text>'
-                    f'</svg>'
-                )
-                # Base64-encode the SVG for safe embedding
-                _map_b64 = _b64.b64encode(_map_svg.encode()).decode()
-                _map_html = f'<img src="data:image/svg+xml;base64,{_map_b64}" style="width:{_MAP_W}px;height:{_MAP_H}px;display:block;" alt="Coverage map"/>'
-            else:
-                _map_html = (
-                    f'<div style="width:{_MAP_W}px;height:{_MAP_H}px;background:#06101e;border-radius:10px;'
-                    f'border:1px solid rgba(0,210,255,0.15);display:flex;align-items:center;justify-content:center;">'
-                    f'<span style="color:#334;font-size:0.75rem;">Deploy drones to see coverage map</span></div>'
-                )
-        except Exception:
-            _map_html = f'<div style="width:{_MAP_W}px;height:{_MAP_H}px;background:#06101e;border-radius:10px;"></div>'
 
         # ── Render full-width banner ───────────────────────────────────────────
         # Build as a variable (no leading indentation) to avoid Markdown treating
@@ -9030,29 +8956,18 @@ if st.session_state['csvs_ready']:
             f'<span style="font-size:0.75rem;color:#334;margin-left:auto;font-family:monospace;">{_qr_loc}</span>'
             '</div>'
 
-            # Main content: map + QR
-            '<div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;margin-bottom:20px;">'
-
-            # Mini map column
-            '<div style="flex-shrink:0;">'
-            f'{_map_html}'
-            f'<div style="font-size:0.58rem;color:#334;text-align:center;margin-top:5px;letter-spacing:0.5px;">DRONE COVERAGE MAP · {_qr_loc.upper()}</div>'
-            '</div>'
-
-            # QR column
-            '<div style="flex:1;min-width:220px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;">'
-            f'<img src="data:image/png;base64,{_qr_b64}" style="width:240px;height:240px;border-radius:12px;display:block;" alt="BRINC Mobile Summary QR"/>'
+            # QR code — centered
+            '<div style="display:flex;flex-direction:column;align-items:center;gap:10px;margin-bottom:20px;">'
+            f'<img src="data:image/png;base64,{_qr_b64}" style="width:260px;height:260px;border-radius:12px;display:block;" alt="BRINC Mobile Summary QR"/>'
             '<div style="text-align:center;">'
             '<div style="font-size:1.0rem;font-weight:800;color:#ffffff;letter-spacing:0.5px;">&#128241; Scan for Mobile Summary</div>'
             '<div style="font-size:0.65rem;color:#445566;margin-top:3px;">No login required &middot; Opens on any phone</div>'
             '</div>'
             '<div style="font-size:0.52rem;color:#283444;font-family:monospace;word-break:break-all;'
-            'background:#08111e;border:1px solid #1a2535;border-radius:5px;padding:5px 8px;max-width:260px;text-align:center;">'
+            'background:#08111e;border:1px solid #1a2535;border-radius:5px;padding:5px 8px;max-width:300px;text-align:center;">'
             f'{_qr_base}/Mobile_Summary'
             '</div>'
             '</div>'
-
-            '</div>'  # end main content row
 
             # Contact footer
             '<div style="border-top:1px solid rgba(0,210,255,0.12);padding-top:16px;'

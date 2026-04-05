@@ -25,24 +25,20 @@ st.set_page_config(page_title="BRINC COS Drone Optimizer", layout="wide", initia
 # ── Mobile-responsive CSS (applied globally, activated by media queries) ──
 st.markdown("""
 <style>
+/* ── Hide the auto-generated multi-page nav from sidebar ── */
+[data-testid="stSidebarNav"] { display: none !important; }
+
 @media (max-width: 900px) {
-  /* Tighten block padding on small screens */
   [data-testid="block-container"] { padding: 1rem 0.5rem !important; }
-  /* Stack columns vertically */
   [data-testid="column"] { min-width: 100% !important; }
-  /* Shrink sidebar toggle area */
   [data-testid="collapsedControl"] { top: 0.4rem !important; }
-  /* Scale down plotly charts so they don't overflow */
   .js-plotly-plot { max-width: 100% !important; overflow-x: auto; }
-  /* Make metric values readable on small screens */
   [data-testid="stMetricValue"] { font-size: 1.4rem !important; }
-  /* Reduce button font size */
   [data-testid="baseButton-secondary"] { font-size: 0.72rem !important; }
 }
 @media (max-width: 600px) {
   [data-testid="block-container"] { padding: 0.5rem 0.25rem !important; }
   [data-testid="stMetricValue"] { font-size: 1.1rem !important; }
-  /* Hide non-essential sidebar elements on phone */
   section[data-testid="stSidebar"] { width: 260px !important; }
 }
 </style>
@@ -8907,9 +8903,9 @@ if st.session_state['csvs_ready']:
         })
         _qr_url = f"{_qr_base}/Mobile_Summary?{_qr_params}"
 
-        # Generate BRINC-styled QR code (cyan on near-black)
+        # Generate large BRINC-styled QR code (cyan on near-black)
         _qr = _qrcode.QRCode(version=None, error_correction=_qrcode.constants.ERROR_CORRECT_M,
-                              box_size=8, border=3)
+                              box_size=18, border=4)
         _qr.add_data(_qr_url)
         _qr.make(fit=True)
         _qr_img = _qr.make_image(fill_color="#00D2FF", back_color="#080c14")
@@ -8918,24 +8914,54 @@ if st.session_state['csvs_ready']:
         _qr_buf = _io_qr.BytesIO()
         _qr_img.save(_qr_buf, format="PNG")
         _qr_buf.seek(0)
+        import base64 as _b64
+        _qr_b64 = _b64.b64encode(_qr_buf.getvalue()).decode()
 
-        # Display
-        _qr_col1, _qr_col2, _qr_col3 = st.columns([1, 1.2, 1])
-        with _qr_col2:
-            st.markdown("""
-            <div style="text-align:center;margin-bottom:6px;">
-              <span style="font-size:0.65rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;">
-                📱 Mobile Summary
-              </span><br>
-              <span style="font-size:0.60rem;color:#555;">Scan to view on your phone</span>
+        # Full-width presentation banner
+        _qr_city  = st.session_state.get("active_city", "")
+        _qr_state = st.session_state.get("active_state", "")
+        _qr_loc   = f"{_qr_city}, {_qr_state}" if _qr_city else "your city"
+        st.markdown(f"""
+        <div style="
+          background: linear-gradient(135deg, #060a12 0%, #0d1520 50%, #060a12 100%);
+          border: 1px solid rgba(0,210,255,0.25);
+          border-top: 3px solid #00D2FF;
+          border-radius: 14px;
+          padding: 32px 40px 28px;
+          margin-top: 10px;
+          display: flex;
+          align-items: center;
+          gap: 40px;
+          flex-wrap: wrap;
+          justify-content: center;
+        ">
+          <!-- QR code -->
+          <div style="flex-shrink:0;">
+            <img src="data:image/png;base64,{_qr_b64}"
+                 style="width:260px;height:260px;display:block;border-radius:10px;"
+                 alt="BRINC Mobile Summary QR Code" />
+          </div>
+          <!-- Text -->
+          <div style="flex:1;min-width:220px;text-align:left;">
+            <div style="font-size:0.65rem;color:#00D2FF;text-transform:uppercase;letter-spacing:2px;font-weight:700;margin-bottom:6px;">
+              📱 Mobile Summary
             </div>
-            """, unsafe_allow_html=True)
-            st.image(_qr_buf, width=180)
-            st.markdown(f"""
-            <div style="text-align:center;margin-top:4px;">
-              <span style="font-size:0.55rem;color:#333;word-break:break-all;">{_qr_base}/Mobile_Summary</span>
+            <div style="font-size:1.9rem;font-weight:900;color:#ffffff;line-height:1.15;margin-bottom:8px;font-family:sans-serif;">
+              Scan to view<br>the deployment<br>summary on<br>your phone
             </div>
-            """, unsafe_allow_html=True)
+            <div style="font-size:0.85rem;color:#556677;line-height:1.6;margin-bottom:14px;">
+              View coverage stats, fleet ROI, and<br>
+              response metrics for <strong style="color:#aabbcc;">{_qr_loc}</strong><br>
+              — no login required.
+            </div>
+            <div style="font-size:0.60rem;color:#334455;font-family:monospace;word-break:break-all;
+                        background:#0a0f18;border:1px solid #1a2535;border-radius:6px;
+                        padding:6px 10px;display:inline-block;max-width:340px;">
+              {_qr_base}/Mobile_Summary
+            </div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
     except Exception as _qr_err:
         st.caption(f"📱 QR code unavailable — install `qrcode` package. ({_qr_err})")
 

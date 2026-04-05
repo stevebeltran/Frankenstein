@@ -8,6 +8,15 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# Hide sidebar nav and sidebar entirely on mobile summary page
+st.markdown("""
+<style>
+[data-testid="stSidebarNav"]     { display: none !important; }
+[data-testid="stSidebar"]        { display: none !important; }
+[data-testid="collapsedControl"] { display: none !important; }
+</style>
+""", unsafe_allow_html=True)
+
 # ── Read URL params ────────────────────────────────────────────────────────
 p        = st.query_params
 city     = str(p.get("city",  "Your City"))

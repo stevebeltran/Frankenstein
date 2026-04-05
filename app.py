@@ -2640,18 +2640,32 @@ def _make_random_stations(df_calls, n=40, boundary_geom=None, epsg_code=None):
 @st.cache_data(show_spinner=False)
 def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations: int = 200):
     """Cache-friendly OSM query keyed on rounded centroid (2 dp ≈ 1 km grid).
-    Returns (list_of_dicts | None, note_str).  Timeout is kept short so the
-    UI falls back to random stations quickly if Overpass is unresponsive.
+    Returns (list_of_dicts | None, note_str).  All three Overpass mirrors are
+    queried in parallel — total wait = fastest mirror, not sum of all mirrors.
     """
+    import concurrent.futures as _cf2
+
     osm_urls = [
         'https://overpass-api.de/api/interpreter',
         'https://overpass.kumi.systems/api/interpreter',
         'https://overpass.openstreetmap.ru/api/interpreter',
     ]
+
+    def _try_mirror(url, query):
+        try:
+            req = urllib.request.Request(
+                f"{url}?data={urllib.parse.quote(query)}",
+                headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'}
+            )
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                return json.loads(resp.read().decode('utf-8'))
+        except Exception:
+            return None
+
     for R in [0.25, 0.45]:
         bbox = f"{cen_lat_r - R},{cen_lon_r - R},{cen_lat_r + R},{cen_lon_r + R}"
         query = (
-            f'[out:json][timeout:30];'
+            f'[out:json][timeout:20];'
             f'(node["amenity"="fire_station"]({bbox});'
             f'node["amenity"="police"]({bbox});'
             f'node["amenity"="school"]({bbox});'
@@ -2682,23 +2696,15 @@ def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations:
             f'way["amenity"="social_facility"]({bbox});'
             f');out center;'
         )
+        # Fire all three mirrors in parallel — first successful response wins
         data = None
-        for osm_url in osm_urls:
-            for _attempt in range(2):  # one retry per mirror before moving on
-                try:
-                    req = urllib.request.Request(
-                        f"{osm_url}?data={urllib.parse.quote(query)}",
-                        headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'}
-                    )
-                    with urllib.request.urlopen(req, timeout=8) as resp:  # fail fast
-                        data = json.loads(resp.read().decode('utf-8'))
-                    break
-                except Exception:
-                    if _attempt == 0:
-                        import time as _t; _t.sleep(1)
-                    continue
-            if data is not None:
-                break
+        with _cf2.ThreadPoolExecutor(max_workers=3) as _pool:
+            futs = {_pool.submit(_try_mirror, url, query): url for url in osm_urls}
+            for fut in _cf2.as_completed(futs):
+                result = fut.result()
+                if result is not None:
+                    data = result
+                    break  # cancel remaining mirrors implicitly (they finish but are ignored)
 
         if data is None:
             continue
@@ -2754,8 +2760,11 @@ def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations:
 def _fetch_hifld_stations_cached(min_lat: float, min_lon: float, max_lat: float, max_lon: float):
     """Fetch fire stations and law enforcement from HIFLD (US Federal open data).
     Returns (list_of_dicts | None, note_str).
+    Fire and Police endpoints are queried in parallel to halve wait time.
     HIFLD endpoints are ArcGIS FeatureServer REST services maintained by DHS.
     """
+    import concurrent.futures as _cf3
+
     _HIFLD_SOURCES = [
         (
             "https://services1.arcgis.com/Hp6G80Pky0om7QvQ/arcgis/rest/services/Fire_Stations/FeatureServer/0/query",
@@ -2769,8 +2778,8 @@ def _fetch_hifld_stations_cached(min_lat: float, min_lon: float, max_lat: float,
         ),
     ]
     bbox_str = f"{min_lon},{min_lat},{max_lon},{max_lat}"
-    all_rows = []
-    for url, type_label, name_field in _HIFLD_SOURCES:
+
+    def _fetch_one(url, type_label, name_field):
         try:
             params = urllib.parse.urlencode({
                 'where': '1=1',
@@ -2787,8 +2796,9 @@ def _fetch_hifld_stations_cached(min_lat: float, min_lon: float, max_lat: float,
                 f"{url}?{params}",
                 headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'}
             )
-            with urllib.request.urlopen(req, timeout=12) as resp:
+            with urllib.request.urlopen(req, timeout=8) as resp:
                 data = json.loads(resp.read().decode('utf-8'))
+            rows = []
             for feat in data.get('features', []):
                 geom  = feat.get('geometry', {})
                 attrs = feat.get('attributes', {})
@@ -2797,10 +2807,18 @@ def _fetch_hifld_stations_cached(min_lat: float, min_lon: float, max_lat: float,
                 if lat is None or lon is None:
                     continue
                 name = (attrs.get(name_field) or '').strip() or f"{type_label} Station"
-                all_rows.append({'name': name, 'lat': round(float(lat), 6),
-                                 'lon': round(float(lon), 6), 'type': type_label})
+                rows.append({'name': name, 'lat': round(float(lat), 6),
+                             'lon': round(float(lon), 6), 'type': type_label})
+            return rows
         except Exception:
-            continue
+            return []
+
+    # Fetch fire + police in parallel — total wait = max(fire, police), not sum
+    all_rows = []
+    with _cf3.ThreadPoolExecutor(max_workers=2) as _pool:
+        futs = [_pool.submit(_fetch_one, url, lbl, fld) for url, lbl, fld in _HIFLD_SOURCES]
+        for fut in _cf3.as_completed(futs):
+            all_rows.extend(fut.result())
 
     if all_rows:
         return all_rows, f"Found {len(all_rows)} stations from HIFLD (US Federal)."
@@ -8903,62 +8921,182 @@ if st.session_state['csvs_ready']:
         })
         _qr_url = f"{_qr_base}/Mobile_Summary?{_qr_params}"
 
-        # Generate large BRINC-styled QR code (cyan on near-black)
+        # ── QR code image ──────────────────────────────────────────────────────
         _qr = _qrcode.QRCode(version=None, error_correction=_qrcode.constants.ERROR_CORRECT_M,
                               box_size=18, border=4)
         _qr.add_data(_qr_url)
         _qr.make(fit=True)
         _qr_img = _qr.make_image(fill_color="#00D2FF", back_color="#080c14")
-
-        # Convert to bytes
         _qr_buf = _io_qr.BytesIO()
         _qr_img.save(_qr_buf, format="PNG")
-        _qr_buf.seek(0)
         import base64 as _b64
         _qr_b64 = _b64.b64encode(_qr_buf.getvalue()).decode()
 
-        # Full-width presentation banner
+        # ── Salesman info from session state ───────────────────────────────────
+        _qr_user  = str(st.session_state.get("brinc_user", "steven.beltran")).strip() or "steven.beltran"
+        _qr_name  = " ".join(w.capitalize() for w in _qr_user.split("."))
+        _qr_email = f"{_qr_user}@brincdrones.com"
         _qr_city  = st.session_state.get("active_city", "")
         _qr_state = st.session_state.get("active_state", "")
         _qr_loc   = f"{_qr_city}, {_qr_state}" if _qr_city else "your city"
+
+        # ── SVG mini-map of station coverage ──────────────────────────────────
+        _MAP_W, _MAP_H = 420, 260
+        _map_svg = ""
+        try:
+            if active_drones:
+                _m_lats = [d["lat"] for d in active_drones]
+                _m_lons = [d["lon"] for d in active_drones]
+                _max_r_deg = max(d["radius_m"] / 1609.34 / 69.0 for d in active_drones)
+                _lat_span = max(max(_m_lats) - min(_m_lats), _max_r_deg * 2.4)
+                _lon_span = max(max(_m_lons) - min(_m_lons), _max_r_deg * 2.4)
+                _pad = 0.18
+                _bminlat = min(_m_lats) - _lat_span * _pad
+                _bmaxlat = max(_m_lats) + _lat_span * _pad
+                _bminlon = min(_m_lons) - _lon_span * _pad
+                _bmaxlon = max(_m_lons) + _lon_span * _pad
+
+                def _mproj(lat, lon):
+                    x = (lon - _bminlon) / max(_bmaxlon - _bminlon, 1e-9) * _MAP_W
+                    y = _MAP_H - (lat - _bminlat) / max(_bmaxlat - _bminlat, 1e-9) * _MAP_H
+                    return round(x, 1), round(y, 1)
+
+                _els = []
+                # Call dots (random sample for density background)
+                try:
+                    _cd = (df_calls_full if df_calls_full is not None else df_calls)
+                    if _cd is not None and not _cd.empty and "lat" in _cd.columns:
+                        _samp = _cd[["lat","lon"]].dropna().sample(min(300, len(_cd)), random_state=42)
+                        for _, _cr in _samp.iterrows():
+                            _cx, _cy = _mproj(float(_cr["lat"]), float(_cr["lon"]))
+                            if -4 < _cx < _MAP_W+4 and -4 < _cy < _MAP_H+4:
+                                _els.append(f'<circle cx="{_cx}" cy="{_cy}" r="1.4" fill="#1e3a52" opacity="0.7"/>')
+                except Exception:
+                    pass
+                # Coverage circles
+                for _d in active_drones:
+                    _cx, _cy = _mproj(_d["lat"], _d["lon"])
+                    _r_deg = _d["radius_m"] / 1609.34 / 69.0
+                    _r_px  = _r_deg / max(_bmaxlat - _bminlat, 1e-9) * _MAP_H
+                    _col   = _d.get("color", "#00D2FF")
+                    # Hex to rgb for rgba
+                    try:
+                        _hr = int(_col[1:3],16); _hg = int(_col[3:5],16); _hb = int(_col[5:7],16)
+                        _fill_col = f"rgba({_hr},{_hg},{_hb},0.13)"
+                        _strk_col = f"rgba({_hr},{_hg},{_hb},0.75)"
+                    except Exception:
+                        _fill_col = "rgba(0,210,255,0.13)"; _strk_col = "rgba(0,210,255,0.75)"
+                    _els.append(f'<circle cx="{_cx}" cy="{_cy}" r="{round(_r_px,1)}" fill="{_fill_col}" stroke="{_strk_col}" stroke-width="1.5"/>')
+                # Station markers
+                for _d in active_drones:
+                    _cx, _cy = _mproj(_d["lat"], _d["lon"])
+                    _col = _d.get("color", "#00D2FF")
+                    _els.append(f'<circle cx="{_cx}" cy="{_cy}" r="6" fill="{_col}" stroke="#fff" stroke-width="1.8"/>')
+                    _els.append(f'<circle cx="{_cx}" cy="{_cy}" r="2.5" fill="#ffffff"/>')
+
+                _map_svg = (
+                    f'<svg width="{_MAP_W}" height="{_MAP_H}" xmlns="http://www.w3.org/2000/svg">'
+                    f'<defs><clipPath id="mc"><rect width="{_MAP_W}" height="{_MAP_H}" rx="10"/></clipPath></defs>'
+                    f'<rect width="{_MAP_W}" height="{_MAP_H}" fill="#06101e" rx="10"/>'
+                    + "".join(_els) +
+                    f'<rect width="{_MAP_W}" height="{_MAP_H}" fill="none" stroke="rgba(0,210,255,0.2)" stroke-width="1" rx="10"/>'
+                    f'<text x="8" y="{_MAP_H-8}" font-size="9" fill="rgba(0,210,255,0.4)" font-family="monospace">BRINC DFR · {_qr_loc}</text>'
+                    f'</svg>'
+                )
+                # Base64-encode the SVG for safe embedding
+                _map_b64 = _b64.b64encode(_map_svg.encode()).decode()
+                _map_html = f'<img src="data:image/svg+xml;base64,{_map_b64}" style="width:{_MAP_W}px;height:{_MAP_H}px;display:block;" alt="Coverage map"/>'
+            else:
+                _map_html = (
+                    f'<div style="width:{_MAP_W}px;height:{_MAP_H}px;background:#06101e;border-radius:10px;'
+                    f'border:1px solid rgba(0,210,255,0.15);display:flex;align-items:center;justify-content:center;">'
+                    f'<span style="color:#334;font-size:0.75rem;">Deploy drones to see coverage map</span></div>'
+                )
+        except Exception:
+            _map_html = f'<div style="width:{_MAP_W}px;height:{_MAP_H}px;background:#06101e;border-radius:10px;"></div>'
+
+        # ── Render full-width banner ───────────────────────────────────────────
         st.markdown(f"""
-        <div style="
-          background: linear-gradient(135deg, #060a12 0%, #0d1520 50%, #060a12 100%);
-          border: 1px solid rgba(0,210,255,0.25);
-          border-top: 3px solid #00D2FF;
-          border-radius: 14px;
-          padding: 32px 40px 28px;
-          margin-top: 10px;
-          display: flex;
-          align-items: center;
-          gap: 40px;
-          flex-wrap: wrap;
-          justify-content: center;
-        ">
-          <!-- QR code -->
-          <div style="flex-shrink:0;">
-            <img src="data:image/png;base64,{_qr_b64}"
-                 style="width:260px;height:260px;display:block;border-radius:10px;"
-                 alt="BRINC Mobile Summary QR Code" />
+        <div style="background:linear-gradient(160deg,#060c18 0%,#0b1525 60%,#060c18 100%);
+                    border:1px solid rgba(0,210,255,0.22);border-top:3px solid #00D2FF;
+                    border-radius:16px;padding:28px 32px 24px;margin-top:12px;overflow:hidden;">
+
+          <!-- Header row -->
+          <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
+            <span style="font-size:1.5rem;font-weight:900;color:#00D2FF;letter-spacing:3px;font-family:sans-serif;">BRINC</span>
+            <span style="font-size:1.0rem;font-weight:700;color:#aabbcc;font-family:sans-serif;">Drone as First Responder</span>
+            <span style="font-size:0.75rem;color:#334;margin-left:auto;font-family:monospace;">{_qr_loc}</span>
           </div>
-          <!-- Text -->
-          <div style="flex:1;min-width:220px;text-align:left;">
-            <div style="font-size:0.65rem;color:#00D2FF;text-transform:uppercase;letter-spacing:2px;font-weight:700;margin-bottom:6px;">
-              📱 Mobile Summary
+
+          <!-- Main content: map + QR -->
+          <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;margin-bottom:20px;">
+
+            <!-- Mini map -->
+            <div style="flex-shrink:0;">
+              {_map_html}
+              <div style="font-size:0.58rem;color:#334;text-align:center;margin-top:5px;letter-spacing:0.5px;">
+                DRONE COVERAGE MAP · {_qr_loc.upper()}
+              </div>
             </div>
-            <div style="font-size:1.9rem;font-weight:900;color:#ffffff;line-height:1.15;margin-bottom:8px;font-family:sans-serif;">
-              Scan to view<br>the deployment<br>summary on<br>your phone
+
+            <!-- QR + scan prompt -->
+            <div style="flex:1;min-width:220px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;">
+              <img src="data:image/png;base64,{_qr_b64}"
+                   style="width:240px;height:240px;border-radius:12px;display:block;"
+                   alt="BRINC Mobile Summary QR" />
+              <div style="text-align:center;">
+                <div style="font-size:1.0rem;font-weight:800;color:#ffffff;letter-spacing:0.5px;">📱 Scan for Mobile Summary</div>
+                <div style="font-size:0.65rem;color:#445566;margin-top:3px;">No login required · Opens on any phone</div>
+              </div>
+              <div style="font-size:0.52rem;color:#283444;font-family:monospace;word-break:break-all;
+                          background:#08111e;border:1px solid #1a2535;border-radius:5px;
+                          padding:5px 8px;max-width:260px;text-align:center;">
+                {_qr_base}/Mobile_Summary
+              </div>
             </div>
-            <div style="font-size:0.85rem;color:#556677;line-height:1.6;margin-bottom:14px;">
-              View coverage stats, fleet ROI, and<br>
-              response metrics for <strong style="color:#aabbcc;">{_qr_loc}</strong><br>
-              — no login required.
+
+          </div>
+
+          <!-- Contact footer -->
+          <div style="border-top:1px solid rgba(0,210,255,0.12);padding-top:16px;
+                      display:flex;flex-wrap:wrap;gap:18px;align-items:center;">
+
+            <!-- Rep info -->
+            <div style="flex:1;min-width:220px;">
+              <div style="font-size:0.6rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-bottom:5px;">Your BRINC Representative</div>
+              <div style="font-size:1.05rem;font-weight:800;color:#eef2f7;margin-bottom:2px;">{_qr_name}</div>
+              <div style="font-size:0.8rem;color:#00D2FF;">✉ <a href="mailto:{_qr_email}" style="color:#00D2FF;text-decoration:none;">{_qr_email}</a></div>
             </div>
-            <div style="font-size:0.60rem;color:#334455;font-family:monospace;word-break:break-all;
-                        background:#0a0f18;border:1px solid #1a2535;border-radius:6px;
-                        padding:6px 10px;display:inline-block;max-width:340px;">
-              {_qr_base}/Mobile_Summary
+
+            <!-- BRINC contact -->
+            <div style="flex:1;min-width:220px;">
+              <div style="font-size:0.6rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-bottom:5px;">BRINC Drones, Inc.</div>
+              <div style="font-size:0.82rem;color:#aabbcc;margin-bottom:3px;">
+                🌐 <a href="https://brincdrones.com" target="_blank" style="color:#aabbcc;text-decoration:none;">brincdrones.com</a>
+                &nbsp;·&nbsp;
+                ✉ <a href="mailto:info@brincdrones.com" style="color:#aabbcc;text-decoration:none;">info@brincdrones.com</a>
+              </div>
+              <!-- Socials -->
+              <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;">
+                <a href="https://linkedin.com/company/brinc" target="_blank"
+                   style="font-size:0.72rem;color:#0a66c2;background:rgba(10,102,194,0.12);
+                          border:1px solid rgba(10,102,194,0.35);border-radius:5px;
+                          padding:3px 9px;text-decoration:none;font-weight:600;">in LinkedIn</a>
+                <a href="https://instagram.com/brincdrones" target="_blank"
+                   style="font-size:0.72rem;color:#e1306c;background:rgba(225,48,108,0.10);
+                          border:1px solid rgba(225,48,108,0.35);border-radius:5px;
+                          padding:3px 9px;text-decoration:none;font-weight:600;">&#x1F4F7; Instagram</a>
+                <a href="https://x.com/BRINCDrones" target="_blank"
+                   style="font-size:0.72rem;color:#d0d0d0;background:rgba(255,255,255,0.06);
+                          border:1px solid rgba(255,255,255,0.18);border-radius:5px;
+                          padding:3px 9px;text-decoration:none;font-weight:600;">&#x1D54F; Twitter / X</a>
+                <a href="https://youtube.com/@BRINCDrones" target="_blank"
+                   style="font-size:0.72rem;color:#ff0000;background:rgba(255,0,0,0.09);
+                          border:1px solid rgba(255,0,0,0.3);border-radius:5px;
+                          padding:3px 9px;text-decoration:none;font-weight:600;">&#x25B6; YouTube</a>
+              </div>
             </div>
+
           </div>
         </div>
         """, unsafe_allow_html=True)

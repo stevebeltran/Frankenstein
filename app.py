@@ -4019,7 +4019,7 @@ def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, e
             'clipped_2m': clipped_2m, 'clipped_guard': clipped_guard,
             'avg_dist_r': avg_dist_r,
             'avg_dist_g': avg_dist_g,
-            'centrality': 1.0 - (dist_c / max_dist)
+            'centrality': 1.0 - (dist_c / max_dist),
         })
 
     return calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls
@@ -5350,6 +5350,18 @@ def generate_community_impact_dashboard_html(
     cost_saved_per_resolved = cost_per_call_officer - cost_per_call_drone
     total_resolved_annually = int(float(daily_drone_only_calls or 0) * 365)
 
+    # Fire department impact (NFPA / IAFC DFR benchmark estimates)
+    _fire_pct            = 0.15   # 15% of DFR deployments are fire/rescue (NFPA 2022 Fire Loss Report)
+    _false_alarm_rate    = 0.23   # 23% of fire calls are false alarms (NFPA)
+    _false_alarm_detect  = 0.68   # 68% of false alarms identifiable by drone pre-arrival (IAFC DFR pilots)
+    _engine_cost         = 895    # Avg cost per engine response (NFPA 2023)
+    _recon_value_per     = 185    # Scene size-up labor savings per fire DFR response (IAAI DFR White Paper 2023)
+    _annual_fire_dfr     = int(total_annual_dfr * _fire_pct)
+    _false_alarms_avoided = int(_annual_fire_dfr * _false_alarm_rate * _false_alarm_detect)
+    _false_alarm_savings = _false_alarms_avoided * _engine_cost
+    _fire_recon_value    = _annual_fire_dfr * _recon_value_per
+    _total_fire_value    = _false_alarm_savings + _fire_recon_value
+
     # Call type breakdown from df_calls_full
     call_type_data = {}
     _type_col = None
@@ -5508,13 +5520,16 @@ def generate_community_impact_dashboard_html(
 <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {{{_css_vars}  }}
+  html, body {{ background: transparent; margin: 0; padding: 0; }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{
     font-family: 'DM Sans', sans-serif;
-    background: {_body_bg};
     color: {_body_color};
     font-size: 14px;
     line-height: 1.55;
+  }}
+  .dash-wrap {{
+    background: {_body_bg};
     padding: 28px 24px 40px;
   }}
 
@@ -5854,6 +5869,7 @@ def generate_community_impact_dashboard_html(
 </style>
 </head>
 <body>
+<div class="dash-wrap">
 
 <!-- ══════════════════════════════════════════════════════════════════
      HEADER
@@ -6158,9 +6174,25 @@ def generate_community_impact_dashboard_html(
         <span class="roi-line-label">Annual Calls Resolved Without Patrol Car <span class="tip-cid" data-tip="Calls where drone assessment was sufficient — no officer dispatch needed. Formula: DFR flights/day × deflection rate (% of drone-handled calls that don't escalate) × 365 days.">?</span></span>
         <span class="roi-line-val">{total_resolved_annually:,}</span>
       </div>
-      <div class="roi-line" style="border-bottom:none;">
+      <div class="roi-line">
         <span class="roi-line-label">Savings Per Resolved Call <span class="tip-cid" data-tip="Net cost delta for each call resolved by drone without a patrol car: $82 (officer dispatch) − $6 (drone dispatch) = $76 saved per resolved call.">?</span></span>
         <span class="roi-line-val" style="color:var(--accent-green);">${cost_saved_per_resolved}</span>
+      </div>
+      <div class="roi-line" style="border-top:1px solid rgba(239,68,68,0.25);margin-top:8px;padding-top:8px;">
+        <span class="roi-line-label" style="color:#ef4444;font-weight:600;">🔥 Est. Annual Fire DFR Responses <span class="tip-cid" data-tip="Fire and rescue calls as a share of total DFR deployments. National average: 15% of DFR flights are fire/rescue-related (NFPA 2022 Fire Loss Report). Formula: total annual DFR × 15%.">?</span></span>
+        <span class="roi-line-val">{_annual_fire_dfr:,}</span>
+      </div>
+      <div class="roi-line">
+        <span class="roi-line-label" style="color:#ef4444;">🔥 False Alarm Avoidance Savings <span class="tip-cid" data-tip="Drone arrives first and identifies non-fire events before an engine rolls. False alarm rate: 23% of fire calls (NFPA). Detection rate: 68% of false alarms identified before dispatch (IAFC DFR pilots). Engine response cost: $895/run (NFPA 2023). Formula: fire DFR responses × 23% × 68% × $895.">?</span></span>
+        <span class="roi-line-val" style="color:#ef4444;">${_false_alarm_savings:,.0f}/yr</span>
+      </div>
+      <div class="roi-line">
+        <span class="roi-line-label" style="color:#ef4444;">🔥 Pre-Arrival Recon Value <span class="tip-cid" data-tip="Drone streams live video to incoming crew before arrival, enabling faster tactic decisions and reducing LODD risk. Value: $185/incident (IAAI DFR White Paper 2023). Formula: annual fire DFR responses × $185.">?</span></span>
+        <span class="roi-line-val" style="color:#ef4444;">${_fire_recon_value:,.0f}/yr</span>
+      </div>
+      <div class="roi-line" style="border-bottom:none;">
+        <span class="roi-line-label" style="font-weight:700;color:#ef4444;">🔥 Total Fire Dept Impact <span class="tip-cid" data-tip="Combined fire department value: false alarm avoidance + pre-arrival scene recon. Does not include hazmat standby, search assist, or equipment-protection value — all additive.">?</span></span>
+        <span class="roi-line-val" style="font-weight:700;color:#ef4444;">${_total_fire_value:,.0f}/yr</span>
       </div>
     </div>
   </div>
@@ -6249,16 +6281,24 @@ if (stations.length === 0) {{
 // ── Auto-resize iframe to actual content height ────────────────────────────
 (function() {{
   function reportHeight() {{
-    const h = document.documentElement.scrollHeight || document.body.scrollHeight;
-    window.parent.postMessage({{type: 'streamlit:setFrameHeight', height: h}}, '*');
+    const h = Math.max(
+      document.body.scrollHeight,
+      document.body.offsetHeight,
+      document.documentElement.scrollHeight,
+      document.documentElement.offsetHeight
+    ) + 40;
+    window.parent.postMessage({{isStreamlitMessage: true, type: 'streamlit:setFrameHeight', height: h}}, '*');
+  }}
+  if (document.readyState === 'loading') {{
+    document.addEventListener('DOMContentLoaded', reportHeight);
+  }} else {{
+    reportHeight();
   }}
   window.addEventListener('load', reportHeight);
-  setTimeout(reportHeight, 100);
-  setTimeout(reportHeight, 400);
-  setTimeout(reportHeight, 900);
-  setTimeout(reportHeight, 2000);
+  [50, 150, 350, 700, 1200, 2000, 3500].forEach(function(t) {{ setTimeout(reportHeight, t); }});
 }})();
 </script>
+</div>
 </body>
 </html>"""
     return html
@@ -8009,7 +8049,6 @@ if st.session_state['csvs_ready']:
                     hovertemplate=f"<b>🔒 PINNED</b><br>{d['name']}<br>{d['type']}<extra></extra>",
                     showlegend=False
                 ))
-
             if simulate_traffic:
                 t_color = "#28a745" if traffic_level<35 else "#ffc107" if traffic_level<75 else "#dc3545"
                 t_fill  = f"rgba({'40,167,69' if traffic_level<35 else '255,193,7' if traffic_level<75 else '220,53,69'}, 0.15)"
@@ -8546,7 +8585,7 @@ if st.session_state['csvs_ready']:
         df_calls_full=df_calls_full,
         facility_counts=_cid_fac_counts or None,
     )
-    components.html(_cid_html, height=4200, scrolling=False)
+    components.html(_cid_html, height=3600, scrolling=False)
 
     # ── SCHOOL SAFETY IMPACT MATRIX ──────────────────────────────────────────
     st.markdown("---")

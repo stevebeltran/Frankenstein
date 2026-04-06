@@ -4648,6 +4648,9 @@ if not st.session_state['csvs_ready']:
                         _gstr = save_data.get('guard_strategy', 'Land Coverage')
                         st.session_state['resp_strat_idx']  = 0 if _rstr == 'Call Coverage' else 1
                         st.session_state['guard_strat_idx'] = 0 if _gstr == 'Call Coverage' else 1
+                        st.session_state['deployment_mode_idx'] = save_data.get('deployment_mode_idx', 1)
+                        st.session_state['incremental_build']   = save_data.get('incremental_build', True)
+                        st.session_state['auto_cap_dfr']        = save_data.get('auto_cap_dfr', True)
 
                         # Restore pin-drop mode flag
                         st.session_state['pin_drop_used'] = save_data.get('pin_drop_used', False)
@@ -6661,7 +6664,8 @@ if st.session_state['csvs_ready']:
 
     strat_expander = st.sidebar.expander("⚙️ Deployment Strategy", expanded=False)
     with strat_expander:
-        incremental_build = st.toggle("Phased Rollout", value=True,
+        incremental_build = st.toggle("Phased Rollout", value=st.session_state.get('incremental_build', True),
+            key='incremental_build',
             help="Place drones one at a time in priority order. Disable to find the global optimum in a single pass.")
         auto_cap_dfr = st.toggle("Auto-cap over-utilized stations", value=True,
             key='auto_cap_dfr',
@@ -9176,6 +9180,9 @@ if st.session_state['csvs_ready']:
             # Optimization strategies
             "resp_strategy": resp_strategy_raw,
             "guard_strategy": guard_strategy_raw,
+            "deployment_mode_idx": st.session_state.get('deployment_mode_idx', 1),
+            "incremental_build": st.session_state.get('incremental_build', True),
+            "auto_cap_dfr": st.session_state.get('auto_cap_dfr', True),
             # Locked stations (must restore before auto-minimums runs)
             "pinned_guard_names": list(pinned_guard_names),
             "pinned_resp_names":  list(pinned_resp_names),
@@ -10570,13 +10577,9 @@ function copyCommunitySection() {{
 
     # 1. Save Deployment Plan (.brinc) — always available
     _brinc_data = json.dumps(export_dict) if fleet_capex > 0 else json.dumps({
-        "city": st.session_state.get('active_city', ''), "state": st.session_state.get('active_state', ''),
-        "_disclaimer": "No drones deployed yet.", "k_resp": 0, "k_guard": 0,
-        "calls_data": _safe_df_to_records(
-            st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None
-            else st.session_state.get('df_calls')
-        ),
-        "stations_data": _safe_df_to_records(st.session_state.get('df_stations')),
+        **export_dict,
+        "k_resp": 0, "k_guard": 0,
+        "_disclaimer": "No drones deployed yet.",
     })
     if st.sidebar.download_button("💾 Save Deployment Plan", data=_brinc_data,
                                   file_name=f"Brinc_{_safe_city}_{_ts}.brinc",

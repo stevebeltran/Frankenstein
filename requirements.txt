@@ -16,3 +16,4 @@ pyxlsb==1.0.10
 scikit-learn==1.8.0
 pillow==12.1.1
 qrcode==8.0
+Authlib>=1.3.2

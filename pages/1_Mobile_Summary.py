@@ -19,7 +19,7 @@ st.markdown("""
 
 # ── Read URL params ────────────────────────────────────────────────────────
 p        = st.query_params
-city     = str(p.get("city",  "Your City"))
+city     = str(p.get("city",  "Your City")).title()
 state    = str(p.get("state", ""))
 pop      = int(p.get("pop",   0) or 0)
 cov      = float(p.get("cov", 0) or 0)

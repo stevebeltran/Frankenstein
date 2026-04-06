@@ -22,6 +22,34 @@ from PIL import Image
 # --- PAGE CONFIG & INITIALIZE SESSION STATE ---
 st.set_page_config(page_title="BRINC COS Drone Optimizer", layout="wide", initial_sidebar_state="expanded")
 
+# ── Google OAuth Login Gate ────────────────────────────────────────────────────
+# Only runs if [auth] section exists in .streamlit/secrets.toml
+try:
+    if hasattr(st, 'user') and "auth" in st.secrets:
+        if not st.user.is_logged_in:
+            st.markdown("""
+            <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+                        min-height:60vh;gap:24px;">
+              <div style="font-size:2rem;font-weight:900;color:#00D2FF;letter-spacing:4px;">BRINC DFR</div>
+              <div style="color:#888;font-size:0.9rem;">Drone as First Responder · Optimizer</div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.button("🔐 Sign in with Google", on_click=st.login, args=("google",),
+                      type="primary", use_container_width=False)
+            st.stop()
+
+        # Restrict to @brincdrones.com accounts only
+        _user_email = getattr(st.user, "email", "") or ""
+        if not _user_email.lower().endswith("@brincdrones.com"):
+            st.error(f"Access restricted to BRINC Drones employees.  \n"
+                     f"You are signed in as **{_user_email}**.  \n"
+                     "Please sign in with your @brincdrones.com account.")
+            st.button("Sign out", on_click=st.logout)
+            st.stop()
+except Exception:
+    pass  # Auth not configured — app runs without login gate
+# ──────────────────────────────────────────────────────────────────────────────
+
 # ── Mobile-responsive CSS (applied globally, activated by media queries) ──
 st.markdown("""
 <style>
@@ -4592,7 +4620,7 @@ if not st.session_state['csvs_ready']:
                         brinc_file.seek(0)
                         save_data = json.loads(brinc_file.getvalue().decode('utf-8'))
                         
-                        st.session_state['active_city']   = save_data.get('city', 'Unknown')
+                        st.session_state['active_city']   = str(save_data.get('city', 'Unknown')).title()
                         st.session_state['active_state']  = save_data.get('state', 'US')
                         st.session_state['k_resp']        = save_data.get('k_resp', 2)
                         st.session_state['k_guard']       = save_data.get('k_guard', 0)
@@ -4943,7 +4971,7 @@ if not st.session_state['csvs_ready']:
                                 pass
 
                         if detected_city and detected_state:
-                            st.session_state['active_city'] = detected_city
+                            st.session_state['active_city'] = str(detected_city).title()
                             st.session_state['active_state'] = detected_state
                             st.session_state['target_cities'] = [{"city": detected_city, "state": detected_state}]
                             st.session_state['location_detection_source'] = detection_source
@@ -4993,7 +5021,7 @@ if not st.session_state['csvs_ready']:
                             st.session_state['master_gdf_override'] = coord_gdf
                             st.session_state['boundary_source_path'] = 'local_parquet'
                             st.session_state['boundary_kind'] = 'place'
-                            st.session_state['active_city'] = coord_gdf.iloc[0]['DISPLAY_NAME']
+                            st.session_state['active_city'] = str(coord_gdf.iloc[0]['DISPLAY_NAME']).title()
 
                         else:
                             st.session_state['master_gdf_override'] = None
@@ -5083,10 +5111,10 @@ if not st.session_state['csvs_ready']:
             st.stop()
 
         if len(active_targets) == 1:
-            st.session_state['active_city']  = active_targets[0]['city']
+            st.session_state['active_city']  = str(active_targets[0]['city']).title()
             st.session_state['active_state'] = active_targets[0]['state']
         else:
-            st.session_state['active_city']  = f"{active_targets[0]['city']} & {len(active_targets)-1} others"
+            st.session_state['active_city']  = f"{str(active_targets[0]['city']).title()} & {len(active_targets)-1} others"
             st.session_state['active_state'] = active_targets[0]['state']
 
         prog = st.progress(0, text="🫡 Preparing tools worthy of those who serve…")
@@ -6582,7 +6610,7 @@ if st.session_state['csvs_ready']:
     selected_names = [options_map[l] for l in selected_labels]
     active_gdf = master_gdf[master_gdf['DISPLAY_NAME'].isin(selected_names)]
     if selected_names and st.session_state.get('active_city') == "Orlando":
-        st.session_state['active_city'] = selected_names[0]
+        st.session_state['active_city'] = str(selected_names[0]).title()
 
     filter_expander = st.sidebar.expander("⚙️ Data Filters", expanded=False)
     with filter_expander:
@@ -8906,7 +8934,7 @@ if st.session_state['csvs_ready']:
             _qr_area = 0
 
         _qr_params = _up.urlencode({
-            "city":  st.session_state.get("active_city", ""),
+            "city":  str(st.session_state.get("active_city", "")).title(),
             "state": st.session_state.get("active_state", ""),
             "pop":   int(st.session_state.get("estimated_pop", 0) or 0),
             "cov":   round(float(calls_covered_perc or 0), 1),

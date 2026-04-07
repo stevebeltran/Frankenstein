@@ -313,7 +313,10 @@ st.html("""
         if (doc.getElementById('_brinc_no_brand')) return;
         var s = doc.createElement('style');
         s.id = '_brinc_no_brand';
-        s.textContent = cssSelectors.map(function(sel){ return sel + '{display:none!important;visibility:hidden!important;}'; }).join('');
+        s.textContent = cssSelectors.map(function(sel){ return sel + '{display:none!important;visibility:hidden!important;}'; }).join('')
+        + 'svg[viewBox="0 0 303 165"]{display:none!important;}'
+        + 'a[href*="streamlit"]{display:none!important;}'
+        + 'a[href*="github.com"]{display:none!important;}';
         (doc.head || doc.documentElement).appendChild(s);
     }
 
@@ -327,14 +330,25 @@ st.html("""
                 if (btn) btn.style.setProperty('display', 'none', 'important');
             }
         });
-        // Hide anything linking to github.com
-        doc.querySelectorAll('a[href*="github.com"]').forEach(function(el) {
+        // Hide anything linking to github.com or streamlit.io
+        doc.querySelectorAll('a[href*="github.com"],a[href*="streamlit.io"],a[href*="streamlit.app"]').forEach(function(el) {
             var p = el.closest('li') || el.closest('div') || el;
             p.style.setProperty('display', 'none', 'important');
         });
-        // Hide elements with github in aria-label or title
-        doc.querySelectorAll('[aria-label*="GitHub" i],[title*="GitHub" i],[aria-label*="github" i]').forEach(function(el) {
+        // Hide elements with github/streamlit in aria-label or title
+        doc.querySelectorAll('[aria-label*="GitHub" i],[title*="GitHub" i],[aria-label*="streamlit" i],[title*="streamlit" i]').forEach(function(el) {
             el.style.setProperty('display', 'none', 'important');
+        });
+        // Hide Streamlit logo SVG (viewBox="0 0 303 165") and its container
+        doc.querySelectorAll('svg[viewBox="0 0 303 165"]').forEach(function(svg) {
+            var el = svg.parentElement || svg;
+            el.style.setProperty('display', 'none', 'important');
+            if (el.parentElement) el.parentElement.style.setProperty('display', 'none', 'important');
+        });
+        // Hide app creator avatar and its wrapper
+        doc.querySelectorAll('[data-testid="appCreatorAvatar"],[data-testid="appCreatorContainer"],[data-testid="appCreator"]').forEach(function(el) {
+            var p = el.parentElement || el;
+            p.style.setProperty('display', 'none', 'important');
         });
     }
 

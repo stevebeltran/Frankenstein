@@ -178,6 +178,9 @@ try:
             [data-testid="stStatusWidget"] {{ display: none !important; }}
             .stDeployButton {{ display: none !important; }}
             [data-testid="stToolbarActionButtonIcon"] {{ display: none !important; }}
+            [data-testid="appCreatorAvatar"] {{ display: none !important; }}
+            [data-testid="appCreatorContainer"] {{ display: none !important; }}
+            [data-testid="appCreator"] {{ display: none !important; }}
             </style>
             <div style="
                 display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -269,6 +272,9 @@ footer { visibility: hidden !important; display: none !important; }
 [data-testid="stStatusWidget"] { display: none !important; }
 .stDeployButton { display: none !important; }
 [data-testid="stToolbarActionButtonIcon"] { display: none !important; }
+[data-testid="appCreatorAvatar"] { display: none !important; }
+[data-testid="appCreatorContainer"] { display: none !important; }
+[data-testid="appCreator"] { display: none !important; }
 
 @media (max-width: 900px) {
   [data-testid="block-container"] { padding: 1rem 0.5rem !important; }
@@ -297,7 +303,10 @@ st.html("""
         'header', '[data-testid="stHeader"]', '[data-testid="stToolbar"]',
         '[data-testid="stDecoration"]', '[data-testid="stStatusWidget"]',
         '#MainMenu', 'footer', '.stDeployButton',
-        '[data-testid="stToolbarActionButtonIcon"]'
+        '[data-testid="stToolbarActionButtonIcon"]',
+        '[data-testid="appCreatorAvatar"]',
+        '[data-testid="appCreatorContainer"]',
+        '[data-testid="appCreator"]'
     ];
 
     function injectStyle(doc) {

@@ -181,6 +181,10 @@ try:
             [data-testid="appCreatorAvatar"] {{ display: none !important; }}
             [data-testid="appCreatorContainer"] {{ display: none !important; }}
             [data-testid="appCreator"] {{ display: none !important; }}
+            svg[viewBox="0 0 303 165"] {{ display: none !important; }}
+            :has(> svg[viewBox="0 0 303 165"]) {{ display: none !important; }}
+            a[href*="streamlit"] {{ display: none !important; }}
+            a[href*="github.com"] {{ display: none !important; }}
             </style>
             <div style="
                 display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -275,6 +279,11 @@ footer { visibility: hidden !important; display: none !important; }
 [data-testid="appCreatorAvatar"] { display: none !important; }
 [data-testid="appCreatorContainer"] { display: none !important; }
 [data-testid="appCreator"] { display: none !important; }
+/* Streamlit logo SVG (unique viewBox) and its parent link/div */
+svg[viewBox="0 0 303 165"] { display: none !important; }
+:has(> svg[viewBox="0 0 303 165"]) { display: none !important; }
+a[href*="streamlit"] { display: none !important; }
+a[href*="github.com"] { display: none !important; }
 
 @media (max-width: 900px) {
   [data-testid="block-container"] { padding: 1rem 0.5rem !important; }

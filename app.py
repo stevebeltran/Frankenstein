@@ -128,24 +128,99 @@ try:
             import base64 as _b64
             try:
                 _logo_b64 = _b64.b64encode(open("logo.png","rb").read()).decode()
-                _logo_tag = f'<img src="data:image/png;base64,{_logo_b64}" style="height:90px;object-fit:contain;" alt="BRINC">'
+                _logo_tag = f'<img src="data:image/png;base64,{_logo_b64}" style="height:80px;object-fit:contain;" alt="BRINC">'
             except Exception:
                 _logo_tag = '<div style="font-size:2rem;font-weight:900;color:#00D2FF;letter-spacing:4px;">BRINC DFR</div>'
+            # CSS: hide sidebar, branding, and style the login page + center the button
             st.markdown(f"""
             <style>
             section[data-testid="stSidebar"] {{ display: none !important; }}
             [data-testid="collapsedControl"],
             [data-testid="stSidebarCollapsedControl"] {{ display: none !important; }}
-            [data-testid="stAppViewContainer"] {{ background: #080c14 !important; }}
+            /* Full-page dark background */
+            [data-testid="stAppViewContainer"] {{
+                background: radial-gradient(ellipse at 50% 30%, #0d1b2e 0%, #060a12 70%) !important;
+            }}
+            /* Remove all padding so our card can be centered */
+            [data-testid="block-container"] {{
+                padding-top: 0 !important;
+                padding-bottom: 0 !important;
+                max-width: 100% !important;
+            }}
+            /* Center the Streamlit button */
+            div[data-testid="stButton"] {{
+                display: flex !important;
+                justify-content: center !important;
+                margin-top: 0 !important;
+            }}
+            div[data-testid="stButton"] > button {{
+                background: linear-gradient(135deg, #0077b6, #00b4d8) !important;
+                color: #fff !important;
+                border: none !important;
+                border-radius: 10px !important;
+                padding: 13px 44px !important;
+                font-size: 0.95rem !important;
+                font-weight: 600 !important;
+                letter-spacing: 0.6px !important;
+                box-shadow: 0 4px 24px rgba(0,180,216,0.35) !important;
+            }}
+            div[data-testid="stButton"] > button:hover {{
+                background: linear-gradient(135deg, #005f8a, #009dbf) !important;
+                box-shadow: 0 6px 30px rgba(0,180,216,0.5) !important;
+            }}
             </style>
-            <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-                        min-height:60vh;gap:20px;">
-              {_logo_tag}
-              <div style="color:#888;font-size:0.9rem;letter-spacing:0.5px;">Drone as First Responder · Optimizer</div>
+            <div style="
+                display:flex;flex-direction:column;align-items:center;justify-content:center;
+                min-height:85vh;gap:0;
+            ">
+              <!-- Card -->
+              <div style="
+                background:rgba(255,255,255,0.03);
+                border:1px solid rgba(255,255,255,0.08);
+                border-radius:20px;
+                padding:52px 64px 44px;
+                display:flex;flex-direction:column;align-items:center;gap:18px;
+                box-shadow:0 20px 60px rgba(0,0,0,0.6);
+                backdrop-filter:blur(12px);
+                min-width:340px;
+              ">
+                {_logo_tag}
+                <div style="width:48px;height:2px;background:linear-gradient(90deg,transparent,#00b4d8,transparent);margin:2px 0;"></div>
+                <div style="color:#8a9bb5;font-size:0.78rem;letter-spacing:2.5px;text-transform:uppercase;font-weight:500;">
+                  Drone as First Responder &nbsp;·&nbsp; Optimizer
+                </div>
+                <div style="height:12px;"></div>
+              </div>
             </div>
             """, unsafe_allow_html=True)
-            st.button("🔐 Sign in with Google", on_click=st.login, args=("google",),
+            st.button("Sign in with Google", on_click=st.login, args=("google",),
                       type="primary", use_container_width=False)
+            # JS runs in an iframe — use window.parent.document to reach Streamlit's DOM
+            st.html("""
+<script>
+(function() {
+    var sel = [
+        'header', '[data-testid="stHeader"]', '[data-testid="stToolbar"]',
+        '[data-testid="stDecoration"]', '[data-testid="stStatusWidget"]',
+        '#MainMenu', 'footer', '.stDeployButton'
+    ];
+    function hide() {
+        try {
+            var doc = window.parent.document;
+            sel.forEach(function(s) {
+                doc.querySelectorAll(s).forEach(function(el) {
+                    el.style.setProperty('display', 'none', 'important');
+                });
+            });
+        } catch(e) {}
+    }
+    hide();
+    try {
+        new MutationObserver(hide).observe(window.parent.document.body, {childList:true, subtree:true});
+    } catch(e) {}
+})();
+</script>
+""", unsafe_allow_javascript=True)
             st.stop()
 
         # Restrict to @brincdrones.com accounts only

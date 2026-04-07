@@ -10280,7 +10280,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 <section class="doc-section" id="cell-coverage">
   <div class="section-eyebrow"><span class="pg-num">03b</span><span class="pg-title">4G LTE Cell Coverage</span><span class="src" data-src="Source: FCC National Broadband Map (broadbandmap.fcc.gov). Coverage reflects carrier-reported FCC BDC data for 4G LTE (tech code 300) at ≥25 Mbps download. Displayed carriers include AT&T, T-Mobile, Verizon, and US Cellular. Coverage data may not reflect actual field conditions.">ⓘ</span></div>
   <p style="font-size:0.78rem;color:#8899aa;margin:0 0 16px;">FCC-reported 4G LTE availability centered on the deployment area. Click the link below to open the interactive map and toggle individual carriers for drone data-link connectivity assessment.</p>
-  <a href="https://broadbandmap.fcc.gov/home?version=dec2023&zoom={_fcc_zoom}&vlon={center_lon:.6f}&vlat={center_lat:.6f}&speed=25&tech=300&br=4" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+  <a href="{_fcc_url}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
     <div style="display:flex;align-items:center;justify-content:space-between;background:#0d1b2e;border:1px solid #1e3a5f;border-radius:10px;padding:20px 28px;">
       <div>
         <div style="color:#00b4d8;font-size:1rem;font-weight:600;margin-bottom:4px;">📶 Open FCC 4G LTE Coverage Map</div>

@@ -20,7 +20,10 @@
       "Bash(tasklist:*)",
       "Bash(powershell Get-Process -Id 15468 | Select-Object Name, Id, MainWindowTitle:*)",
       "Bash(\"C:/Users/4070/AppData/Local/Programs/Python/Python312/python.exe\" -c \" import glob st_path = 'C:/Users/4070/AppData/Local/Programs/Python/Python312/Lib/site-packages/streamlit/static' for f in glob.glob\\(st_path + '/**/*.js', recursive=True\\): try: with open\\(f, 'r', encoding='utf-8', errors='ignore'\\) as fp: content = fp.read\\(\\) for term in ['sidebar-toggle','SidebarToggle','sidebar_toggle','sidebarCollapse','stSidebarCollapse','chevron','sidebar.*button','toggleSidebar']: import re matches = list\\(re.finditer\\(term, content, re.IGNORECASE\\)\\) if matches: m = matches[0] print\\(f'Term [{term}] in {f.split\\(\\\\\"/\\\\\"\\)[-1]}:'\\) print\\(content[max\\(0,m.start\\(\\)-80\\):m.end\\(\\)+120]\\) print\\('---'\\) break except: pass \")",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "WebFetch(domain:www.fcc.gov)",
+      "WebFetch(domain:broadbandmap.fcc.gov)",
+      "Read(//tmp/**)"
     ]
   }
 }

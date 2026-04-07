@@ -125,16 +125,23 @@ st.set_page_config(page_title="BRINC COS Drone Optimizer", layout="wide", initia
 try:
     if hasattr(st, 'user') and "auth" in st.secrets:
         if not st.user.is_logged_in:
-            st.markdown("""
+            import base64 as _b64
+            try:
+                _logo_b64 = _b64.b64encode(open("logo.png","rb").read()).decode()
+                _logo_tag = f'<img src="data:image/png;base64,{_logo_b64}" style="height:90px;object-fit:contain;" alt="BRINC">'
+            except Exception:
+                _logo_tag = '<div style="font-size:2rem;font-weight:900;color:#00D2FF;letter-spacing:4px;">BRINC DFR</div>'
+            st.markdown(f"""
             <style>
-            section[data-testid="stSidebar"] { display: none !important; }
+            section[data-testid="stSidebar"] {{ display: none !important; }}
             [data-testid="collapsedControl"],
-            [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+            [data-testid="stSidebarCollapsedControl"] {{ display: none !important; }}
+            [data-testid="stAppViewContainer"] {{ background: #080c14 !important; }}
             </style>
             <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-                        min-height:60vh;gap:24px;">
-              <div style="font-size:2rem;font-weight:900;color:#00D2FF;letter-spacing:4px;">BRINC DFR</div>
-              <div style="color:#888;font-size:0.9rem;">Drone as First Responder · Optimizer</div>
+                        min-height:60vh;gap:20px;">
+              {_logo_tag}
+              <div style="color:#888;font-size:0.9rem;letter-spacing:0.5px;">Drone as First Responder · Optimizer</div>
             </div>
             """, unsafe_allow_html=True)
             st.button("🔐 Sign in with Google", on_click=st.login, args=("google",),
@@ -9183,6 +9190,21 @@ if st.session_state['csvs_ready']:
     prop_email = f"{user_clean}@brincdrones.com"
     prop_name = " ".join([word.capitalize() for word in user_clean.split('.')])
 
+    # ── 4G LTE CELL COVERAGE MAP ─────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown(f"<h3 style='color:{text_main};'>📶 4G LTE Cell Coverage</h3>", unsafe_allow_html=True)
+    st.markdown(f"<div style='font-size:0.82rem;color:{text_muted};margin-bottom:10px;'>FCC National Broadband Map — 4G LTE coverage from AT&T, T-Mobile, Verizon, and US Cellular. Use the layer controls inside the map to toggle individual carriers. Coverage reflects FCC-reported availability data.</div>", unsafe_allow_html=True)
+    _fcc_zoom = round(min(13, max(9, dynamic_zoom + 1)), 2)
+    _fcc_url  = (f"https://broadbandmap.fcc.gov/home?version=dec2023"
+                 f"&zoom={_fcc_zoom}&vlon={center_lon:.6f}&vlat={center_lat:.6f}"
+                 f"&speed=25&tech=300&br=4")
+    st.components.v1.html(
+        f'<iframe src="{_fcc_url}" width="100%" height="580" frameborder="0" '
+        f'style="border-radius:8px;border:1px solid #1e2535;" allow="fullscreen"></iframe>',
+        height=600, scrolling=False
+    )
+    st.caption("Source: FCC Broadband Data Collection. Coverage reflects carrier-reported data and may not reflect actual field conditions. Opens FCC broadbandmap.fcc.gov.")
+
     # Always define these so download buttons work regardless of fleet_capex
     prop_city  = st.session_state.get('active_city', 'City')
     prop_state = st.session_state.get('active_state', 'FL')
@@ -10020,6 +10042,18 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 <section class="doc-section" id="map">
   <div class="section-eyebrow"><span class="pg-num">03</span><span class="pg-title">Coverage Map</span><span class="src" data-src="Map tiles: © OpenStreetMap contributors (ODbL license). FAA airspace data: Federal Aviation Administration LAANC UAS Facility Maps. Incident dots: uploaded CAD data (up to 40K sampled). Coverage rings are operational radius estimates; actual deployment requires FAA LAANC authorization or Part 107 waiver.">ⓘ</span></div>
   <div class="map-wrap">{map_html_str}</div>
+</section>
+
+<!-- ── 03b: 4G LTE CELL COVERAGE ─────────────────────────────── -->
+<section class="doc-section" id="cell-coverage">
+  <div class="section-eyebrow"><span class="pg-num">03b</span><span class="pg-title">4G LTE Cell Coverage</span><span class="src" data-src="Source: FCC National Broadband Map (broadbandmap.fcc.gov). Coverage reflects carrier-reported FCC BDC data for 4G LTE (tech code 300) at ≥25 Mbps download. Displayed carriers include AT&T, T-Mobile, Verizon, and US Cellular. Coverage data may not reflect actual field conditions.">ⓘ</span></div>
+  <p style="font-size:0.78rem;color:#8899aa;margin:0 0 12px;">FCC-reported 4G LTE availability centered on the deployment area. Use the interactive map to toggle individual carriers and assess connectivity for drone data-link operations.</p>
+  <div style="width:100%;border-radius:8px;overflow:hidden;border:1px solid #1e2535;">
+    <iframe src="https://broadbandmap.fcc.gov/home?version=dec2023&zoom={_fcc_zoom}&vlon={center_lon:.6f}&vlat={center_lat:.6f}&speed=25&tech=300&br=4"
+            width="100%" height="580" frameborder="0" allow="fullscreen"
+            style="display:block;"></iframe>
+  </div>
+  <p style="font-size:0.65rem;color:#556;margin:8px 0 0;">Interactive map requires internet connection. Data: FCC Broadband Data Collection © Federal Communications Commission.</p>
 </section>
 
 <!-- ── 04: INCIDENT ANALYSIS ─────────────────────────────────── -->

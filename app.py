@@ -188,6 +188,11 @@ try:
             img[src*="avatars.githubusercontent.com"] {{ display: none !important; visibility: hidden !important; }}
             img[src*="259721542"] {{ display: none !important; visibility: hidden !important; }}
             :has(> img[src*="avatars.githubusercontent.com"]) {{ display: none !important; visibility: hidden !important; }}
+            [class*="_profileImage_"] {{ display: none !important; visibility: hidden !important; }}
+            [class*="_darkThemeShadow_"] {{ display: none !important; visibility: hidden !important; }}
+            [class*="_link_gzau3"] {{ display: none !important; visibility: hidden !important; }}
+            [class*="_appCreator_"] {{ display: none !important; visibility: hidden !important; }}
+            [class*="_viewerBadge_"] {{ display: none !important; visibility: hidden !important; }}
             </style>
             <div style="
                 display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -313,6 +318,12 @@ a[href*="github.com"] { display: none !important; visibility: hidden !important;
 img[src*="avatars.githubusercontent.com"] { display: none !important; visibility: hidden !important; }
 img[src*="259721542"] { display: none !important; visibility: hidden !important; }
 :has(> img[src*="avatars.githubusercontent.com"]) { display: none !important; visibility: hidden !important; }
+/* Target Streamlit Cloud branding by stable class prefix */
+[class*="_profileImage_"] { display: none !important; visibility: hidden !important; }
+[class*="_darkThemeShadow_"] { display: none !important; visibility: hidden !important; }
+[class*="_link_gzau3"] { display: none !important; visibility: hidden !important; }
+[class*="_appCreator_"] { display: none !important; visibility: hidden !important; }
+[class*="_viewerBadge_"] { display: none !important; visibility: hidden !important; }
 
 @media (max-width: 900px) {
   [data-testid="block-container"] { padding: 1rem 0.5rem !important; }

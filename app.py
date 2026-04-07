@@ -174,6 +174,12 @@ button[aria-label="Collapse sidebar"],
 button[aria-label="Expand sidebar"],
 button[aria-label="Open sidebar"],
 button[aria-label="Close sidebar"] { display: none !important; }
+/* ── Hide Streamlit branding (footer + toolbar with GitHub/Streamlit logos) ── */
+#MainMenu { display: none !important; }
+footer { display: none !important; }
+[data-testid="stToolbar"] { display: none !important; }
+[data-testid="stDecoration"] { display: none !important; }
+[data-testid="stStatusWidget"] { display: none !important; }
 
 @media (max-width: 900px) {
   [data-testid="block-container"] { padding: 1rem 0.5rem !important; }

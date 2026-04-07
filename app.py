@@ -285,21 +285,57 @@ footer { visibility: hidden !important; display: none !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Hide sidebar double-chevron toggle button ──────────────────────────────
+# ── Hide sidebar chevron + all Streamlit/GitHub branding ──────────────────
 st.html("""
 <script>
 (function() {
-    function hideSidebarToggle() {
-        document.querySelectorAll('[data-testid="stIconMaterial"]').forEach(function(el) {
+    // Works whether st.html injects directly OR inside an iframe
+    var docs = [document];
+    try { if (window.parent && window.parent.document !== document) docs.push(window.parent.document); } catch(e) {}
+
+    var cssSelectors = [
+        'header', '[data-testid="stHeader"]', '[data-testid="stToolbar"]',
+        '[data-testid="stDecoration"]', '[data-testid="stStatusWidget"]',
+        '#MainMenu', 'footer', '.stDeployButton',
+        '[data-testid="stToolbarActionButtonIcon"]'
+    ];
+
+    function injectStyle(doc) {
+        if (doc.getElementById('_brinc_no_brand')) return;
+        var s = doc.createElement('style');
+        s.id = '_brinc_no_brand';
+        s.textContent = cssSelectors.map(function(sel){ return sel + '{display:none!important;visibility:hidden!important;}'; }).join('');
+        (doc.head || doc.documentElement).appendChild(s);
+    }
+
+    function hideAll(doc) {
+        injectStyle(doc);
+        // Hide chevron toggles
+        doc.querySelectorAll('[data-testid="stIconMaterial"]').forEach(function(el) {
             var t = el.textContent.trim();
             if (t === 'keyboard_double_arrow_left' || t === 'keyboard_double_arrow_right') {
                 var btn = el.closest('button');
                 if (btn) btn.style.setProperty('display', 'none', 'important');
             }
         });
+        // Hide anything linking to github.com
+        doc.querySelectorAll('a[href*="github.com"]').forEach(function(el) {
+            var p = el.closest('li') || el.closest('div') || el;
+            p.style.setProperty('display', 'none', 'important');
+        });
+        // Hide elements with github in aria-label or title
+        doc.querySelectorAll('[aria-label*="GitHub" i],[title*="GitHub" i],[aria-label*="github" i]').forEach(function(el) {
+            el.style.setProperty('display', 'none', 'important');
+        });
     }
-    hideSidebarToggle();
-    new MutationObserver(hideSidebarToggle).observe(document.body, {childList: true, subtree: true});
+
+    docs.forEach(function(doc) {
+        try {
+            hideAll(doc);
+            new MutationObserver(function() { hideAll(doc); })
+                .observe(doc.body || doc.documentElement, {childList: true, subtree: true});
+        } catch(e) {}
+    });
 })();
 </script>
 """, unsafe_allow_javascript=True)

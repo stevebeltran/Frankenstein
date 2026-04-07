@@ -212,32 +212,56 @@ try:
             """, unsafe_allow_html=True)
             st.button("Sign in with Google", on_click=st.login, args=("google",),
                       type="primary", use_container_width=False)
-            # JS runs in an iframe — use window.parent.document to reach Streamlit's DOM
-            st.html("""
+            # Use components.v1.html — same-origin iframe, so window.parent.document is reachable
+            import streamlit.components.v1 as _cv1_login
+            _cv1_login.html("""
 <script>
 (function() {
-    var sel = [
-        'header', '[data-testid="stHeader"]', '[data-testid="stToolbar"]',
-        '[data-testid="stDecoration"]', '[data-testid="stStatusWidget"]',
-        '#MainMenu', 'footer', '.stDeployButton'
-    ];
-    function hide() {
+    var CSS = [
+        'header{display:none!important;visibility:hidden!important;}',
+        'footer{display:none!important;visibility:hidden!important;}',
+        '#MainMenu{display:none!important;}',
+        '[data-testid="stHeader"]{display:none!important;}',
+        '[data-testid="stToolbar"]{display:none!important;}',
+        '[data-testid="stDecoration"]{display:none!important;}',
+        '[data-testid="stStatusWidget"]{display:none!important;}',
+        '[data-testid="appCreatorAvatar"]{display:none!important;}',
+        '[data-testid="appCreatorContainer"]{display:none!important;}',
+        '[data-testid="appCreator"]{display:none!important;}',
+        '.stDeployButton{display:none!important;}',
+        'svg[viewBox="0 0 303 165"]{display:none!important;}',
+        ':has(>svg[viewBox="0 0 303 165"]){display:none!important;}',
+        'a[href*="streamlit"]{display:none!important;}',
+        'a[href*="github.com"]{display:none!important;}'
+    ].join('');
+
+    function apply() {
         try {
             var doc = window.parent.document;
-            sel.forEach(function(s) {
-                doc.querySelectorAll(s).forEach(function(el) {
-                    el.style.setProperty('display', 'none', 'important');
-                });
+            if (!doc.getElementById('_brinc_hide_login')) {
+                var s = doc.createElement('style');
+                s.id = '_brinc_hide_login';
+                s.textContent = CSS;
+                (doc.head || doc.documentElement).appendChild(s);
+            }
+            doc.querySelectorAll('svg[viewBox="0 0 303 165"]').forEach(function(svg) {
+                var p = svg.parentElement || svg;
+                p.style.setProperty('display','none','important');
+                if (p.parentElement) p.parentElement.style.setProperty('display','none','important');
+            });
+            doc.querySelectorAll('[data-testid="appCreatorAvatar"],[data-testid="appCreator"]').forEach(function(el) {
+                (el.parentElement || el).style.setProperty('display','none','important');
             });
         } catch(e) {}
     }
-    hide();
+
+    apply();
     try {
-        new MutationObserver(hide).observe(window.parent.document.body, {childList:true, subtree:true});
+        new MutationObserver(apply).observe(window.parent.document.documentElement, {childList:true, subtree:true});
     } catch(e) {}
 })();
 </script>
-""", unsafe_allow_javascript=True)
+""", height=0)
             st.stop()
 
         # Restrict to @brincdrones.com accounts only
@@ -301,76 +325,81 @@ a[href*="github.com"] { display: none !important; }
 """, unsafe_allow_html=True)
 
 # ── Hide sidebar chevron + all Streamlit/GitHub branding ──────────────────
-st.html("""
+# st.components.v1.html() serves from the same origin so window.parent.document
+# is accessible — unlike st.html() which sandboxes without allow-same-origin.
+import streamlit.components.v1 as _cv1
+_cv1.html("""
 <script>
 (function() {
-    // Works whether st.html injects directly OR inside an iframe
-    var docs = [document];
-    try { if (window.parent && window.parent.document !== document) docs.push(window.parent.document); } catch(e) {}
+    var CSS = [
+        'header{display:none!important;visibility:hidden!important;}',
+        'header[data-testid="stHeader"]{display:none!important;}',
+        'footer{display:none!important;visibility:hidden!important;}',
+        '#MainMenu{display:none!important;}',
+        '[data-testid="stToolbar"]{display:none!important;}',
+        '[data-testid="stDecoration"]{display:none!important;}',
+        '[data-testid="stStatusWidget"]{display:none!important;}',
+        '[data-testid="appCreatorAvatar"]{display:none!important;}',
+        '[data-testid="appCreatorContainer"]{display:none!important;}',
+        '[data-testid="appCreator"]{display:none!important;}',
+        '.stDeployButton{display:none!important;}',
+        'svg[viewBox="0 0 303 165"]{display:none!important;}',
+        ':has(>svg[viewBox="0 0 303 165"]){display:none!important;}',
+        'a[href*="streamlit"]{display:none!important;}',
+        'a[href*="github.com"]{display:none!important;}'
+    ].join('');
 
-    var cssSelectors = [
-        'header', '[data-testid="stHeader"]', '[data-testid="stToolbar"]',
-        '[data-testid="stDecoration"]', '[data-testid="stStatusWidget"]',
-        '#MainMenu', 'footer', '.stDeployButton',
-        '[data-testid="stToolbarActionButtonIcon"]',
-        '[data-testid="appCreatorAvatar"]',
-        '[data-testid="appCreatorContainer"]',
-        '[data-testid="appCreator"]'
-    ];
-
-    function injectStyle(doc) {
-        if (doc.getElementById('_brinc_no_brand')) return;
-        var s = doc.createElement('style');
-        s.id = '_brinc_no_brand';
-        s.textContent = cssSelectors.map(function(sel){ return sel + '{display:none!important;visibility:hidden!important;}'; }).join('')
-        + 'svg[viewBox="0 0 303 165"]{display:none!important;}'
-        + 'a[href*="streamlit"]{display:none!important;}'
-        + 'a[href*="github.com"]{display:none!important;}';
-        (doc.head || doc.documentElement).appendChild(s);
-    }
-
-    function hideAll(doc) {
-        injectStyle(doc);
-        // Hide chevron toggles
-        doc.querySelectorAll('[data-testid="stIconMaterial"]').forEach(function(el) {
-            var t = el.textContent.trim();
-            if (t === 'keyboard_double_arrow_left' || t === 'keyboard_double_arrow_right') {
-                var btn = el.closest('button');
-                if (btn) btn.style.setProperty('display', 'none', 'important');
-            }
-        });
-        // Hide anything linking to github.com or streamlit.io
-        doc.querySelectorAll('a[href*="github.com"],a[href*="streamlit.io"],a[href*="streamlit.app"]').forEach(function(el) {
-            var p = el.closest('li') || el.closest('div') || el;
-            p.style.setProperty('display', 'none', 'important');
-        });
-        // Hide elements with github/streamlit in aria-label or title
-        doc.querySelectorAll('[aria-label*="GitHub" i],[title*="GitHub" i],[aria-label*="streamlit" i],[title*="streamlit" i]').forEach(function(el) {
-            el.style.setProperty('display', 'none', 'important');
-        });
-        // Hide Streamlit logo SVG (viewBox="0 0 303 165") and its container
-        doc.querySelectorAll('svg[viewBox="0 0 303 165"]').forEach(function(svg) {
-            var el = svg.parentElement || svg;
-            el.style.setProperty('display', 'none', 'important');
-            if (el.parentElement) el.parentElement.style.setProperty('display', 'none', 'important');
-        });
-        // Hide app creator avatar and its wrapper
-        doc.querySelectorAll('[data-testid="appCreatorAvatar"],[data-testid="appCreatorContainer"],[data-testid="appCreator"]').forEach(function(el) {
-            var p = el.parentElement || el;
-            p.style.setProperty('display', 'none', 'important');
-        });
-    }
-
-    docs.forEach(function(doc) {
+    function injectStyle() {
         try {
-            hideAll(doc);
-            new MutationObserver(function() { hideAll(doc); })
-                .observe(doc.body || doc.documentElement, {childList: true, subtree: true});
+            var doc = window.parent.document;
+            if (doc.getElementById('_brinc_hide')) return;
+            var s = doc.createElement('style');
+            s.id = '_brinc_hide';
+            s.textContent = CSS;
+            (doc.head || doc.documentElement).appendChild(s);
         } catch(e) {}
-    });
+    }
+
+    function hideElements() {
+        try {
+            var doc = window.parent.document;
+            // Chevron toggles
+            doc.querySelectorAll('[data-testid="stIconMaterial"]').forEach(function(el) {
+                var t = el.textContent.trim();
+                if (t === 'keyboard_double_arrow_left' || t === 'keyboard_double_arrow_right') {
+                    var btn = el.closest('button');
+                    if (btn) btn.style.setProperty('display','none','important');
+                }
+            });
+            // Streamlit logo SVG by unique viewBox
+            doc.querySelectorAll('svg[viewBox="0 0 303 165"]').forEach(function(svg) {
+                var p = svg.parentElement || svg;
+                p.style.setProperty('display','none','important');
+                if (p.parentElement) p.parentElement.style.setProperty('display','none','important');
+            });
+            // Anything linking to github or streamlit
+            doc.querySelectorAll('a[href*="github.com"],a[href*="streamlit.io"],a[href*="streamlit.app"]').forEach(function(a) {
+                (a.closest('div') || a).style.setProperty('display','none','important');
+            });
+            // app creator elements
+            doc.querySelectorAll('[data-testid="appCreatorAvatar"],[data-testid="appCreatorContainer"],[data-testid="appCreator"]').forEach(function(el) {
+                (el.parentElement || el).style.setProperty('display','none','important');
+            });
+        } catch(e) {}
+    }
+
+    injectStyle();
+    hideElements();
+
+    try {
+        new MutationObserver(function() {
+            injectStyle();
+            hideElements();
+        }).observe(window.parent.document.body, {childList:true, subtree:true});
+    } catch(e) {}
 })();
 </script>
-""", unsafe_allow_javascript=True)
+""", height=0)
 
 # This MUST run before any st.session_state checks to prevent KeyError
 defaults = {

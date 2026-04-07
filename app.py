@@ -168,6 +168,16 @@ try:
                 background: linear-gradient(135deg, #005f8a, #009dbf) !important;
                 box-shadow: 0 6px 30px rgba(0,180,216,0.5) !important;
             }}
+            /* ── Hide ALL Streamlit branding (local + Streamlit Cloud) ── */
+            header {{ visibility: hidden !important; display: none !important; }}
+            header[data-testid="stHeader"] {{ display: none !important; }}
+            footer {{ visibility: hidden !important; display: none !important; }}
+            #MainMenu {{ display: none !important; }}
+            [data-testid="stToolbar"] {{ display: none !important; }}
+            [data-testid="stDecoration"] {{ display: none !important; }}
+            [data-testid="stStatusWidget"] {{ display: none !important; }}
+            .stDeployButton {{ display: none !important; }}
+            [data-testid="stToolbarActionButtonIcon"] {{ display: none !important; }}
             </style>
             <div style="
                 display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -249,12 +259,16 @@ button[aria-label="Collapse sidebar"],
 button[aria-label="Expand sidebar"],
 button[aria-label="Open sidebar"],
 button[aria-label="Close sidebar"] { display: none !important; }
-/* ── Hide Streamlit branding (footer + toolbar with GitHub/Streamlit logos) ── */
+/* ── Hide Streamlit branding (local + Streamlit Cloud) ── */
+header { visibility: hidden !important; display: none !important; }
+header[data-testid="stHeader"] { display: none !important; }
+footer { visibility: hidden !important; display: none !important; }
 #MainMenu { display: none !important; }
-footer { display: none !important; }
 [data-testid="stToolbar"] { display: none !important; }
 [data-testid="stDecoration"] { display: none !important; }
 [data-testid="stStatusWidget"] { display: none !important; }
+.stDeployButton { display: none !important; }
+[data-testid="stToolbarActionButtonIcon"] { display: none !important; }
 
 @media (max-width: 900px) {
   [data-testid="block-container"] { padding: 1rem 0.5rem !important; }

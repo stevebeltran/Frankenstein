@@ -291,23 +291,22 @@ button[aria-label="Expand sidebar"],
 button[aria-label="Open sidebar"],
 button[aria-label="Close sidebar"] { display: none !important; }
 /* ── Hide Streamlit branding (local + Streamlit Cloud) ── */
-header { visibility: hidden !important; display: none !important; }
-header[data-testid="stHeader"] { display: none !important; }
-footer { visibility: hidden !important; display: none !important; }
-#MainMenu { display: none !important; }
-[data-testid="stToolbar"] { display: none !important; }
-[data-testid="stDecoration"] { display: none !important; }
-[data-testid="stStatusWidget"] { display: none !important; }
-.stDeployButton { display: none !important; }
-[data-testid="stToolbarActionButtonIcon"] { display: none !important; }
-[data-testid="appCreatorAvatar"] { display: none !important; }
-[data-testid="appCreatorContainer"] { display: none !important; }
-[data-testid="appCreator"] { display: none !important; }
-/* Streamlit logo SVG (unique viewBox) and its parent link/div */
-svg[viewBox="0 0 303 165"] { display: none !important; }
-:has(> svg[viewBox="0 0 303 165"]) { display: none !important; }
-a[href*="streamlit"] { display: none !important; }
-a[href*="github.com"] { display: none !important; }
+header { display: none !important; visibility: hidden !important; }
+header[data-testid="stHeader"] { display: none !important; visibility: hidden !important; }
+footer { display: none !important; visibility: hidden !important; }
+#MainMenu { display: none !important; visibility: hidden !important; }
+[data-testid="stToolbar"] { display: none !important; visibility: hidden !important; }
+[data-testid="stDecoration"] { display: none !important; visibility: hidden !important; }
+[data-testid="stStatusWidget"] { display: none !important; visibility: hidden !important; }
+.stDeployButton { display: none !important; visibility: hidden !important; }
+[data-testid="stToolbarActionButtonIcon"] { display: none !important; visibility: hidden !important; }
+[data-testid="appCreatorAvatar"] { display: none !important; visibility: hidden !important; }
+[data-testid="appCreatorContainer"] { display: none !important; visibility: hidden !important; }
+[data-testid="appCreator"] { display: none !important; visibility: hidden !important; }
+svg[viewBox="0 0 303 165"] { display: none !important; visibility: hidden !important; }
+:has(> svg[viewBox="0 0 303 165"]) { display: none !important; visibility: hidden !important; }
+a[href*="streamlit"] { display: none !important; visibility: hidden !important; }
+a[href*="github.com"] { display: none !important; visibility: hidden !important; }
 
 @media (max-width: 900px) {
   [data-testid="block-container"] { padding: 1rem 0.5rem !important; }
@@ -331,22 +330,23 @@ import streamlit.components.v1 as _cv1
 _cv1.html("""
 <script>
 (function() {
+    var HIDE = 'display:none!important;visibility:hidden!important;';
     var CSS = [
-        'header{display:none!important;visibility:hidden!important;}',
-        'header[data-testid="stHeader"]{display:none!important;}',
-        'footer{display:none!important;visibility:hidden!important;}',
-        '#MainMenu{display:none!important;}',
-        '[data-testid="stToolbar"]{display:none!important;}',
-        '[data-testid="stDecoration"]{display:none!important;}',
-        '[data-testid="stStatusWidget"]{display:none!important;}',
-        '[data-testid="appCreatorAvatar"]{display:none!important;}',
-        '[data-testid="appCreatorContainer"]{display:none!important;}',
-        '[data-testid="appCreator"]{display:none!important;}',
-        '.stDeployButton{display:none!important;}',
-        'svg[viewBox="0 0 303 165"]{display:none!important;}',
-        ':has(>svg[viewBox="0 0 303 165"]){display:none!important;}',
-        'a[href*="streamlit"]{display:none!important;}',
-        'a[href*="github.com"]{display:none!important;}'
+        'header{' + HIDE + '}',
+        'header[data-testid="stHeader"]{' + HIDE + '}',
+        'footer{' + HIDE + '}',
+        '#MainMenu{' + HIDE + '}',
+        '[data-testid="stToolbar"]{' + HIDE + '}',
+        '[data-testid="stDecoration"]{' + HIDE + '}',
+        '[data-testid="stStatusWidget"]{' + HIDE + '}',
+        '[data-testid="appCreatorAvatar"]{' + HIDE + '}',
+        '[data-testid="appCreatorContainer"]{' + HIDE + '}',
+        '[data-testid="appCreator"]{' + HIDE + '}',
+        '.stDeployButton{' + HIDE + '}',
+        'svg[viewBox="0 0 303 165"]{' + HIDE + '}',
+        ':has(>svg[viewBox="0 0 303 165"]){' + HIDE + '}',
+        'a[href*="streamlit"]{' + HIDE + '}',
+        'a[href*="github.com"]{' + HIDE + '}'
     ].join('');
 
     function injectStyle() {
@@ -375,15 +375,23 @@ _cv1.html("""
             doc.querySelectorAll('svg[viewBox="0 0 303 165"]').forEach(function(svg) {
                 var p = svg.parentElement || svg;
                 p.style.setProperty('display','none','important');
-                if (p.parentElement) p.parentElement.style.setProperty('display','none','important');
+                p.style.setProperty('visibility','hidden','important');
+                if (p.parentElement) {
+                    p.parentElement.style.setProperty('display','none','important');
+                    p.parentElement.style.setProperty('visibility','hidden','important');
+                }
             });
             // Anything linking to github or streamlit
             doc.querySelectorAll('a[href*="github.com"],a[href*="streamlit.io"],a[href*="streamlit.app"]').forEach(function(a) {
-                (a.closest('div') || a).style.setProperty('display','none','important');
+                var t = a.closest('div') || a;
+                t.style.setProperty('display','none','important');
+                t.style.setProperty('visibility','hidden','important');
             });
             // app creator elements
             doc.querySelectorAll('[data-testid="appCreatorAvatar"],[data-testid="appCreatorContainer"],[data-testid="appCreator"]').forEach(function(el) {
-                (el.parentElement || el).style.setProperty('display','none','important');
+                var t = el.parentElement || el;
+                t.style.setProperty('display','none','important');
+                t.style.setProperty('visibility','hidden','important');
             });
         } catch(e) {}
     }

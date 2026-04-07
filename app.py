@@ -181,10 +181,13 @@ try:
             [data-testid="appCreatorAvatar"] {{ display: none !important; }}
             [data-testid="appCreatorContainer"] {{ display: none !important; }}
             [data-testid="appCreator"] {{ display: none !important; }}
-            svg[viewBox="0 0 303 165"] {{ display: none !important; }}
-            :has(> svg[viewBox="0 0 303 165"]) {{ display: none !important; }}
-            a[href*="streamlit"] {{ display: none !important; }}
-            a[href*="github.com"] {{ display: none !important; }}
+            svg[viewBox="0 0 303 165"] {{ display: none !important; visibility: hidden !important; }}
+            :has(> svg[viewBox="0 0 303 165"]) {{ display: none !important; visibility: hidden !important; }}
+            a[href*="streamlit"] {{ display: none !important; visibility: hidden !important; }}
+            a[href*="github.com"] {{ display: none !important; visibility: hidden !important; }}
+            img[src*="avatars.githubusercontent.com"] {{ display: none !important; visibility: hidden !important; }}
+            img[src*="259721542"] {{ display: none !important; visibility: hidden !important; }}
+            :has(> img[src*="avatars.githubusercontent.com"]) {{ display: none !important; visibility: hidden !important; }}
             </style>
             <div style="
                 display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -307,6 +310,9 @@ svg[viewBox="0 0 303 165"] { display: none !important; visibility: hidden !impor
 :has(> svg[viewBox="0 0 303 165"]) { display: none !important; visibility: hidden !important; }
 a[href*="streamlit"] { display: none !important; visibility: hidden !important; }
 a[href*="github.com"] { display: none !important; visibility: hidden !important; }
+img[src*="avatars.githubusercontent.com"] { display: none !important; visibility: hidden !important; }
+img[src*="259721542"] { display: none !important; visibility: hidden !important; }
+:has(> img[src*="avatars.githubusercontent.com"]) { display: none !important; visibility: hidden !important; }
 
 @media (max-width: 900px) {
   [data-testid="block-container"] { padding: 1rem 0.5rem !important; }

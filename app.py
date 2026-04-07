@@ -9415,12 +9415,27 @@ if st.session_state['csvs_ready']:
     _fcc_url  = (f"https://broadbandmap.fcc.gov/home?version=dec2023"
                  f"&zoom={_fcc_zoom}&vlon={center_lon:.6f}&vlat={center_lat:.6f}"
                  f"&speed=25&tech=300&br=4")
-    st.components.v1.html(
-        f'<iframe src="{_fcc_url}" width="100%" height="580" frameborder="0" '
-        f'style="border-radius:8px;border:1px solid #1e2535;" allow="fullscreen"></iframe>',
-        height=600, scrolling=False
-    )
-    st.caption("Source: FCC Broadband Data Collection. Coverage reflects carrier-reported data and may not reflect actual field conditions. Opens FCC broadbandmap.fcc.gov.")
+    st.markdown(f"""
+    <a href="{_fcc_url}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+      <div style="
+        display:flex;align-items:center;justify-content:space-between;
+        background:#0d1b2e;border:1px solid #1e3a5f;border-radius:10px;
+        padding:20px 28px;cursor:pointer;transition:border-color 0.2s;
+      ">
+        <div>
+          <div style="color:#00b4d8;font-size:1rem;font-weight:600;margin-bottom:4px;">
+            📶 Open FCC 4G LTE Coverage Map
+          </div>
+          <div style="color:#6b7f99;font-size:0.78rem;">
+            FCC National Broadband Map · AT&amp;T, T-Mobile, Verizon, US Cellular ·
+            Centered on {center_lat:.4f}, {center_lon:.4f}
+          </div>
+        </div>
+        <div style="color:#00b4d8;font-size:1.4rem;margin-left:20px;">↗</div>
+      </div>
+    </a>
+    """, unsafe_allow_html=True)
+    st.caption("Opens broadbandmap.fcc.gov in a new tab. Coverage reflects FCC-reported carrier availability data and may not reflect actual field conditions.")
 
     # Always define these so download buttons work regardless of fleet_capex
     prop_city  = st.session_state.get('active_city', 'City')
@@ -10264,13 +10279,17 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 <!-- ── 03b: 4G LTE CELL COVERAGE ─────────────────────────────── -->
 <section class="doc-section" id="cell-coverage">
   <div class="section-eyebrow"><span class="pg-num">03b</span><span class="pg-title">4G LTE Cell Coverage</span><span class="src" data-src="Source: FCC National Broadband Map (broadbandmap.fcc.gov). Coverage reflects carrier-reported FCC BDC data for 4G LTE (tech code 300) at ≥25 Mbps download. Displayed carriers include AT&T, T-Mobile, Verizon, and US Cellular. Coverage data may not reflect actual field conditions.">ⓘ</span></div>
-  <p style="font-size:0.78rem;color:#8899aa;margin:0 0 12px;">FCC-reported 4G LTE availability centered on the deployment area. Use the interactive map to toggle individual carriers and assess connectivity for drone data-link operations.</p>
-  <div style="width:100%;border-radius:8px;overflow:hidden;border:1px solid #1e2535;">
-    <iframe src="https://broadbandmap.fcc.gov/home?version=dec2023&zoom={_fcc_zoom}&vlon={center_lon:.6f}&vlat={center_lat:.6f}&speed=25&tech=300&br=4"
-            width="100%" height="580" frameborder="0" allow="fullscreen"
-            style="display:block;"></iframe>
-  </div>
-  <p style="font-size:0.65rem;color:#556;margin:8px 0 0;">Interactive map requires internet connection. Data: FCC Broadband Data Collection © Federal Communications Commission.</p>
+  <p style="font-size:0.78rem;color:#8899aa;margin:0 0 16px;">FCC-reported 4G LTE availability centered on the deployment area. Click the link below to open the interactive map and toggle individual carriers for drone data-link connectivity assessment.</p>
+  <a href="https://broadbandmap.fcc.gov/home?version=dec2023&zoom={_fcc_zoom}&vlon={center_lon:.6f}&vlat={center_lat:.6f}&speed=25&tech=300&br=4" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+    <div style="display:flex;align-items:center;justify-content:space-between;background:#0d1b2e;border:1px solid #1e3a5f;border-radius:10px;padding:20px 28px;">
+      <div>
+        <div style="color:#00b4d8;font-size:1rem;font-weight:600;margin-bottom:4px;">📶 Open FCC 4G LTE Coverage Map</div>
+        <div style="color:#6b7f99;font-size:0.78rem;">FCC National Broadband Map · AT&amp;T, T-Mobile, Verizon, US Cellular · Centered on {center_lat:.4f}, {center_lon:.4f}</div>
+      </div>
+      <div style="color:#00b4d8;font-size:1.6rem;margin-left:20px;">↗</div>
+    </div>
+  </a>
+  <p style="font-size:0.65rem;color:#556;margin:10px 0 0;">Opens broadbandmap.fcc.gov in a new tab. Data: FCC Broadband Data Collection © Federal Communications Commission.</p>
 </section>
 
 <!-- ── 04: INCIDENT ANALYSIS ─────────────────────────────────── -->

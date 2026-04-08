@@ -9780,22 +9780,22 @@ if st.session_state['csvs_ready']:
         except Exception:
             _stn_str = ""
 
-        # Encode incident data compactly for mobile map (sample to keep URL manageable)
-        # Format: "lat1,lon1;lat2,lon2;..." (2 decimal places for ~1km accuracy, much smaller)
+        # Encode incident data compactly for mobile map (minimal sample to keep URL under QR version 40)
+        # Format: "lat1,lon1;lat2,lon2;..." (1 decimal place for ~10km accuracy)
         _calls_str = ""
         try:
             _qr_df_calls = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
             if _qr_df_calls is not None and not _qr_df_calls.empty and 'lat' in _qr_df_calls.columns and 'lon' in _qr_df_calls.columns:
-                # Sample up to 40 calls to keep URL compact for QR code (max version 40)
-                _call_sample = _qr_df_calls.sample(min(40, len(_qr_df_calls)), random_state=42)
-                _call_parts = [f"{row['lat']:.2f},{row['lon']:.2f}" for _, row in _call_sample.iterrows()
+                # Sample up to 20 calls to keep URL under QR version 40 limit
+                _call_sample = _qr_df_calls.sample(min(20, len(_qr_df_calls)), random_state=42)
+                _call_parts = [f"{row['lat']:.1f},{row['lon']:.1f}" for _, row in _call_sample.iterrows()
                                if pd.notna(row.get('lat')) and pd.notna(row.get('lon'))]
-                _calls_str = ";".join(_call_parts[:40])
+                _calls_str = ";".join(_call_parts[:20])
         except Exception:
             pass
 
-        # Encode boundary (city shapefile) for mobile map display
-        # Sample every Nth coordinate to keep URL compact
+        # Encode boundary (city shapefile) for mobile map display - MINIMAL sampling only
+        # Sample aggressively to keep URL compact (max 25 points)
         _boundary_str = ""
         try:
             if city_boundary_geom is not None and not city_boundary_geom.is_empty:
@@ -9804,11 +9804,11 @@ if st.session_state['csvs_ready']:
                 if _boundary_geoms:
                     _first_geom = _boundary_geoms[0]
                     _boundary_coords = list(_first_geom.exterior.coords)
-                    # Sample every Nth point to keep URL under control (aim for ~40-50 points)
-                    _sample_step = max(1, len(_boundary_coords) // 45)
+                    # Sample very aggressively - aim for exactly 20-25 points max
+                    _sample_step = max(1, len(_boundary_coords) // 25)
                     _sampled = _boundary_coords[::_sample_step]
-                    _boundary_parts = [f"{lat:.2f},{lon:.2f}" for lon, lat in _sampled]
-                    _boundary_str = ";".join(_boundary_parts)
+                    _boundary_parts = [f"{lat:.1f},{lon:.1f}" for lon, lat in _sampled]
+                    _boundary_str = ";".join(_boundary_parts[:25])
         except Exception:
             pass
 

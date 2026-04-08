@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 from shapely.geometry import Point, Polygon, MultiPolygon, box, shape
 from shapely.ops import unary_union
 import os, itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib, uuid, traceback
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import pulp
 import urllib.request
@@ -120,6 +121,7 @@ if st.query_params.get("view") == "mobile":
     _mob_clon    = float(p.get("clon", 0) or 0)
     _mob_zoom    = float(p.get("zoom", 11) or 11)
     _mob_calls_str = str(p.get("m_calls", "")).strip()  # Incident data: "lat1,lon1;lat2,lon2;..."
+    _mob_boundary_str = str(p.get("boundary", "")).strip()  # City boundary: "lat1,lon1;lat2,lon2;..."
 
     if _mob_stn_str and _mob_clat and _mob_clon:
         try:
@@ -130,7 +132,24 @@ if st.query_params.get("view") == "mobile":
 
             _mob_fig = _go_mob.Figure()
 
-            # Incident data points
+            # City boundary / jurisdiction shapefile
+            if _mob_boundary_str:
+                try:
+                    _mob_bound_pairs = [pair.split(",") for pair in _mob_boundary_str.split(";") if "," in pair]
+                    if _mob_bound_pairs:
+                        _mob_bound_lats = [float(bp[0]) for bp in _mob_bound_pairs]
+                        _mob_bound_lons = [float(bp[1]) for bp in _mob_bound_pairs]
+                        _mob_fig.add_trace(_go_mob.Scattermap(
+                            lat=_mob_bound_lats, lon=_mob_bound_lons,
+                            mode='lines', fill='toself',
+                            line=dict(color='#ffffff', width=2),
+                            fillcolor='rgba(255,255,255,0.05)',
+                            hoverinfo='skip', showlegend=False, name='Jurisdiction'
+                        ))
+                except Exception:
+                    pass
+
+            # Incident data points (call for service dots)
             if _mob_calls_str:
                 try:
                     _mob_call_pairs = [pair.split(",") for pair in _mob_calls_str.split(";") if "," in pair]
@@ -140,17 +159,17 @@ if st.query_params.get("view") == "mobile":
                         _mob_fig.add_trace(_go_mob.Scattermap(
                             lat=_mob_call_lats, lon=_mob_call_lons,
                             mode='markers',
-                            marker=dict(size=2, color='#888888', opacity=0.4),
-                            hoverinfo='skip', showlegend=False, name='Calls'
+                            marker=dict(size=3, color='#ff6b6b', opacity=0.5),
+                            hoverinfo='skip', showlegend=False, name='Calls for Service'
                         ))
                 except Exception:
                     pass
 
-            # RF range rings (compute with default parameters)
-            if _mob_slats and _mob_slons:
+            # Station markers with coverage circles
+            if _mob_slats:
+                # Coverage circles around stations (typical ~3 mile radius)
                 try:
-                    # Compute RF rings with standard parameters for compact visualization
-                    def get_circle_coords_mob(lat, lon, r_mi=1.0):
+                    def get_circle_coords_mob(lat, lon, r_mi=3.0):
                         import math
                         r_m = r_mi * 1609.34
                         angles = [i * (360/120) for i in range(121)]
@@ -163,31 +182,24 @@ if st.query_params.get("view") == "mobile":
                             lons.append(lon + dlon)
                         return lats, lons
 
-                    # 3 SNR tiers: 0.8 mi (Marginal), 1.5 mi (Good), 2.5 mi (Excellent)
-                    _ring_colors = ["#ef4444", "#f59e0b", "#22c55e"]
-                    _ring_radii = [0.8, 1.5, 2.5]
-                    _ring_labels = ["Marginal", "Good", "Excellent"]
-
-                    for _rr_idx, (_rr_col, _rr_rad, _rr_lbl) in enumerate(zip(_ring_colors, _ring_radii, _ring_labels)):
-                        for _stn_lat, _stn_lon in zip(_mob_slats, _mob_slons):
-                            _rr_lats, _rr_lons = get_circle_coords_mob(_stn_lat, _stn_lon, r_mi=_rr_rad)
-                            _mob_fig.add_trace(_go_mob.Scattermap(
-                                lat=_rr_lats, lon=_rr_lons,
-                                mode='lines', fill='toself',
-                                line=dict(color=_rr_col, width=1),
-                                fillcolor=f"rgba({int(_rr_col[1:3],16)},{int(_rr_col[3:5],16)},{int(_rr_col[5:7],16)},0.06)",
-                                hoverinfo='skip', showlegend=False, name=_rr_lbl
-                            ))
+                    for _stn_lat, _stn_lon in zip(_mob_slats, _mob_slons):
+                        _circ_lats, _circ_lons = get_circle_coords_mob(_stn_lat, _stn_lon, r_mi=3.0)
+                        _mob_fig.add_trace(_go_mob.Scattermap(
+                            lat=_circ_lats, lon=_circ_lons,
+                            mode='lines', fill='toself',
+                            line=dict(color='#00D2FF', width=1.5),
+                            fillcolor='rgba(0,210,255,0.08)',
+                            hoverinfo='skip', showlegend=False
+                        ))
                 except Exception:
                     pass
 
-            # Station markers
-            if _mob_slats:
+                # Station markers
                 _mob_fig.add_trace(_go_mob.Scattermap(
                     lat=_mob_slats, lon=_mob_slons,
                     mode='markers',
-                    marker=dict(size=12, color='#00D2FF', symbol='circle'),
-                    hoverinfo='skip', showlegend=False,
+                    marker=dict(size=14, color='#00D2FF', symbol='circle'),
+                    hoverinfo='skip', showlegend=False, name='Stations'
                 ))
 
             _mob_fig.update_layout(
@@ -3931,8 +3943,8 @@ def _load_coverage(state_abbr: str):
         return None
 
 
-def add_coverage_traces(fig, state_abbr: str):
-    """Add AT&T / T-Mobile / Verizon 4G LTE polygon traces (legendonly by default)."""
+def add_coverage_traces(fig, state_abbr: str, visible=True):
+    """Add AT&T / T-Mobile / Verizon 4G LTE polygon traces."""
     gdf = _load_coverage(state_abbr)
     if gdf is None or gdf.empty:
         return
@@ -3965,7 +3977,7 @@ def add_coverage_traces(fig, state_abbr: str):
             line=dict(color=color, width=1),
             name=f"{carrier} 4G LTE",
             hoverinfo='name',
-            visible='legendonly',
+            visible=visible,
         ))
 
 
@@ -8731,7 +8743,7 @@ if st.session_state['csvs_ready']:
         if show_coverage:
             _cov_state = st.session_state.get('active_state', '')
             if _cov_state:
-                add_coverage_traces(fig, _cov_state)
+                add_coverage_traces(fig, _cov_state, visible=True)
 
         for d in active_drones:
             clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
@@ -9782,6 +9794,24 @@ if st.session_state['csvs_ready']:
         except Exception:
             pass
 
+        # Encode boundary (city shapefile) for mobile map display
+        # Sample every Nth coordinate to keep URL compact
+        _boundary_str = ""
+        try:
+            if city_boundary_geom is not None and not city_boundary_geom.is_empty:
+                _boundary_geoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
+                                   else list(city_boundary_geom.geoms))
+                if _boundary_geoms:
+                    _first_geom = _boundary_geoms[0]
+                    _boundary_coords = list(_first_geom.exterior.coords)
+                    # Sample every Nth point to keep URL under control (aim for ~40-50 points)
+                    _sample_step = max(1, len(_boundary_coords) // 45)
+                    _sampled = _boundary_coords[::_sample_step]
+                    _boundary_parts = [f"{lat:.2f},{lon:.2f}" for lon, lat in _sampled]
+                    _boundary_str = ";".join(_boundary_parts)
+        except Exception:
+            pass
+
         _qr_params = _up.urlencode({
             "city":  str(st.session_state.get("active_city", "")).title(),
             "state": st.session_state.get("active_state", ""),
@@ -9800,16 +9830,39 @@ if st.session_state['csvs_ready']:
             "zoom":  round(dynamic_zoom, 1),
             "s":     _stn_str,
             "m_calls": _calls_str,
+            "boundary": _boundary_str,
         })
         _qr_url = f"{_qr_base}/?view=mobile&{_qr_params}"
 
-        # ── QR code image — high readability ──────────────────────────────────
+        # ── QR code image — high readability with BRINC logo overlay ──────────
         # Use highest error correction (H) for better phone scanning reliability
         _qr = _qrcode.QRCode(version=None, error_correction=_qrcode.constants.ERROR_CORRECT_H,
                               box_size=28, border=8)
         _qr.add_data(_qr_url)
         _qr.make(fit=True)
-        _qr_img = _qr.make_image(fill_color="#000000", back_color="#FFFFFF")
+        _qr_img = _qr.make_image(fill_color="#000000", back_color="#FFFFFF").convert('RGB')
+
+        # Overlay BRINC logo in center
+        try:
+            _logo_path = "logo.png"
+            if Path(_logo_path).exists():
+                _logo = _PILImage.open(_logo_path).convert('RGBA')
+                # Logo should be ~20% of QR code size for good scannability with error correction H
+                _logo_size = int(_qr_img.size[0] * 0.20)
+                _logo = _logo.resize((_logo_size, _logo_size), _PILImage.Resampling.LANCZOS)
+
+                # Create white background square for logo
+                _bg_size = int(_logo_size * 1.15)
+                _white_bg = _PILImage.new('RGB', (_bg_size, _bg_size), 'white')
+                _bg_pos = (((_bg_size - _logo_size) // 2), ((_bg_size - _logo_size) // 2))
+                _white_bg.paste(_logo, _bg_pos, _logo)
+
+                # Paste white background (with logo) centered on QR code
+                _qr_pos = ((_qr_img.size[0] - _bg_size) // 2, (_qr_img.size[1] - _bg_size) // 2)
+                _qr_img.paste(_white_bg, _qr_pos)
+        except Exception:
+            pass
+
         _qr_buf = _io_qr.BytesIO()
         _qr_img.save(_qr_buf, format="PNG")
         import base64 as _b64
@@ -10090,7 +10143,7 @@ if st.session_state['csvs_ready']:
         # ── 4G LTE coverage polygons (legendonly, toggleable in export) ─────
         _exp_cov_state = st.session_state.get('active_state', '')
         if _exp_cov_state:
-            add_coverage_traces(fig_for_export, _exp_cov_state)
+            add_coverage_traces(fig_for_export, _exp_cov_state, visible='legendonly')
 
         # ── Coverage circles + station pins ──────────────────────────────────
         for d in active_drones:
@@ -10128,6 +10181,9 @@ if st.session_state['csvs_ready']:
             "Social Services": ("rgba(236,72,153,0.1)",   "#9d174d"),
             "Government":      ("rgba(139,92,246,0.1)",   "#4b0082"),
             "Library":         ("rgba(249,115,22,0.1)",   "#8a3300"),
+            "Power Station":   ("rgba(255,165,0,0.1)",    "#cc6600"),
+            "Water Treatment": ("rgba(100,200,255,0.1)",  "#0066cc"),
+            "Place of Worship": ("rgba(200,100,200,0.1)", "#663366"),
         }
         # ── Facility type counts (for summary grid + community impact dashboard) ──
         _fac_counts = {}
@@ -10141,6 +10197,7 @@ if st.session_state['csvs_ready']:
             "Hospital": "🏥", "University": "🎓", "Transit": "🚌",
             "Community": "🏛️", "Courthouse": "⚖️", "Social Services": "🤝",
             "Government": "🏛️", "Library": "📚",
+            "Power Station": "⚡", "Water Treatment": "💧", "Place of Worship": "✝️",
         }
         _FAC_SOURCES = {
             "Police":          "DHS HIFLD Law Enforcement Locations · OpenStreetMap (amenity=police) · ODbL license",
@@ -10155,6 +10212,9 @@ if st.session_state['csvs_ready']:
             "Social Services": "OpenStreetMap (amenity=social_facility) · HUD Location Affordability Index",
             "Government":      "OpenStreetMap (building=government) · TIGER/Line Shapefiles (census.gov)",
             "Library":         "OpenStreetMap (amenity=library) · IMLS Public Libraries Survey (imls.gov)",
+            "Power Station":   "OpenStreetMap (power=station) · US Energy Information Administration (eia.gov)",
+            "Water Treatment": "OpenStreetMap (man_made=water_treatment) · EPA Enviromapper · US Water Infrastructure Database",
+            "Place of Worship": "OpenStreetMap (amenity=place_of_worship) · Faith-based facility directory",
         }
         _fac_summary_cells = ""
         for _ft, _fcnt in sorted(_fac_counts.items(), key=lambda x: -x[1]):
@@ -10983,20 +11043,21 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
   </div>
 </section>
 
-<!-- ── 07: INFRASTRUCTURE DIRECTORY ──────────────────────────── -->
+<!-- ── 07: COMMUNITY INFRASTRUCTURE & ASSET PROTECTION ──────────────────────────── -->
 <section class="doc-section" id="infrastructure">
-  <div class="section-eyebrow"><span class="pg-num">07</span><span class="pg-title">Infrastructure Directory</span><span class="src" data-src="Sources: OpenStreetMap (© contributors, ODbL license) · DHS HIFLD Open Data — Fire Stations &amp; Law Enforcement Locations (public domain) · NCES Common Core of Data (schools) · CMS Hospital Compare · NEMSIS National EMS Database · NTD National Transit Database · IMLS Public Libraries Survey · US Courts PACER · FAA LAANC UAS Facility Maps. User-uploaded or pin-dropped stations marked accordingly.">ⓘ</span></div>
-  <p style="color:var(--muted);font-size:12px;margin-bottom:16px;">Public facilities evaluated as candidate deployment locations during optimization. Drone coverage prioritizes facilities most critical to public safety response. All coordinates verified against FAA LAANC facility maps.</p>
+  <div class="section-eyebrow"><span class="pg-num">07</span><span class="pg-title">Community Infrastructure &amp; Asset Protection</span><span class="src" data-src="Sources: OpenStreetMap (© contributors, ODbL license) · DHS HIFLD Open Data (public domain) · NCES Common Core of Data · CMS Hospital Compare · NEMSIS National EMS Database · NTD National Transit Database · IMLS Public Libraries Survey · US Courts PACER · EPA Infrastructure Maps · US Energy Information Administration · FAA LAANC UAS Facility Maps · User-verified locations.">ⓘ</span></div>
+
+  <p style="color:var(--text);font-size:14px;line-height:1.6;margin-bottom:20px;">
+    This deployment protects <strong>{len(df_stations_all):,} indexed public facilities</strong> across {prop_city}, {prop_state} — from emergency response centers and critical infrastructure to schools, hospitals, places of worship, and community services. The BRINC DFR network provides 24/7 aerial first-response coverage prioritizing assets most critical to public safety, economic continuity, and community resilience. All facility coordinates have been verified against FAA LAANC facility maps and current data sources.
+  </p>
 
   <!-- FACILITY TYPE SUMMARY -->
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:24px;">
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:28px;">
     {_fac_summary_cells}
   </div>
 
-  <p style="font-size:11px;color:var(--muted);margin-bottom:14px;border-top:1px solid var(--border);padding-top:12px;">
-    <strong>{len(df_stations_all):,} total facilities</strong> indexed across {prop_city}, {prop_state} ·
-    <span style="color:var(--cyan);">{calls_covered_perc:.1f}% of annual incidents</span> fall within drone response zones ·
-    Source: OpenStreetMap, DHS HIFLD, NCES, CMS, NEMSIS, NTD, IMLS, user data
+  <p style="font-size:12px;color:var(--muted);margin-bottom:18px;padding:12px;background:var(--light);border-radius:6px;">
+    <strong>Coverage Impact:</strong> <span style="color:var(--cyan);font-weight:600;">{calls_covered_perc:.1f}% of annual incidents</span> occur within drone response zones, enabling rapid aerial assessment and coordinated ground response. <strong>Data Sources:</strong> OpenStreetMap · DHS HIFLD · NCES · CMS · NEMSIS · NTD · IMLS · EPA · US EIA · User data
   </p>
 
   <div class="infra-grid">{all_bldgs_rows}</div>

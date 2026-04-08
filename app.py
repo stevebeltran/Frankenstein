@@ -8550,6 +8550,11 @@ if st.session_state['csvs_ready']:
     with st.spinner(get_faa_message()):
         faa_geojson = load_faa_parquet(minx, miny, maxx, maxy)
         faa_feature_count = len(faa_geojson.get('features', [])) if isinstance(faa_geojson, dict) and faa_geojson.get('features') else 0
+        # Debug FAA loading
+        if faa_feature_count == 0:
+            st.sidebar.warning(f"⚠️ FAA data not loading (0 zones). Check Display Options.")
+        else:
+            st.sidebar.info(f"📍 FAA data ready: {faa_feature_count} zones")
     with st.spinner(get_airfield_message()):
         airfields = fetch_airfields(minx, miny, maxx, maxy)
 
@@ -9394,11 +9399,15 @@ if st.session_state['csvs_ready']:
                     mode='markers', marker=dict(size=point_size, color='#ff3b3b', opacity=point_opacity),
                     name="Fire Incidents", hoverinfo='skip'))
 
-        if show_faa and faa_geojson and faa_geojson.get("features"):
-            try:
-                add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=not show_satellite)
-            except Exception as e:
-                st.error(f"Error rendering FAA layer: {e}")
+        if show_faa:
+            if faa_geojson and faa_geojson.get("features"):
+                try:
+                    add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=not show_satellite)
+                    st.sidebar.success(f"✅ FAA: {len(faa_geojson.get('features', []))} zones rendered")
+                except Exception as e:
+                    st.sidebar.error(f"🔴 FAA render error: {str(e)[:100]}")
+            else:
+                st.sidebar.warning(f"⚠️ FAA: No zones loaded for current location")
 
         if show_obstacles:
             add_faa_obstacles_layer_to_plotly(fig, minx, miny, maxx, maxy)

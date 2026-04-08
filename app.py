@@ -119,6 +119,7 @@ if st.query_params.get("view") == "mobile":
     _mob_clat    = float(p.get("clat", 0) or 0)
     _mob_clon    = float(p.get("clon", 0) or 0)
     _mob_zoom    = float(p.get("zoom", 11) or 11)
+    _mob_calls_str = str(p.get("m_calls", "")).strip()  # Incident data: "lat1,lon1;lat2,lon2;..."
 
     if _mob_stn_str and _mob_clat and _mob_clon:
         try:
@@ -128,14 +129,67 @@ if st.query_params.get("view") == "mobile":
             _mob_slons = [float(p2[1]) for p2 in _mob_pairs]
 
             _mob_fig = _go_mob.Figure()
+
+            # Incident data points
+            if _mob_calls_str:
+                try:
+                    _mob_call_pairs = [pair.split(",") for pair in _mob_calls_str.split(";") if "," in pair]
+                    if _mob_call_pairs:
+                        _mob_call_lats = [float(cp[0]) for cp in _mob_call_pairs]
+                        _mob_call_lons = [float(cp[1]) for cp in _mob_call_pairs]
+                        _mob_fig.add_trace(_go_mob.Scattermap(
+                            lat=_mob_call_lats, lon=_mob_call_lons,
+                            mode='markers',
+                            marker=dict(size=2, color='#888888', opacity=0.4),
+                            hoverinfo='skip', showlegend=False, name='Calls'
+                        ))
+                except Exception:
+                    pass
+
+            # RF range rings (compute with default parameters)
+            if _mob_slats and _mob_slons:
+                try:
+                    # Compute RF rings with standard parameters for compact visualization
+                    def get_circle_coords_mob(lat, lon, r_mi=1.0):
+                        import math
+                        r_m = r_mi * 1609.34
+                        angles = [i * (360/120) for i in range(121)]
+                        lats, lons = [], []
+                        for angle_deg in angles:
+                            angle_rad = math.radians(angle_deg)
+                            dlat = (r_m / 111_000) * math.cos(angle_rad)
+                            dlon = (r_m / (111_000 * math.cos(math.radians(lat)))) * math.sin(angle_rad)
+                            lats.append(lat + dlat)
+                            lons.append(lon + dlon)
+                        return lats, lons
+
+                    # 3 SNR tiers: 0.8 mi (Marginal), 1.5 mi (Good), 2.5 mi (Excellent)
+                    _ring_colors = ["#ef4444", "#f59e0b", "#22c55e"]
+                    _ring_radii = [0.8, 1.5, 2.5]
+                    _ring_labels = ["Marginal", "Good", "Excellent"]
+
+                    for _rr_idx, (_rr_col, _rr_rad, _rr_lbl) in enumerate(zip(_ring_colors, _ring_radii, _ring_labels)):
+                        for _stn_lat, _stn_lon in zip(_mob_slats, _mob_slons):
+                            _rr_lats, _rr_lons = get_circle_coords_mob(_stn_lat, _stn_lon, r_mi=_rr_rad)
+                            _mob_fig.add_trace(_go_mob.Scattermap(
+                                lat=_rr_lats, lon=_rr_lons,
+                                mode='lines', fill='toself',
+                                line=dict(color=_rr_col, width=1),
+                                fillcolor=f"rgba({int(_rr_col[1:3],16)},{int(_rr_col[3:5],16)},{int(_rr_col[5:7],16)},0.06)",
+                                hoverinfo='skip', showlegend=False, name=_rr_lbl
+                            ))
+                except Exception:
+                    pass
+
             # Station markers
             if _mob_slats:
                 _mob_fig.add_trace(_go_mob.Scattermap(
                     lat=_mob_slats, lon=_mob_slons,
                     mode='markers',
-                    marker=dict(size=14, color='#00D2FF', symbol='circle'),
+                    marker=dict(size=12, color='#00D2FF', symbol='circle'),
                     hoverinfo='skip', showlegend=False,
                 ))
+
             _mob_fig.update_layout(
                 map=dict(center=dict(lat=_mob_clat, lon=_mob_clon),
                          zoom=max(9, _mob_zoom - 1),
@@ -149,7 +203,14 @@ if st.query_params.get("view") == "mobile":
         except Exception:
             pass
 
-    st.markdown('<div class="disclaimer">All figures are model estimates based on deployment parameters, national DFR benchmark rates, and CAD data. Response times, ROI, and outcomes are projections — not guarantees.</div><div style="text-align:center;margin-top:20px;"><div style="font-size:0.75rem;font-weight:900;color:#00D2FF;letter-spacing:3px;">BRINC</div><div style="font-size:0.60rem;color:#334;letter-spacing:1px;text-transform:uppercase;margin-top:2px;">Drone as First Responder · brincdrones.com</div></div>', unsafe_allow_html=True)
+    # ── Footer with BRINC logo ────────────────────────────────────────────────
+    try:
+        _mob_logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
+        _mob_logo_html = f'<img src="data:image/png;base64,{_mob_logo_b64}" style="height:32px;display:block;margin:0 auto;">' if _mob_logo_b64 else '<div style="font-size:0.75rem;font-weight:900;color:#00D2FF;letter-spacing:3px;">BRINC</div>'
+    except Exception:
+        _mob_logo_html = '<div style="font-size:0.75rem;font-weight:900;color:#00D2FF;letter-spacing:3px;">BRINC</div>'
+
+    st.markdown(f'<div class="disclaimer">All figures are model estimates based on deployment parameters, national DFR benchmark rates, and CAD data. Response times, ROI, and outcomes are projections — not guarantees.</div><div style="text-align:center;margin-top:20px;">{_mob_logo_html}<div style="font-size:0.60rem;color:#334;letter-spacing:1px;text-transform:uppercase;margin-top:6px;">Drone as First Responder · brincdrones.com</div></div>', unsafe_allow_html=True)
     st.stop()
 
 # --- PAGE CONFIG & INITIALIZE SESSION STATE ---
@@ -9707,6 +9768,21 @@ if st.session_state['csvs_ready']:
         except Exception:
             _stn_str = ""
 
+        # Encode incident data compactly for mobile map (sample to keep URL manageable)
+        # Format: "lat1,lon1;lat2,lon2;..." (3 decimal places for ~100m accuracy)
+        _calls_str = ""
+        try:
+            _qr_df_calls = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
+            if _qr_df_calls is not None and not _qr_df_calls.empty and 'lat' in _qr_df_calls.columns and 'lon' in _qr_df_calls.columns:
+                # Sample up to 100 calls to keep URL under 2000 chars
+                _sample_size = min(100, max(1, int(len(_qr_df_calls) / 100)))
+                _call_sample = _qr_df_calls.sample(min(100, len(_qr_df_calls)), random_state=42)
+                _call_parts = [f"{row['lat']:.3f},{row['lon']:.3f}" for _, row in _call_sample.iterrows()
+                               if pd.notna(row.get('lat')) and pd.notna(row.get('lon'))]
+                _calls_str = ";".join(_call_parts[:100])
+        except Exception:
+            pass
+
         _qr_params = _up.urlencode({
             "city":  str(st.session_state.get("active_city", "")).title(),
             "state": st.session_state.get("active_state", ""),
@@ -9724,6 +9800,7 @@ if st.session_state['csvs_ready']:
             "clon":  round(center_lon, 4),
             "zoom":  round(dynamic_zoom, 1),
             "s":     _stn_str,
+            "m_calls": _calls_str,
         })
         _qr_url = f"{_qr_base}/?view=mobile&{_qr_params}"
 
@@ -10203,6 +10280,13 @@ if st.session_state['csvs_ready']:
         _guardian_img_b64 = get_transparent_product_base64("gigs.png") or ""
         logo_b64_dark = get_themed_logo_base64("logo.png", theme="dark")
         logo_b64_light = get_themed_logo_base64("logo.png", theme="light")
+
+        # ── FCC 4G LTE Coverage Map URL for export ────────────────────────────
+        _fcc_zoom_export = round(min(13, max(9, dynamic_zoom + 1)), 2)
+        _fcc_url = (f"https://broadbandmap.fcc.gov/home?version=dec2023"
+                    f"&zoom={_fcc_zoom_export}&vlon={center_lon:.6f}&vlat={center_lat:.6f}"
+                    f"&speed=25&tech=300&br=4")
+
         export_html = f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">

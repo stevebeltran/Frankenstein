@@ -365,6 +365,7 @@ try:
 
         # Restrict to @brincdrones.com accounts only
         _user_email = getattr(st.user, "email", "") or ""
+        _user_name = getattr(st.user, "username", "") or ""  # Fallback: use email prefix
         if not _user_email.lower().endswith("@brincdrones.com"):
             st.markdown("<style>section[data-testid='stSidebar'] { display: none !important; }</style>",
                         unsafe_allow_html=True)
@@ -372,6 +373,16 @@ try:
                      f"You are signed in as **{_user_email}**.  \n"
                      "Please sign in with your @brincdrones.com account.")
             st.button("Sign out", on_click=st.logout)
+            st.stop()
+
+        # Extract name from Google account; fallback to email prefix
+        if not _user_name or _user_name.strip() == "":
+            _user_name = _user_email.split("@")[0]  # e.g., "john.smith" from "john.smith@brincdrones.com"
+
+        # Store authenticated user data in session state (bypassing manual input)
+        st.session_state['google_user_email'] = _user_email
+        st.session_state['google_user_name'] = _user_name
+        st.session_state['brinc_user'] = _user_email.split("@")[0]  # For backward compatibility
             st.stop()
 except Exception:
     pass  # Auth not configured — app runs without login gate
@@ -9948,15 +9959,28 @@ if st.session_state['csvs_ready']:
     # ── EXPORT BUTTONS — always visible in sidebar ──
     st.sidebar.markdown("---")
 
-    brinc_user = st.sidebar.text_input("BRINC Email Prefix (first.last)", value=st.session_state.get('brinc_user', 'steven.beltran'), key='brinc_user', help="Enter 'first.last' to auto-generate your name and @brincdrones.com email address.")
-    st.sidebar.caption("*(Press **Enter** after typing to apply changes)*")
+    # Display authenticated user info (read-only, from Google OAuth)
+    _google_email = st.session_state.get('google_user_email', 'user@brincdrones.com')
+    _google_name_raw = st.session_state.get('google_user_name', 'User')
 
+    st.sidebar.markdown(
+        f"<div style='font-size:0.75rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-bottom:6px;'>BRINC Representative</div>",
+        unsafe_allow_html=True
+    )
+    st.sidebar.markdown(
+        f"<div style='font-size:1rem;font-weight:700;color:#ffffff;margin-bottom:3px;'>{_google_name_raw.replace('.', ' ').title()}</div>",
+        unsafe_allow_html=True
+    )
+    st.sidebar.markdown(
+        f"<div style='font-size:0.8rem;color:#aabbcc;margin-bottom:8px;'>{_google_email}</div>",
+        unsafe_allow_html=True
+    )
+    st.sidebar.caption("*(Authenticated via Google OAuth)*")
 
-    user_clean = brinc_user.strip()
-    if not user_clean: user_clean = "steven.beltran"
-
-    prop_email = f"{user_clean}@brincdrones.com"
-    prop_name = " ".join([word.capitalize() for word in user_clean.split('.')])
+    # Use Google auth data for exports
+    user_clean = _google_name_raw.replace('.', ' ').title()
+    prop_email = _google_email
+    prop_name = user_clean
 
     # Always define these so download buttons work regardless of fleet_capex
     prop_city  = st.session_state.get('active_city', 'City')
@@ -11532,8 +11556,10 @@ function copyCommunitySection() {{
         "k_resp": 0, "k_guard": 0,
         "_disclaimer": "No drones deployed yet.",
     })
+    # Include authenticated user's name in the .brinc filename for easy identification
+    _user_name_safe = user_clean.replace(" ", "_")
     if st.sidebar.download_button("💾 Save Deployment Plan", data=_brinc_data,
-                                  file_name=f"Brinc_{_safe_city}_{_ts}.brinc",
+                                  file_name=f"{_user_name_safe}_BRINC_DFR_{_safe_city}_{_ts}.brinc",
                                   mime="application/json", use_container_width=True):
         # ── Track export event ───────────────────────────────────────────────
         st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['BRINC']

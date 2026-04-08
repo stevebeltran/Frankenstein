@@ -23,7 +23,18 @@
       "Bash(ls:*)",
       "WebFetch(domain:www.fcc.gov)",
       "WebFetch(domain:broadbandmap.fcc.gov)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:help.bdc.fcc.gov)",
+      "WebFetch(domain:us-fcc.box.com)",
+      "WebFetch(domain:us-fcc.app.box.com)",
+      "Bash(curl -s \"https://broadbandmap.fcc.gov/api/public/map/listProviders?category=Mobile+Availability\")",
+      "Bash(curl -s \"https://broadbandmap.fcc.gov/api/public/map/listFilings\")",
+      "Bash(du -sh cell_coverage/*.parquet)",
+      "Bash(du -sh \"G:/My Drive/PRIVATE NO ACCESS/Pyton/app/Beta/Frankenstein/cell_coverage/\"*.parquet)",
+      "Bash(where python:*)",
+      "Bash(C:/Users/4070/AppData/Local/Python/bin/python.exe -m py_compile app.py)",
+      "Bash(C:/Users/4070/AppData/Local/Python/bin/python.exe:*)"
     ]
   }
 }

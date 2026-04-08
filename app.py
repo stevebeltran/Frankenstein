@@ -121,7 +121,6 @@ if st.query_params.get("view") == "mobile":
     _mob_clon    = float(p.get("clon", 0) or 0)
     _mob_zoom    = float(p.get("zoom", 11) or 11)
     _mob_calls_str = str(p.get("m_calls", "")).strip()  # Incident data: "lat1,lon1;lat2,lon2;..."
-    _mob_boundary_str = str(p.get("boundary", "")).strip()  # City boundary: "lat1,lon1;lat2,lon2;..."
 
     if _mob_stn_str and _mob_clat and _mob_clon:
         try:
@@ -131,23 +130,6 @@ if st.query_params.get("view") == "mobile":
             _mob_slons = [float(p2[1]) for p2 in _mob_pairs]
 
             _mob_fig = _go_mob.Figure()
-
-            # City boundary / jurisdiction shapefile
-            if _mob_boundary_str:
-                try:
-                    _mob_bound_pairs = [pair.split(",") for pair in _mob_boundary_str.split(";") if "," in pair]
-                    if _mob_bound_pairs:
-                        _mob_bound_lats = [float(bp[0]) for bp in _mob_bound_pairs]
-                        _mob_bound_lons = [float(bp[1]) for bp in _mob_bound_pairs]
-                        _mob_fig.add_trace(_go_mob.Scattermap(
-                            lat=_mob_bound_lats, lon=_mob_bound_lons,
-                            mode='lines', fill='toself',
-                            line=dict(color='#ffffff', width=2),
-                            fillcolor='rgba(255,255,255,0.05)',
-                            hoverinfo='skip', showlegend=False, name='Jurisdiction'
-                        ))
-                except Exception:
-                    pass
 
             # Incident data points (call for service dots)
             if _mob_calls_str:
@@ -5367,6 +5349,8 @@ if not st.session_state['csvs_ready']:
 
                         # Restore sidebar settings — BRINC rep info
                         st.session_state['brinc_user'] = save_data.get('brinc_user', 'steven.beltran')
+                        # Restore pricing tier selection
+                        st.session_state['pricing_tier'] = save_data.get('pricing_tier', 'Safe Guard')
 
                         st.session_state['data_source'] = 'brinc_file'
                         st.session_state['demo_mode_used'] = False
@@ -7327,6 +7311,31 @@ if st.session_state['csvs_ready']:
 
     strat_expander = st.sidebar.expander("⚙️ Deployment Strategy", expanded=False)
     with strat_expander:
+        # ── PRICING TIER SELECTOR ──────────────────────────────────────────────────
+        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:0 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Pricing Plan</div>", unsafe_allow_html=True)
+        pricing_tier = st.radio(
+            "Pricing Plan",
+            ("Safe Guard", "Safe Guard Lite"),
+            index=0 if st.session_state.get('pricing_tier', 'Safe Guard') == 'Safe Guard' else 1,
+            label_visibility="collapsed",
+            help="Safe Guard (Responder $79,999 | Guardian $159,999): Advanced custom features and add-ons. Safe Guard Lite (Responder $59,999 | Guardian $119,999): Core functionality. See DFR Safeguard Option Comparison Sheet for feature breakdown."
+        )
+        st.session_state['pricing_tier'] = pricing_tier
+
+        # Update CONFIG with tier-specific pricing
+        if pricing_tier == "Safe Guard":
+            CONFIG["RESPONDER_COST"] = 79999
+            CONFIG["GUARDIAN_COST"] = 159999
+            _tier_badge = "🛡️ Safe Guard"
+            _tier_desc = "Advanced Custom Features"
+        else:
+            CONFIG["RESPONDER_COST"] = 59999
+            CONFIG["GUARDIAN_COST"] = 119999
+            _tier_badge = "🛡️ Safe Guard Lite"
+            _tier_desc = "Core Functionality"
+
+        st.markdown("---")
+
         incremental_build = st.toggle("Phased Rollout", value=st.session_state.get('incremental_build', True),
             key='incremental_build',
             help="Place drones one at a time in priority order. Disable to find the global optimum in a single pass.")
@@ -7542,6 +7551,7 @@ if st.session_state['csvs_ready']:
             st.session_state['_auto_minimums_sig'] = _auto_sig
     except Exception:
         pass
+
 
     # Safely pull the default values without exceeding the allowed maximums
     val_r = min(st.session_state.get('k_resp', 2), max_resp_calc)
@@ -8575,6 +8585,15 @@ if st.session_state['csvs_ready']:
     st.session_state['avg_time_saved_min'] = avg_time_saved
     st.session_state['avg_resp_time_min']  = avg_resp_time
 
+    # ── Re-establish tier badge variables for display ──────────────────────────
+    _pricing_tier = st.session_state.get('pricing_tier', 'Safe Guard')
+    if _pricing_tier == "Safe Guard":
+        _tier_badge = "🛡️ Safe Guard"
+        _tier_desc = "Advanced Custom Features"
+    else:
+        _tier_badge = "🛡️ Safe Guard Lite"
+        _tier_desc = "Core Functionality"
+
     # 1. THE SINGLE-LINE EXECUTIVE HEADER
     logo_b64 = get_transparent_product_base64("gigs.png")
     main_logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:32px; vertical-align:middle; margin-right:15px;">' if logo_b64 else f'<span style="font-size:1.5rem; font-weight:900; letter-spacing:2px; color:#ffffff; margin-right:15px;">BRINC</span>'
@@ -8590,6 +8609,7 @@ if st.session_state['csvs_ready']:
             <span>Data Period: <span style="color:#fff;">{date_range_str}</span></span>
             <span style="color:{card_border};">|</span>
             <span style="font-weight: 800; color: {text_main}; font-size: 0.95rem;">{actual_k_responder} <span style="color:#888; font-weight:normal;">Resp</span> · {actual_k_guardian} <span style="color:#888; font-weight:normal;">Guard</span></span>
+            <span style="background:#0066aa;border:1px solid #00D2FF;border-radius:4px;padding:3px 8px;font-size:0.75rem;font-weight:700;color:#00D2FF;letter-spacing:0.5px;text-transform:uppercase;">{_tier_badge}</span>
             {main_logo_html}
         </div>
     </div>
@@ -9794,23 +9814,8 @@ if st.session_state['csvs_ready']:
         except Exception:
             pass
 
-        # Encode boundary (city shapefile) for mobile map display - MINIMAL sampling only
-        # Sample aggressively to keep URL compact (max 25 points)
-        _boundary_str = ""
-        try:
-            if city_boundary_geom is not None and not city_boundary_geom.is_empty:
-                _boundary_geoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
-                                   else list(city_boundary_geom.geoms))
-                if _boundary_geoms:
-                    _first_geom = _boundary_geoms[0]
-                    _boundary_coords = list(_first_geom.exterior.coords)
-                    # Sample very aggressively - aim for exactly 20-25 points max
-                    _sample_step = max(1, len(_boundary_coords) // 25)
-                    _sampled = _boundary_coords[::_sample_step]
-                    _boundary_parts = [f"{lat:.1f},{lon:.1f}" for lon, lat in _sampled]
-                    _boundary_str = ";".join(_boundary_parts[:25])
-        except Exception:
-            pass
+        # Note: Boundary/shapefile outline removed from QR mobile map to avoid misleading simplified versions
+        # The main program renders the full detailed boundary; mobile map focuses on station locations and calls
 
         _qr_params = _up.urlencode({
             "city":  str(st.session_state.get("active_city", "")).title(),
@@ -9830,7 +9835,6 @@ if st.session_state['csvs_ready']:
             "zoom":  round(dynamic_zoom, 1),
             "s":     _stn_str,
             "m_calls": _calls_str,
-            "boundary": _boundary_str,
         })
         _qr_url = f"{_qr_base}/?view=mobile&{_qr_params}"
 
@@ -10094,6 +10098,8 @@ if st.session_state['csvs_ready']:
             "boundary_source_path": st.session_state.get('boundary_source_path', ''),
             # Sidebar settings — BRINC rep info
             "brinc_user": st.session_state.get('brinc_user', 'steven.beltran'),
+            # Pricing tier selection
+            "pricing_tier": st.session_state.get('pricing_tier', 'Safe Guard'),
         }
 
         fig_for_export = go.Figure()
@@ -10348,6 +10354,15 @@ if st.session_state['csvs_ready']:
         _fcc_url = (f"https://broadbandmap.fcc.gov/home?version=dec2023"
                     f"&zoom={_fcc_zoom_export}&vlon={center_lon:.6f}&vlat={center_lat:.6f}"
                     f"&speed=25&tech=300&br=4")
+
+        # ── Re-establish tier badge variables for export ────────────────────────
+        _exp_pricing_tier = st.session_state.get('pricing_tier', 'Safe Guard')
+        if _exp_pricing_tier == "Safe Guard":
+            _tier_badge = "🛡️ Safe Guard"
+            _tier_desc = "Advanced Custom Features"
+        else:
+            _tier_badge = "🛡️ Safe Guard Lite"
+            _tier_desc = "Core Functionality"
 
         export_html = f"""<!DOCTYPE html>
 <html lang="en"><head>
@@ -10757,6 +10772,21 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
     <div class="metric-cell"><div class="m-label">Time Saved vs Patrol</div><div class="m-value green">{avg_time_saved:.1f} min</div><div class="m-sub">per incident, on average</div></div>
     <div class="metric-cell" style="background:#fafbfc"><div class="m-label">Total Fleet Units</div><div class="m-value" style="color:#374151">{actual_k_responder + actual_k_guardian}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
   </div>
+
+  <!-- Pricing Tier Badge -->
+  <div style="background:linear-gradient(135deg,#0066aa 0%,#0088dd 100%);border-radius:10px;padding:16px 20px;margin:20px 0;border:2px solid #00D2FF;">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <div style="background:rgba(0,210,255,0.2);border-radius:6px;padding:8px 12px;">
+        <div style="font-size:11px;color:#00D2FF;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Pricing Tier</div>
+        <div style="font-size:16px;color:#ffffff;font-weight:800;margin-top:4px;">{_tier_badge}</div>
+      </div>
+      <div>
+        <div style="font-size:13px;color:#ffffff;margin-bottom:8px;"><strong>{_tier_desc}</strong></div>
+        <div style="font-size:12px;color:#aabbdd;">Responder: <strong>${CONFIG['RESPONDER_COST']:,}</strong> · Guardian: <strong>${CONFIG['GUARDIAN_COST']:,}</strong></div>
+      </div>
+    </div>
+  </div>
+
   <p style="font-size:15px;color:#444;line-height:1.8;max-width:680px">
     The {jurisdiction_list} proposes a BRINC Drones Drone as a First Responder (DFR) program deploying
     <strong>{actual_k_responder + actual_k_guardian} aerial units</strong> — {actual_k_responder} BRINC Responders

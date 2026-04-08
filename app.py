@@ -9804,12 +9804,13 @@ if st.session_state['csvs_ready']:
         })
         _qr_url = f"{_qr_base}/?view=mobile&{_qr_params}"
 
-        # ── QR code image ──────────────────────────────────────────────────────
-        _qr = _qrcode.QRCode(version=None, error_correction=_qrcode.constants.ERROR_CORRECT_M,
-                              box_size=18, border=4)
+        # ── QR code image — high readability ──────────────────────────────────
+        # Use highest error correction (H) for better phone scanning reliability
+        _qr = _qrcode.QRCode(version=None, error_correction=_qrcode.constants.ERROR_CORRECT_H,
+                              box_size=28, border=8)
         _qr.add_data(_qr_url)
         _qr.make(fit=True)
-        _qr_img = _qr.make_image(fill_color="#00D2FF", back_color="#080c14")
+        _qr_img = _qr.make_image(fill_color="#000000", back_color="#FFFFFF")
         _qr_buf = _io_qr.BytesIO()
         _qr_img.save(_qr_buf, format="PNG")
         import base64 as _b64
@@ -9823,32 +9824,35 @@ if st.session_state['csvs_ready']:
         _qr_state = st.session_state.get("active_state", "")
         _qr_loc   = f"{_qr_city}, {_qr_state}" if _qr_city else "your city"
 
+        # Get department/jurisdiction name for personalization
+        _qr_dept = st.session_state.get('active_dept_name', '') or _qr_city or 'Jurisdiction'
+        _qr_dept = str(_qr_dept).strip().title()
+
 
         # ── Render full-width banner ───────────────────────────────────────────
         # Build as a variable (no leading indentation) to avoid Markdown treating
         # 4+ leading spaces as a code block, which renders HTML as raw text.
         _qr_banner = (
             '<div style="background:linear-gradient(160deg,#060c18 0%,#0b1525 60%,#060c18 100%);'
-            'border:1px solid rgba(0,210,255,0.22);border-top:3px solid #00D2FF;'
-            'border-radius:16px;padding:28px 32px 24px;margin-top:12px;overflow:hidden;">'
+            'border:2px solid #00D2FF;border-radius:16px;padding:32px;margin-top:12px;overflow:hidden;text-align:center;">'
 
-            # Header
-            '<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:20px;flex-wrap:wrap;">'
-            '<span style="font-size:1.5rem;font-weight:900;color:#00D2FF;letter-spacing:3px;font-family:sans-serif;">BRINC</span>'
-            '<span style="font-size:1.0rem;font-weight:700;color:#aabbcc;font-family:sans-serif;">Drone as First Responder</span>'
-            f'<span style="font-size:0.75rem;color:#334;margin-left:auto;font-family:monospace;">{_qr_loc}</span>'
+            # Header with department name
+            '<div style="margin-bottom:24px;">'
+            '<div style="font-size:0.75rem;color:#00D2FF;text-transform:uppercase;letter-spacing:2px;font-weight:700;margin-bottom:6px;">Mobile Deployment Summary</div>'
+            f'<div style="font-size:1.8rem;font-weight:900;color:#ffffff;margin-bottom:4px;">{_qr_dept}</div>'
+            '<div style="font-size:0.95rem;color:#aabbcc;margin-bottom:2px;">BRINC Drone as First Responder</div>'
+            f'<div style="font-size:0.75rem;color:#667799;">{_qr_city}, {_qr_state}</div>'
             '</div>'
 
-            # QR code — centered
-            '<div style="display:flex;flex-direction:column;align-items:center;gap:10px;margin-bottom:20px;">'
-            f'<img src="data:image/png;base64,{_qr_b64}" style="width:260px;height:260px;border-radius:12px;display:block;" alt="BRINC Mobile Summary QR"/>'
+            # QR code — large and centered with white background for readability
+            '<div style="display:flex;flex-direction:column;align-items:center;gap:14px;margin:20px 0;">'
+            f'<div style="background:#ffffff;border-radius:16px;padding:16px;display:inline-block;box-shadow:0 8px 24px rgba(0,210,255,0.2);">'
+            f'<img src="data:image/png;base64,{_qr_b64}" style="width:420px;height:420px;display:block;border-radius:12px;" alt="BRINC Mobile Summary QR"/>'
+            '</div>'
             '<div style="text-align:center;">'
-            '<div style="font-size:1.0rem;font-weight:800;color:#ffffff;letter-spacing:0.5px;">&#128241; Scan for Mobile Summary</div>'
-            '<div style="font-size:0.65rem;color:#445566;margin-top:3px;">No login required &middot; Opens on any phone</div>'
-            '</div>'
-            '<div style="font-size:0.52rem;color:#283444;font-family:monospace;word-break:break-all;'
-            'background:#08111e;border:1px solid #1a2535;border-radius:5px;padding:5px 8px;max-width:300px;text-align:center;">'
-            f'{_qr_base}/Mobile_Summary'
+            '<div style="font-size:1.1rem;font-weight:800;color:#00D2FF;letter-spacing:0.5px;margin-bottom:6px;">📱 Scan with any smartphone</div>'
+            '<div style="font-size:0.75rem;color:#445566;">No login required • Works on iOS & Android</div>'
+            '<div style="font-size:0.75rem;color:#334;margin-top:8px;font-style:italic;">Open in landscape for best viewing</div>'
             '</div>'
             '</div>'
 

@@ -113,6 +113,42 @@ if st.query_params.get("view") == "mobile":
     if roi_mult > 0:  rows.append(("Return on Investment", f"{roi_mult:.2f}× annually", "g"))
     roi_html = '<div class="roi-panel">' + "".join(f'<div class="roi-row"><span class="roi-label">{l}</span><span class="roi-val {c}">{v}</span></div>' for l,v,c in rows) + '</div>'
     st.markdown(roi_html, unsafe_allow_html=True)
+
+    # ── Deployment map ────────────────────────────────────────────────────────
+    _mob_stn_str = str(p.get("s", "")).strip()
+    _mob_clat    = float(p.get("clat", 0) or 0)
+    _mob_clon    = float(p.get("clon", 0) or 0)
+    _mob_zoom    = float(p.get("zoom", 11) or 11)
+
+    if _mob_stn_str and _mob_clat and _mob_clon:
+        try:
+            import plotly.graph_objects as _go_mob
+            _mob_pairs = [pair.split(",") for pair in _mob_stn_str.split(";") if "," in pair]
+            _mob_slats = [float(p2[0]) for p2 in _mob_pairs]
+            _mob_slons = [float(p2[1]) for p2 in _mob_pairs]
+
+            _mob_fig = _go_mob.Figure()
+            # Station markers
+            if _mob_slats:
+                _mob_fig.add_trace(_go_mob.Scattermap(
+                    lat=_mob_slats, lon=_mob_slons,
+                    mode='markers',
+                    marker=dict(size=14, color='#00D2FF', symbol='circle'),
+                    hoverinfo='skip', showlegend=False,
+                ))
+            _mob_fig.update_layout(
+                map=dict(center=dict(lat=_mob_clat, lon=_mob_clon),
+                         zoom=max(9, _mob_zoom - 1),
+                         style="carto-darkmatter"),
+                margin=dict(l=0, r=0, t=0, b=0),
+                height=260, showlegend=False,
+                paper_bgcolor='#080c14',
+            )
+            st.markdown('<div class="section-head">Deployment Map</div>', unsafe_allow_html=True)
+            st.plotly_chart(_mob_fig, use_container_width=True, config={"displayModeBar": False})
+        except Exception:
+            pass
+
     st.markdown('<div class="disclaimer">All figures are model estimates based on deployment parameters, national DFR benchmark rates, and CAD data. Response times, ROI, and outcomes are projections — not guarantees.</div><div style="text-align:center;margin-top:20px;"><div style="font-size:0.75rem;font-weight:900;color:#00D2FF;letter-spacing:3px;">BRINC</div><div style="font-size:0.60rem;color:#334;letter-spacing:1px;text-transform:uppercase;margin-top:2px;">Drone as First Responder · brincdrones.com</div></div>', unsafe_allow_html=True)
     st.stop()
 
@@ -3830,7 +3866,6 @@ def add_coverage_traces(fig, state_abbr: str):
             continue
         carrier = row['carrier']
         color   = row['color']
-        # Collect all exterior rings (handle MultiPolygon)
         rings = []
         if geom.geom_type == 'Polygon':
             rings = [geom.exterior]
@@ -3845,20 +3880,129 @@ def add_coverage_traces(fig, state_abbr: str):
             lons_all.extend(list(xs) + [None])
             lats_all.extend(list(ys) + [None])
 
-        # Parse hex color → rgba fill at 25% opacity
         r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
-        fill_color = f"rgba({r},{g},{b},0.25)"
-
         fig.add_trace(go.Scattermap(
             lon=lons_all, lat=lats_all,
-            mode='lines',
-            fill='toself',
-            fillcolor=fill_color,
+            mode='lines', fill='toself',
+            fillcolor=f"rgba({r},{g},{b},0.25)",
             line=dict(color=color, width=1),
             name=f"{carrier} 4G LTE",
             hoverinfo='name',
             visible='legendonly',
         ))
+
+
+def _carrier_coverage_analysis(state_abbr: str, boundary_geom):
+    """
+    Intersects each carrier's dissolved polygon with the jurisdiction boundary.
+    Returns list of dicts sorted by coverage % descending:
+      {'carrier', 'color', 'pct', 'poly'}
+    """
+    if not state_abbr or boundary_geom is None or boundary_geom.is_empty:
+        return []
+    gdf = _load_coverage(state_abbr)
+    if gdf is None or gdf.empty:
+        return []
+
+    boundary_area = boundary_geom.area
+    if boundary_area <= 0:
+        return []
+
+    results = []
+    for _, row in gdf.iterrows():
+        poly = row.geometry
+        if poly is None or poly.is_empty:
+            results.append({'carrier': row['carrier'], 'color': row['color'], 'pct': 0.0, 'poly': None})
+            continue
+        try:
+            clipped = poly.intersection(boundary_geom)
+            pct = min(100.0, clipped.area / boundary_area * 100)
+        except Exception:
+            clipped = None
+            pct = 0.0
+        results.append({'carrier': row['carrier'], 'color': row['color'], 'pct': pct, 'poly': clipped})
+
+    return sorted(results, key=lambda x: x['pct'], reverse=True)
+
+
+def _build_carrier_mini_map(cinfo, boundary_geom, center_lat, center_lon, zoom, map_style):
+    """Build a small Plotly map showing jurisdiction boundary + one carrier's coverage."""
+    fig = go.Figure()
+
+    # Jurisdiction outline
+    if boundary_geom is not None and not boundary_geom.is_empty:
+        geoms = [boundary_geom] if isinstance(boundary_geom, Polygon) else list(boundary_geom.geoms)
+        for gi, g in enumerate(geoms):
+            bx, by = g.exterior.coords.xy
+            fig.add_trace(go.Scattermap(
+                mode='lines', lon=list(bx), lat=list(by),
+                line=dict(color='#ffffff', width=1.5),
+                showlegend=False, hoverinfo='skip'
+            ))
+
+    # Coverage fill
+    poly = cinfo.get('poly')
+    if poly is not None and not poly.is_empty:
+        color = cinfo['color']
+        r, g_c, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+        rings = ([poly.exterior] if poly.geom_type == 'Polygon'
+                 else [p.exterior for p in poly.geoms])
+        lons, lats = [], []
+        for ring in rings:
+            xs, ys = ring.coords.xy
+            lons.extend(list(xs) + [None])
+            lats.extend(list(ys) + [None])
+        fig.add_trace(go.Scattermap(
+            lon=lons, lat=lats, mode='lines', fill='toself',
+            fillcolor=f"rgba({r},{g_c},{b},0.40)",
+            line=dict(color=color, width=1),
+            showlegend=False, hoverinfo='skip'
+        ))
+
+    fig.update_layout(
+        map=dict(center=dict(lat=center_lat, lon=center_lon),
+                 zoom=max(8, zoom - 1), style=map_style),
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=210, showlegend=False,
+    )
+    return fig
+
+
+# ── RF Link Budget — 3390 MHz Friis free-space model ─────────────────────────
+
+def _rf_range_rings_3390(infra_height_m: float = 9.14,
+                          drone_alt_m: float = 61.0,
+                          clutter_db: float = 15.0,
+                          tx_power_dbm: float = 33.0,
+                          tx_gain_dbi: float = 3.0,
+                          rx_gain_dbi: float = 3.0) -> list:
+    """
+    Returns list of (label, hex_color, radius_miles) for 3 SNR tiers at 3390 MHz.
+
+    Link budget:
+      FSPL = 20*log10(d_m) + 43.05  (at 3390 MHz)
+      SNR  = tx_power + tx_gain + rx_gain - FSPL - noise_floor - clutter
+           = EIRP + rx_gain - 43.05 - 20*log10(d) + 94 - clutter
+    Noise floor: -174 + 10*log10(20e6 BW) + 7 NF = -94 dBm
+    """
+    import math as _math
+    eirp = tx_power_dbm + tx_gain_dbi + rx_gain_dbi
+    noise_floor_dbm = -94.0   # 20 MHz BW, 7 dB NF
+    link_budget = eirp - 43.05 + abs(noise_floor_dbm) - clutter_db
+
+    tiers = [
+        ("Excellent (SNR ≥ 20 dB)", "#22c55e", 20),
+        ("Good (SNR ≥ 10 dB)",      "#f59e0b", 10),
+        ("Marginal (SNR ≥ 0 dB)",   "#ef4444",  0),
+    ]
+    rings = []
+    for label, color, snr_thresh in tiers:
+        d_m = 10 ** ((link_budget - snr_thresh) / 20.0)
+        # Add height correction — effective slant range
+        h_diff = abs(drone_alt_m - infra_height_m)
+        d_horiz = max(0.0, _math.sqrt(max(0, d_m**2 - h_diff**2)))
+        rings.append((label, color, d_horiz / 1609.34))  # convert to miles
+    return rings
 
 def format_3_lines(name_str):
     match = re.search(r'\s(\d{1,5}\s+[A-Za-z])', name_str)
@@ -9337,6 +9481,173 @@ if st.session_state['csvs_ready']:
     )
     components.html(_school_full_html, height=1300, scrolling=False)
 
+    # ── 4G LTE CELL COVERAGE — 3 carrier maps with % coverage ────────────────
+    st.markdown("---")
+    st.markdown(f"<h3 style='color:{text_main};'>📶 4G LTE Cell Coverage</h3>", unsafe_allow_html=True)
+
+    _cov_state    = st.session_state.get('active_state', '')
+    _cov_boundary = city_boundary_geom  # may be None if no boundary loaded
+
+    _carrier_results = _carrier_coverage_analysis(_cov_state, _cov_boundary)
+
+    if _carrier_results:
+        # ── 3 small maps in a row, sorted highest → lowest coverage ──────────
+        _cov_cols = st.columns(3)
+        for _ci, _cr in enumerate(_carrier_results[:3]):
+            with _cov_cols[_ci]:
+                _pct_display = f"{_cr['pct']:.1f}%" if _cr['pct'] > 0 else "No data"
+                _badge_color = "#22c55e" if _cr['pct'] >= 90 else "#f59e0b" if _cr['pct'] >= 70 else "#ef4444"
+                st.markdown(
+                    f"<div style='text-align:center;padding:6px 0 4px;'>"
+                    f"<span style='font-size:1.1rem;font-weight:800;color:{_cr['color']};'>{_cr['carrier']}</span>"
+                    f"<br><span style='font-size:1.9rem;font-weight:900;color:{_badge_color};font-family:monospace;'>{_pct_display}</span>"
+                    f"<br><span style='font-size:0.62rem;color:#667;text-transform:uppercase;letter-spacing:1px;'>of jurisdiction covered</span>"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+                _mini_fig = _build_carrier_mini_map(
+                    _cr, _cov_boundary, center_lat, center_lon,
+                    dynamic_zoom, map_style
+                )
+                st.plotly_chart(_mini_fig, use_container_width=True, config={"displayModeBar": False})
+
+        # Rank line
+        if len(_carrier_results) > 1:
+            _rank_txt = " → ".join(
+                f"<span style='color:{r['color']};font-weight:700;'>{r['carrier']} {r['pct']:.1f}%</span>"
+                for r in _carrier_results[:3]
+            )
+            st.markdown(
+                f"<div style='font-size:0.75rem;color:#556;margin-top:4px;text-align:center;'>"
+                f"Coverage rank: {_rank_txt}</div>",
+                unsafe_allow_html=True
+            )
+    else:
+        # Fallback: FCC link card if parquet not available for this state
+        _fcc_zoom_lte = round(min(13, max(9, dynamic_zoom + 1)), 2)
+        _fcc_url_lte  = (f"https://broadbandmap.fcc.gov/home?version=dec2023"
+                         f"&zoom={_fcc_zoom_lte}&vlon={center_lon:.6f}&vlat={center_lat:.6f}"
+                         f"&speed=25&tech=300&br=4")
+        st.markdown(f"""
+        <a href="{_fcc_url_lte}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+          <div style="display:flex;align-items:center;justify-content:space-between;
+            background:#0d1b2e;border:1px solid #1e3a5f;border-radius:10px;padding:20px 28px;cursor:pointer;">
+            <div>
+              <div style="color:#00b4d8;font-size:1rem;font-weight:600;margin-bottom:4px;">📶 Open FCC 4G LTE Coverage Map</div>
+              <div style="color:#6b7f99;font-size:0.78rem;">FCC National Broadband Map · AT&amp;T, T-Mobile, Verizon</div>
+            </div>
+            <div style="color:#00b4d8;font-size:1.4rem;">↗</div>
+          </div>
+        </a>""", unsafe_allow_html=True)
+
+    # ── RF Link Coverage — 3390 MHz ───────────────────────────────────────────
+    st.markdown("---")
+    st.markdown(f"<h3 style='color:{text_main};'>📡 RF Link Coverage — 3390 MHz</h3>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='font-size:0.82rem;color:{text_muted};margin-bottom:12px;'>"
+        "Free-space path loss model at 3390 MHz (C-Band drone data-link). "
+        "RF tower mounted on station rooftop, 30 ft above roofline. "
+        "Drone altitude: 200 ft AGL. MIMO-A 4×2, 2W TX, 20 MHz BW."
+        "</div>",
+        unsafe_allow_html=True
+    )
+
+    _rf_col1, _rf_col2, _rf_col3 = st.columns([2, 1, 1])
+    with _rf_col2:
+        _rf_clutter_label = st.selectbox(
+            "Environment", ["Urban (+15 dB)", "Suburban (+10 dB)", "Rural (+5 dB)"],
+            index=0, key='rf_clutter_sel',
+            help="Clutter correction added to path loss for terrain/building obstruction."
+        )
+    with _rf_col3:
+        _rf_drone_alt = st.number_input("Drone Alt (ft)", value=200, min_value=50, max_value=400, step=50, key='rf_drone_alt')
+    with _rf_col1:
+        _rf_infra_ht  = st.number_input("Tower Ht above station (ft)", value=30, min_value=5, max_value=100, step=5, key='rf_tower_ht')
+
+    _rf_clutter_map = {"Urban (+15 dB)": 15.0, "Suburban (+10 dB)": 10.0, "Rural (+5 dB)": 5.0}
+    _rf_clutter_db  = _rf_clutter_map.get(_rf_clutter_label, 15.0)
+    _rf_infra_m     = _rf_infra_ht * 0.3048      # ft → m
+    _rf_drone_m     = _rf_drone_alt * 0.3048
+
+    _rf_rings = _rf_range_rings_3390(
+        infra_height_m=_rf_infra_m,
+        drone_alt_m=_rf_drone_m,
+        clutter_db=_rf_clutter_db,
+    )
+
+    # Build RF coverage figure
+    _rf_fig = go.Figure()
+
+    # Jurisdiction boundary
+    if city_boundary_geom is not None and not city_boundary_geom.is_empty:
+        _bgeoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
+                   else list(city_boundary_geom.geoms))
+        for _bgi, _bg in enumerate(_bgeoms):
+            _bx, _by = _bg.exterior.coords.xy
+            _rf_fig.add_trace(go.Scattermap(
+                mode='lines', lon=list(_bx), lat=list(_by),
+                line=dict(color='#ffffff', width=1.5),
+                name='Jurisdiction', showlegend=(_bgi == 0), hoverinfo='skip'
+            ))
+
+    # RF rings per station
+    for _rfd in active_drones:
+        for _rf_label, _rf_color, _rf_r_mi in _rf_rings:
+            if _rf_r_mi <= 0:
+                continue
+            _rf_clats, _rf_clons = get_circle_coords(_rfd['lat'], _rfd['lon'], r_mi=_rf_r_mi)
+            _rf_fig.add_trace(go.Scattermap(
+                lat=list(_rf_clats), lon=list(_rf_clons),
+                mode='lines', fill='toself',
+                line=dict(color=_rf_color, width=1.5),
+                fillcolor=f"rgba({int(_rf_color[1:3],16)},{int(_rf_color[3:5],16)},{int(_rf_color[5:7],16)},0.08)",
+                name=f"{_rfd['name'].split(',')[0]} · {_rf_label}",
+                hovertext=f"<b>{_rfd['name'].split(',')[0]}</b><br>{_rf_label}<br>Radius: {_rf_r_mi:.1f} mi",
+                hoverinfo='text',
+                showlegend=True,
+            ))
+
+    # Station dots
+    if active_drones:
+        _rf_fig.add_trace(go.Scattermap(
+            lat=[d['lat'] for d in active_drones],
+            lon=[d['lon'] for d in active_drones],
+            mode='markers+text',
+            marker=dict(size=10, color=[d['color'] for d in active_drones]),
+            text=[d['name'].split(',')[0] for d in active_drones],
+            textposition='top right',
+            textfont=dict(size=10, color='#ffffff'),
+            name='Stations', hoverinfo='text',
+            showlegend=True,
+        ))
+
+    _rf_fig.update_layout(
+        map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style=map_style),
+        margin=dict(l=0, r=0, t=0, b=0), height=520,
+        showlegend=True,
+        legend=dict(yanchor='top', y=0.98, xanchor='left', x=0.02,
+                    bgcolor=legend_bg, bordercolor='#444', borderwidth=1,
+                    font=dict(size=11, color=legend_text)),
+    )
+    st.plotly_chart(_rf_fig, use_container_width=True, config={"displayModeBar": False})
+
+    # Link budget table
+    _rf_budget_rows = ""
+    for _lb, _lc, _lr in _rf_rings:
+        _rf_budget_rows += (
+            f"<tr><td style='padding:5px 10px;color:{_lc};font-weight:600;'>{_lb}</td>"
+            f"<td style='padding:5px 10px;color:#aabbcc;font-family:monospace;'>{_lr:.2f} mi ({_lr*1609.34/1000:.1f} km)</td></tr>"
+        )
+    st.markdown(
+        f"<table style='width:100%;border-collapse:collapse;font-size:0.78rem;margin-top:8px;'>"
+        f"<thead><tr style='border-bottom:1px solid #1e2535;'>"
+        f"<th style='padding:5px 10px;color:#556;text-align:left;'>SNR Tier</th>"
+        f"<th style='padding:5px 10px;color:#556;text-align:left;'>Max Horizontal Range</th>"
+        f"</tr></thead><tbody>{_rf_budget_rows}</tbody></table>"
+        f"<div style='font-size:0.65rem;color:#445;margin-top:6px;'>Model assumptions: 3390 MHz, TX 2W (+33 dBm), gains 3+3 dBi, 20 MHz BW, 7 dB noise figure, {_rf_clutter_label}, drone at {_rf_drone_alt} ft AGL, RF tower {_rf_infra_ht} ft above roofline. Free-space path loss (Friis). Does not account for terrain, buildings, or multipath — field conditions may vary.</div>",
+        unsafe_allow_html=True
+    )
+
     # ── MOBILE QR CODE ────────────────────────────────────────────────────────
     st.markdown("---")
     try:
@@ -9366,6 +9677,14 @@ if st.session_state['csvs_ready']:
         except Exception:
             _qr_area = 0
 
+        # Encode active station positions compactly for mobile map
+        # Format: "lat1,lon1;lat2,lon2" (4 decimal places, ≈10m accuracy)
+        try:
+            _stn_parts = [f"{d['lat']:.4f},{d['lon']:.4f}" for d in active_drones[:12]]
+            _stn_str   = ";".join(_stn_parts)
+        except Exception:
+            _stn_str = ""
+
         _qr_params = _up.urlencode({
             "city":  str(st.session_state.get("active_city", "")).title(),
             "state": st.session_state.get("active_state", ""),
@@ -9379,6 +9698,10 @@ if st.session_state['csvs_ready']:
             "calls": int(total_calls or 0),
             "area":  _qr_area,
             "tsav":  round(float(avg_time_saved or 0), 2),
+            "clat":  round(center_lat, 4),
+            "clon":  round(center_lon, 4),
+            "zoom":  round(dynamic_zoom, 1),
+            "s":     _stn_str,
         })
         _qr_url = f"{_qr_base}/?view=mobile&{_qr_params}"
 
@@ -9481,36 +9804,6 @@ if st.session_state['csvs_ready']:
     pd_dept_phone = st.session_state.get('pd_dept_phone', '')
     prop_email = f"{user_clean}@brincdrones.com"
     prop_name = " ".join([word.capitalize() for word in user_clean.split('.')])
-
-    # ── 4G LTE CELL COVERAGE MAP ─────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown(f"<h3 style='color:{text_main};'>📶 4G LTE Cell Coverage</h3>", unsafe_allow_html=True)
-    st.markdown(f"<div style='font-size:0.82rem;color:{text_muted};margin-bottom:10px;'>FCC National Broadband Map — 4G LTE coverage from AT&T, T-Mobile, Verizon, and US Cellular. Use the layer controls inside the map to toggle individual carriers. Coverage reflects FCC-reported availability data.</div>", unsafe_allow_html=True)
-    _fcc_zoom = round(min(13, max(9, dynamic_zoom + 1)), 2)
-    _fcc_url  = (f"https://broadbandmap.fcc.gov/home?version=dec2023"
-                 f"&zoom={_fcc_zoom}&vlon={center_lon:.6f}&vlat={center_lat:.6f}"
-                 f"&speed=25&tech=300&br=4")
-    st.markdown(f"""
-    <a href="{_fcc_url}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
-      <div style="
-        display:flex;align-items:center;justify-content:space-between;
-        background:#0d1b2e;border:1px solid #1e3a5f;border-radius:10px;
-        padding:20px 28px;cursor:pointer;transition:border-color 0.2s;
-      ">
-        <div>
-          <div style="color:#00b4d8;font-size:1rem;font-weight:600;margin-bottom:4px;">
-            📶 Open FCC 4G LTE Coverage Map
-          </div>
-          <div style="color:#6b7f99;font-size:0.78rem;">
-            FCC National Broadband Map · AT&amp;T, T-Mobile, Verizon, US Cellular ·
-            Centered on {center_lat:.4f}, {center_lon:.4f}
-          </div>
-        </div>
-        <div style="color:#00b4d8;font-size:1.4rem;margin-left:20px;">↗</div>
-      </div>
-    </a>
-    """, unsafe_allow_html=True)
-    st.caption("Opens broadbandmap.fcc.gov in a new tab. Coverage reflects FCC-reported carrier availability data and may not reflect actual field conditions.")
 
     # Always define these so download buttons work regardless of fleet_capex
     prop_city  = st.session_state.get('active_city', 'City')

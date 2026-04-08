@@ -3792,6 +3792,74 @@ def get_circle_coords(lat, lon, r_mi=2.0):
     c_lons = lon + (r_mi/(69.172 * np.cos(np.radians(lat)))) * np.cos(angles)
     return c_lats, c_lons
 
+
+# ── 4G LTE coverage overlay ───────────────────────────────────────────────────
+
+_COVERAGE_CACHE: dict = {}   # {state_abbr: GeoDataFrame or None}
+
+def _load_coverage(state_abbr: str):
+    """Load cell_coverage/{STATE}.parquet; returns GeoDataFrame or None."""
+    if state_abbr in _COVERAGE_CACHE:
+        return _COVERAGE_CACHE[state_abbr]
+    path = os.path.join("cell_coverage", f"{state_abbr}.parquet")
+    if not os.path.exists(path):
+        _COVERAGE_CACHE[state_abbr] = None
+        return None
+    try:
+        import pyarrow.parquet as pq
+        from shapely.wkb import loads as wkb_loads
+        df = pd.read_parquet(path)
+        df['geometry'] = df['geometry_wkb'].apply(lambda h: wkb_loads(bytes.fromhex(h)) if h else None)
+        gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')
+        _COVERAGE_CACHE[state_abbr] = gdf
+        return gdf
+    except Exception:
+        _COVERAGE_CACHE[state_abbr] = None
+        return None
+
+
+def add_coverage_traces(fig, state_abbr: str):
+    """Add AT&T / T-Mobile / Verizon 4G LTE polygon traces (legendonly by default)."""
+    gdf = _load_coverage(state_abbr)
+    if gdf is None or gdf.empty:
+        return
+
+    for _, row in gdf.iterrows():
+        geom = row.geometry
+        if geom is None or geom.is_empty:
+            continue
+        carrier = row['carrier']
+        color   = row['color']
+        # Collect all exterior rings (handle MultiPolygon)
+        rings = []
+        if geom.geom_type == 'Polygon':
+            rings = [geom.exterior]
+        elif geom.geom_type == 'MultiPolygon':
+            rings = [p.exterior for p in geom.geoms]
+        else:
+            continue
+
+        lons_all, lats_all = [], []
+        for ring in rings:
+            xs, ys = ring.coords.xy
+            lons_all.extend(list(xs) + [None])
+            lats_all.extend(list(ys) + [None])
+
+        # Parse hex color → rgba fill at 25% opacity
+        r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+        fill_color = f"rgba({r},{g},{b},0.25)"
+
+        fig.add_trace(go.Scattermap(
+            lon=lons_all, lat=lats_all,
+            mode='lines',
+            fill='toself',
+            fillcolor=fill_color,
+            line=dict(color=color, width=1),
+            name=f"{carrier} 4G LTE",
+            hoverinfo='name',
+            visible='legendonly',
+        ))
+
 def format_3_lines(name_str):
     match = re.search(r'\s(\d{1,5}\s+[A-Za-z])', name_str)
     if match:
@@ -7013,6 +7081,8 @@ if st.session_state['csvs_ready']:
         show_dots       = st.toggle("Incident Dots", value=True,
                                     help="Show individual 911 call locations as dots on the map.")
         show_faa        = st.toggle("FAA LAANC Airspace", value=False)
+        show_coverage   = st.toggle("4G LTE Coverage", value=False,
+                                    help="Show AT&T, T-Mobile, and Verizon 4G LTE coverage polygons. Toggle individual carriers in the map legend.")
         simulate_traffic = st.toggle("Simulate Ground Traffic", value=False)
         traffic_level   = st.slider("Traffic Congestion", 0, 100, 40) if simulate_traffic else 40
 
@@ -8431,6 +8501,11 @@ if st.session_state['csvs_ready']:
         if show_faa and faa_geojson:
             add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=not show_satellite)
 
+        if show_coverage:
+            _cov_state = st.session_state.get('active_state', '')
+            if _cov_state:
+                add_coverage_traces(fig, _cov_state)
+
         for d in active_drones:
             clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
             lbl = f"{d['name'].split(',')[0]} ({'Resp' if d['type']=='RESPONDER' else 'Guard'})"
@@ -9630,6 +9705,11 @@ if st.session_state['csvs_ready']:
                     marker=dict(size=_exp_pt_size, color='#ff3b3b', opacity=_exp_opacity),
                     name="Fire Incidents", hoverinfo='skip'
                 ))
+
+        # ── 4G LTE coverage polygons (legendonly, toggleable in export) ─────
+        _exp_cov_state = st.session_state.get('active_state', '')
+        if _exp_cov_state:
+            add_coverage_traces(fig_for_export, _exp_cov_state)
 
         # ── Coverage circles + station pins ──────────────────────────────────
         for d in active_drones:

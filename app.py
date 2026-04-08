@@ -470,7 +470,6 @@ defaults = {
     'dfr_rate': 12, 'deflect_rate': 25, 'total_original_calls': 0, 'total_modeled_calls': 0,
     'onboarding_done': False, 'trigger_sim': False, 'city_count': 1,
     'brinc_user': 'steven.beltran',
-    'pd_chief_name': '', 'pd_dept_name': '', 'pd_dept_email': '', 'pd_dept_phone': '',
     'session_start': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
     'session_id': str(uuid.uuid4())[:8],
     'data_source': 'unknown',   # 'cad_upload' | 'simulation' | 'demo' | 'brinc_file'
@@ -607,8 +606,6 @@ def _build_details_html(details):
     sid   = details.get('session_id', '—')
     stime = details.get('session_start', '—')
     dur   = details.get('session_duration_min', '—')
-    pd_c  = details.get('pd_chief', '—')
-    pd_d  = details.get('pd_dept', '—')
     avg_t = details.get('avg_response_min', 0)
     time_saved = details.get('avg_time_saved_min', 0)
     area_cov = details.get('area_covered_pct', 0)
@@ -644,11 +641,6 @@ def _build_details_html(details):
             <tr><td style="padding:4px; color:#888;">Time Saved vs Patrol</td><td style="padding:4px;">{time_saved:.1f} min</td></tr>
             <tr><td style="padding:4px; color:#888;">Geographic Coverage</td><td style="padding:4px;">{area_cov:.1f}%</td></tr>
         </table>
-        <h4 style="color:#555; margin-bottom:10px;">Police Dept Contact</h4>
-        <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:15px;">
-            <tr><td style="padding:4px; color:#888; width:50%;">Signatory</td><td style="padding:4px;">{pd_c}</td></tr>
-            <tr><td style="padding:4px; color:#888;">Department</td><td style="padding:4px;">{pd_d}</td></tr>
-        </table>
         <h4 style="color:#555; margin-bottom:10px;">Active Drones Placed</h4>
         <ul style="font-size:12px; color:#444; padding-left:20px;">{drone_list}</ul>
     </div>
@@ -677,13 +669,9 @@ def _build_sheets_row(city, state, event_type, k_resp, k_guard, coverage, name, 
         # ── Who ─────────────────────────────────────────────────────────────
         name,                                   # F: BRINC Rep Name
         email,                                  # G: BRINC Rep Email
-        d.get('pd_chief', ''),                 # H: PD Chief / Signatory
-        d.get('pd_dept', ''),                  # I: Department Name
-        d.get('pd_dept_email', ''),            # J: Department Email
-        d.get('pd_dept_phone', ''),            # K: Department Phone
         # ── Where (user-selected) ────────────────────────────────────────────
-        city,                                   # L: City (user-selected)
-        state,                                  # M: State (user-selected)
+        city,                                   # H: City (user-selected)
+        state,                                  # I: State (user-selected)
         d.get('population', ''),               # N: Population
         d.get('area_sq_mi', ''),               # O: Area (sq mi)
         # ── Where (file-inferred) ────────────────────────────────────────────
@@ -5304,12 +5292,8 @@ if not st.session_state['csvs_ready']:
                         if save_data.get('faa_geojson'):
                             st.session_state['_faa_geojson_cache'] = save_data['faa_geojson']
 
-                        # Restore sidebar settings — BRINC rep and police dept signatories
-                        st.session_state['brinc_user']     = save_data.get('brinc_user', 'steven.beltran')
-                        st.session_state['pd_chief_name']  = save_data.get('pd_chief_name', '')
-                        st.session_state['pd_dept_name']   = save_data.get('pd_dept_name', '')
-                        st.session_state['pd_dept_email']  = save_data.get('pd_dept_email', '')
-                        st.session_state['pd_dept_phone']  = save_data.get('pd_dept_phone', '')
+                        # Restore sidebar settings — BRINC rep info
+                        st.session_state['brinc_user'] = save_data.get('brinc_user', 'steven.beltran')
 
                         st.session_state['data_source'] = 'brinc_file'
                         st.session_state['demo_mode_used'] = False
@@ -7037,10 +7021,6 @@ if st.session_state['csvs_ready']:
                 'avg_response_min': 0,
                 'avg_time_saved_min': 0,
                 'area_covered_pct': 0,
-                'pd_chief':         st.session_state.get('pd_chief_name', ''),
-                'pd_dept':          st.session_state.get('pd_dept_name', ''),
-                'pd_dept_email':    st.session_state.get('pd_dept_email', ''),
-                'pd_dept_phone':    st.session_state.get('pd_dept_phone', ''),
                 'active_drones':    [],
             }
             _log_to_sheets(_map_city, _map_state, 'MAP_BUILD', 0, 0, 0.0,
@@ -9839,11 +9819,6 @@ if st.session_state['csvs_ready']:
     user_clean = brinc_user.strip()
     if not user_clean: user_clean = "steven.beltran"
 
-    # Police dept fields removed from sidebar — read from session state defaults
-    pd_chief_name = st.session_state.get('pd_chief_name', '')
-    pd_dept_name  = st.session_state.get('pd_dept_name', '')
-    pd_dept_email = st.session_state.get('pd_dept_email', '')
-    pd_dept_phone = st.session_state.get('pd_dept_phone', '')
     prop_email = f"{user_clean}@brincdrones.com"
     prop_name = " ".join([word.capitalize() for word in user_clean.split('.')])
 
@@ -9857,13 +9832,6 @@ if st.session_state['csvs_ready']:
         prop_city  = st.session_state.get('active_city', 'City')
         prop_state = st.session_state.get('active_state', 'FL')
 
-        # Police dept signatory — falls back gracefully if not filled in
-        pd_chief  = pd_chief_name.strip()  if pd_chief_name.strip()  else f"Chief of Police, {prop_city}"
-        pd_dept   = pd_dept_name.strip()   if pd_dept_name.strip()   else f"{prop_city} Police Department"
-        pd_email  = pd_dept_email.strip()  if pd_dept_email.strip()  else ""
-        pd_phone  = pd_dept_phone.strip()  if pd_dept_phone.strip()  else ""
-        pd_email_html = f'📧 <a href="mailto:{pd_email}">{pd_email}</a><br>' if pd_email else ""
-        pd_phone_html = f'📞 {pd_phone}<br>' if pd_phone else ""
         pop_metric = st.session_state.get('estimated_pop', 250000)
         current_time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         safe_city = prop_city.replace(" ","_").replace("/","_")
@@ -9936,11 +9904,6 @@ if st.session_state['csvs_ready']:
             "total_exports_in_session": st.session_state.get('export_count', 0),
             # File data matrix (populated by aggressive_parse_calls → _extract_file_meta)
             "file_meta":             st.session_state.get('file_meta', {}),
-            # PD Contact
-            "pd_chief":              st.session_state.get('pd_chief_name', ''),
-            "pd_dept":               st.session_state.get('pd_dept_name', ''),
-            "pd_dept_email":         st.session_state.get('pd_dept_email', ''),
-            "pd_dept_phone":         st.session_state.get('pd_dept_phone', ''),
             # Drones
             "active_drones": [{
                 "name": d['name'], "type": d['type'],
@@ -9997,12 +9960,8 @@ if st.session_state['csvs_ready']:
             "boundary_geojson": _boundary_geojson_export,
             "boundary_kind": st.session_state.get('boundary_kind', 'place'),
             "boundary_source_path": st.session_state.get('boundary_source_path', ''),
-            # Sidebar settings — BRINC rep info and police dept signatory fields
+            # Sidebar settings — BRINC rep info
             "brinc_user": st.session_state.get('brinc_user', 'steven.beltran'),
-            "pd_chief_name": st.session_state.get('pd_chief_name', ''),
-            "pd_dept_name": st.session_state.get('pd_dept_name', ''),
-            "pd_dept_email": st.session_state.get('pd_dept_email', ''),
-            "pd_dept_phone": st.session_state.get('pd_dept_phone', ''),
         }
 
         fig_for_export = go.Figure()
@@ -11028,15 +10987,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 
   <p>For every <strong>$10,000</strong> contributed, the program is projected to generate approximately <strong>${int(annual_savings/max(fleet_capex,1)*10000):,}</strong> in annual operational savings and property crime cost avoidance for the {prop_city} business community — a {round(annual_savings/max(fleet_capex,1),1):.1f}x return on community investment.</p>
 
-  <p>To make a contribution or learn more, please contact:</p>
-
-  <div style="background:#f8f9fa;border:1px solid #eee;border-radius:8px;padding:20px;margin:20px 0;font-size:13px">
-    <strong>{pd_chief}</strong><br>{pd_dept}<br>{pd_email_html}{pd_phone_html}
-  </div>
-
   <p>Together, we can make {prop_city} safer, faster, and more resilient. Thank you for your commitment to this community.</p>
-  <p>Respectfully,</p>
-  <p><strong>{pd_chief}</strong><br>{pd_dept}</p>
 </section>
 
 [ANALYTICS_SECTION]

@@ -3903,16 +3903,24 @@ def load_faa_parquet(minx, miny, maxx, maxy):
 
         if gdf.empty:
             # Fallback to mock if no cached data
-            return generate_mock_faa_grid(minx, miny, maxx, maxy)
+            mock_result = generate_mock_faa_grid(minx, miny, maxx, maxy)
+            return mock_result
 
         # Filter to bounding box
         pad = 0.05
-        filtered = gdf.cx[minx-pad:maxx+pad, miny-pad:maxy+pad]
+        try:
+            filtered = gdf.cx[minx-pad:maxx+pad, miny-pad:maxy+pad]
+        except Exception as e:
+            # If cx indexing fails, return all data
+            filtered = gdf
 
         if filtered.empty:
+            # No data in this bounding box, return empty
             return {"type": "FeatureCollection", "features": []}
 
-        return json.loads(filtered.to_json())
+        # Convert to GeoJSON
+        result = json.loads(filtered.to_json())
+        return result
 
     except Exception as e:
         return generate_mock_faa_grid(minx, miny, maxx, maxy)
@@ -9399,15 +9407,11 @@ if st.session_state['csvs_ready']:
                     mode='markers', marker=dict(size=point_size, color='#ff3b3b', opacity=point_opacity),
                     name="Fire Incidents", hoverinfo='skip'))
 
-        if show_faa:
-            if faa_geojson and faa_geojson.get("features"):
-                try:
-                    add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=not show_satellite)
-                    st.sidebar.success(f"✅ FAA: {len(faa_geojson.get('features', []))} zones rendered")
-                except Exception as e:
-                    st.sidebar.error(f"🔴 FAA render error: {str(e)[:100]}")
-            else:
-                st.sidebar.warning(f"⚠️ FAA: No zones loaded for current location")
+        if show_faa and faa_geojson and faa_geojson.get("features"):
+            try:
+                add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=not show_satellite)
+            except Exception as e:
+                st.sidebar.error(f"🔴 FAA render error: {str(e)[:100]}")
 
         if show_obstacles:
             add_faa_obstacles_layer_to_plotly(fig, minx, miny, maxx, maxy)

@@ -2328,16 +2328,44 @@ def aggressive_parse_calls(uploaded_files):
                         continue
 
             if d_found:
+                # ── Normalise date/time columns to plain strings ───────────────
+                # openpyxl returns Python datetime.datetime / datetime.time objects
+                # for date and time cells.  Concatenating them with strings via
+                # `+ ' '` raises TypeError and is caught by the bare except,
+                # silently discarding the entire file.  Convert to strings first.
+                def _col_to_datestr(series):
+                    """Convert a column that may contain datetime objects → 'YYYY-MM-DD' strings."""
+                    try:
+                        _p = pd.to_datetime(series, errors='coerce')
+                        if _p.notna().mean() > 0.6:
+                            return _p.dt.strftime('%Y-%m-%d').where(_p.notna(), '')
+                    except Exception:
+                        pass
+                    return series.fillna('').astype(str).str.strip()
+
+                def _col_to_timestr(series):
+                    """Convert a column that may contain datetime.time objects → 'HH:MM:SS' strings."""
+                    try:
+                        _first = series.dropna().iloc[0] if not series.dropna().empty else None
+                        if _first is not None and hasattr(_first, 'strftime'):
+                            # openpyxl datetime.time or datetime.datetime objects
+                            return series.apply(
+                                lambda v: v.strftime('%H:%M:%S') if hasattr(v, 'strftime') else ''
+                            ).fillna('')
+                    except Exception:
+                        pass
+                    return series.fillna('').astype(str).str.strip()
+
                 # Build the raw string series to parse — combine date+time cols if separate
                 if t_found and d_found[0] != t_found[0]:
-                    _raw_dt_str = raw_df[d_found[0]].fillna('') + ' ' + raw_df[t_found[0]].fillna('')
+                    _raw_dt_str = _col_to_datestr(raw_df[d_found[0]]) + ' ' + _col_to_timestr(raw_df[t_found[0]])
                 else:
-                    _raw_dt_str = raw_df[d_found[0]]
+                    _raw_dt_str = raw_df[d_found[0]].fillna('').astype(str).str.strip()
 
                 # Try explicit common formats first (orders of magnitude faster than
                 # dateutil fallback on large files, and avoids NaT on ghost rows).
                 # Format detection: sample the first non-null value.
-                _sample_vals = _raw_dt_str.dropna().str.strip()
+                _sample_vals = _raw_dt_str.dropna().astype(str).str.strip()
                 _sample_vals = _sample_vals[_sample_vals != ''].head(5)
                 _fmt_candidates = [
                     '%m/%d/%Y %I:%M %p',   # 2/14/2025 6:03 PM  (Mobile AL)

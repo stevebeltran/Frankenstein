@@ -7304,7 +7304,7 @@ if st.session_state['csvs_ready']:
         resp_strategy_raw = st.radio(
             "Responder Objective",
             ("Call Coverage", "Land Coverage"),
-            index=st.session_state.get('resp_strat_idx', 0),
+            index=st.session_state.get('resp_strat_idx', 1),
             horizontal=True,
             label_visibility="collapsed",
             help="What the Responder optimizer maximises. Call Coverage = densest incident areas. Land Coverage = broadest geographic reach."

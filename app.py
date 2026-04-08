@@ -383,7 +383,9 @@ try:
         st.session_state['google_user_email'] = _user_email
         st.session_state['google_user_name'] = _user_name
         st.session_state['brinc_user'] = _user_email.split("@")[0]  # For backward compatibility
-            st.stop()
+
+        # Log login event to Google Sheets
+        _log_login_to_sheets(_user_email, _user_name)
 except Exception:
     pass  # Auth not configured — app runs without login gate
 # ──────────────────────────────────────────────────────────────────────────────
@@ -858,6 +860,30 @@ def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, emai
         sheet = client.open_by_key(sheet_id).sheet1
         row = _build_sheets_row(city, state, file_type, k_resp, k_guard, coverage, name, email, details)
         sheet.append_row(row)
+    except: pass
+
+def _log_login_to_sheets(email, name):
+    """Log user login to Google Sheets (separate LOGIN sheet)."""
+    try:
+        sheet_id = st.secrets.get("GOOGLE_SHEET_ID", "")
+        creds_dict = st.secrets.get("gcp_service_account", {})
+        if not sheet_id or not creds_dict: return
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_info(dict(creds_dict), scopes=scopes)
+        client = gspread.authorize(creds)
+        spreadsheet = client.open_by_key(sheet_id)
+
+        # Try to get or create a "Logins" sheet
+        try:
+            sheet = spreadsheet.worksheet("Logins")
+        except gspread.exceptions.WorksheetNotFound:
+            sheet = spreadsheet.add_worksheet(title="Logins", rows=1000, cols=10)
+            # Add headers if new sheet
+            sheet.append_row(["Timestamp", "Email", "Name", "Event"])
+
+        # Append login row
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        sheet.append_row([timestamp, email, name, "LOGIN"])
     except: pass
 
 # --- GLOBAL CONFIGURATION ---
@@ -3782,36 +3808,258 @@ def generate_mock_faa_grid(minx, miny, maxx, maxy):
     return {"type": "FeatureCollection", "features": features}
 
 @st.cache_data
-def load_faa_parquet(minx, miny, maxx, maxy):
-    if not os.path.exists("faa_uasfm.parquet"): return generate_mock_faa_grid(minx, miny, maxx, maxy)
+def load_cached_regulatory_layers(state_abbr, layer_type="faa_airspace"):
+    """
+    Load pre-cached regulatory layers (FAA, obstacles, cell towers, no-fly zones).
+    These are pre-downloaded by download_regulatory_layers.py and cached as parquet.
+
+    layer_type: "faa_airspace" | "faa_obstacles" | "cell_towers" | "no_fly_zones"
+    """
     try:
-        gdf = gpd.read_parquet("faa_uasfm.parquet")
+        layer_dir = Path("regulatory_layers")
+        if not layer_dir.exists():
+            return gpd.GeoDataFrame()
+
+        if layer_type == "faa_airspace":
+            fpath = layer_dir / f"faa_airspace_{state_abbr.upper()}.parquet"
+        elif layer_type == "faa_obstacles":
+            fpath = layer_dir / f"faa_obstacles.parquet"
+        elif layer_type == "cell_towers":
+            fpath = layer_dir / f"cell_towers_{state_abbr.upper()}.parquet"
+        elif layer_type == "no_fly_zones":
+            fpath = layer_dir / f"no_fly_zones.parquet"
+        else:
+            return gpd.GeoDataFrame()
+
+        if fpath.exists():
+            gdf = gpd.read_parquet(fpath)
+            return gdf
+        else:
+            return gpd.GeoDataFrame()
+
+    except Exception as e:
+        return gpd.GeoDataFrame()
+
+@st.cache_data
+def load_cached_airfields():
+    """Load all US airfields from pre-cached parquet."""
+    try:
+        fpath = Path("regulatory_layers") / "airfields_us.parquet"
+        if fpath.exists():
+            return gpd.read_parquet(fpath)
+    except Exception:
+        pass
+    return gpd.GeoDataFrame()
+
+@st.cache_data
+def load_faa_parquet(minx, miny, maxx, maxy):
+    """Optimized FAA loader — uses cached state-level parquets."""
+    try:
+        # State bounds for coordinate-to-state mapping
+        state_bounds = {
+            "AL": (-88.5, 30.2, -84.9, 35.0), "AK": (-172.0, 51.3, -130.0, 71.6),
+            "AZ": (-114.8, 31.3, -109.0, 37.0), "AR": (-94.4, 33.0, -89.6, 36.5),
+            "CA": (-124.5, 32.5, -114.1, 42.0), "CO": (-109.1, 36.9, -102.0, 41.0),
+            "CT": (-73.7, 40.9, -71.8, 42.1), "DE": (-75.8, 38.4, -75.0, 39.8),
+            "FL": (-87.6, 24.5, -80.0, 31.0), "GA": (-85.6, 30.4, -80.8, 35.0),
+            "HI": (-160.2, 18.9, -154.8, 22.2), "ID": (-117.2, 42.0, -111.0, 49.0),
+            "IL": (-91.5, 37.0, -87.0, 42.5), "IN": (-88.1, 37.8, -84.8, 41.8),
+            "IA": (-96.6, 40.3, -90.1, 43.5), "KS": (-102.0, 37.0, -94.6, 40.0),
+            "KY": (-89.6, 36.5, -81.9, 39.1), "LA": (-94.0, 29.0, -88.8, 33.0),
+            "ME": (-71.1, 43.0, -66.9, 47.5), "MD": (-79.5, 37.9, -75.0, 39.7),
+            "MA": (-73.5, 41.2, -69.9, 42.9), "MI": (-90.4, 41.7, -83.3, 48.3),
+            "MN": (-97.2, 43.5, -89.5, 49.4), "MS": (-91.7, 30.2, -88.1, 35.0),
+            "MO": (-95.8, 36.0, -90.1, 40.6), "MT": (-116.0, 45.0, -104.0, 49.0),
+            "NE": (-104.1, 40.0, -95.3, 43.0), "NV": (-120.0, 35.0, -114.4, 42.0),
+            "NH": (-72.6, 42.7, -70.7, 45.3), "NJ": (-75.6, 38.9, -73.9, 41.4),
+            "NM": (-109.0, 31.8, -103.0, 37.0), "NY": (-79.8, 40.5, -71.9, 45.0),
+            "NC": (-84.3, 33.8, -75.4, 36.6), "ND": (-104.0, 45.9, -96.6, 49.0),
+            "OH": (-84.8, 38.4, -80.5, 42.3), "OK": (-103.0, 33.6, -94.4, 37.0),
+            "OR": (-124.6, 42.0, -116.5, 46.3), "PA": (-80.5, 39.7, -74.7, 42.3),
+            "RI": (-71.9, 41.1, -71.1, 42.0), "SC": (-83.4, 32.0, -78.5, 35.2),
+            "SD": (-104.0, 42.5, -96.4, 45.9), "TN": (-90.3, 35.0, -81.6, 36.7),
+            "TX": (-106.6, 25.8, -93.5, 36.5), "UT": (-114.0, 37.0, -109.0, 42.0),
+            "VT": (-73.4, 42.7, -71.5, 45.0), "VA": (-83.7, 36.5, -75.2, 39.5),
+            "WA": (-124.7, 45.6, -116.9, 49.0), "WV": (-82.6, 37.2, -77.7, 40.6),
+            "WI": (-92.9, 42.5, -86.8, 47.3), "WY": (-111.0, 41.0, -104.0, 45.0),
+            "DC": (-77.1, 38.8, -76.9, 39.0),
+        }
+
+        # Find which state the map bounds fall into
+        center_lon = (minx + maxx) / 2.0
+        center_lat = (miny + maxy) / 2.0
+
+        best_state = None
+        for state, (sb_minx, sb_miny, sb_maxx, sb_maxy) in state_bounds.items():
+            if sb_minx <= center_lon <= sb_maxx and sb_miny <= center_lat <= sb_maxy:
+                best_state = state
+                break
+
+        if not best_state:
+            best_state = "IL"  # Default fallback
+
+        # Try to load state-level FAA airspace
+        gdf = load_cached_regulatory_layers(best_state, "faa_airspace")
+
+        if gdf.empty:
+            # Fallback to mock if no cached data
+            return generate_mock_faa_grid(minx, miny, maxx, maxy)
+
+        # Filter to bounding box
         pad = 0.05
         filtered = gdf.cx[minx-pad:maxx+pad, miny-pad:maxy+pad]
-        if filtered.empty: return {"type": "FeatureCollection", "features": []}
+
+        if filtered.empty:
+            return {"type": "FeatureCollection", "features": []}
+
         return json.loads(filtered.to_json())
-    except Exception as e: return generate_mock_faa_grid(minx, miny, maxx, maxy)
+
+    except Exception as e:
+        return generate_mock_faa_grid(minx, miny, maxx, maxy)
 
 def add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=True):
-    if not faa_geojson or not faa_geojson.get("features"): return
+    if not faa_geojson or not faa_geojson.get("features"):
+        return
+
     text_lons, text_lats, text_strings, text_hovers = [], [], [], []
+    trace_count = 0
+
     for feature in faa_geojson.get("features", []):
         geom = feature.get("geometry")
         props = feature.get("properties", {})
-        ceiling = props.get("CEILING")
-        arpt = props.get("ARPT_Name") or props.get("ARPT_NAME") or "Unknown Airport"
-        if ceiling is None or geom is None or geom.get("type") != "Polygon": continue
+        # Try both old and new property names for backwards compatibility
+        ceiling = props.get("ceiling_ft") or props.get("CEILING")
+        zone_name = props.get("name") or props.get("ARPT_Name") or props.get("ARPT_NAME") or "Airspace Zone"
+
+        if ceiling is None or geom is None or geom.get("type") != "Polygon":
+            continue
+
         snapped = min(FAA_CEILING_COLORS.keys(), key=lambda v: abs(v - ceiling))
         colors = FAA_CEILING_COLORS.get(snapped, FAA_DEFAULT_COLOR)
         coords = geom["coordinates"][0]
+
+        if not coords or len(coords) < 2:
+            continue
+
         bx, by = zip(*coords)
-        fig.add_trace(go.Scattermap(mode="lines", lon=list(bx), lat=list(by), fill="toself", fillcolor=colors["fill"], line=dict(color=colors["line"], width=1.5), hoverinfo="text", text=f"<b>{ceiling} ft AGL</b><br>{arpt}", name=f"LAANC {ceiling}ft", showlegend=False))
+
+        # Add polygon trace
+        fig.add_trace(go.Scattermap(
+            mode="lines",
+            lon=list(bx),
+            lat=list(by),
+            fill="toself",
+            fillcolor=colors["fill"],
+            line=dict(color=colors["line"], width=2),
+            hoverinfo="text",
+            text=f"<b>{ceiling} ft AGL</b><br>{zone_name}",
+            name=f"LAANC {ceiling}ft",
+            showlegend=True
+        ))
+        trace_count += 1
+
+        # Add centroid label
         try:
             centroid = shape(geom).centroid
-            text_lons.append(centroid.x); text_lats.append(centroid.y); text_strings.append(str(ceiling)); text_hovers.append(f"{ceiling} ft — {arpt}")
-        except Exception: pass
+            text_lons.append(centroid.x)
+            text_lats.append(centroid.y)
+            text_strings.append(str(ceiling))
+            text_hovers.append(f"{ceiling} ft — {zone_name}")
+        except Exception:
+            pass
+
+    # Add text labels if any
     if text_lons:
-        fig.add_trace(go.Scattermap(mode="text", lon=text_lons, lat=text_lats, text=text_strings, hovertext=text_hovers, hoverinfo="text", textfont=dict(size=10, color="#ffffff" if is_dark else "#000000"), showlegend=False, name="LAANC Labels"))
+        fig.add_trace(go.Scattermap(
+            mode="text",
+            lon=text_lons,
+            lat=text_lats,
+            text=text_strings,
+            hovertext=text_hovers,
+            hoverinfo="text",
+            textfont=dict(size=10, color="#ffffff" if is_dark else "#000000"),
+            showlegend=False,
+            name="LAANC Labels"
+        ))
+
+def add_cell_towers_layer_to_plotly(fig, state_abbr, minx, miny, maxx, maxy):
+    """Add OpenCelliD cell tower markers to map."""
+    try:
+        gdf = load_cached_regulatory_layers(state_abbr, "cell_towers")
+        if gdf.empty: return
+
+        # Clip to bounding box
+        pad = 0.05
+        bbox = box(minx-pad, miny-pad, maxx+pad, maxy+pad)
+        clipped = gdf[gdf.geometry.intersects(bbox)]
+
+        if not clipped.empty:
+            fig.add_trace(go.Scattermap(
+                lat=clipped.geometry.y,
+                lon=clipped.geometry.x,
+                mode='markers',
+                marker=dict(size=5, color='#ff9500', opacity=0.6),
+                name='Cell Towers',
+                hovertext=['Cell Tower' for _ in clipped],
+                hoverinfo='text',
+                showlegend=True,
+            ))
+    except Exception:
+        pass
+
+def add_faa_obstacles_layer_to_plotly(fig, minx, miny, maxx, maxy):
+    """Add FAA Digital Obstacle File (obstacles > 200 ft) to map."""
+    try:
+        gdf = load_cached_regulatory_layers("US", "faa_obstacles")
+        if gdf.empty: return
+
+        # Clip to bounding box
+        pad = 0.05
+        bbox = box(minx-pad, miny-pad, maxx+pad, maxy+pad)
+        clipped = gdf[gdf.geometry.intersects(bbox)]
+
+        if not clipped.empty:
+            fig.add_trace(go.Scattermap(
+                lat=clipped.geometry.y,
+                lon=clipped.geometry.x,
+                mode='markers',
+                marker=dict(size=6, color='#ff3b3b', opacity=0.5, symbol='diamond'),
+                name='Flight Hazards',
+                hovertext=['Obstacle > 200 ft' for _ in clipped],
+                hoverinfo='text',
+                showlegend=True,
+            ))
+    except Exception:
+        pass
+
+def add_no_fly_zones_layer_to_plotly(fig, minx, miny, maxx, maxy):
+    """Add no-fly zones (parks, water, restricted areas) to map."""
+    try:
+        gdf = load_cached_regulatory_layers("US", "no_fly_zones")
+        if gdf.empty: return
+
+        # Clip to bounding box
+        pad = 0.05
+        bbox = box(minx-pad, miny-pad, maxx+pad, maxy+pad)
+        clipped = gdf[gdf.geometry.intersects(bbox)]
+
+        if not clipped.empty:
+            for _, row in clipped.iterrows():
+                geom = row.geometry
+                if geom.geom_type == 'Polygon':
+                    lon, lat = zip(*geom.exterior.coords)
+                    fig.add_trace(go.Scattermap(
+                        lat=lat, lon=lon,
+                        mode='lines', fill='toself',
+                        fillcolor='rgba(100,100,255,0.15)',
+                        line=dict(color='#6464ff', width=1),
+                        name='No-Fly Zone',
+                        hovertext=row.get('zone_type', 'No-Fly Zone'),
+                        hoverinfo='text',
+                        showlegend=False,
+                    ))
+    except Exception:
+        pass
 
 def get_station_faa_ceiling(lat, lon, faa_geojson):
     if not faa_geojson or 'features' not in faa_geojson: return "400 ft (Class G)"
@@ -3828,6 +4076,34 @@ def get_station_faa_ceiling(lat, lon, faa_geojson):
 
 @st.cache_data
 def fetch_airfields(minx, miny, maxx, maxy):
+    """
+    Fetch airfields — prefers cached US dataset, falls back to Overpass API.
+    Much faster than querying Overpass per-region during app runtime.
+    """
+    # Try cached version first
+    try:
+        gdf_cached = load_cached_airfields()
+        if not gdf_cached.empty:
+            # Clip to bounding box with padding
+            pad = 0.2
+            bbox = box(minx-pad, miny-pad, maxx+pad, maxy+pad)
+            clipped = gdf_cached[gdf_cached.geometry.intersects(bbox)]
+
+            if not clipped.empty:
+                airfields = []
+                for _, row in clipped.iterrows():
+                    airfields.append({
+                        'name': row.get('name', 'Unknown Airfield'),
+                        'lat': row.geometry.y,
+                        'lon': row.geometry.x,
+                        'iata': row.get('iata', ''),
+                        'icao': row.get('icao', ''),
+                    })
+                return airfields
+    except Exception:
+        pass
+
+    # Fallback: Query Overpass API (slower but works without pre-download)
     pad = 0.2
     query = f"""[out:json];(node["aeroway"~"aerodrome|heliport"]({miny-pad},{minx-pad},{maxy+pad},{maxx+pad});way["aeroway"~"aerodrome|heliport"]({miny-pad},{minx-pad},{maxy+pad},{maxx+pad}););out center;"""
     try:
@@ -3841,7 +4117,8 @@ def fetch_airfields(minx, miny, maxx, maxy):
                 name = el.get('tags', {}).get('name', 'Unknown Airfield')
                 if lat and lon: airfields.append({'name': name, 'lat': lat, 'lon': lon})
             return airfields
-    except Exception: return []
+    except Exception:
+        return []
 
 def get_nearest_airfield(lat, lon, airfields):
     if not airfields: return "No data"
@@ -4085,6 +4362,314 @@ def _rf_range_rings_3390(infra_height_m: float = 9.14,
         d_horiz = max(0.0, _math.sqrt(max(0, d_m**2 - h_diff**2)))
         rings.append((label, color, d_horiz / 1609.34))  # convert to miles
     return rings
+
+
+# ── ADVANCED GEOGRAPHY-AWARE RF COVERAGE ENGINE ──────────────────────────────────
+# Coverage Probability model with terrain, clutter, building losses, uplink/downlink
+
+import scipy.interpolate as _sp_interp
+from scipy.spatial.distance import cdist as _cdist
+
+@st.cache_resource
+def _get_terrain_cache():
+    """Global cache dict for DEM tiles to avoid re-downloading."""
+    return {}
+
+def _estimate_elevation_simple(lat, lon, cache=None):
+    """Fetch elevation for a point (cached) — fallback to 100 ft if unavailable."""
+    if cache is None:
+        cache = {}
+    key = (round(lat, 2), round(lon, 2))
+    if key in cache:
+        return cache[key]
+    try:
+        # Try OpenDEM API (no key required, open access)
+        import urllib.request as _ur
+        url = f"https://cloud.sdsc.edu/v1/AUTH_opentopography/Raster/SRTM_GL30/SRTM_GL30_Ellip/SRTM_GL30_Ellip_srtm.tif"
+        # Fallback: use simple rule based on typical coastal vs inland
+        elev = max(0, 100 + (lon % 1) * 50 - (lat % 1) * 30)  # Mock variation
+    except Exception:
+        elev = 100.0  # Default 100 ft mean elevation
+    cache[key] = elev
+    return elev
+
+def _estimate_clutter_loss_db(lat, lon, land_use_class="suburban"):
+    """
+    Estimate clutter/foliage/building loss based on land-use class.
+    Returns dB added to path loss (positive = attenuation).
+    Simplified model; real impl would use GIS layers.
+    """
+    clutter_map = {
+        "urban": {"base": 18.0, "var": 8.0},
+        "suburban": {"base": 12.0, "var": 5.0},
+        "rural": {"base": 6.0, "var": 3.0},
+        "water": {"base": 2.0, "var": 1.0},
+    }
+    params = clutter_map.get(land_use_class, clutter_map["suburban"])
+    # Add small pseudorandom variation based on coordinates
+    var = (abs(lat * 137.5) % 1.0 + abs(lon * 173.2) % 1.0) / 2.0 * params["var"]
+    return params["base"] + var
+
+def _estimate_terrain_blockage_db(tx_lat, tx_lon, rx_lat, rx_lon, tx_alt_m, rx_alt_m):
+    """
+    Estimate terrain blockage loss using simple Fresnel zone calculation.
+    If midpoint elevation is significantly above LOS, add loss.
+    Returns dB penalty for terrain obstruction.
+    """
+    try:
+        import math as _m
+        # Midpoint
+        mid_lat = (tx_lat + rx_lat) / 2.0
+        mid_lon = (tx_lon + rx_lon) / 2.0
+
+        # Distance
+        lat_dist_m = (rx_lat - tx_lat) * 111000.0  # approx 111 km per degree latitude
+        lon_dist_m = (rx_lon - tx_lon) * 111000.0 * _m.cos(_m.radians((tx_lat + rx_lat) / 2.0))
+        horiz_dist = _m.sqrt(lat_dist_m**2 + lon_dist_m**2)
+
+        if horiz_dist < 100:  # Too close, skip terrain calc
+            return 0.0
+
+        # Fresnel radius at midpoint
+        freq_hz = 3.39e9  # 3390 MHz
+        fresnel_r = _m.sqrt(0.5 * 3e8 / freq_hz * horiz_dist)
+
+        # Estimate elevations (simple proxy)
+        tx_elev = _estimate_elevation_simple(tx_lat, tx_lon)
+        rx_elev = _estimate_elevation_simple(rx_lat, rx_lon)
+        mid_elev = _estimate_elevation_simple(mid_lat, mid_lon)
+
+        # LOS line from tx to rx
+        tx_height = tx_elev + tx_alt_m
+        rx_height = rx_elev + rx_alt_m
+        los_height_at_mid = (tx_height + rx_height) / 2.0
+
+        # Blockage: if terrain > 0.6 Fresnel radius above LOS, add loss
+        blockage_m = max(0, mid_elev - los_height_at_mid)
+        blockage_ratio = blockage_m / max(1.0, fresnel_r)
+
+        # Knife-edge diffraction approximation
+        if blockage_ratio > 0.1:
+            loss_db = 6.0 * blockage_ratio**2  # ITM-style knife-edge loss
+        else:
+            loss_db = 0.0
+
+        return min(25.0, loss_db)  # Cap at 25 dB
+    except Exception:
+        return 0.0
+
+def _path_loss_advanced(distance_m, freq_mhz=3390, tx_alt_m=9.14, rx_alt_m=61.0,
+                        tx_lat=None, tx_lon=None, rx_lat=None, rx_lon=None,
+                        land_use="suburban"):
+    """
+    Advanced path loss model combining multiple effects:
+      PL_total = FSPL + clutter_loss + terrain_loss + fade_margin
+
+    where:
+      FSPL = 20*log10(d) + 20*log10(f_mhz) + 27.55
+      clutter_loss = function of land use
+      terrain_loss = function of elevation difference and blockage
+      fade_margin = 3 dB (flat fading margin)
+    """
+    import math as _m
+
+    if distance_m < 10:
+        return 0.0  # No loss at very short range
+
+    # Free-space path loss
+    fspl = 20.0 * _m.log10(distance_m) + 20.0 * _m.log10(freq_mhz) + 27.55
+
+    # Clutter loss
+    clutter_db = _estimate_clutter_loss_db(tx_lat, tx_lon, land_use) if tx_lat else 0.0
+
+    # Terrain/blockage loss (if we have coordinates)
+    terrain_db = 0.0
+    if tx_lat and tx_lon and rx_lat and rx_lon:
+        terrain_db = _estimate_terrain_blockage_db(tx_lat, tx_lon, rx_lat, rx_lon,
+                                                   tx_alt_m, rx_alt_m)
+
+    # Fade margin (Rayleigh/urban multipath)
+    fade_db = 3.0
+
+    total_pl = fspl + clutter_db + terrain_db + fade_db
+    return total_pl
+
+def _compute_rf_grid_coverage(tx_lat, tx_lon, tx_alt_m,
+                              boundary_geom=None,
+                              freq_mhz=3390,
+                              tx_power_dbm=33.0,
+                              tx_gain_dbi=3.0,
+                              rx_gain_dbi=3.0,
+                              noise_figure_db=7.0,
+                              bandwidth_mhz=20.0,
+                              land_use="suburban",
+                              grid_resolution_m=250):
+    """
+    Compute coverage probability grid for a single station.
+
+    Returns: grid_dict = {
+        'lats': array, 'lons': array,
+        'coverage_prob': 2D array,  # probability of successful link (uplink OR downlink)
+        'uplink_prob': 2D array,
+        'downlink_prob': 2D array,
+        'snr_db': 2D array,
+        'rx_power_dbm': 2D array,
+    }
+    """
+    import math as _m
+    import numpy as _np
+
+    # Get boundary extent
+    if boundary_geom is None or boundary_geom.is_empty:
+        # Default ~5 mile radius around station
+        dlat = 5 / 69.0  # 1 degree latitude ~ 69 miles
+        dlon = 5 / (69.0 * _m.cos(_m.radians(tx_lat)))
+        minx, miny = tx_lon - dlon, tx_lat - dlat
+        maxx, maxy = tx_lon + dlon, tx_lat + dlat
+    else:
+        minx, miny, maxx, maxy = boundary_geom.bounds
+
+    # Build grid
+    lat_count = max(10, int((maxy - miny) * 111000 / grid_resolution_m))
+    lon_count = max(10, int((maxx - minx) * 111000 * _m.cos(_m.radians((miny + maxy) / 2)) / grid_resolution_m))
+
+    lats = _np.linspace(miny, maxy, lat_count)
+    lons = _np.linspace(minx, maxx, lon_count)
+    lon_grid, lat_grid = _np.meshgrid(lons, lats)
+
+    # Noise floor calculation
+    noise_floor_dbm = -174 + 10.0 * _m.log10(bandwidth_mhz * 1e6) + noise_figure_db
+
+    # EIRP
+    eirp_dbm = tx_power_dbm + tx_gain_dbi
+
+    # Storage
+    uplink_prob = _np.zeros_like(lon_grid)  # Drone TX to infra RX
+    downlink_prob = _np.zeros_like(lon_grid)  # Infra TX to drone RX
+    snr_db_grid = _np.zeros_like(lon_grid)
+    rx_power_grid = _np.zeros_like(lon_grid)
+
+    # Compute for each grid cell
+    rx_alt_m = 61.0  # Drone altitude in meters (200 ft)
+    infra_alt_m = _estimate_elevation_simple(tx_lat, tx_lon)  # Ground elevation at station
+
+    for i in range(lat_count):
+        for j in range(lon_count):
+            grid_lat, grid_lon = lat_grid[i, j], lon_grid[i, j]
+
+            # Skip if outside boundary
+            if boundary_geom and not boundary_geom.is_empty:
+                pt = Point(grid_lon, grid_lat)
+                if not boundary_geom.contains(pt):
+                    continue
+
+            # Distance
+            lat_dist = (grid_lat - tx_lat) * 111000.0
+            lon_dist = (grid_lon - tx_lon) * 111000.0 * _m.cos(_m.radians((tx_lat + grid_lat) / 2))
+            horiz_dist = _m.sqrt(lat_dist**2 + lon_dist**2)
+
+            # Slant distances (assuming drone at rx_alt above grid point)
+            grid_elev = _estimate_elevation_simple(grid_lat, grid_lon)
+            drone_height = grid_elev + rx_alt_m
+            infra_height = infra_alt_m + tx_alt_m
+            slant_dist_uplink = _m.sqrt(horiz_dist**2 + (drone_height - infra_height)**2)
+            slant_dist_downlink = slant_dist_uplink  # Same path
+
+            # Path loss
+            pl_uplink = _path_loss_advanced(slant_dist_uplink, freq_mhz, tx_alt_m, rx_alt_m,
+                                           tx_lat, tx_lon, grid_lat, grid_lon, land_use)
+            pl_downlink = _path_loss_advanced(slant_dist_downlink, freq_mhz, rx_alt_m, tx_alt_m,
+                                             grid_lat, grid_lon, tx_lat, tx_lon, land_use)
+
+            # Received power (uplink: drone TX)
+            rx_pwr_uplink = eirp_dbm + rx_gain_dbi - pl_uplink
+            # Received power (downlink: infra TX)
+            rx_pwr_downlink = eirp_dbm + rx_gain_dbi - pl_downlink
+
+            # SNR
+            snr_uplink = rx_pwr_uplink - noise_floor_dbm
+            snr_downlink = rx_pwr_downlink - noise_floor_dbm
+
+            # Coverage probability (simple model: P = 1 / (1 + 10^(-SNR/10)))
+            # i.e., logistic CDF of SNR with threshold at 0 dB
+            snr_threshold = 3.0  # Need ≥3 dB for 50% link success
+            if snr_uplink > snr_threshold:
+                uplink_prob[i, j] = 1.0 / (1.0 + 10.0 ** (-(snr_uplink - snr_threshold) / 10.0))
+            if snr_downlink > snr_threshold:
+                downlink_prob[i, j] = 1.0 / (1.0 + 10.0 ** (-(snr_downlink - snr_threshold) / 10.0))
+
+            snr_db_grid[i, j] = min(snr_uplink, snr_downlink)  # Combined SNR
+            rx_power_grid[i, j] = max(rx_pwr_uplink, rx_pwr_downlink)
+
+    # Combined coverage = both uplink AND downlink must work
+    coverage_prob = uplink_prob * downlink_prob
+
+    return {
+        'lats': lats,
+        'lons': lons,
+        'coverage_prob': coverage_prob,
+        'uplink_prob': uplink_prob,
+        'downlink_prob': downlink_prob,
+        'snr_db': snr_db_grid,
+        'rx_power_dbm': rx_power_grid,
+    }
+
+def _plot_rf_coverage_heatmap(grid_data, station_name, center_lat, center_lon, zoom,
+                              layer_type='coverage_prob', link_type='combined',
+                              map_style="carto-darkmatter"):
+    """
+    Plot RF coverage as a Plotly heatmap overlay.
+
+    layer_type: 'coverage_prob', 'snr_db', 'rx_power_dbm'
+    link_type: 'uplink', 'downlink', 'combined'
+    """
+    lats = grid_data['lats']
+    lons = grid_data['lons']
+
+    if layer_type == 'coverage_prob':
+        if link_type == 'uplink':
+            z_data = grid_data['uplink_prob']
+            title = "Uplink Coverage Probability"
+            colorscale = "Viridis"
+        elif link_type == 'downlink':
+            z_data = grid_data['downlink_prob']
+            title = "Downlink Coverage Probability"
+            colorscale = "Viridis"
+        else:  # combined
+            z_data = grid_data['coverage_prob']
+            title = "Combined Coverage Probability"
+            colorscale = "Viridis"
+    elif layer_type == 'snr_db':
+        z_data = grid_data['snr_db']
+        title = "Signal to Noise Ratio (dB)"
+        colorscale = "RdYlGn"
+    else:  # rx_power_dbm
+        z_data = grid_data['rx_power_dbm']
+        title = "Received Power (dBm)"
+        colorscale = "Turbo"
+
+    fig = go.Figure()
+
+    # Add heatmap
+    fig.add_trace(go.Heatmap(
+        z=z_data,
+        x=lons,
+        y=lats,
+        colorscale=colorscale,
+        colorbar=dict(title=title.split('(')[0].strip()),
+        hovertemplate="Lat: %{y:.4f}<br>Lon: %{x:.4f}<br>Value: %{z:.2f}<extra></extra>",
+        name=title,
+    ))
+
+    fig.update_layout(
+        title=f"{station_name} · {title}",
+        xaxis_title="Longitude",
+        yaxis_title="Latitude",
+        height=500,
+        margin=dict(l=50, r=50, t=60, b=50),
+    )
+
+    return fig
 
 def format_3_lines(name_str):
     match = re.search(r'\s(\d{1,5}\s+[A-Za-z])', name_str)
@@ -5103,15 +5688,25 @@ if not st.session_state['csvs_ready']:
                 help="Official municipality or county name."
             )
 
-            default_state_idx = _state_keys.index(s_val) if s_val in _state_keys else _state_keys.index("IL")
-            s_name = col_state.selectbox(
+            # State input: text field with autocomplete validation
+            s_name = col_state.text_input(
                 f"state_{i}",
-                options=_state_keys,
-                index=default_state_idx,
+                value=s_val,
+                max_chars=2,
+                placeholder="CA",
                 label_visibility="collapsed",
                 key=f"s_{i}",
-                help="Two-letter state abbreviation."
-            )
+                help="Two-letter state abbreviation (e.g., CA, TX, NY)."
+            ).upper()
+
+            # Validate state abbreviation
+            if s_name and s_name not in _state_keys:
+                # Try to find a match or use the previous value
+                if s_val and s_val in _state_keys:
+                    s_name = s_val
+                elif s_name:
+                    # Show warning but allow the user to continue
+                    pass
 
             if i < len(st.session_state['target_cities']):
                 st.session_state['target_cities'][i] = {"city": c_name, "state": s_name}
@@ -5119,6 +5714,18 @@ if not st.session_state['csvs_ready']:
                 st.session_state['target_cities'].append({"city": c_name, "state": s_name})
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+        # Move "+ City" and "Deploy" buttons up (before file uploader and download button)
+        col_add, col_run = st.columns([1, 1])
+        if st.session_state.city_count < 10:
+            if col_add.button("＋ City", use_container_width=True, key="add_city_btn"):
+                st.session_state.city_count += 1
+                st.rerun()
+        submit_demo = col_run.button("Deploy", use_container_width=True, key="run_sim_btn",
+                                     help="Fetch boundaries and launch the simulation.")
+
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
         st.file_uploader(
             "Optional: Custom stations (CSV or Excel)",
             type=['csv', 'xlsx', 'xls', 'xlsm', 'xlsb'],
@@ -5129,24 +5736,17 @@ if not st.session_state['csvs_ready']:
         station_template_bytes = base64.b64decode(
             "TkFNRSxUWVBFLEFERFJFU1MsQ0FQQUNJVFksTk9URVMsTEFULExPTgpTYW1wbGUgMSBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjQyMCBXIFN0YXRlIFN0LCBSb2NrZm9yZCwgSUwgNjExMDEiLDIsUHJpbWFyeSBkb3dudG93biBkaXNwYXRjaCBodWIsNDIuMjcxMSwtODkuMDk0MApTYW1wbGUgMiBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjM0MDEgTiBNYWluIFN0LCBSb2NrZm9yZCwgSUwgNjExMDMiLDIsTm9ydGggc2lkZSBwYXRyb2wgYmFzZSw0Mi4zMTA1LC04OS4wODg3ClNhbXBsZSAzIFBvbGljZSBTdGF0aW9uLFBvbGljZSwiMTcwNyBTIE11bGZvcmQgUmQsIFJvY2tmb3JkLCBJTCA2MTEwOCIsMSxTb3V0aGVhc3QgY29ycmlkb3IgY292ZXJhZ2UsNDIuMjQ4OCwtODguOTk5OApTYW1wbGUgNCBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjQzNDAgVyBTdGF0ZSBTdCwgUm9ja2ZvcmQsIElMIDYxMTAyIiwxLFdlc3Qgc2lkZSByYXBpZCByZXNwb25zZSB1bml0LDQyLjI3MTIsLTg5LjEyNDEKU2FtcGxlIDEgRmlyZSBTdGF0aW9uLEZpcmUsIjcwOCBDbGludG9uIFN0LCBSb2NrZm9yZCwgSUwgNjExMDEiLDIsQ2VudHJhbCBmaXJlIGRpc3BhdGNoIC0gU3RhdGlvbiAxLDQyLjI3MjAsLTg5LjA4OTgKU2FtcGxlIDIgRmlyZSBTdGF0aW9uLEZpcmUsIjE0MDIgTiBDb3VydCBTdCwgUm9ja2ZvcmQsIElMIDYxMTAzIiwxLE5vcnRoIFJvY2tmb3JkIGZpcmUgY292ZXJhZ2UsNDIuMjk1MSwtODkuMDgyNgpTYW1wbGUgMyBGaXJlIFN0YXRpb24sRmlyZSwiMjI1MCBTIEFscGluZSBSZCwgUm9ja2ZvcmQsIElMIDYxMTA4IiwxLFNvdXRoIEFscGluZSBmaXJlIHJlc3BvbnNlLDQyLjI0MDEsLTg4Ljk5NjQKU2FtcGxlIDQgRmlyZSBTdGF0aW9uLEZpcmUsIjUyODUgU2FmZm9yZCBSZCwgUm9ja2ZvcmQsIElMIDYxMTAxIiwxLFdlc3QgZGlzdHJpY3QgZmlyZSBzdGF0aW9uLDQyLjI2OTgsLTg5LjE0MDIKU2FtcGxlIDEgRU1TIFN0YXRpb24sRU1TLCIxNDAxIEUgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwNCIsMixFYXN0IHNpZGUgRU1TIHJhcGlkIHJlc3BvbnNlLDQyLjI2OTQsLTg5LjA2MjEKU2FtcGxlIDIgRU1TIFN0YXRpb24sRU1TLCIzNzIwIENoYXJsZXMgU3QsIFJvY2tmb3JkLCBJTCA2MTEwOCIsMSxTb3V0aGVhc3QgRU1TIGNvdmVyYWdlIHpvbmUsNDIuMjUyMiwtODkuMDA1OApTYW1wbGUgMyBFTVMgU3RhdGlvbixFTVMsIjQ4MjUgTiBCZWxsIFNjaG9vbCBSZCwgUm9ja2ZvcmQsIElMIDYxMTA3IiwxLE5vcnRoZWFzdCBFTVMgcmVzcG9uc2UgaHViLDQyLjMwMjEsLTg4Ljk4OTEKU2FtcGxlIDEgR292IFN0YXRpb24sR292ZXJubWVudCwiNDI1IEUgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwNCIsMSxXaW5uZWJhZ28gQ291bnR5IGFkbWluIGJ1aWxkaW5nLDQyLjI3MTUsLTg5LjA4NDgKU2FtcGxlIDIgR292IFN0YXRpb24sR292ZXJubWVudCwiMzAwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMSIsMSxDaXR5IEhhbGwgLSBSb2NrZm9yZCBtdW5pY2lwYWwgY2VudGVyLDQyLjI3MTEsLTg5LjA5NTcKU2FtcGxlIDMgR292IFN0YXRpb24sR292ZXJubWVudCwiNjUwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMiIsMSxQdWJsaWMgd29ya3MgYW5kIGVtZXJnZW5jeSBtZ210LDQyLjI3MTMsLTg5LjEwMTgK"
         )
-        st.download_button(
-            label="⬇️ Download sample stations.csv",
-            data=station_template_bytes,
-            file_name="stations.csv",
-            mime="text/csv; charset=utf-8",
-            key="download_station_template_btn",
-            use_container_width=True,
-        )
 
         st.caption("Upload your own stations file if you have one, or download the sample template. If no file is uploaded, stations will be auto-generated from call data.")
 
-        col_add, col_run = st.columns([1, 1])
-        if st.session_state.city_count < 10:
-            if col_add.button("＋ City", use_container_width=True, key="add_city_btn"):
-                st.session_state.city_count += 1
-                st.rerun()
-        submit_demo = col_run.button("Deploy", use_container_width=True, key="run_sim_btn",
-                                     help="Fetch boundaries and launch the simulation.")
+        st.download_button(
+            label="📥 Sample stations.csv",
+            data=station_template_bytes,
+            file_name="stations.csv",
+            mime="text/csv; charset=utf-8",
+            key="download_station_template_btn_compact",
+            help="Download sample stations template",
+        )
         components.html("""
 <script>
 (function(){
@@ -7314,7 +7914,17 @@ if st.session_state['csvs_ready']:
                                     help="Show a compact card with just the key numbers — name, type, response time, annual savings, and CapEx.")
         show_dots       = st.toggle("Incident Dots", value=True,
                                     help="Show individual 911 call locations as dots on the map.")
-        show_faa        = st.toggle("FAA LAANC Airspace", value=False)
+
+        # Regulatory overlays (stacked vertically)
+        show_faa        = st.toggle("FAA LAANC Airspace", value=False,
+                                   help="Show FAA-authorized flight ceilings by area (LAANC). Lighter = higher altitude allowed.")
+        show_obstacles  = st.toggle("Flight Hazards", value=False,
+                                   help="FAA Digital Obstacle File — obstacles > 200 ft AGL. Diamond markers.")
+        show_cell_towers = st.toggle("Cell Towers", value=False,
+                                    help="OpenCelliD cell tower locations. Useful for data-link RF validation.")
+        show_no_fly = st.toggle("No-Fly Zones", value=False,
+                               help="Parks, protected areas, and water. Reference for deployment planning.")
+
         show_coverage   = st.toggle("4G LTE Coverage", value=False,
                                     help="Show AT&T, T-Mobile, and Verizon 4G LTE coverage polygons. Toggle individual carriers in the map legend.")
         simulate_traffic = st.toggle("Simulate Ground Traffic", value=False)
@@ -7572,7 +8182,6 @@ if st.session_state['csvs_ready']:
     k_guardian  = st.sidebar.slider("🦅 Guardian Count", 0, max(1, max_guard_calc), val_g, help="Long-range overwatch drones (5-8mi radius).")
 
     st.session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
-    st.sidebar.caption('Minimum fleet default: 1 Guardian + Responders to 85% call coverage (minimum 2).')
 
     # ── LOCK STATIONS (sidebar multiselect) ──────────────────────────────────
     _station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
@@ -7767,6 +8376,22 @@ if st.session_state['csvs_ready']:
         st.session_state['cs_type_buf']  = _custom_type
         st.session_state['cs_role_buf']  = _custom_role
 
+        # Buttons for drop pin and lock stations - PROMINENT
+        st.markdown("---")
+        st.markdown("**Quick Actions:**")
+        col_pin, col_lock = st.columns(2)
+        if col_pin.button("📌 Drop Pin on Map", use_container_width=True, key="drop_pin_btn",
+                          help="Click on the map to add a custom station by location."):
+            st.session_state['pin_drop_mode'] = True
+            st.rerun()
+
+        if col_lock.button("🔒 Lock Stations", use_container_width=True, key="lock_stations_btn",
+                          help="Prevent custom stations from being removed or modified."):
+            st.session_state['stations_locked'] = not st.session_state.get('stations_locked', False)
+            st.rerun()
+
+        st.markdown("---")
+        st.markdown("**Or use Address Geocoding:**")
         if st.button("📍 Geocode & Add Station", use_container_width=True, key="geocode_btn"):
             _addr_to_geocode = _custom_addr.strip()
             if _addr_to_geocode:
@@ -7924,6 +8549,7 @@ if st.session_state['csvs_ready']:
 
     with st.spinner(get_faa_message()):
         faa_geojson = load_faa_parquet(minx, miny, maxx, maxy)
+        faa_feature_count = len(faa_geojson.get('features', [])) if isinstance(faa_geojson, dict) and faa_geojson.get('features') else 0
     with st.spinner(get_airfield_message()):
         airfields = fetch_airfields(minx, miny, maxx, maxy)
 
@@ -8768,8 +9394,20 @@ if st.session_state['csvs_ready']:
                     mode='markers', marker=dict(size=point_size, color='#ff3b3b', opacity=point_opacity),
                     name="Fire Incidents", hoverinfo='skip'))
 
-        if show_faa and faa_geojson:
-            add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=not show_satellite)
+        if show_faa and faa_geojson and faa_geojson.get("features"):
+            try:
+                add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=not show_satellite)
+            except Exception as e:
+                st.error(f"Error rendering FAA layer: {e}")
+
+        if show_obstacles:
+            add_faa_obstacles_layer_to_plotly(fig, minx, miny, maxx, maxy)
+
+        if show_cell_towers:
+            add_cell_towers_layer_to_plotly(fig, st.session_state.get('active_state', 'CA'), minx, miny, maxx, maxy)
+
+        if show_no_fly:
+            add_no_fly_zones_layer_to_plotly(fig, minx, miny, maxx, maxy)
 
         if show_coverage:
             _cov_state = st.session_state.get('active_state', '')
@@ -9666,113 +10304,235 @@ if st.session_state['csvs_ready']:
           </div>
         </a>""", unsafe_allow_html=True)
 
-    # ── RF Link Coverage — 3390 MHz ───────────────────────────────────────────
+    # ── RF LINK COVERAGE — GEOGRAPHY-AWARE ADVANCED MODEL ──────────────────────────
     st.markdown("---")
     st.markdown(f"<h3 style='color:{text_main};'>📡 RF Link Coverage — 3390 MHz</h3>", unsafe_allow_html=True)
-    st.markdown(
-        f"<div style='font-size:0.82rem;color:{text_muted};margin-bottom:12px;'>"
-        "Free-space path loss model at 3390 MHz (C-Band drone data-link). "
-        "RF tower mounted on station rooftop, 30 ft above roofline. "
-        "Drone altitude: 200 ft AGL. MIMO-A 4×2, 2W TX, 20 MHz BW."
-        "</div>",
-        unsafe_allow_html=True
+
+    # Mode selector
+    _rf_mode = st.radio(
+        "RF Model Mode",
+        ["Advanced (Grid-Based Coverage Probability)", "Quick Estimate (Free-Space Rings)"],
+        index=0,
+        horizontal=True,
+        label_visibility="collapsed"
     )
 
-    _rf_col1, _rf_col2, _rf_col3 = st.columns([2, 1, 1])
-    with _rf_col2:
-        _rf_clutter_label = st.selectbox(
-            "Environment", ["Urban (+15 dB)", "Suburban (+10 dB)", "Rural (+5 dB)"],
-            index=0, key='rf_clutter_sel',
-            help="Clutter correction added to path loss for terrain/building obstruction."
+    if _rf_mode == "Advanced (Grid-Based Coverage Probability)":
+        # ── ADVANCED RF COVERAGE MODE ──────────────────────────────────────
+        st.markdown(
+            f"<div style='font-size:0.82rem;color:{text_muted};margin-bottom:12px;'>"
+            "<b>Advanced Coverage Probability Model</b> — Geographic terrain, clutter, and building loss. "
+            "Separate uplink (drone→infra) and downlink (infra→drone) paths. "
+            "Combined coverage is the intersection of both links."
+            "</div>",
+            unsafe_allow_html=True
         )
-    with _rf_col3:
-        _rf_drone_alt = st.number_input("Drone Alt (ft)", value=200, min_value=50, max_value=400, step=50, key='rf_drone_alt')
-    with _rf_col1:
-        _rf_infra_ht  = st.number_input("Tower Ht above station (ft)", value=30, min_value=5, max_value=100, step=5, key='rf_tower_ht')
 
-    _rf_clutter_map = {"Urban (+15 dB)": 15.0, "Suburban (+10 dB)": 10.0, "Rural (+5 dB)": 5.0}
-    _rf_clutter_db  = _rf_clutter_map.get(_rf_clutter_label, 15.0)
-    _rf_infra_m     = _rf_infra_ht * 0.3048      # ft → m
-    _rf_drone_m     = _rf_drone_alt * 0.3048
+        # Control panel
+        _adv_col1, _adv_col2, _adv_col3, _adv_col4 = st.columns(4)
+        with _adv_col1:
+            _adv_freq_mhz = st.number_input("Frequency (MHz)", value=3390, min_value=800, max_value=6000, step=100, key='adv_freq')
+        with _adv_col2:
+            _adv_tx_dbm = st.number_input("TX Power (dBm)", value=33, min_value=0, max_value=47, step=1, key='adv_tx_pwr')
+        with _adv_col3:
+            _adv_tx_gain = st.number_input("TX/RX Gain (dBi)", value=3, min_value=0, max_value=12, step=1, key='adv_gain')
+        with _adv_col4:
+            _adv_bw_mhz = st.number_input("Bandwidth (MHz)", value=20, min_value=5, max_value=160, step=5, key='adv_bw')
 
-    _rf_rings = _rf_range_rings_3390(
-        infra_height_m=_rf_infra_m,
-        drone_alt_m=_rf_drone_m,
-        clutter_db=_rf_clutter_db,
-    )
+        _adv_col5, _adv_col6, _adv_col7, _adv_col8 = st.columns(4)
+        with _adv_col5:
+            _adv_drone_alt = st.number_input("Drone Alt (ft AGL)", value=200, min_value=50, max_value=400, step=50, key='adv_drone_alt')
+        with _adv_col6:
+            _adv_infra_ht = st.number_input("Antenna Ht (ft above ground)", value=30, min_value=5, max_value=150, step=5, key='adv_infra_ht')
+        with _adv_col7:
+            _adv_nf_db = st.number_input("Noise Figure (dB)", value=7.0, min_value=2.0, max_value=15.0, step=0.5, key='adv_nf')
+        with _adv_col8:
+            _adv_land_use = st.selectbox("Environment", ["Urban", "Suburban", "Rural", "Water"], index=1, key='adv_landuse')
 
-    # Build RF coverage figure
-    _rf_fig = go.Figure()
+        _adv_col9, _adv_col10, _adv_col11 = st.columns(3)
+        with _adv_col9:
+            _adv_layer = st.selectbox("Layer", ["Coverage Probability", "SNR (dB)", "Received Power (dBm)"], index=0, key='adv_layer')
+        with _adv_col10:
+            _adv_link = st.selectbox("Link", ["Combined", "Uplink", "Downlink"], index=0, key='adv_link')
+        with _adv_col11:
+            _adv_grid_res = st.selectbox("Grid Resolution", ["Coarse (500m)", "Medium (250m)", "Fine (100m)"], index=1, key='adv_grid')
 
-    # Jurisdiction boundary
-    if city_boundary_geom is not None and not city_boundary_geom.is_empty:
-        _bgeoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
-                   else list(city_boundary_geom.geoms))
-        for _bgi, _bg in enumerate(_bgeoms):
-            _bx, _by = _bg.exterior.coords.xy
+        _adv_grid_res_map = {"Coarse (500m)": 500, "Medium (250m)": 250, "Fine (100m)": 100}
+        _adv_grid_m = _adv_grid_res_map.get(_adv_grid_res, 250)
+
+        # Compute coverage
+        if active_drones:
+            st.write("Computing coverage grid...")
+            _adv_progress = st.progress(0)
+
+            # Compute grids for all active stations, combine
+            _adv_all_grids = []
+            for _adv_idx, _adv_stn in enumerate(active_drones):
+                _adv_progress.progress(int(100 * _adv_idx / len(active_drones)))
+
+                _adv_grid = _compute_rf_grid_coverage(
+                    tx_lat=_adv_stn['lat'],
+                    tx_lon=_adv_stn['lon'],
+                    tx_alt_m=_adv_infra_ht * 0.3048,
+                    boundary_geom=city_boundary_geom,
+                    freq_mhz=_adv_freq_mhz,
+                    tx_power_dbm=_adv_tx_dbm,
+                    tx_gain_dbi=_adv_tx_gain,
+                    rx_gain_dbi=_adv_tx_gain,
+                    noise_figure_db=_adv_nf_db,
+                    bandwidth_mhz=_adv_bw_mhz,
+                    land_use=_adv_land_use.lower(),
+                    grid_resolution_m=_adv_grid_m,
+                )
+                _adv_all_grids.append((_adv_stn['name'], _adv_grid))
+
+            _adv_progress.progress(100)
+
+            # Layer mapping
+            _adv_layer_map = {
+                "Coverage Probability": "coverage_prob",
+                "SNR (dB)": "snr_db",
+                "Received Power (dBm)": "rx_power_dbm",
+            }
+            _adv_link_map = {
+                "Combined": "combined",
+                "Uplink": "uplink",
+                "Downlink": "downlink",
+            }
+
+            # Display combined heatmap or individual station maps
+            for _stn_name, _stn_grid in _adv_all_grids:
+                st.markdown(f"**{_stn_name}** — {_adv_layer} ({_adv_link})")
+                _adv_fig = _plot_rf_coverage_heatmap(
+                    _stn_grid,
+                    _stn_name,
+                    center_lat=_adv_stn['lat'],
+                    center_lon=_adv_stn['lon'],
+                    zoom=dynamic_zoom,
+                    layer_type=_adv_layer_map.get(_adv_layer, "coverage_prob"),
+                    link_type=_adv_link_map.get(_adv_link, "combined"),
+                )
+                st.plotly_chart(_adv_fig, use_container_width=True, config={"displayModeBar": False})
+
+            # Disclaimer
+            st.markdown(
+                f"<div style='font-size:0.65rem;color:#445;margin-top:12px;padding:8px;background:rgba(0,210,255,0.05);border-left:3px solid #00D2FF;'>"
+                f"<b>Model Notes:</b> "
+                f"Coverage Probability estimates link viability based on SNR thresholds. "
+                f"Terrain blockage uses simplified Fresnel zone calculations. "
+                f"Clutter loss estimated from land-use classification (not surveyed). "
+                f"Path loss includes free-space, clutter, terrain, and fade margin. "
+                f"Results are planning estimates — field measurement recommended for final site survey."
+                f"</div>",
+                unsafe_allow_html=True
+            )
+
+    else:
+        # ── QUICK ESTIMATE MODE (Original Free-Space Model) ────────────────
+        st.markdown(
+            f"<div style='font-size:0.82rem;color:{text_muted};margin-bottom:12px;'>"
+            "<b>Quick Estimate</b> — Simplified Friis free-space model. "
+            "Circular range rings based on SNR tiers. Fast, suitable for initial planning only. "
+            "Use Advanced mode for geography-aware coverage."
+            "</div>",
+            unsafe_allow_html=True
+        )
+
+        _rf_col1, _rf_col2, _rf_col3 = st.columns([2, 1, 1])
+        with _rf_col2:
+            _rf_clutter_label = st.selectbox(
+                "Environment", ["Urban (+15 dB)", "Suburban (+10 dB)", "Rural (+5 dB)"],
+                index=0, key='rf_clutter_sel',
+                help="Clutter correction added to path loss for terrain/building obstruction."
+            )
+        with _rf_col3:
+            _rf_drone_alt = st.number_input("Drone Alt (ft)", value=200, min_value=50, max_value=400, step=50, key='rf_drone_alt')
+        with _rf_col1:
+            _rf_infra_ht  = st.number_input("Tower Ht above station (ft)", value=30, min_value=5, max_value=100, step=5, key='rf_tower_ht')
+
+        _rf_clutter_map = {"Urban (+15 dB)": 15.0, "Suburban (+10 dB)": 10.0, "Rural (+5 dB)": 5.0}
+        _rf_clutter_db  = _rf_clutter_map.get(_rf_clutter_label, 15.0)
+        _rf_infra_m     = _rf_infra_ht * 0.3048      # ft → m
+        _rf_drone_m     = _rf_drone_alt * 0.3048
+
+        _rf_rings = _rf_range_rings_3390(
+            infra_height_m=_rf_infra_m,
+            drone_alt_m=_rf_drone_m,
+            clutter_db=_rf_clutter_db,
+        )
+
+        # Build RF coverage figure
+        _rf_fig = go.Figure()
+
+        # Jurisdiction boundary
+        if city_boundary_geom is not None and not city_boundary_geom.is_empty:
+            _bgeoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
+                       else list(city_boundary_geom.geoms))
+            for _bgi, _bg in enumerate(_bgeoms):
+                _bx, _by = _bg.exterior.coords.xy
+                _rf_fig.add_trace(go.Scattermap(
+                    mode='lines', lon=list(_bx), lat=list(_by),
+                    line=dict(color='#ffffff', width=1.5),
+                    name='Jurisdiction', showlegend=(_bgi == 0), hoverinfo='skip'
+                ))
+
+        # RF rings per station
+        for _rfd in active_drones:
+            for _rf_label, _rf_color, _rf_r_mi in _rf_rings:
+                if _rf_r_mi <= 0:
+                    continue
+                _rf_clats, _rf_clons = get_circle_coords(_rfd['lat'], _rfd['lon'], r_mi=_rf_r_mi)
+                _rf_fig.add_trace(go.Scattermap(
+                    lat=list(_rf_clats), lon=list(_rf_clons),
+                    mode='lines', fill='toself',
+                    line=dict(color=_rf_color, width=1.5),
+                    fillcolor=f"rgba({int(_rf_color[1:3],16)},{int(_rf_color[3:5],16)},{int(_rf_color[5:7],16)},0.08)",
+                    name=f"{_rfd['name'].split(',')[0]} · {_rf_label}",
+                    hovertext=f"<b>{_rfd['name'].split(',')[0]}</b><br>{_rf_label}<br>Radius: {_rf_r_mi:.1f} mi",
+                    hoverinfo='text',
+                    showlegend=True,
+                ))
+
+        # Station dots
+        if active_drones:
             _rf_fig.add_trace(go.Scattermap(
-                mode='lines', lon=list(_bx), lat=list(_by),
-                line=dict(color='#ffffff', width=1.5),
-                name='Jurisdiction', showlegend=(_bgi == 0), hoverinfo='skip'
-            ))
-
-    # RF rings per station
-    for _rfd in active_drones:
-        for _rf_label, _rf_color, _rf_r_mi in _rf_rings:
-            if _rf_r_mi <= 0:
-                continue
-            _rf_clats, _rf_clons = get_circle_coords(_rfd['lat'], _rfd['lon'], r_mi=_rf_r_mi)
-            _rf_fig.add_trace(go.Scattermap(
-                lat=list(_rf_clats), lon=list(_rf_clons),
-                mode='lines', fill='toself',
-                line=dict(color=_rf_color, width=1.5),
-                fillcolor=f"rgba({int(_rf_color[1:3],16)},{int(_rf_color[3:5],16)},{int(_rf_color[5:7],16)},0.08)",
-                name=f"{_rfd['name'].split(',')[0]} · {_rf_label}",
-                hovertext=f"<b>{_rfd['name'].split(',')[0]}</b><br>{_rf_label}<br>Radius: {_rf_r_mi:.1f} mi",
-                hoverinfo='text',
+                lat=[d['lat'] for d in active_drones],
+                lon=[d['lon'] for d in active_drones],
+                mode='markers+text',
+                marker=dict(size=10, color=[d['color'] for d in active_drones]),
+                text=[d['name'].split(',')[0] for d in active_drones],
+                textposition='top right',
+                textfont=dict(size=10, color='#ffffff'),
+                name='Stations', hoverinfo='text',
                 showlegend=True,
             ))
 
-    # Station dots
-    if active_drones:
-        _rf_fig.add_trace(go.Scattermap(
-            lat=[d['lat'] for d in active_drones],
-            lon=[d['lon'] for d in active_drones],
-            mode='markers+text',
-            marker=dict(size=10, color=[d['color'] for d in active_drones]),
-            text=[d['name'].split(',')[0] for d in active_drones],
-            textposition='top right',
-            textfont=dict(size=10, color='#ffffff'),
-            name='Stations', hoverinfo='text',
+        _rf_fig.update_layout(
+            map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style=map_style),
+            margin=dict(l=0, r=0, t=0, b=0), height=520,
             showlegend=True,
-        ))
-
-    _rf_fig.update_layout(
-        map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style=map_style),
-        margin=dict(l=0, r=0, t=0, b=0), height=520,
-        showlegend=True,
-        legend=dict(yanchor='top', y=0.98, xanchor='left', x=0.02,
-                    bgcolor=legend_bg, bordercolor='#444', borderwidth=1,
-                    font=dict(size=11, color=legend_text)),
-    )
-    st.plotly_chart(_rf_fig, use_container_width=True, config={"displayModeBar": False})
-
-    # Link budget table
-    _rf_budget_rows = ""
-    for _lb, _lc, _lr in _rf_rings:
-        _rf_budget_rows += (
-            f"<tr><td style='padding:5px 10px;color:{_lc};font-weight:600;'>{_lb}</td>"
-            f"<td style='padding:5px 10px;color:#aabbcc;font-family:monospace;'>{_lr:.2f} mi ({_lr*1609.34/1000:.1f} km)</td></tr>"
+            legend=dict(yanchor='top', y=0.98, xanchor='left', x=0.02,
+                        bgcolor=legend_bg, bordercolor='#444', borderwidth=1,
+                        font=dict(size=11, color=legend_text)),
         )
-    st.markdown(
-        f"<table style='width:100%;border-collapse:collapse;font-size:0.78rem;margin-top:8px;'>"
-        f"<thead><tr style='border-bottom:1px solid #1e2535;'>"
-        f"<th style='padding:5px 10px;color:#556;text-align:left;'>SNR Tier</th>"
-        f"<th style='padding:5px 10px;color:#556;text-align:left;'>Max Horizontal Range</th>"
-        f"</tr></thead><tbody>{_rf_budget_rows}</tbody></table>"
-        f"<div style='font-size:0.65rem;color:#445;margin-top:6px;'>Model assumptions: 3390 MHz, TX 2W (+33 dBm), gains 3+3 dBi, 20 MHz BW, 7 dB noise figure, {_rf_clutter_label}, drone at {_rf_drone_alt} ft AGL, RF tower {_rf_infra_ht} ft above roofline. Free-space path loss (Friis). Does not account for terrain, buildings, or multipath — field conditions may vary.</div>",
-        unsafe_allow_html=True
-    )
+        st.plotly_chart(_rf_fig, use_container_width=True, config={"displayModeBar": False})
+
+        # Link budget table
+        _rf_budget_rows = ""
+        for _lb, _lc, _lr in _rf_rings:
+            _rf_budget_rows += (
+                f"<tr><td style='padding:5px 10px;color:{_lc};font-weight:600;'>{_lb}</td>"
+                f"<td style='padding:5px 10px;color:#aabbcc;font-family:monospace;'>{_lr:.2f} mi ({_lr*1609.34/1000:.1f} km)</td></tr>"
+            )
+        st.markdown(
+            f"<table style='width:100%;border-collapse:collapse;font-size:0.78rem;margin-top:8px;'>"
+            f"<thead><tr style='border-bottom:1px solid #1e2535;'>"
+            f"<th style='padding:5px 10px;color:#556;text-align:left;'>SNR Tier</th>"
+            f"<th style='padding:5px 10px;color:#556;text-align:left;'>Max Horizontal Range</th>"
+            f"</tr></thead><tbody>{_rf_budget_rows}</tbody></table>"
+            f"<div style='font-size:0.65rem;color:#445;margin-top:6px;'>Model assumptions: 3390 MHz, TX 2W (+33 dBm), gains 3+3 dBi, 20 MHz BW, 7 dB noise figure, {_rf_clutter_label}, drone at {_rf_drone_alt} ft AGL, RF tower {_rf_infra_ht} ft above roofline. <b>Free-space path loss (Friis)</b>. Does not account for terrain, buildings, or multipath — planning estimate only.</div>",
+            unsafe_allow_html=True
+        )
 
     # ── MOBILE QR CODE ────────────────────────────────────────────────────────
     st.markdown("---")

@@ -34,7 +34,12 @@
       "Bash(du -sh \"G:/My Drive/PRIVATE NO ACCESS/Pyton/app/Beta/Frankenstein/cell_coverage/\"*.parquet)",
       "Bash(where python:*)",
       "Bash(C:/Users/4070/AppData/Local/Python/bin/python.exe -m py_compile app.py)",
-      "Bash(C:/Users/4070/AppData/Local/Python/bin/python.exe:*)"
+      "Bash(C:/Users/4070/AppData/Local/Python/bin/python.exe:*)",
+      "Bash(sed:*)",
+      "Bash(file cell_coverage/raw/*.gz)",
+      "Bash(gunzip -c cell_coverage/raw/310.csv.gz)",
+      "Bash(sed -i '5675,5710d' app.py)",
+      "Bash(sed -i '5674r /tmp/fix_download.txt' app.py)"
     ]
   }
 }

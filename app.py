@@ -5246,6 +5246,9 @@ if not st.session_state['csvs_ready']:
                         st.session_state['incremental_build']   = save_data.get('incremental_build', True)
                         st.session_state['auto_cap_dfr']        = save_data.get('auto_cap_dfr', True)
 
+                        # Restore boundary selection (county vs place)
+                        st.session_state['use_county_boundary'] = save_data.get('use_county_boundary', False)
+
                         # Restore pin-drop mode flag
                         st.session_state['pin_drop_used'] = save_data.get('pin_drop_used', False)
 
@@ -5296,6 +5299,17 @@ if not st.session_state['csvs_ready']:
                                 pass
                         st.session_state['boundary_kind'] = save_data.get('boundary_kind', 'place')
                         st.session_state['boundary_source_path'] = save_data.get('boundary_source_path', '')
+
+                        # Restore FAA LAANC airspace data (if present)
+                        if save_data.get('faa_geojson'):
+                            st.session_state['_faa_geojson_cache'] = save_data['faa_geojson']
+
+                        # Restore sidebar settings — BRINC rep and police dept signatories
+                        st.session_state['brinc_user']     = save_data.get('brinc_user', 'steven.beltran')
+                        st.session_state['pd_chief_name']  = save_data.get('pd_chief_name', '')
+                        st.session_state['pd_dept_name']   = save_data.get('pd_dept_name', '')
+                        st.session_state['pd_dept_email']  = save_data.get('pd_dept_email', '')
+                        st.session_state['pd_dept_phone']  = save_data.get('pd_dept_phone', '')
 
                         st.session_state['data_source'] = 'brinc_file'
                         st.session_state['demo_mode_used'] = False
@@ -9963,6 +9977,8 @@ if st.session_state['csvs_ready']:
             "deployment_mode_idx": st.session_state.get('deployment_mode_idx', 1),
             "incremental_build": st.session_state.get('incremental_build', True),
             "auto_cap_dfr": st.session_state.get('auto_cap_dfr', True),
+            # Boundary selection
+            "use_county_boundary": st.session_state.get('use_county_boundary', False),
             # Locked stations (must restore before auto-minimums runs)
             "pinned_guard_names": list(pinned_guard_names),
             "pinned_resp_names":  list(pinned_resp_names),
@@ -9981,6 +9997,12 @@ if st.session_state['csvs_ready']:
             "boundary_geojson": _boundary_geojson_export,
             "boundary_kind": st.session_state.get('boundary_kind', 'place'),
             "boundary_source_path": st.session_state.get('boundary_source_path', ''),
+            # Sidebar settings — BRINC rep info and police dept signatory fields
+            "brinc_user": st.session_state.get('brinc_user', 'steven.beltran'),
+            "pd_chief_name": st.session_state.get('pd_chief_name', ''),
+            "pd_dept_name": st.session_state.get('pd_dept_name', ''),
+            "pd_dept_email": st.session_state.get('pd_dept_email', ''),
+            "pd_dept_phone": st.session_state.get('pd_dept_phone', ''),
         }
 
         fig_for_export = go.Figure()

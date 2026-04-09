@@ -8115,16 +8115,19 @@ if st.session_state['csvs_ready']:
         else 'local_parquet' if _boundary_src_note == 'local_parquet'
         else (_boundary_src_note.split(chr(47))[-1].split(chr(92))[-1] if _boundary_src_note else 'live lookup')
     )
-    st.sidebar.caption(f"Boundary: {_boundary_kind_note} · {_boundary_src_display}")
-    if boundary_overlay_gdf is not None and not boundary_overlay_gdf.empty:
+    st.sidebar.caption(f"Boundary: {_boundary_kind_note} - {_boundary_src_display}")
+    _sidebar_overlay_gdf = st.session_state.get('boundary_overlay_gdf')
+    if _sidebar_overlay_gdf is not None and not _sidebar_overlay_gdf.empty:
         _overlay_file = st.session_state.get('boundary_overlay_file', '') or st.session_state.get('boundary_overlay_name', 'uploaded boundary')
         st.sidebar.caption(f"Overlay: {_overlay_file} (display only)")
-        if boundary_overlay_status:
-            if boundary_overlay_status['status'] == 'inside':
-                st.sidebar.info(boundary_overlay_status['message'])
+        _sidebar_overlay_status = None
+        if 'city_boundary_geom' in locals() and city_boundary_geom is not None and not city_boundary_geom.is_empty and 'epsg_code' in locals():
+            _sidebar_overlay_status = _boundary_overlay_status(city_boundary_geom, _sidebar_overlay_gdf, epsg_code)
+        if _sidebar_overlay_status:
+            if _sidebar_overlay_status['status'] == 'inside':
+                st.sidebar.info(_sidebar_overlay_status['message'])
             else:
-                st.sidebar.warning(boundary_overlay_status['message'])
-
+                st.sidebar.warning(_sidebar_overlay_status['message'])
 
     total_pts = master_gdf['data_count'].sum()
     master_gdf['LABEL'] = master_gdf['DISPLAY_NAME'] + " (" + (master_gdf['data_count']/total_pts*100).round(1).astype(str) + "%)"

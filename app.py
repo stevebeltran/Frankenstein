@@ -3432,17 +3432,81 @@ def get_address_from_latlon(lat, lon):
     # Fallback to coordinates if an exact street address isn't found
     return f"{lat:.5f}, {lon:.5f}"
 
-@st.cache_data
-def forward_geocode(address_str):
-    import urllib.parse
-    url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(address_str)}&limit=1"
+@st.cache_data(show_spinner=False)
+def search_address_candidates(address_str, limit=6):
+    address_str = str(address_str or '').strip()
+    if not address_str:
+        return []
+
+    limit = max(1, min(int(limit or 6), 10))
+    candidates = []
+    seen = set()
+
+    def _add_candidate(label, lat, lon, source, raw_match=''):
+        try:
+            lat_f = float(lat)
+            lon_f = float(lon)
+        except Exception:
+            return
+        dedupe_key = (round(lat_f, 6), round(lon_f, 6), str(label).strip().lower())
+        if dedupe_key in seen:
+            return
+        seen.add(dedupe_key)
+        candidates.append({
+            'label': str(label).strip() or str(raw_match).strip() or address_str,
+            'matched_address': str(raw_match).strip() or str(label).strip() or address_str,
+            'lat': lat_f,
+            'lon': lon_f,
+            'source': source,
+        })
+
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
-        with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            if data:
-                return float(data[0]['lat']), float(data[0]['lon'])
-    except Exception: pass
+        _params = urllib.parse.urlencode({
+            'address': address_str,
+            'benchmark': '2020',
+            'format': 'json'
+        })
+        _url = f"https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?{_params}"
+        _req = urllib.request.Request(_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+        with urllib.request.urlopen(_req, timeout=8) as _resp:
+            _data = json.loads(_resp.read().decode('utf-8'))
+        for _match in _data.get('result', {}).get('addressMatches', [])[:limit]:
+            _coords = _match.get('coordinates', {})
+            _add_candidate(
+                _match.get('matchedAddress', address_str),
+                _coords.get('y'),
+                _coords.get('x'),
+                'Census',
+                raw_match=_match.get('matchedAddress', address_str),
+            )
+    except Exception:
+        pass
+
+    try:
+        _params = urllib.parse.urlencode({
+            'format': 'jsonv2',
+            'q': address_str,
+            'limit': str(limit),
+            'countrycodes': 'us',
+            'addressdetails': '1',
+        })
+        _url = f"https://nominatim.openstreetmap.org/search?{_params}"
+        _req = urllib.request.Request(_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+        with urllib.request.urlopen(_req, timeout=8) as _resp:
+            _data = json.loads(_resp.read().decode('utf-8'))
+        for _match in _data[:limit]:
+            _label = _match.get('display_name', address_str)
+            _add_candidate(_label, _match.get('lat'), _match.get('lon'), 'OSM', raw_match=_label)
+    except Exception:
+        pass
+
+    return candidates[:limit]
+
+@st.cache_data(show_spinner=False)
+def forward_geocode(address_str):
+    _matches = search_address_candidates(address_str, limit=1)
+    if _matches:
+        return float(_matches[0]['lat']), float(_matches[0]['lon'])
     return None, None
 
 @st.cache_data(show_spinner=False)
@@ -8233,14 +8297,12 @@ if st.session_state['csvs_ready']:
         _new_g = st.multiselect(
             "🦅 Lock as Guardian",
             options=_station_names,
-            default=_saved_g,
             key="lock_guard_ms",
             help="These stations will always be assigned a Guardian drone regardless of optimizer output."
         )
         _new_r = st.multiselect(
             "🚁 Lock as Responder",
             options=[s for s in _station_names if s not in _new_g],
-            default=_saved_r_excl,
             key="lock_resp_ms",
             help="These stations will always be assigned a Responder drone regardless of optimizer output."
         )
@@ -8373,7 +8435,7 @@ if st.session_state['csvs_ready']:
         st.markdown(
             f"<div style='font-size:0.7rem; color:{text_muted}; margin-bottom:8px;'>"
             "Enter an address to add a custom deployment location. "
-            "The Census geocoder resolves it to lat/lon. Custom stations persist for this session.</div>",
+            "Address suggestions use Census + OpenStreetMap lookup. Custom stations persist for this session.</div>",
             unsafe_allow_html=True
         )
         # Use value= (not key=) so we can clear via session_state buffer without
@@ -8392,6 +8454,25 @@ if st.session_state['csvs_ready']:
         _type_idx     = _type_opts.index(st.session_state['cs_type_buf']) if st.session_state['cs_type_buf'] in _type_opts else 0
         _custom_type  = st.selectbox("Type", _type_opts, index=_type_idx,
                                       key="custom_station_type")
+
+        _addr_query = _custom_addr.strip()
+        _addr_matches = search_address_candidates(_addr_query, limit=6) if len(_addr_query) >= 4 else []
+        _addr_options = [f"{m['matched_address']} [{m['source']}]" for m in _addr_matches]
+        if _addr_options:
+            _addr_pick = st.selectbox(
+                "Suggested match",
+                options=_addr_options,
+                index=0,
+                key="custom_station_match",
+                help="Suggestions refresh from Census and OpenStreetMap as you type. The selected match will be used when adding the station."
+            )
+            _selected_match = _addr_matches[_addr_options.index(_addr_pick)]
+            st.caption(f"Using: {_selected_match['matched_address']} | {_selected_match['lat']:.5f}, {_selected_match['lon']:.5f}")
+        elif len(_addr_query) >= 4:
+            _selected_match = None
+            st.caption("No live address suggestions found yet. You can still try the geocode button for fallback matching.")
+        else:
+            _selected_match = None
 
         # Explicit drone role selector — user decides, no auto-guessing
         if 'cs_role_buf' not in st.session_state: st.session_state['cs_role_buf'] = "🦅 Lock as Guardian"
@@ -8427,21 +8508,14 @@ if st.session_state['csvs_ready']:
             _addr_to_geocode = _custom_addr.strip()
             if _addr_to_geocode:
                 try:
-                    import urllib.request, urllib.parse, json as _json
-                    _params = urllib.parse.urlencode({
-                        "address": _addr_to_geocode,
-                        "benchmark": "2020",
-                        "format": "json"
-                    })
-                    _url = f"https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?{_params}"
-                    with urllib.request.urlopen(_url, timeout=8) as _resp:
-                        _data = _json.loads(_resp.read().decode())
-                    _matches = _data.get("result", {}).get("addressMatches", [])
-                    if _matches:
-                        _coords = _matches[0]["coordinates"]
-                        _geo_lat = float(_coords["y"])
-                        _geo_lon = float(_coords["x"])
-                        _matched_addr = _matches[0].get("matchedAddress", _addr_to_geocode)
+                    _match = _selected_match
+                    if not _match:
+                        _fallback_matches = search_address_candidates(_addr_to_geocode, limit=1)
+                        _match = _fallback_matches[0] if _fallback_matches else None
+                    if _match:
+                        _geo_lat = float(_match['lat'])
+                        _geo_lon = float(_match['lon'])
+                        _matched_addr = _match.get('matched_address', _addr_to_geocode)
                         _label = _custom_label.strip() or _matched_addr
                         # The type-prefix rename later produces "[Type] label"
                         # Store both original and prefixed name so pin lookup works
@@ -8486,7 +8560,7 @@ if st.session_state['csvs_ready']:
                             _pin_note = f"🚁 Pinned as Responder."
 
                         st.success(f"✅ Added & locked: **{_label}** ({_geo_lat:.4f}, {_geo_lon:.4f})\n{_pin_note}")
-                        st.caption(f"Matched address: {_matched_addr}")
+                        st.caption(f"Matched address: {_matched_addr} [{_match.get('source', 'lookup')}]")
                         # Clear buffers (role intentionally kept so user can add more of same type)
                         st.session_state['cs_addr_buf']  = ""
                         st.session_state['cs_label_buf'] = ""
@@ -8497,7 +8571,7 @@ if st.session_state['csvs_ready']:
                             st.session_state.pop(_ck, None)
                         st.rerun()
                     else:
-                        st.warning("⚠️ Address not found. Try including city and state — e.g. '123 Main St, Mobile AL'.")
+                        st.warning("Address not found. Try selecting a suggested match or include city and state.")
                 except Exception as _ge:
                     st.error(f"Geocoding failed: {_ge}")
             else:

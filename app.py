@@ -9732,7 +9732,7 @@ if st.session_state['csvs_ready']:
             for oi, geom in enumerate(_overlay_parts):
                 bx, by = geom.exterior.coords.xy
                 fig.add_trace(go.Scattermap(mode="lines", lon=list(bx), lat=list(by),
-                    line=dict(color="#00D2FF", width=2, dash="dash"), name="Uploaded Boundary Overlay",
+                    line=dict(color="#00D2FF", width=2), name="Uploaded Boundary Overlay",
                     hoverinfo='skip', showlegend=(oi==0)))
 
         if show_heatmap and not display_calls.empty:

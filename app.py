@@ -71,6 +71,18 @@ __version__ = _compute_build_version()
 print(f"\033[38;5;234m{__version__}\033[0m")
 
 
+def _render_version_badge(position="top-right"):
+    _placement = "top: 12px; right: 16px;" if position == "top-right" else "bottom: 12px; right: 16px;"
+    st.markdown(
+        f"""
+        <div style="position:fixed; {_placement} z-index:9999; font-family:'IBM Plex Mono',monospace; font-size:0.62rem; letter-spacing:0.08em; color:rgba(160,175,190,0.72); background:rgba(7,10,18,0.72); border:1px solid rgba(120,140,160,0.18); border-radius:999px; padding:4px 10px; backdrop-filter: blur(6px); pointer-events:none;">
+            v {__version__}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # --- MOBILE SUMMARY ROUTE (must run before set_page_config) ---
 if st.query_params.get("view") == "mobile":
     st.set_page_config(page_title="BRINC DFR — Mobile Summary", page_icon="🚁",
@@ -5605,6 +5617,7 @@ def compute_all_elbow_curves(n_calls, _resp_matrix, _guard_matrix, _geos_r, _geo
 # ============================================================
 
 if not st.session_state['csvs_ready']:
+    _render_version_badge("top-right")
 
     # GRAB THE LOGO FOR THE UPLOAD PAGE
     logo_b64 = get_themed_logo_base64("logo.png", theme="dark")

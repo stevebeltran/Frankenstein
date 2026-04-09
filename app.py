@@ -71,17 +71,6 @@ __version__ = _compute_build_version()
 print(f"\033[38;5;234m{__version__}\033[0m")
 
 
-def _render_version_badge(position="top-right"):
-    _placement = "top: 12px; right: 16px;" if position == "top-right" else "bottom: 12px; right: 16px;"
-    st.markdown(
-        f"""
-        <div style="position:fixed; {_placement} z-index:9999; font-family:'IBM Plex Mono',monospace; font-size:0.62rem; letter-spacing:0.08em; color:rgba(160,175,190,0.72); background:rgba(7,10,18,0.72); border:1px solid rgba(120,140,160,0.18); border-radius:999px; padding:4px 10px; backdrop-filter: blur(6px); pointer-events:none;">
-            v {__version__}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
 # --- MOBILE SUMMARY ROUTE (must run before set_page_config) ---
 if st.query_params.get("view") == "mobile":
     st.set_page_config(page_title="BRINC DFR — Mobile Summary", page_icon="🚁",
@@ -900,7 +889,8 @@ def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email
                 <div style="margin-top:16px;font-size:11px;color:#bbb;">{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} UTC</div>
             </div>
         </div>
-        </body></html>
+        <div class="doc-version">v {__version__}</div>
+</body></html>
         """
         msg = MIMEMultipart("alternative")
         msg["Subject"], msg["From"], msg["To"] = subject, gmail_address, notify_address
@@ -5615,7 +5605,6 @@ def compute_all_elbow_curves(n_calls, _resp_matrix, _guard_matrix, _geos_r, _geo
 # ============================================================
 
 if not st.session_state['csvs_ready']:
-    _render_version_badge("top-right")
 
     # GRAB THE LOGO FOR THE UPLOAD PAGE
     logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
@@ -7801,7 +7790,6 @@ if (stations.length === 0) {{
 # MAIN MAP INTERFACE
 # ============================================================
 if st.session_state['csvs_ready']:
-    _render_version_badge("bottom-right")
     components.html("<script>window._brincHasData = true;</script>", height=0)
 
     df_calls = st.session_state['df_calls'].copy()
@@ -11606,7 +11594,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 .doc-footer{{background:var(--ink);color:#555;padding:36px 60px;font-size:11px;display:flex;justify-content:space-between;align-items:center;gap:20px}}
 .doc-footer a{{color:#666;text-decoration:none}}
 .doc-footer .brand-mark{{font-size:16px;font-weight:900;letter-spacing:3px;color:#fff;flex-shrink:0}}
-.doc-version{{position:fixed;right:18px;bottom:12px;z-index:9999;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.12em;color:rgba(107,114,128,0.9);background:rgba(255,255,255,0.82);border:1px solid rgba(228,230,234,0.95);border-radius:999px;padding:4px 10px;}}
+.doc-version{{margin:28px 0 0;padding-top:12px;border-top:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.12em;color:rgba(107,114,128,0.9);text-align:right;}}
 
 /* ── PRODUCT IMAGE ───────────────────────────────────────────── */
 .cover-body{{
@@ -11693,12 +11681,11 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
     page-break-inside:avoid;
   }}
   a{{color:inherit !important;text-decoration:none !important}}
-  .doc-version{{position:fixed;right:14px;bottom:10px;background:rgba(255,255,255,0.94) !important;border-color:rgba(203,213,225,1) !important;color:#6b7280 !important;}}
+  .doc-version{{margin-top:18px;padding-top:10px;border-top:1px solid #e5e7eb;color:#6b7280 !important;}}
 }}
 </style>
 </head>
 <body>
-<div class="doc-version">v {__version__}</div>
 
 <!-- ── TOP-RIGHT CORNER LOGO ─────────────────────────────────── -->
 

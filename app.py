@@ -5925,16 +5925,6 @@ if not st.session_state['csvs_ready']:
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-        st.markdown("<div style='font-size:12px;color:#888;padding-bottom:4px'>Boundary Overlay (optional)</div>", unsafe_allow_html=True)
-        sim_boundary_files = st.file_uploader(
-            "Upload shapefile components (.shp, .shx, .dbf, .prj)",
-            type=["shp", "shx", "dbf", "prj"],
-            accept_multiple_files=True,
-            key="sim_boundary_overlay_uploader",
-            help="Display uploaded boundary outlines on the map without changing optimization or coverage analysis."
-        )
-        st.caption("Display only. The selected city/county remains the authoritative analysis boundary.")
-
         # Move "+ City" and "Deploy" buttons up (before file uploader and download button)
         col_add, col_run = st.columns([1, 1])
         if st.session_state.city_count < 10:
@@ -6067,17 +6057,17 @@ if not st.session_state['csvs_ready']:
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
         uploaded_files = st.file_uploader(
-            "Drop your CAD export (+ optional stations CSV)",
+            "Drop CAD calls + optional stations + optional boundary shapefile files",
             accept_multiple_files=True,
-            type=['csv', 'xlsx', 'xls', 'xlsb', 'xlsm', 'brinc', 'json', 'txt'],
+            type=['csv', 'xlsx', 'xls', 'xlsb', 'xlsm', 'brinc', 'json', 'txt', 'shp', 'shx', 'dbf', 'prj'],
             label_visibility="collapsed",
-            help="One file = raw CAD export. Two files = calls + stations. OR drop a .brinc file to restore a previous session."
+            help="Upload real CAD calls, optional stations, and optional shapefile sidecars (.shp/.shx/.dbf/.prj) for a display-only boundary overlay. OR drop a .brinc file to restore a previous session."
         )
 
         st.markdown("""
         <div class="field-footnote">
             <b style='color:#555;'>1 file</b> — any CAD export (CSV or Excel); stations auto-built from OSM<br>
-            <b style='color:#555;'>2+ files</b> — calls + stations (CSV or Excel, any column names)<br>
+            <b style='color:#555;'>2+ files</b> - calls + optional stations + optional .shp/.shx/.dbf/.prj overlay files<br>
             <b style='color:#39FF14;'>.brinc file</b> — instantly restore a saved deployment<br>
             Max 25,000 calls · 100 stations
         </div>
@@ -6086,6 +6076,9 @@ if not st.session_state['csvs_ready']:
         def _looks_like_stations(fname):
             n = fname.lower()
             return any(k in n for k in ['station','facility','loc'])
+
+        def _is_boundary_sidecar(fname):
+            return Path(fname).suffix.lower() in {'.shp', '.shx', '.dbf', '.prj'}
 
         if uploaded_files and len(uploaded_files) >= 1:
             
@@ -6234,18 +6227,21 @@ if not st.session_state['csvs_ready']:
                 f_list = list(uploaded_files)
                 call_files = []
                 station_file = None
+                boundary_files = []
                 st.session_state['boundary_overlay_gdf'] = None
                 st.session_state['boundary_overlay_name'] = ''
                 st.session_state['boundary_overlay_file'] = ''
 
                 for f in f_list:
-                    if _looks_like_stations(f.name):
+                    if _is_boundary_sidecar(f.name):
+                        boundary_files.append(f)
+                    elif _looks_like_stations(f.name):
                         station_file = f
                     else:
                         call_files.append(f)
                 
-                if len(f_list) == 2 and not station_file:
-                    f0, f1 = f_list
+                if len(call_files) == 2 and not station_file:
+                    f0, f1 = call_files
                     f0.seek(0); sz0 = len(f0.read()); f0.seek(0)
                     f1.seek(0); sz1 = len(f1.read()); f1.seek(0)
                     if sz0 >= sz1:
@@ -6633,21 +6629,6 @@ if not st.session_state['csvs_ready']:
         else:
             st.session_state['active_city']  = f"{str(active_targets[0]['city']).title()} & {len(active_targets)-1} others"
             st.session_state['active_state'] = active_targets[0]['state']
-
-        _overlay_files = st.session_state.get('sim_boundary_overlay_uploader')
-        if _overlay_files:
-            try:
-                _overlay_gdf, _overlay_name, _overlay_file = _load_uploaded_boundary_overlay(_overlay_files)
-                st.session_state['boundary_overlay_gdf'] = _overlay_gdf
-                st.session_state['boundary_overlay_name'] = _overlay_name
-                st.session_state['boundary_overlay_file'] = _overlay_file
-            except Exception as _overlay_err:
-                st.error(f"Boundary overlay upload error: {_overlay_err}")
-                st.stop()
-        else:
-            st.session_state['boundary_overlay_gdf'] = None
-            st.session_state['boundary_overlay_name'] = ''
-            st.session_state['boundary_overlay_file'] = ''
 
         prog = st.progress(0, text="🫡 Preparing tools worthy of those who serve…")
         all_gdfs = []

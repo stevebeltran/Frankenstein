@@ -8307,8 +8307,10 @@ if st.session_state['csvs_ready']:
             help="These stations will always be assigned a Responder drone regardless of optimizer output."
         )
         if _new_g != _saved_g or _new_r != _saved_r_excl:
-            st.session_state['pinned_guard_names'] = _new_g
-            st.session_state['pinned_resp_names']  = _new_r
+            st.session_state['lock_guard_ms'] = list(_new_g)
+            st.session_state['lock_resp_ms']  = list(_new_r)
+            st.session_state['pinned_guard_names'] = list(_new_g)
+            st.session_state['pinned_resp_names']  = list(_new_r)
             st.session_state.pop('pin_drop_used', None)
             st.session_state.pop('_auto_minimums_sig', None)
             if '_opt_cache_key' in st.session_state:
@@ -8327,19 +8329,20 @@ if st.session_state['csvs_ready']:
         st.sidebar.warning(f"⚠️ Raise Responder Count ≥ {len(pinned_resp_names)} to honour all Responder locks.")
 
     # ── MAP-CLICK PIN DROP ─────────────────────────────────────────────────────
-    # Apply deferred toggle reset before the widget instantiates (can't modify after)
-    if st.session_state.pop('_reset_pin_toggle', False):
-        st.session_state['pin_drop_toggle'] = False
-        st.session_state['pin_drop_mode']   = False
+    _pin_mode = bool(st.session_state.get('pin_drop_mode', False))
 
-    _pin_mode = st.sidebar.toggle(
-        "📍 Drop Pin on Map",
-        value=st.session_state.get('pin_drop_mode', False),
-        key="pin_drop_toggle",
-        help="Turn on, then click-and-drag a small box on the map to place a station. A confirmation form will appear here."
-    )
-    st.session_state['pin_drop_mode'] = _pin_mode
-
+    if _pin_mode:
+        st.sidebar.markdown(
+            "<div style='background:rgba(0,210,255,0.08);border:1px solid rgba(0,210,255,0.35);"
+            "border-radius:6px;padding:8px 10px;margin-bottom:8px;font-size:0.72rem;color:#e0e0f0;'>"
+            "<b>Drop Pin Mode Active</b><br>Click-and-drag a small box on the map to place a station."
+            "</div>",
+            unsafe_allow_html=True
+        )
+        if st.sidebar.button("Cancel Drop Pin", use_container_width=True, key="cancel_drop_pin_mode_btn"):
+            st.session_state['pin_drop_mode'] = False
+            st.session_state['pending_pin'] = None
+            st.rerun()
     # If pin mode was just turned off, clear any pending pin
     if not _pin_mode and st.session_state.get('pending_pin') is not None:
         st.session_state['pending_pin'] = None
@@ -8421,12 +8424,13 @@ if st.session_state['csvs_ready']:
                 st.session_state['pending_pin']         = None
                 st.session_state['pp_label_buf']        = ""
                 st.session_state['pin_drop_mode']       = False
-                st.session_state['_reset_pin_toggle']   = True  # applied before toggle renders next run
                 st.session_state.pop('_pin_sel_hash', None)
                 st.toast(f"✅ {_label} pinned as {'Guardian' if 'Guardian' in _pp_role else 'Responder'}.")
                 st.rerun()
             if _pin_cols[1].button("✕ Cancel", use_container_width=True, key="pp_cancel_btn"):
                 st.session_state['pending_pin'] = None
+                st.session_state['pin_drop_mode'] = False
+                st.session_state.pop('_pin_sel_hash', None)
                 st.rerun()
 
     # ── ADD CUSTOM STATION BY ADDRESS ─────────────────────────────────────────
@@ -12479,3 +12483,6 @@ function copyCommunitySection() {{
         st.sidebar.button("🌏 Google Earth Briefing File", disabled=True,
                           use_container_width=True,
                           help="Deploy at least one drone to generate the KML file.")
+
+
+

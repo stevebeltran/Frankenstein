@@ -20,6 +20,67 @@ import gspread
 from google.oauth2.service_account import Credentials
 import pyproj
 from PIL import Image
+_MONSTER_NAMES = ["prom", "behe", "quasi", "drac"]
+_BUILD_META_PATH = Path(".build_meta")
+
+
+def _compute_build_version():
+    _app_path = Path(__file__).resolve()
+    _mtime = _app_path.stat().st_mtime
+    _stored_ts = _mtime
+    _iteration = 0
+
+    try:
+        if _BUILD_META_PATH.exists():
+            _raw_meta = _BUILD_META_PATH.read_text(encoding="utf-8").strip()
+            if _raw_meta:
+                _ts_str, _iter_str = _raw_meta.split("|", 1)
+                _stored_ts = float(_ts_str)
+                _iteration = int(_iter_str)
+        else:
+            _BUILD_META_PATH.write_text(f"{_mtime}|0", encoding="utf-8")
+            _stored_ts = _mtime
+    except (ValueError, OSError):
+        _stored_ts = _mtime
+        _iteration = 0
+        try:
+            _BUILD_META_PATH.write_text(f"{_mtime}|0", encoding="utf-8")
+        except OSError:
+            pass
+
+    if _mtime > _stored_ts:
+        _iteration += 1
+        try:
+            _BUILD_META_PATH.write_text(f"{_mtime}|{_iteration}", encoding="utf-8")
+        except OSError:
+            pass
+    elif not _BUILD_META_PATH.exists():
+        try:
+            _BUILD_META_PATH.write_text(f"{_mtime}|{_iteration}", encoding="utf-8")
+        except OSError:
+            pass
+
+    _dt = datetime.datetime.fromtimestamp(_mtime)
+    _month_letter = chr(ord("A") + _dt.month - 1)
+    _monster_idx = min(_iteration // 50, len(_MONSTER_NAMES) - 1)
+    _monster_name = _MONSTER_NAMES[_monster_idx]
+    return f"{_dt:%y}{_month_letter}{_dt:%d}-{_monster_name}-{_dt:%H%M}.{_iteration}"
+
+
+__version__ = _compute_build_version()
+print(f"\033[38;5;234m{__version__}\033[0m")
+
+
+def _render_version_badge(position="top-right"):
+    _placement = "top: 12px; right: 16px;" if position == "top-right" else "bottom: 12px; right: 16px;"
+    st.markdown(
+        f"""
+        <div style="position:fixed; {_placement} z-index:9999; font-family:'IBM Plex Mono',monospace; font-size:0.62rem; letter-spacing:0.08em; color:rgba(160,175,190,0.72); background:rgba(7,10,18,0.72); border:1px solid rgba(120,140,160,0.18); border-radius:999px; padding:4px 10px; backdrop-filter: blur(6px); pointer-events:none;">
+            v {__version__}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # --- MOBILE SUMMARY ROUTE (must run before set_page_config) ---
 if st.query_params.get("view") == "mobile":
@@ -4026,7 +4087,7 @@ def add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=True):
             hoverinfo="text",
             text=f"<b>{ceiling} ft AGL</b><br>{zone_name}",
             name=f"LAANC {ceiling}ft",
-            showlegend=True
+            showlegend=False
         ))
         trace_count += 1
 
@@ -5554,6 +5615,7 @@ def compute_all_elbow_curves(n_calls, _resp_matrix, _guard_matrix, _geos_r, _geo
 # ============================================================
 
 if not st.session_state['csvs_ready']:
+    _render_version_badge("top-right")
 
     # GRAB THE LOGO FOR THE UPLOAD PAGE
     logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
@@ -5975,6 +6037,11 @@ if not st.session_state['csvs_ready']:
                         # Restore locked stations
                         st.session_state['pinned_guard_names'] = save_data.get('pinned_guard_names', [])
                         st.session_state['pinned_resp_names']  = save_data.get('pinned_resp_names',  [])
+                        st.session_state['lock_guard_ms'] = list(st.session_state['pinned_guard_names'])
+                        st.session_state['lock_resp_ms']  = [
+                            s for s in st.session_state['pinned_resp_names']
+                            if s not in st.session_state['pinned_guard_names']
+                        ]
 
                         # Restore custom / pin-dropped stations
                         _cs_records = save_data.get('custom_stations')
@@ -7734,6 +7801,7 @@ if (stations.length === 0) {{
 # MAIN MAP INTERFACE
 # ============================================================
 if st.session_state['csvs_ready']:
+    _render_version_badge("bottom-right")
     components.html("<script>window._brincHasData = true;</script>", height=0)
 
     df_calls = st.session_state['df_calls'].copy()
@@ -8279,17 +8347,42 @@ if st.session_state['csvs_ready']:
     st.session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
 
     # ── LOCK STATIONS (sidebar multiselect) ──────────────────────────────────
+    def _make_unique_station_label(raw_label, station_type, lat, lon):
+        """Return a stable, unique custom-station label."""
+        _label = (raw_label or "").strip() or f"{lat:.5f}, {lon:.5f}"
+        _existing_prefixed = set(df_stations_all['name'].astype(str).tolist())
+        _custom_existing = st.session_state.get('custom_stations', pd.DataFrame())
+        if not _custom_existing.empty and {'name', 'type'}.issubset(_custom_existing.columns):
+            _existing_prefixed.update(
+                f"[{row['type']}] {row['name']}"
+                for _, row in _custom_existing[['name', 'type']].dropna().iterrows()
+            )
+        _prefixed = f"[{station_type}] {_label}"
+        if _prefixed not in _existing_prefixed:
+            return _label
+
+        _coord_suffix = f" ({lat:.5f}, {lon:.5f})"
+        _label_with_coords = f"{_label}{_coord_suffix}"
+        _prefixed_with_coords = f"[{station_type}] {_label_with_coords}"
+        if _prefixed_with_coords not in _existing_prefixed:
+            return _label_with_coords
+
+        _n = 2
+        while f"[{station_type}] {_label_with_coords} #{_n}" in _existing_prefixed:
+            _n += 1
+        return f"{_label_with_coords} #{_n}"
+
     _station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
     _saved_g = [s for s in st.session_state.get('pinned_guard_names', []) if s in _station_names]
     _saved_r = [s for s in st.session_state.get('pinned_resp_names',  []) if s in _station_names]
+    st.session_state['pinned_guard_names'] = list(_saved_g)
+    st.session_state['pinned_resp_names'] = list(_saved_r)
 
-    # Sync multiselect widget state with session state BEFORE rendering so that
-    # programmatically-added pins (e.g. from pin-drop) are reflected in the widget.
-    if st.session_state.get('lock_guard_ms') != _saved_g:
-        st.session_state['lock_guard_ms'] = _saved_g
     _saved_r_excl = [s for s in _saved_r if s not in _saved_g]
-    if st.session_state.get('lock_resp_ms') != _saved_r_excl:
-        st.session_state['lock_resp_ms'] = _saved_r_excl
+    _guard_ms = [s for s in st.session_state.get('lock_guard_ms', _saved_g) if s in _station_names]
+    _resp_ms = [s for s in st.session_state.get('lock_resp_ms', _saved_r_excl) if s in _station_names and s not in _guard_ms]
+    st.session_state['lock_guard_ms'] = _guard_ms
+    st.session_state['lock_resp_ms'] = _resp_ms
 
     lock_expander = st.sidebar.expander("🔒 Lock Stations", expanded=bool(_saved_g or _saved_r))
     with lock_expander:
@@ -8376,7 +8469,7 @@ if st.session_state['csvs_ready']:
 
             _pin_cols = st.sidebar.columns(2)
             if _pin_cols[0].button("✅ Add Station", use_container_width=True, key="pp_confirm_btn"):
-                _label = _pp_label.strip() or f"{_pp_type} Station"
+                _label = _make_unique_station_label(_pp_label, _pp_type, _pending['lat'], _pending['lon'])
                 _prefixed_label = f"[{_pp_type}] {_label}"
                 _new_pin_row = pd.DataFrame([{
                     "name":   _label,
@@ -8411,7 +8504,12 @@ if st.session_state['csvs_ready']:
                         x for x in st.session_state.get('pinned_guard_names', [])
                         if x != _prefixed_label]
                     st.session_state['pinned_resp_names'] = _pr
-                # Drive fleet counts entirely from pin lists so no open slots remain
+                st.session_state['lock_guard_ms'] = list(st.session_state.get('pinned_guard_names', []))
+                st.session_state['lock_resp_ms'] = [
+                    x for x in st.session_state.get('pinned_resp_names', [])
+                    if x not in st.session_state.get('pinned_guard_names', [])
+                ]
+
                 st.session_state['k_guard'] = len(st.session_state.get('pinned_guard_names', []))
                 st.session_state['k_resp']  = len(st.session_state.get('pinned_resp_names',  []))
                 st.session_state['pin_drop_used'] = True
@@ -8520,7 +8618,12 @@ if st.session_state['csvs_ready']:
                         _geo_lat = float(_match['lat'])
                         _geo_lon = float(_match['lon'])
                         _matched_addr = _match.get('matched_address', _addr_to_geocode)
-                        _label = _custom_label.strip() or _matched_addr
+                        _label = _make_unique_station_label(
+                            _custom_label.strip() or _matched_addr,
+                            _custom_type,
+                            _geo_lat,
+                            _geo_lon,
+                        )
                         # The type-prefix rename later produces "[Type] label"
                         # Store both original and prefixed name so pin lookup works
                         _prefixed_label = f"[{_custom_type}] {_label}"
@@ -8563,7 +8666,13 @@ if st.session_state['csvs_ready']:
                                 st.session_state['k_resp'] = len(_pr)
                             _pin_note = f"🚁 Pinned as Responder."
 
-                        st.success(f"✅ Added & locked: **{_label}** ({_geo_lat:.4f}, {_geo_lon:.4f})\n{_pin_note}")
+                        st.session_state['lock_guard_ms'] = list(st.session_state.get('pinned_guard_names', []))
+                        st.session_state['lock_resp_ms'] = [
+                            x for x in st.session_state.get('pinned_resp_names', [])
+                            if x not in st.session_state.get('pinned_guard_names', [])
+                        ]
+
+                        st.success(f"Added & locked: **{_label}** ({_geo_lat:.4f}, {_geo_lon:.4f})\n{_pin_note}")
                         st.caption(f"Matched address: {_matched_addr} [{_match.get('source', 'lookup')}]")
                         # Clear buffers (role intentionally kept so user can add more of same type)
                         st.session_state['cs_addr_buf']  = ""
@@ -8616,7 +8725,12 @@ if st.session_state['csvs_ready']:
                     x for x in st.session_state.get('pinned_guard_names', []) if x not in _rm_names]
                 st.session_state['pinned_resp_names']  = [
                     x for x in st.session_state.get('pinned_resp_names',  []) if x not in _rm_names]
-                # Restore auto-minimums if all pin-drop stations have been removed
+                st.session_state['lock_guard_ms'] = list(st.session_state.get('pinned_guard_names', []))
+                st.session_state['lock_resp_ms'] = [
+                    x for x in st.session_state.get('pinned_resp_names', [])
+                    if x not in st.session_state.get('pinned_guard_names', [])
+                ]
+
                 if not st.session_state.get('pinned_guard_names') and not st.session_state.get('pinned_resp_names'):
                     st.session_state['pin_drop_used'] = False
                 st.session_state.pop('_auto_minimums_sig', None)
@@ -8661,9 +8775,7 @@ if st.session_state['csvs_ready']:
         faa_feature_count = len(faa_geojson.get('features', [])) if isinstance(faa_geojson, dict) and faa_geojson.get('features') else 0
         # Debug FAA loading
         if faa_feature_count == 0:
-            st.sidebar.warning(f"⚠️ FAA data not loading (0 zones). Check Display Options.")
-        else:
-            st.sidebar.info(f"📍 FAA data ready: {faa_feature_count} zones")
+            st.sidebar.warning("FAA data not loading (0 zones). Check Display Options.")
     with st.spinner(get_airfield_message()):
         airfields = fetch_airfields(minx, miny, maxx, maxy)
 
@@ -10998,6 +11110,7 @@ if st.session_state['csvs_ready']:
             "brinc_user": st.session_state.get('brinc_user', 'steven.beltran'),
             # Pricing tier selection
             "pricing_tier": st.session_state.get('pricing_tier', 'Safe Guard'),
+            "app_version": __version__,
         }
 
         fig_for_export = go.Figure()
@@ -11493,6 +11606,7 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
 .doc-footer{{background:var(--ink);color:#555;padding:36px 60px;font-size:11px;display:flex;justify-content:space-between;align-items:center;gap:20px}}
 .doc-footer a{{color:#666;text-decoration:none}}
 .doc-footer .brand-mark{{font-size:16px;font-weight:900;letter-spacing:3px;color:#fff;flex-shrink:0}}
+.doc-version{{position:fixed;right:18px;bottom:12px;z-index:9999;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.12em;color:rgba(107,114,128,0.9);background:rgba(255,255,255,0.82);border:1px solid rgba(228,230,234,0.95);border-radius:999px;padding:4px 10px;}}
 
 /* ── PRODUCT IMAGE ───────────────────────────────────────────── */
 .cover-body{{
@@ -11579,10 +11693,12 @@ td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
     page-break-inside:avoid;
   }}
   a{{color:inherit !important;text-decoration:none !important}}
+  .doc-version{{position:fixed;right:14px;bottom:10px;background:rgba(255,255,255,0.94) !important;border-color:rgba(203,213,225,1) !important;color:#6b7280 !important;}}
 }}
 </style>
 </head>
 <body>
+<div class="doc-version">v {__version__}</div>
 
 <!-- ── TOP-RIGHT CORNER LOGO ─────────────────────────────────── -->
 
@@ -12423,6 +12539,7 @@ function copyCommunitySection() {{
     # ── Download buttons — always rendered so they're visible in the sidebar ──
     _safe_city   = _safe_city_base
     _ts          = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    _version_slug = __version__.replace(":", "-").replace("/", "-").replace(" ", "_")
 
     # 1. Save Deployment Plan (.brinc) — always available
     _brinc_data = json.dumps(export_dict) if fleet_capex > 0 else json.dumps({
@@ -12433,7 +12550,7 @@ function copyCommunitySection() {{
     # Include authenticated user's name in the .brinc filename for easy identification
     _user_name_safe = user_clean.replace(" ", "_")
     if st.sidebar.download_button("💾 Save Deployment Plan", data=_brinc_data,
-                                  file_name=f"{_user_name_safe}_BRINC_DFR_{_safe_city}_{_ts}.brinc",
+                                  file_name=f"{_user_name_safe}_BRINC_DFR_{_safe_city}_{_version_slug}_{_ts}.brinc",
                                   mime="application/json", use_container_width=True):
         # ── Track export event ───────────────────────────────────────────────
         st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['BRINC']
@@ -12449,7 +12566,7 @@ function copyCommunitySection() {{
     if fleet_capex > 0:
         if st.sidebar.download_button(f"📄 {prop_city}, {prop_state} — Executive Summary",
                                       data=export_html,
-                                      file_name=f"BRINC_Executive_Summary_{_safe_city}_{_ts}.html",
+                                      file_name=f"BRINC_Executive_Summary_{_safe_city}_{_version_slug}_{_ts}.html",
                                       mime="text/html",
                                       use_container_width=True):
             # ── Track export event ───────────────────────────────────────────
@@ -12483,6 +12600,9 @@ function copyCommunitySection() {{
         st.sidebar.button("🌏 Google Earth Briefing File", disabled=True,
                           use_container_width=True,
                           help="Deploy at least one drone to generate the KML file.")
+
+
+
 
 
 

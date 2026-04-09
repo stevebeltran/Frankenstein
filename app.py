@@ -5808,10 +5808,33 @@ if not st.session_state['csvs_ready']:
     });
   }
 
-  new MutationObserver(style).observe(parent.document.body,{childList:true,subtree:true});
+  function bindEnterToDeploy(){
+    var doc = parent.document;
+    var cityInput = doc.querySelector('input[aria-label="city_or_county_0"]');
+    if(!cityInput || cityInput.getAttribute('data-brinc-enter-submit')) return;
+    cityInput.setAttribute('data-brinc-enter-submit', '1');
+    cityInput.addEventListener('keydown', function(evt){
+      if(evt.key !== 'Enter' || evt.shiftKey || evt.ctrlKey || evt.altKey || evt.metaKey) return;
+      var deployBtn = Array.from(doc.querySelectorAll('[data-testid="stButton"] > button')).find(function(btn){
+        var p = btn.querySelector('p');
+        return p && p.textContent.trim() === 'Deploy';
+      });
+      if(!deployBtn) return;
+      evt.preventDefault();
+      setTimeout(function(){ deployBtn.click(); }, 30);
+    });
+  }
+
+  new MutationObserver(function(){
+    style();
+    bindEnterToDeploy();
+  }).observe(parent.document.body,{childList:true,subtree:true});
   style();
+  bindEnterToDeploy();
   setTimeout(style,150);
   setTimeout(style,500);
+  setTimeout(bindEnterToDeploy,150);
+  setTimeout(bindEnterToDeploy,500);
 })();
 </script>
 """, height=0)

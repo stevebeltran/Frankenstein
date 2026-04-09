@@ -6,7 +6,7 @@ import numpy as np
 import plotly.graph_objects as go
 from shapely.geometry import Point, Polygon, MultiPolygon, box, shape
 from shapely.ops import unary_union
-import os, itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib, uuid, traceback
+import os, itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib, uuid, traceback, tempfile
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import pulp
@@ -60,6 +60,86 @@ def _compute_build_version():
 
 __version__ = _compute_build_version()
 print(f"\033[38;5;234m{__version__}\033[0m")
+
+
+def _load_uploaded_boundary_overlay(uploaded_files):
+    """Read uploaded shapefile sidecars into EPSG:4326 for display-only map overlays."""
+    if not uploaded_files:
+        return None, "", ""
+
+    _files = list(uploaded_files)
+    _by_ext = {}
+    for _uf in _files:
+        _name = Path(_uf.name).name
+        _ext = Path(_name).suffix.lower()
+        if _ext:
+            _by_ext[_ext] = _uf
+
+    _required = ['.shp', '.shx', '.dbf', '.prj']
+    _missing = [ext for ext in _required if ext not in _by_ext]
+    if _missing:
+        raise ValueError(f"Missing required shapefile components: {', '.join(_missing)}")
+
+    with tempfile.TemporaryDirectory() as _td:
+        for _uf in _files:
+            Path(_td, Path(_uf.name).name).write_bytes(_uf.getvalue())
+
+        _shp_path = str(Path(_td, Path(_by_ext['.shp'].name).name))
+        _gdf = gpd.read_file(_shp_path)
+        if _gdf is None or _gdf.empty:
+            raise ValueError("Uploaded shapefile did not contain any features.")
+        if _gdf.crs is None:
+            raise ValueError("Uploaded shapefile has no coordinate reference system. Include a valid .prj file.")
+
+        _gdf = _gdf.to_crs(epsg=4326)
+        _gdf = _gdf[_gdf.geometry.notna()].copy()
+        _gdf = _gdf[~_gdf.geometry.is_empty].copy()
+        if _gdf.empty:
+            raise ValueError("Uploaded shapefile geometries were empty after loading.")
+
+        _name_col = next((c for c in ['NAME', 'Name', 'name', 'DISTRICT', 'District', 'LABEL', 'Label'] if c in _gdf.columns), None)
+        _label = Path(_by_ext['.shp'].name).stem
+        if _name_col:
+            _gdf['DISPLAY_NAME'] = _gdf[_name_col].astype(str).fillna('').replace('nan', '').str.strip()
+            _gdf['DISPLAY_NAME'] = _gdf['DISPLAY_NAME'].replace('', _label)
+        else:
+            _gdf['DISPLAY_NAME'] = _label
+
+        return _gdf[['DISPLAY_NAME', 'geometry']].copy(), _label, Path(_by_ext['.shp'].name).name
+
+
+def _boundary_overlay_status(boundary_geom_4326, overlay_gdf, epsg_code):
+    if boundary_geom_4326 is None or boundary_geom_4326.is_empty or overlay_gdf is None or overlay_gdf.empty:
+        return None
+    try:
+        _overlay_utm = overlay_gdf.to_crs(epsg=epsg_code)
+        _overlay_union = (_overlay_utm.geometry.union_all() if hasattr(_overlay_utm.geometry, 'union_all') else _overlay_utm.geometry.unary_union)
+        _boundary_utm = gpd.GeoSeries([boundary_geom_4326], crs='EPSG:4326').to_crs(epsg=epsg_code).iloc[0]
+        if _overlay_union.is_empty or _boundary_utm.is_empty:
+            return None
+        _inter = _overlay_union.intersection(_boundary_utm)
+        _overlay_area = float(_overlay_union.area or 0)
+        _boundary_area = float(_boundary_utm.area or 0)
+        _inter_area = float(_inter.area or 0)
+        if _overlay_area <= 0 or _boundary_area <= 0:
+            return None
+        _pct_overlay_inside = max(0.0, min(100.0, _inter_area / _overlay_area * 100.0))
+        _pct_boundary_covered = max(0.0, min(100.0, _inter_area / _boundary_area * 100.0))
+        if _inter_area <= 0:
+            _status = 'no_overlap'
+            _message = 'Uploaded boundary overlay does not overlap the selected city/county boundary.'
+        elif _pct_overlay_inside >= 99.5:
+            _status = 'inside'
+            _message = f"Uploaded boundary overlay sits within the selected boundary ({_pct_overlay_inside:.1f}% inside)."
+        elif _pct_boundary_covered >= 99.5:
+            _status = 'contains'
+            _message = f"Uploaded boundary overlay fully contains the selected boundary ({_pct_overlay_inside:.1f}% of overlay overlaps)."
+        else:
+            _status = 'partial'
+            _message = f"Uploaded boundary overlay partially overlaps the selected boundary ({_pct_overlay_inside:.1f}% of overlay overlaps)."
+        return {'status': _status, 'message': _message, 'pct_overlay_inside': _pct_overlay_inside, 'pct_boundary_covered': _pct_boundary_covered}
+    except Exception:
+        return None
 
 
 def _render_version_badge(position="top-right"):
@@ -600,6 +680,9 @@ defaults = {
     'location_detection_source': '',
     'boundary_detection_mode': '',
     'master_gdf_override': None,  # GeoDataFrame from coordinate-based jurisdiction lookup
+    'boundary_overlay_gdf': None,
+    'boundary_overlay_name': '',
+    'boundary_overlay_file': '',
     # ── NEW: file ingestion metadata & engagement tracking ──────────────────
     'file_meta': {},            # populated by aggressive_parse_calls; see _extract_file_meta()
     'export_event_log': [],     # ordered list of export types clicked this session
@@ -5842,6 +5925,16 @@ if not st.session_state['csvs_ready']:
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
+        st.markdown("<div style='font-size:12px;color:#888;padding-bottom:4px'>Boundary Overlay (optional)</div>", unsafe_allow_html=True)
+        sim_boundary_files = st.file_uploader(
+            "Upload shapefile components (.shp, .shx, .dbf, .prj)",
+            type=["shp", "shx", "dbf", "prj"],
+            accept_multiple_files=True,
+            key="sim_boundary_overlay_uploader",
+            help="Display uploaded boundary outlines on the map without changing optimization or coverage analysis."
+        )
+        st.caption("Display only. The selected city/county remains the authoritative analysis boundary.")
+
         # Move "+ City" and "Deploy" buttons up (before file uploader and download button)
         col_add, col_run = st.columns([1, 1])
         if st.session_state.city_count < 10:
@@ -6108,6 +6201,9 @@ if not st.session_state['csvs_ready']:
                                 pass
                         st.session_state['boundary_kind'] = save_data.get('boundary_kind', 'place')
                         st.session_state['boundary_source_path'] = save_data.get('boundary_source_path', '')
+                        st.session_state['boundary_overlay_gdf'] = None
+                        st.session_state['boundary_overlay_name'] = ''
+                        st.session_state['boundary_overlay_file'] = ''
 
                         # Restore FAA LAANC airspace data (if present)
                         if save_data.get('faa_geojson'):
@@ -6138,6 +6234,9 @@ if not st.session_state['csvs_ready']:
                 f_list = list(uploaded_files)
                 call_files = []
                 station_file = None
+                st.session_state['boundary_overlay_gdf'] = None
+                st.session_state['boundary_overlay_name'] = ''
+                st.session_state['boundary_overlay_file'] = ''
 
                 for f in f_list:
                     if _looks_like_stations(f.name):
@@ -6534,6 +6633,21 @@ if not st.session_state['csvs_ready']:
         else:
             st.session_state['active_city']  = f"{str(active_targets[0]['city']).title()} & {len(active_targets)-1} others"
             st.session_state['active_state'] = active_targets[0]['state']
+
+        _overlay_files = st.session_state.get('sim_boundary_overlay_uploader')
+        if _overlay_files:
+            try:
+                _overlay_gdf, _overlay_name, _overlay_file = _load_uploaded_boundary_overlay(_overlay_files)
+                st.session_state['boundary_overlay_gdf'] = _overlay_gdf
+                st.session_state['boundary_overlay_name'] = _overlay_name
+                st.session_state['boundary_overlay_file'] = _overlay_file
+            except Exception as _overlay_err:
+                st.error(f"Boundary overlay upload error: {_overlay_err}")
+                st.stop()
+        else:
+            st.session_state['boundary_overlay_gdf'] = None
+            st.session_state['boundary_overlay_name'] = ''
+            st.session_state['boundary_overlay_file'] = ''
 
         prog = st.progress(0, text="🫡 Preparing tools worthy of those who serve…")
         all_gdfs = []
@@ -8002,6 +8116,15 @@ if st.session_state['csvs_ready']:
         else (_boundary_src_note.split(chr(47))[-1].split(chr(92))[-1] if _boundary_src_note else 'live lookup')
     )
     st.sidebar.caption(f"Boundary: {_boundary_kind_note} · {_boundary_src_display}")
+    if boundary_overlay_gdf is not None and not boundary_overlay_gdf.empty:
+        _overlay_file = st.session_state.get('boundary_overlay_file', '') or st.session_state.get('boundary_overlay_name', 'uploaded boundary')
+        st.sidebar.caption(f"Overlay: {_overlay_file} (display only)")
+        if boundary_overlay_status:
+            if boundary_overlay_status['status'] == 'inside':
+                st.sidebar.info(boundary_overlay_status['message'])
+            else:
+                st.sidebar.warning(boundary_overlay_status['message'])
+
 
     total_pts = master_gdf['data_count'].sum()
     master_gdf['LABEL'] = master_gdf['DISPLAY_NAME'] + " (" + (master_gdf['data_count']/total_pts*100).round(1).astype(str) + "%)"
@@ -8197,6 +8320,9 @@ if st.session_state['csvs_ready']:
         city_boundary_geom = gpd.GeoSeries([clean_geom], crs=epsg_code).to_crs(epsg=4326).iloc[0]
     except Exception as e:
         st.error(f"Geometry Error: {e}"); st.stop()
+
+    boundary_overlay_gdf = st.session_state.get('boundary_overlay_gdf')
+    boundary_overlay_status = _boundary_overlay_status(city_boundary_geom, boundary_overlay_gdf, epsg_code)
 
     # --- GEOGRAPHIC FILTERING FOR STATIONS ---
     # Keep stations inside city boundary + generous buffer.
@@ -9590,6 +9716,21 @@ if st.session_state['csvs_ready']:
                 fig.add_trace(go.Scattermap(mode="lines", lon=list(bx), lat=list(by),
                     line=dict(color=map_boundary_color, width=2), name="Jurisdiction Boundary",
                     hoverinfo='skip', showlegend=(gi==0)))
+
+        if show_boundaries and boundary_overlay_gdf is not None and not boundary_overlay_gdf.empty:
+            _overlay_parts = []
+            for _overlay_geom in boundary_overlay_gdf.geometry:
+                if _overlay_geom is None or _overlay_geom.is_empty:
+                    continue
+                if isinstance(_overlay_geom, Polygon):
+                    _overlay_parts.append(_overlay_geom)
+                elif isinstance(_overlay_geom, MultiPolygon):
+                    _overlay_parts.extend(list(_overlay_geom.geoms))
+            for oi, geom in enumerate(_overlay_parts):
+                bx, by = geom.exterior.coords.xy
+                fig.add_trace(go.Scattermap(mode="lines", lon=list(bx), lat=list(by),
+                    line=dict(color="#00D2FF", width=2, dash="dash"), name="Uploaded Boundary Overlay",
+                    hoverinfo='skip', showlegend=(oi==0)))
 
         if show_heatmap and not display_calls.empty:
             fig.add_trace(go.Densitymap(lat=display_calls.geometry.y, lon=display_calls.geometry.x,

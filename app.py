@@ -2737,14 +2737,25 @@ def aggressive_parse_calls(uploaded_files):
             else:
                 res['agency'] = 'police'   # safe default for single-agency files
 
-            # ── Agency / source tagging (Fire vs Police) ─────────────────────
-            # Look for a column named 'agency', 'department', or 'dept' and
-            # carry it through as a lowercase 'agency' column so the map
-            # renderer can colour fire calls red and police calls the default colour.
-            _agency_col = next(
-                (c for c in raw_df.columns if c.strip().lower() in ('agency', 'department', 'dept')),
-                None
-            )
+            # Agency / source tagging (Fire vs Police)
+            # Prefer a column that contains fire/police labels when duplicate agency
+            # fields exist (for example Agency + Agency.1 after CSV import).
+            _agency_candidates = [
+                c for c in raw_df.columns
+                if c.strip().lower() in ('agency', 'agency.1', 'department', 'department.1', 'dept', 'dept.1')
+            ]
+            _agency_col = None
+            for _cand in _agency_candidates:
+                try:
+                    _vals = raw_df[_cand].astype(str).str.strip().str.lower()
+                    if _vals.str.contains(r'\b(fire|police|ems|sheriff)\b', regex=True, na=False).any():
+                        _agency_col = _cand
+                        break
+                except Exception:
+                    pass
+            if _agency_col is None:
+                _agency_col = _agency_candidates[0] if _agency_candidates else None
+
             if _agency_col:
                 res['agency'] = raw_df[_agency_col].astype(str).str.strip().str.lower()
             else:

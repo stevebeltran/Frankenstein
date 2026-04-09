@@ -27,7 +27,7 @@ _BUILD_META_PATH = Path(".build_meta")
 def _compute_build_version():
     _app_path = Path(__file__).resolve()
     _mtime = _app_path.stat().st_mtime
-    _stored_ts = _mtime
+    _stored_ts = None
     _iteration = 0
 
     try:
@@ -37,32 +37,23 @@ def _compute_build_version():
                 _ts_str, _iter_str = _raw_meta.split("|", 1)
                 _stored_ts = float(_ts_str)
                 _iteration = int(_iter_str)
-        else:
-            _BUILD_META_PATH.write_text(f"{_mtime}|0", encoding="utf-8")
-            _stored_ts = _mtime
     except (ValueError, OSError):
-        _stored_ts = _mtime
+        _stored_ts = None
         _iteration = 0
-        try:
-            _BUILD_META_PATH.write_text(f"{_mtime}|0", encoding="utf-8")
-        except OSError:
-            pass
 
-    if _mtime > _stored_ts:
+    if _stored_ts is None:
+        _iteration = 1
+    elif _mtime != _stored_ts:
         _iteration += 1
-        try:
-            _BUILD_META_PATH.write_text(f"{_mtime}|{_iteration}", encoding="utf-8")
-        except OSError:
-            pass
-    elif not _BUILD_META_PATH.exists():
-        try:
-            _BUILD_META_PATH.write_text(f"{_mtime}|{_iteration}", encoding="utf-8")
-        except OSError:
-            pass
+
+    try:
+        _BUILD_META_PATH.write_text(f"{_mtime}|{_iteration}", encoding="utf-8")
+    except OSError:
+        pass
 
     _dt = datetime.datetime.fromtimestamp(_mtime)
     _month_letter = chr(ord("A") + _dt.month - 1)
-    _monster_idx = min(_iteration // 50, len(_MONSTER_NAMES) - 1)
+    _monster_idx = min(max(_iteration - 1, 0) // 50, len(_MONSTER_NAMES) - 1)
     _monster_name = _MONSTER_NAMES[_monster_idx]
     return f"{_dt:%y}{_month_letter}{_dt:%d}-{_monster_name}-{_dt:%H%M}.{_iteration}"
 

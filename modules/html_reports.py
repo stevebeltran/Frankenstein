@@ -1687,16 +1687,17 @@ def generate_community_impact_dashboard_html(
             pass
 
     if not call_type_data:
-        # Reasonable DFR-program defaults
+        # Reasonable DFR-program defaults — use a floor of 500 so bars are always visible
+        _ct_base = max(int(total_annual_dfr), 500)
         call_type_data = {
-            "Shots Fired / Weapon": int(total_annual_dfr * 0.12),
-            "Suspicious Person": int(total_annual_dfr * 0.19),
-            "Burglary / Theft": int(total_annual_dfr * 0.17),
-            "Traffic Accident": int(total_annual_dfr * 0.11),
-            "Welfare Check": int(total_annual_dfr * 0.20),
-            "Domestic Disturbance": int(total_annual_dfr * 0.09),
-            "Missing Person": int(total_annual_dfr * 0.05),
-            "Other": int(total_annual_dfr * 0.07),
+            "Shots Fired / Weapon": int(_ct_base * 0.12),
+            "Suspicious Person": int(_ct_base * 0.19),
+            "Burglary / Theft": int(_ct_base * 0.17),
+            "Traffic Accident": int(_ct_base * 0.11),
+            "Welfare Check": int(_ct_base * 0.20),
+            "Domestic Disturbance": int(_ct_base * 0.09),
+            "Missing Person": int(_ct_base * 0.05),
+            "Other": int(_ct_base * 0.07),
         }
 
     ct_total   = max(1, sum(call_type_data.values()))
@@ -1717,6 +1718,7 @@ def generate_community_impact_dashboard_html(
         "Hospital": "🏥", "University": "🎓", "Transit": "🚌",
         "Community": "🏛️", "Courthouse": "⚖️", "Social Services": "🤝",
         "Government": "🏛️", "Library": "📚",
+        "Power Station": "⚡", "Water Treatment": "💧",
     }
     _fac_src_map = {
         "Police":          "DHS HIFLD Law Enforcement Locations · OpenStreetMap (amenity=police, ODbL)",
@@ -1731,12 +1733,15 @@ def generate_community_impact_dashboard_html(
         "Social Services": "OpenStreetMap (amenity=social_facility) · HUD Location Affordability Index",
         "Government":      "OpenStreetMap (building=government) · Census TIGER/Line (census.gov)",
         "Library":         "OpenStreetMap (amenity=library) · IMLS Public Libraries Survey (imls.gov)",
+        "Power Station":   "OpenStreetMap (power=station) · US Energy Information Administration (eia.gov)",
+        "Water Treatment": "OpenStreetMap (man_made=water_treatment) · EPA Enviromapper · US Water Infrastructure Database",
     }
     _fac_color_map = {
         "Police": "#00D2FF", "Fire": "#ef4444", "EMS": "#f97316",
         "School": "#eab308", "Hospital": "#22c55e", "University": "#3b82f6",
         "Transit": "#10b981", "Community": "#f59e0b", "Courthouse": "#8b5cf6",
         "Social Services": "#ec4899", "Government": "#a78bfa", "Library": "#fb923c",
+        "Power Station": "#f59e0b", "Water Treatment": "#0ea5e9",
     }
     _total_facilities = sum((facility_counts or {}).values())
     _fac_cards_html = ""
@@ -2410,14 +2415,14 @@ def generate_community_impact_dashboard_html(
     Research has documented that aerial surveillance can be deployed disproportionately in communities of color even when controlling for income.
     The {city} DFR program explicitly tracks deployment patterns by district to ensure equitable coverage.
   </p>
-  <div style="display:flex;gap:12px;flex-wrap:wrap;">
-    <div style="flex:1;min-width:180px;background:var(--bg-inset);border-radius:8px;padding:12px 14px;">
-      <div style="font-size:11px;font-weight:700;color:var(--accent-gold);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Deployed Stations <span class="tip-cid" data-tip="The drone stations currently active in this deployment plan. Responder (🚁) covers a 2-mile radius; Guardian (🦅) covers up to 8 miles. Station positions are optimized for maximum call coverage.">?</span></div>
-      <div id="stationList" style="font-size:11.5px;color:var(--ink-mid);line-height:1.8;"></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <div style="flex:1;min-width:160px;background:var(--bg-inset);border-radius:6px;padding:8px 10px;">
+      <div style="font-size:10px;font-weight:700;color:var(--accent-gold);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">Deployed Stations <span class="tip-cid" data-tip="The drone stations currently active in this deployment plan. Responder (🚁) covers a 2-mile radius; Guardian (🦅) covers up to 8 miles. Station positions are optimized for maximum call coverage.">?</span></div>
+      <div id="stationList" style="font-size:10.5px;color:var(--ink-mid);line-height:1.6;"></div>
     </div>
-    <div style="flex:2;min-width:200px;background:var(--bg-inset);border-radius:8px;padding:12px 14px;">
-      <div style="font-size:11px;font-weight:700;color:var(--accent-gold);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Equity Safeguards <span class="tip-cid" data-tip="Policy commitments that prevent demographic bias in drone deployment. Placement is data-driven (call volume), not population-profile-driven. Audit results and complaint data are published annually.">?</span></div>
-      <ul style="font-size:11.5px;color:var(--ink-mid);padding-left:16px;line-height:2.0;">
+    <div style="flex:2;min-width:180px;background:var(--bg-inset);border-radius:6px;padding:8px 10px;">
+      <div style="font-size:10px;font-weight:700;color:var(--accent-gold);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">Equity Safeguards <span class="tip-cid" data-tip="Policy commitments that prevent demographic bias in drone deployment. Placement is data-driven (call volume), not population-profile-driven. Audit results and complaint data are published annually.">?</span></div>
+      <ul style="font-size:10.5px;color:var(--ink-mid);padding-left:14px;line-height:1.7;margin:0;">
         <li>Coverage zones set by call-volume density, not demographic profile</li>
         <li>Annual deployment audit published in program transparency report</li>
         <li>No algorithmic profiling: dispatch triggered solely by 911 call</li>
@@ -2426,27 +2431,6 @@ def generate_community_impact_dashboard_html(
     </div>
   </div>
 </div>
-
-
-<!-- ══════════════════════════════════════════════════════════════════
-     SECTION 6B — PROTECTED FACILITIES
-══════════════════════════════════════════════════════════════════ -->
-<div class="section-label" style="margin-top:20px;">06B &nbsp;·&nbsp; Protected Public Facilities
-  <span class="tip-cid" data-tip="Count of public facilities indexed within the city boundaries by type. Sources: OpenStreetMap (ODbL) · DHS HIFLD · NCES · CMS · NEMSIS · NTD · IMLS · US Courts PACER. Facility data is pulled from real-time public datasets at proposal generation time.">?</span>
-</div>
-<p style="font-size:11.5px;color:var(--ink-light);margin-bottom:14px;line-height:1.6;">
-  BRINC DFR provides aerial first-response coverage over <strong style="color:var(--ink);">{_total_facilities:,} indexed public facilities</strong>
-  in {city}, {state} — from schools and hospitals to transit hubs and social services.
-  Drone coverage zones protect these assets 24 / 7 without dedicated officers posted at each location.
-</p>
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:20px;">
-  {_fac_cards_html}
-</div>
-<p style="font-size:10px;color:var(--ink-light);font-style:italic;margin-bottom:20px;">
-  ⓘ Facility counts sourced from OpenStreetMap (ODbL license), DHS HIFLD Open Data (public domain),
-  NCES Common Core of Data, CMS Hospital Compare, NEMSIS National EMS Database, NTD National Transit Database,
-  IMLS Public Libraries Survey, and US Courts PACER. Data reflects snapshot at time of report generation.
-</p>
 
 
 <!-- ══════════════════════════════════════════════════════════════════

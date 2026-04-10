@@ -1379,7 +1379,53 @@ def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, se
     return display_calls.to_crs(epsg=4326)
 
 # ============================================================
-# APP FLOW 
+# SESSION STATE INITIALIZATION
+# ============================================================
+# This MUST run before any st.session_state checks to prevent KeyError
+_defaults = {
+    'csvs_ready': False, 'df_calls': None, 'df_calls_full': None, 'df_stations': None,
+    'active_city': "Rockford", 'active_state': "IL", 'estimated_pop': 65000,
+    'k_resp': 2, 'k_guard': 0, 'r_resp': 2.0, 'r_guard': 8.0,
+    'dfr_rate': 12, 'deflect_rate': 25, 'total_original_calls': 0, 'total_modeled_calls': 0,
+    'onboarding_done': False, 'trigger_sim': False, 'city_count': 1,
+    'brinc_user': 'steven.beltran',
+    'session_start': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    'session_id': str(uuid.uuid4())[:8],
+    'data_source': 'unknown',
+    'map_build_logged': False,
+    'boundary_kind': 'place',
+    'boundary_source_path': '',
+    'location_detection_source': '',
+    'boundary_detection_mode': '',
+    'master_gdf_override': None,
+    'boundary_overlay_gdf': None,
+    'boundary_overlay_name': '',
+    'boundary_overlay_file': '',
+    'file_meta': {},
+    'export_event_log': [],
+    'export_count': 0,
+    'demo_mode_used': False,
+    'sim_mode_used': False,
+    'pin_drop_mode': False,
+    'pending_pin': None,
+    'pin_drop_used': False,
+    'doc_custom_intro': '',
+    'doc_talking_pt_1': '',
+    'doc_talking_pt_2': '',
+    'doc_talking_pt_3': '',
+    'doc_custom_closing': '',
+    'doc_ae_phone': '',
+    'inferred_daily_calls_override': None,
+}
+for k, v in _defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+if 'target_cities' not in st.session_state:
+    st.session_state['target_cities'] = [{"city": "", "state": st.session_state.get('active_state', 'IL')}]
+
+# ============================================================
+# APP FLOW
 # ============================================================
 
 def main():

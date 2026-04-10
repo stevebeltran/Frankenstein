@@ -2499,5834 +2499,3570 @@ def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, se
 # APP FLOW 
 # ============================================================
 
-if not st.session_state['csvs_ready']:
-    _render_version_badge("top-right")
+def main():
+    if not st.session_state['csvs_ready']:
+        _render_version_badge("top-right")
 
-    # GRAB THE LOGO FOR THE UPLOAD PAGE
-    logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
-    hero_logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:72px; margin-bottom:15px;">' if logo_b64 else f'<div style="font-size:2.5rem; font-weight:900; letter-spacing:4px; color:#ffffff; margin-bottom:15px;">BRINC</div>'
-    # Upper-right hero image uses gigs.png (the drone product shot)
-    gigs_b64 = get_transparent_product_base64("gigs.png")
+        # GRAB THE LOGO FOR THE UPLOAD PAGE
+        logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
+        hero_logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:72px; margin-bottom:15px;">' if logo_b64 else f'<div style="font-size:2.5rem; font-weight:900; letter-spacing:4px; color:#ffffff; margin-bottom:15px;">BRINC</div>'
+        # Upper-right hero image uses gigs.png (the drone product shot)
+        gigs_b64 = get_transparent_product_base64("gigs.png")
 
-    st.markdown(f"""
-    <style>
-    @keyframes pulseGlow {{
-        0%, 100% {{ opacity: 0.55; }}
-        50%       {{ opacity: 1.0; }}
-    }}
-    @keyframes fadeUp {{
-        from {{ opacity:0; transform:translateY(14px); }}
-        to   {{ opacity:1; transform:translateY(0); }}
-    }}
-    .brinc-hero {{
-        position: relative;
-        text-align: center;
-        padding: 52px 24px 40px;
-        margin-bottom: 36px;
-        border-radius: 12px;
-        background: radial-gradient(ellipse at 50% 0%,
-            rgba(0,210,255,0.13) 0%, rgba(0,0,0,0) 68%);
-        border-bottom: 1px solid rgba(0,210,255,0.15);
-        overflow: hidden;
-        animation: fadeUp 0.5s ease both;
-    }}
-    .brinc-hero::before {{
-        content: '';
-        position: absolute; inset: 0;
-        background:
-            repeating-linear-gradient(0deg,
-                transparent, transparent 39px,
-                rgba(0,210,255,0.025) 39px,
-                rgba(0,210,255,0.025) 40px),
-            repeating-linear-gradient(90deg,
-                transparent, transparent 79px,
-                rgba(0,210,255,0.025) 79px,
-                rgba(0,210,255,0.025) 80px);
-        pointer-events: none;
-    }}
-    .brinc-eyebrow {{
-        font-family: 'IBM Plex Mono', monospace;
-        font-size: 0.62rem;
-        font-weight: 700;
-        letter-spacing: 4px;
-        color: {accent_color};
-        text-transform: uppercase;
-        opacity: 0.7;
-        margin-bottom: 12px;
-    }}
-    .brinc-h1 {{
-        font-family: 'Manrope', sans-serif;
-        font-size: clamp(2rem, 4vw, 3rem);
-        font-weight: 900;
-        color: #ffffff;
-        letter-spacing: -0.5px;
-        line-height: 1.08;
-        margin-bottom: 12px;
-    }}
-    .brinc-h1 em {{
-        font-style: normal;
-        color: {accent_color};
-    }}
-    .brinc-tagline {{
-        font-size: 0.88rem;
-        color: #666;
-        max-width: 500px;
-        margin: 0 auto 22px;
-        line-height: 1.65;
-    }}
-    .brinc-badges {{
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: 8px;
-        margin-top: 4px;
-    }}
-    .brinc-badge {{
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        background: rgba(0,210,255,0.07);
-        border: 1px solid rgba(0,210,255,0.2);
-        border-radius: 100px;
-        padding: 4px 13px;
-        font-size: 0.64rem;
-        font-weight: 700;
-        color: {accent_color};
-        letter-spacing: 0.8px;
-        text-transform: uppercase;
-    }}
-    .brinc-badge.pulse {{
-        animation: pulseGlow 3s ease-in-out infinite;
-    }}
-    .path-card {{
-        background: #080808;
-        border: 1px solid #1c1c1c;
-        border-radius: 10px;
-        padding: 22px 18px 16px;
-        position: relative;
-        overflow: hidden;
-        transition: border-color 0.2s ease, box-shadow 0.2s ease;
-    }}
-    .path-card::after {{
-        content: '';
-        position: absolute;
-        top: 0; left: 0; right: 0;
-        height: 3px;
-        background: var(--accent);
-        border-radius: 10px 10px 0 0;
-    }}
-    .path-card:hover {{
-        border-color: rgba(255,255,255,0.12);
-        box-shadow: 0 0 28px rgba(0,210,255,0.05);
-    }}
-    .pc-icon  {{ font-size: 1.5rem; display:block; margin-bottom:9px; }}
-    .pc-tag   {{ font-size:0.55rem; font-weight:800; letter-spacing:2.5px;
-                 text-transform:uppercase; color:var(--accent); margin-bottom:5px; }}
-    .pc-title {{ font-size:1rem; font-weight:800; color:#fff;
-                 line-height:1.25; margin-bottom:7px; }}
-    .pc-desc  {{ font-size:0.7rem; color:#555; line-height:1.6; margin-bottom:0; }}
-    .field-footnote {{
-        font-size: 0.63rem; color: #3a3a3a; line-height: 1.75;
-        margin-top: 10px; border-top: 1px solid #141414;
-        padding-top: 10px;
-    }}
-    .demo-cities {{
-        font-size: 0.65rem; color: #444; line-height: 1.9;
-        margin-top: 10px;
-    }}
-    .demo-cities b {{ color: #555; }}
-    .demo-check {{
-        font-size: 0.63rem; color: #333; line-height: 1.8;
-        margin-top: 12px; border-top: 1px solid #141414;
-        padding-top: 10px;
-    }}
-    .demo-check span {{ color: {accent_color}; margin-right: 5px; }}
-    </style>
-
-    <div class="brinc-hero" style="display:flex; align-items:center; justify-content:space-between; text-align:left; padding: 48px 48px 40px; gap: 32px; flex-wrap: wrap;">
-        <div style="flex:1; min-width:280px;">
-            {hero_logo_html}
-            <div class="brinc-eyebrow" style="margin-top:6px;">BRINC Drones · DFR Platform</div>
-            <div class="brinc-h1">
-                Coverage. Operations.<br><em>Savings.</em>
-            </div>
-            <div class="brinc-tagline" style="margin-left:0; text-align:left;">
-                Optimize drone-as-first-responder deployments for any US jurisdiction.
-                Model coverage, forecast ROI, and generate grant-ready proposals in minutes.
-            </div>
-            <div class="brinc-badges" style="justify-content:flex-start;">
-                <div class="brinc-badge pulse">🛰 3D Swarm Simulation</div>
-                <div class="brinc-badge">🗺 Census Boundaries</div>
-                <div class="brinc-badge">📄 Grant Narrative Export</div>
-                <div class="brinc-badge">✈️ FAA LAANC Overlay</div>
-                <div class="brinc-badge">⚡ MCLP Optimizer</div>
-            </div>
-        </div>
-        <div style="flex:0 0 auto; display:flex; align-items:center; justify-content:center;">
-            <img src="data:image/png;base64,{gigs_b64}" style="height:260px; max-width:420px; object-fit:contain; filter: drop-shadow(0 0 32px rgba(0,210,255,0.35)) drop-shadow(0 0 8px rgba(0,150,255,0.2));" alt="BRINC COS Drone Station">
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    path_sim_col, path_upload_col, path_demo_col = st.columns(3, gap="medium")
-
-    with path_sim_col:
         st.markdown(f"""
-        <div class="path-card" style="--accent:{accent_color};">
-            <span class="pc-icon">🗺</span>
-            <div class="pc-tag">Path 01</div>
-            <div class="pc-title">Simulate Any<br>US Region</div>
-            <div class="pc-desc">No data needed. Real Census boundaries + realistic 911 call distribution generated automatically. Stack multiple jurisdictions in one run.</div>
-        </div>
-        """, unsafe_allow_html=True)
+        <style>
+        @keyframes pulseGlow {{
+            0%, 100% {{ opacity: 0.55; }}
+            50%       {{ opacity: 1.0; }}
+        }}
+        @keyframes fadeUp {{
+            from {{ opacity:0; transform:translateY(14px); }}
+            to   {{ opacity:1; transform:translateY(0); }}
+        }}
+        .brinc-hero {{
+            position: relative;
+            text-align: center;
+            padding: 52px 24px 40px;
+            margin-bottom: 36px;
+            border-radius: 12px;
+            background: radial-gradient(ellipse at 50% 0%,
+                rgba(0,210,255,0.13) 0%, rgba(0,0,0,0) 68%);
+            border-bottom: 1px solid rgba(0,210,255,0.15);
+            overflow: hidden;
+            animation: fadeUp 0.5s ease both;
+        }}
+        .brinc-hero::before {{
+            content: '';
+            position: absolute; inset: 0;
+            background:
+                repeating-linear-gradient(0deg,
+                    transparent, transparent 39px,
+                    rgba(0,210,255,0.025) 39px,
+                    rgba(0,210,255,0.025) 40px),
+                repeating-linear-gradient(90deg,
+                    transparent, transparent 79px,
+                    rgba(0,210,255,0.025) 79px,
+                    rgba(0,210,255,0.025) 80px);
+            pointer-events: none;
+        }}
+        .brinc-eyebrow {{
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.62rem;
+            font-weight: 700;
+            letter-spacing: 4px;
+            color: {accent_color};
+            text-transform: uppercase;
+            opacity: 0.7;
+            margin-bottom: 12px;
+        }}
+        .brinc-h1 {{
+            font-family: 'Manrope', sans-serif;
+            font-size: clamp(2rem, 4vw, 3rem);
+            font-weight: 900;
+            color: #ffffff;
+            letter-spacing: -0.5px;
+            line-height: 1.08;
+            margin-bottom: 12px;
+        }}
+        .brinc-h1 em {{
+            font-style: normal;
+            color: {accent_color};
+        }}
+        .brinc-tagline {{
+            font-size: 0.88rem;
+            color: #666;
+            max-width: 500px;
+            margin: 0 auto 22px;
+            line-height: 1.65;
+        }}
+        .brinc-badges {{
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 4px;
+        }}
+        .brinc-badge {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(0,210,255,0.07);
+            border: 1px solid rgba(0,210,255,0.2);
+            border-radius: 100px;
+            padding: 4px 13px;
+            font-size: 0.64rem;
+            font-weight: 700;
+            color: {accent_color};
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+        }}
+        .brinc-badge.pulse {{
+            animation: pulseGlow 3s ease-in-out infinite;
+        }}
+        .path-card {{
+            background: #080808;
+            border: 1px solid #1c1c1c;
+            border-radius: 10px;
+            padding: 22px 18px 16px;
+            position: relative;
+            overflow: hidden;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }}
+        .path-card::after {{
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: var(--accent);
+            border-radius: 10px 10px 0 0;
+        }}
+        .path-card:hover {{
+            border-color: rgba(255,255,255,0.12);
+            box-shadow: 0 0 28px rgba(0,210,255,0.05);
+        }}
+        .pc-icon  {{ font-size: 1.5rem; display:block; margin-bottom:9px; }}
+        .pc-tag   {{ font-size:0.55rem; font-weight:800; letter-spacing:2.5px;
+                     text-transform:uppercase; color:var(--accent); margin-bottom:5px; }}
+        .pc-title {{ font-size:1rem; font-weight:800; color:#fff;
+                     line-height:1.25; margin-bottom:7px; }}
+        .pc-desc  {{ font-size:0.7rem; color:#555; line-height:1.6; margin-bottom:0; }}
+        .field-footnote {{
+            font-size: 0.63rem; color: #3a3a3a; line-height: 1.75;
+            margin-top: 10px; border-top: 1px solid #141414;
+            padding-top: 10px;
+        }}
+        .demo-cities {{
+            font-size: 0.65rem; color: #444; line-height: 1.9;
+            margin-top: 10px;
+        }}
+        .demo-cities b {{ color: #555; }}
+        .demo-check {{
+            font-size: 0.63rem; color: #333; line-height: 1.8;
+            margin-top: 12px; border-top: 1px solid #141414;
+            padding-top: 10px;
+        }}
+        .demo-check span {{ color: {accent_color}; margin-right: 5px; }}
+        </style>
 
-        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-
-        # ── CITY / STATE — simplified single-row inputs ─────────────────────
-        _state_keys = list(STATE_FIPS.keys())
-
-        # Column headers
-        _h_city, _h_state = st.columns([3, 1])
-        _h_city.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>City or County</div>", unsafe_allow_html=True)
-        _h_state.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>State</div>", unsafe_allow_html=True)
-
-        while len(st.session_state['target_cities']) < st.session_state.city_count:
-            st.session_state['target_cities'].append({"city": "", "state": st.session_state.get('active_state', 'IL')})
-
-        for i in range(st.session_state.city_count):
-            c_val = st.session_state['target_cities'][i]['city'] if i < len(st.session_state['target_cities']) else ""
-            s_val = st.session_state['target_cities'][i]['state'] if i < len(st.session_state['target_cities']) else "IL"
-
-            col_city, col_state = st.columns([3, 1])
-
-            c_name = col_city.text_input(
-                f"city_or_county_{i}", value=c_val,
-                placeholder="e.g. Rockford or Winnebago County",
-                label_visibility="collapsed",
-                key=f"c_{i}",
-                help="Official municipality or county name."
-            )
-
-            # State input: text field with autocomplete validation
-            s_name = col_state.text_input(
-                f"state_{i}",
-                value=s_val,
-                max_chars=2,
-                placeholder="CA",
-                label_visibility="collapsed",
-                key=f"s_{i}",
-                help="Two-letter state abbreviation (e.g., CA, TX, NY)."
-            ).upper()
-
-            # Validate state abbreviation
-            if s_name and s_name not in _state_keys:
-                # Try to find a match or use the previous value
-                if s_val and s_val in _state_keys:
-                    s_name = s_val
-                elif s_name:
-                    # Show warning but allow the user to continue
-                    pass
-
-            if i < len(st.session_state['target_cities']):
-                st.session_state['target_cities'][i] = {"city": c_name, "state": s_name}
-            else:
-                st.session_state['target_cities'].append({"city": c_name, "state": s_name})
-
-        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-
-        # Move "+ City" and "Deploy" buttons up (before file uploader and download button)
-        col_add, col_run = st.columns([1, 1])
-        if st.session_state.city_count < 10:
-            if col_add.button("＋ City", use_container_width=True, key="add_city_btn"):
-                st.session_state.city_count += 1
-                st.rerun()
-        submit_demo = col_run.button("Deploy", use_container_width=True, key="run_sim_btn",
-                                     help="Fetch boundaries and launch the simulation.")
-
-        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-
-        st.file_uploader(
-            "Optional: Custom stations (CSV or Excel)",
-            type=['csv', 'xlsx', 'xls', 'xlsm', 'xlsb'],
-            key="sim_station_uploader",
-            help="Include 'lat'/'lon' OR 'address' columns. Max ~20 locations for auto-geocoding."
-        )
-
-        station_template_bytes = base64.b64decode(
-            "TkFNRSxUWVBFLEFERFJFU1MsQ0FQQUNJVFksTk9URVMsTEFULExPTgpTYW1wbGUgMSBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjQyMCBXIFN0YXRlIFN0LCBSb2NrZm9yZCwgSUwgNjExMDEiLDIsUHJpbWFyeSBkb3dudG93biBkaXNwYXRjaCBodWIsNDIuMjcxMSwtODkuMDk0MApTYW1wbGUgMiBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjM0MDEgTiBNYWluIFN0LCBSb2NrZm9yZCwgSUwgNjExMDMiLDIsTm9ydGggc2lkZSBwYXRyb2wgYmFzZSw0Mi4zMTA1LC04OS4wODg3ClNhbXBsZSAzIFBvbGljZSBTdGF0aW9uLFBvbGljZSwiMTcwNyBTIE11bGZvcmQgUmQsIFJvY2tmb3JkLCBJTCA2MTEwOCIsMSxTb3V0aGVhc3QgY29ycmlkb3IgY292ZXJhZ2UsNDIuMjQ4OCwtODguOTk5OApTYW1wbGUgNCBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjQzNDAgVyBTdGF0ZSBTdCwgUm9ja2ZvcmQsIElMIDYxMTAyIiwxLFdlc3Qgc2lkZSByYXBpZCByZXNwb25zZSB1bml0LDQyLjI3MTIsLTg5LjEyNDEKU2FtcGxlIDEgRmlyZSBTdGF0aW9uLEZpcmUsIjcwOCBDbGludG9uIFN0LCBSb2NrZm9yZCwgSUwgNjExMDEiLDIsQ2VudHJhbCBmaXJlIGRpc3BhdGNoIC0gU3RhdGlvbiAxLDQyLjI3MjAsLTg5LjA4OTgKU2FtcGxlIDIgRmlyZSBTdGF0aW9uLEZpcmUsIjE0MDIgTiBDb3VydCBTdCwgUm9ja2ZvcmQsIElMIDYxMTAzIiwxLE5vcnRoIFJvY2tmb3JkIGZpcmUgY292ZXJhZ2UsNDIuMjk1MSwtODkuMDgyNgpTYW1wbGUgMyBGaXJlIFN0YXRpb24sRmlyZSwiMjI1MCBTIEFscGluZSBSZCwgUm9ja2ZvcmQsIElMIDYxMTA4IiwxLFNvdXRoIEFscGluZSBmaXJlIHJlc3BvbnNlLDQyLjI0MDEsLTg4Ljk5NjQKU2FtcGxlIDQgRmlyZSBTdGF0aW9uLEZpcmUsIjUyODUgU2FmZm9yZCBSZCwgUm9ja2ZvcmQsIElMIDYxMTAxIiwxLFdlc3QgZGlzdHJpY3QgZmlyZSBzdGF0aW9uLDQyLjI2OTgsLTg5LjE0MDIKU2FtcGxlIDEgRU1TIFN0YXRpb24sRU1TLCIxNDAxIEUgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwNCIsMixFYXN0IHNpZGUgRU1TIHJhcGlkIHJlc3BvbnNlLDQyLjI2OTQsLTg5LjA2MjEKU2FtcGxlIDIgRU1TIFN0YXRpb24sRU1TLCIzNzIwIENoYXJsZXMgU3QsIFJvY2tmb3JkLCBJTCA2MTEwOCIsMSxTb3V0aGVhc3QgRU1TIGNvdmVyYWdlIHpvbmUsNDIuMjUyMiwtODkuMDA1OApTYW1wbGUgMyBFTVMgU3RhdGlvbixFTVMsIjQ4MjUgTiBCZWxsIFNjaG9vbCBSZCwgUm9ja2ZvcmQsIElMIDYxMTA3IiwxLE5vcnRoZWFzdCBFTVMgcmVzcG9uc2UgaHViLDQyLjMwMjEsLTg4Ljk4OTEKU2FtcGxlIDEgR292IFN0YXRpb24sR292ZXJubWVudCwiNDI1IEUgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwNCIsMSxXaW5uZWJhZ28gQ291bnR5IGFkbWluIGJ1aWxkaW5nLDQyLjI3MTUsLTg5LjA4NDgKU2FtcGxlIDIgR292IFN0YXRpb24sR292ZXJubWVudCwiMzAwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMSIsMSxDaXR5IEhhbGwgLSBSb2NrZm9yZCBtdW5pY2lwYWwgY2VudGVyLDQyLjI3MTEsLTg5LjA5NTcKU2FtcGxlIDMgR292IFN0YXRpb24sR292ZXJubWVudCwiNjUwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMiIsMSxQdWJsaWMgd29ya3MgYW5kIGVtZXJnZW5jeSBtZ210LDQyLjI3MTMsLTg5LjEwMTgK"
-        )
-
-        st.caption("Upload your own stations file if you have one, or download the sample template. If no file is uploaded, stations will be auto-generated from call data.")
-
-        st.download_button(
-            label="📥 Sample stations.csv",
-            data=station_template_bytes,
-            file_name="stations.csv",
-            mime="text/csv; charset=utf-8",
-            key="download_station_template_btn_compact",
-            help="Download sample stations template",
-        )
-        components.html("""
-<script>
-(function(){
-  var _ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;display:inline-block;vertical-align:middle;">'
-    + '<circle cx="12" cy="12" r="9.5" stroke="currentColor" stroke-width="1.6"/>'
-    + '<circle cx="12" cy="12" r="5.5" stroke="currentColor" stroke-width="1.2" stroke-dasharray="3 2"/>'
-    + '<path d="M12 5.5C9.51 5.5 7.5 7.51 7.5 10C7.5 13.25 12 18.5 12 18.5C12 18.5 16.5 13.25 16.5 10C16.5 7.51 14.49 5.5 12 5.5Z" fill="currentColor"/>'
-    + '<circle cx="12" cy="10" r="2" fill="white"/>'
-    + '</svg>';
-
-  function style(){
-    var doc = parent.document;
-    var btns = doc.querySelectorAll('[data-testid="stButton"] > button');
-    btns.forEach(function(b){
-      var p = b.querySelector('p');
-      if(!p || p.textContent.trim() !== 'Deploy') return;
-      if(b.getAttribute('data-brinc-deploy')) return;
-      b.setAttribute('data-brinc-deploy','1');
-      b.style.background   = 'linear-gradient(135deg,#00bcd4 0%,#00D2FF 100%)';
-      b.style.color        = '#000';
-      b.style.border       = 'none';
-      b.style.borderRadius = '8px';
-      b.style.fontWeight   = '800';
-      b.style.fontSize     = '15px';
-      b.style.letterSpacing= '0.4px';
-      b.style.boxShadow    = '0 4px 20px rgba(0,210,255,0.55),0 2px 8px rgba(0,0,0,0.28)';
-      b.style.transition   = 'all 0.16s ease';
-      b.style.display      = 'flex';
-      b.style.alignItems   = 'center';
-      b.style.justifyContent = 'center';
-      b.style.gap          = '7px';
-      p.style.margin  = '0';
-      p.style.color   = '#000';
-      p.style.fontWeight = '800';
-      p.style.display = 'flex';
-      p.style.alignItems = 'center';
-      p.style.gap = '7px';
-      var icon = doc.createElement('span');
-      icon.innerHTML = _ICON;
-      p.insertBefore(icon, p.firstChild);
-      b.addEventListener('mouseenter',function(){
-        b.style.boxShadow  = '0 6px 30px rgba(0,210,255,0.75),0 2px 8px rgba(0,0,0,0.3)';
-        b.style.transform  = 'translateY(-1px)';
-        b.style.background = 'linear-gradient(135deg,#00d4ee 0%,#33e0ff 100%)';
-      });
-      b.addEventListener('mouseleave',function(){
-        b.style.boxShadow  = '0 4px 20px rgba(0,210,255,0.55),0 2px 8px rgba(0,0,0,0.28)';
-        b.style.transform  = 'translateY(0)';
-        b.style.background = 'linear-gradient(135deg,#00bcd4 0%,#00D2FF 100%)';
-      });
-    });
-  }
-
-  function bindEnterToDeploy(){
-    var doc = parent.document;
-    var cityInput = doc.querySelector('input[aria-label="city_or_county_0"]');
-    if(!cityInput || cityInput.getAttribute('data-brinc-enter-submit')) return;
-    cityInput.setAttribute('data-brinc-enter-submit', '1');
-    cityInput.addEventListener('keydown', function(evt){
-      if(evt.key !== 'Enter' || evt.shiftKey || evt.ctrlKey || evt.altKey || evt.metaKey) return;
-      var deployBtn = Array.from(doc.querySelectorAll('[data-testid="stButton"] > button')).find(function(btn){
-        var p = btn.querySelector('p');
-        return p && p.textContent.trim() === 'Deploy';
-      });
-      if(!deployBtn) return;
-      evt.preventDefault();
-      setTimeout(function(){ deployBtn.click(); }, 30);
-    });
-  }
-
-  new MutationObserver(function(){
-    style();
-    bindEnterToDeploy();
-  }).observe(parent.document.body,{childList:true,subtree:true});
-  style();
-  bindEnterToDeploy();
-  setTimeout(style,150);
-  setTimeout(style,500);
-  setTimeout(bindEnterToDeploy,150);
-  setTimeout(bindEnterToDeploy,500);
-})();
-</script>
-""", height=0)
-
-    with path_upload_col:
-        st.markdown(f"""
-        <div class="path-card" style="--accent:#39FF14;">
-            <span class="pc-icon">📂</span>
-            <div class="pc-tag">Path 02</div>
-            <div class="pc-title">Upload CAD<br>or .brinc Save</div>
-            <div class="pc-desc">
-                Drop <b>any</b> CAD export CSV — no renaming needed.
-                Or, drop a previously saved <b>.brinc</b> file to instantly restore your deployment.
+        <div class="brinc-hero" style="display:flex; align-items:center; justify-content:space-between; text-align:left; padding: 48px 48px 40px; gap: 32px; flex-wrap: wrap;">
+            <div style="flex:1; min-width:280px;">
+                {hero_logo_html}
+                <div class="brinc-eyebrow" style="margin-top:6px;">BRINC Drones · DFR Platform</div>
+                <div class="brinc-h1">
+                    Coverage. Operations.<br><em>Savings.</em>
+                </div>
+                <div class="brinc-tagline" style="margin-left:0; text-align:left;">
+                    Optimize drone-as-first-responder deployments for any US jurisdiction.
+                    Model coverage, forecast ROI, and generate grant-ready proposals in minutes.
+                </div>
+                <div class="brinc-badges" style="justify-content:flex-start;">
+                    <div class="brinc-badge pulse">🛰 3D Swarm Simulation</div>
+                    <div class="brinc-badge">🗺 Census Boundaries</div>
+                    <div class="brinc-badge">📄 Grant Narrative Export</div>
+                    <div class="brinc-badge">✈️ FAA LAANC Overlay</div>
+                    <div class="brinc-badge">⚡ MCLP Optimizer</div>
+                </div>
+            </div>
+            <div style="flex:0 0 auto; display:flex; align-items:center; justify-content:center;">
+                <img src="data:image/png;base64,{gigs_b64}" style="height:260px; max-width:420px; object-fit:contain; filter: drop-shadow(0 0 32px rgba(0,210,255,0.35)) drop-shadow(0 0 8px rgba(0,150,255,0.2));" alt="BRINC COS Drone Station">
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        path_sim_col, path_upload_col, path_demo_col = st.columns(3, gap="medium")
 
-        uploaded_files = st.file_uploader(
-            "Drop CAD calls + optional stations + optional boundary shapefile files",
-            accept_multiple_files=True,
-            type=['csv', 'xlsx', 'xls', 'xlsb', 'xlsm', 'brinc', 'json', 'txt', 'shp', 'shx', 'dbf', 'prj'],
-            label_visibility="collapsed",
-            help="Upload real CAD calls, optional stations, and optional shapefile sidecars (.shp/.shx/.dbf/.prj) for a display-only boundary overlay. OR drop a .brinc file to restore a previous session."
-        )
+        with path_sim_col:
+            st.markdown(f"""
+            <div class="path-card" style="--accent:{accent_color};">
+                <span class="pc-icon">🗺</span>
+                <div class="pc-tag">Path 01</div>
+                <div class="pc-title">Simulate Any<br>US Region</div>
+                <div class="pc-desc">No data needed. Real Census boundaries + realistic 911 call distribution generated automatically. Stack multiple jurisdictions in one run.</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-        st.markdown("""
-        <div class="field-footnote">
-            <b style='color:#555;'>1 file</b> — any CAD export (CSV or Excel); stations auto-built from OSM<br>
-            <b style='color:#555;'>2+ files</b> - calls + optional stations + optional .shp/.shx/.dbf/.prj overlay files<br>
-            <b style='color:#39FF14;'>.brinc file</b> — instantly restore a saved deployment<br>
-            Max 25,000 calls · 100 stations
-        </div>
-        """, unsafe_allow_html=True)
+            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-        def _looks_like_stations(fname):
-            n = fname.lower()
-            return any(k in n for k in ['station','facility','loc'])
+            # ── CITY / STATE — simplified single-row inputs ─────────────────────
+            _state_keys = list(STATE_FIPS.keys())
 
-        def _is_boundary_sidecar(fname):
-            return Path(fname).suffix.lower() in {'.shp', '.shx', '.dbf', '.prj'}
+            # Column headers
+            _h_city, _h_state = st.columns([3, 1])
+            _h_city.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>City or County</div>", unsafe_allow_html=True)
+            _h_state.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>State</div>", unsafe_allow_html=True)
 
-        if uploaded_files and len(uploaded_files) >= 1:
-            
-            # --- 1. INTELLIGENTLY CHECK FOR .BRINC FILE ---
-            # Browsers sometimes append .json to .brinc files on download
-            brinc_file = None
-            for f in uploaded_files:
-                fname = f.name.lower()
-                if '.brinc' in fname or fname.endswith('.json'):
-                    try:
-                        # Quick peek inside to see if it has our save data keys
-                        f.seek(0)
-                        peek = json.loads(f.getvalue().decode('utf-8'))
-                        if 'k_resp' in peek and 'calls_data' in peek:
-                            brinc_file = f
-                            break
-                    except:
+            while len(st.session_state['target_cities']) < st.session_state.city_count:
+                st.session_state['target_cities'].append({"city": "", "state": st.session_state.get('active_state', 'IL')})
+
+            for i in range(st.session_state.city_count):
+                c_val = st.session_state['target_cities'][i]['city'] if i < len(st.session_state['target_cities']) else ""
+                s_val = st.session_state['target_cities'][i]['state'] if i < len(st.session_state['target_cities']) else "IL"
+
+                col_city, col_state = st.columns([3, 1])
+
+                c_name = col_city.text_input(
+                    f"city_or_county_{i}", value=c_val,
+                    placeholder="e.g. Rockford or Winnebago County",
+                    label_visibility="collapsed",
+                    key=f"c_{i}",
+                    help="Official municipality or county name."
+                )
+
+                # State input: text field with autocomplete validation
+                s_name = col_state.text_input(
+                    f"state_{i}",
+                    value=s_val,
+                    max_chars=2,
+                    placeholder="CA",
+                    label_visibility="collapsed",
+                    key=f"s_{i}",
+                    help="Two-letter state abbreviation (e.g., CA, TX, NY)."
+                ).upper()
+
+                # Validate state abbreviation
+                if s_name and s_name not in _state_keys:
+                    # Try to find a match or use the previous value
+                    if s_val and s_val in _state_keys:
+                        s_name = s_val
+                    elif s_name:
+                        # Show warning but allow the user to continue
                         pass
 
-            if brinc_file:
-                with st.spinner("💾 Restoring saved deployment..."):
-                    try:
-                        brinc_file.seek(0)
-                        save_data = json.loads(brinc_file.getvalue().decode('utf-8'))
+                if i < len(st.session_state['target_cities']):
+                    st.session_state['target_cities'][i] = {"city": c_name, "state": s_name}
+                else:
+                    st.session_state['target_cities'].append({"city": c_name, "state": s_name})
+
+            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+            # Move "+ City" and "Deploy" buttons up (before file uploader and download button)
+            col_add, col_run = st.columns([1, 1])
+            if st.session_state.city_count < 10:
+                if col_add.button("＋ City", use_container_width=True, key="add_city_btn"):
+                    st.session_state.city_count += 1
+                    st.rerun()
+            submit_demo = col_run.button("Deploy", use_container_width=True, key="run_sim_btn",
+                                         help="Fetch boundaries and launch the simulation.")
+
+            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+            st.file_uploader(
+                "Optional: Custom stations (CSV or Excel)",
+                type=['csv', 'xlsx', 'xls', 'xlsm', 'xlsb'],
+                key="sim_station_uploader",
+                help="Include 'lat'/'lon' OR 'address' columns. Max ~20 locations for auto-geocoding."
+            )
+
+            station_template_bytes = base64.b64decode(
+                "TkFNRSxUWVBFLEFERFJFU1MsQ0FQQUNJVFksTk9URVMsTEFULExPTgpTYW1wbGUgMSBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjQyMCBXIFN0YXRlIFN0LCBSb2NrZm9yZCwgSUwgNjExMDEiLDIsUHJpbWFyeSBkb3dudG93biBkaXNwYXRjaCBodWIsNDIuMjcxMSwtODkuMDk0MApTYW1wbGUgMiBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjM0MDEgTiBNYWluIFN0LCBSb2NrZm9yZCwgSUwgNjExMDMiLDIsTm9ydGggc2lkZSBwYXRyb2wgYmFzZSw0Mi4zMTA1LC04OS4wODg3ClNhbXBsZSAzIFBvbGljZSBTdGF0aW9uLFBvbGljZSwiMTcwNyBTIE11bGZvcmQgUmQsIFJvY2tmb3JkLCBJTCA2MTEwOCIsMSxTb3V0aGVhc3QgY29ycmlkb3IgY292ZXJhZ2UsNDIuMjQ4OCwtODguOTk5OApTYW1wbGUgNCBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjQzNDAgVyBTdGF0ZSBTdCwgUm9ja2ZvcmQsIElMIDYxMTAyIiwxLFdlc3Qgc2lkZSByYXBpZCByZXNwb25zZSB1bml0LDQyLjI3MTIsLTg5LjEyNDEKU2FtcGxlIDEgRmlyZSBTdGF0aW9uLEZpcmUsIjcwOCBDbGludG9uIFN0LCBSb2NrZm9yZCwgSUwgNjExMDEiLDIsQ2VudHJhbCBmaXJlIGRpc3BhdGNoIC0gU3RhdGlvbiAxLDQyLjI3MjAsLTg5LjA4OTgKU2FtcGxlIDIgRmlyZSBTdGF0aW9uLEZpcmUsIjE0MDIgTiBDb3VydCBTdCwgUm9ja2ZvcmQsIElMIDYxMTAzIiwxLE5vcnRoIFJvY2tmb3JkIGZpcmUgY292ZXJhZ2UsNDIuMjk1MSwtODkuMDgyNgpTYW1wbGUgMyBGaXJlIFN0YXRpb24sRmlyZSwiMjI1MCBTIEFscGluZSBSZCwgUm9ja2ZvcmQsIElMIDYxMTA4IiwxLFNvdXRoIEFscGluZSBmaXJlIHJlc3BvbnNlLDQyLjI0MDEsLTg4Ljk5NjQKU2FtcGxlIDQgRmlyZSBTdGF0aW9uLEZpcmUsIjUyODUgU2FmZm9yZCBSZCwgUm9ja2ZvcmQsIElMIDYxMTAxIiwxLFdlc3QgZGlzdHJpY3QgZmlyZSBzdGF0aW9uLDQyLjI2OTgsLTg5LjE0MDIKU2FtcGxlIDEgRU1TIFN0YXRpb24sRU1TLCIxNDAxIEUgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwNCIsMixFYXN0IHNpZGUgRU1TIHJhcGlkIHJlc3BvbnNlLDQyLjI2OTQsLTg5LjA2MjEKU2FtcGxlIDIgRU1TIFN0YXRpb24sRU1TLCIzNzIwIENoYXJsZXMgU3QsIFJvY2tmb3JkLCBJTCA2MTEwOCIsMSxTb3V0aGVhc3QgRU1TIGNvdmVyYWdlIHpvbmUsNDIuMjUyMiwtODkuMDA1OApTYW1wbGUgMyBFTVMgU3RhdGlvbixFTVMsIjQ4MjUgTiBCZWxsIFNjaG9vbCBSZCwgUm9ja2ZvcmQsIElMIDYxMTA3IiwxLE5vcnRoZWFzdCBFTVMgcmVzcG9uc2UgaHViLDQyLjMwMjEsLTg4Ljk4OTEKU2FtcGxlIDEgR292IFN0YXRpb24sR292ZXJubWVudCwiNDI1IEUgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwNCIsMSxXaW5uZWJhZ28gQ291bnR5IGFkbWluIGJ1aWxkaW5nLDQyLjI3MTUsLTg5LjA4NDgKU2FtcGxlIDIgR292IFN0YXRpb24sR292ZXJubWVudCwiMzAwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMSIsMSxDaXR5IEhhbGwgLSBSb2NrZm9yZCBtdW5pY2lwYWwgY2VudGVyLDQyLjI3MTEsLTg5LjA5NTcKU2FtcGxlIDMgR292IFN0YXRpb24sR292ZXJubWVudCwiNjUwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMiIsMSxQdWJsaWMgd29ya3MgYW5kIGVtZXJnZW5jeSBtZ210LDQyLjI3MTMsLTg5LjEwMTgK"
+            )
+
+            st.caption("Upload your own stations file if you have one, or download the sample template. If no file is uploaded, stations will be auto-generated from call data.")
+
+            st.download_button(
+                label="📥 Sample stations.csv",
+                data=station_template_bytes,
+                file_name="stations.csv",
+                mime="text/csv; charset=utf-8",
+                key="download_station_template_btn_compact",
+                help="Download sample stations template",
+            )
+            components.html("""
+    <script>
+    (function(){
+      var _ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;display:inline-block;vertical-align:middle;">'
+        + '<circle cx="12" cy="12" r="9.5" stroke="currentColor" stroke-width="1.6"/>'
+        + '<circle cx="12" cy="12" r="5.5" stroke="currentColor" stroke-width="1.2" stroke-dasharray="3 2"/>'
+        + '<path d="M12 5.5C9.51 5.5 7.5 7.51 7.5 10C7.5 13.25 12 18.5 12 18.5C12 18.5 16.5 13.25 16.5 10C16.5 7.51 14.49 5.5 12 5.5Z" fill="currentColor"/>'
+        + '<circle cx="12" cy="10" r="2" fill="white"/>'
+        + '</svg>';
+
+      function style(){
+        var doc = parent.document;
+        var btns = doc.querySelectorAll('[data-testid="stButton"] > button');
+        btns.forEach(function(b){
+          var p = b.querySelector('p');
+          if(!p || p.textContent.trim() !== 'Deploy') return;
+          if(b.getAttribute('data-brinc-deploy')) return;
+          b.setAttribute('data-brinc-deploy','1');
+          b.style.background   = 'linear-gradient(135deg,#00bcd4 0%,#00D2FF 100%)';
+          b.style.color        = '#000';
+          b.style.border       = 'none';
+          b.style.borderRadius = '8px';
+          b.style.fontWeight   = '800';
+          b.style.fontSize     = '15px';
+          b.style.letterSpacing= '0.4px';
+          b.style.boxShadow    = '0 4px 20px rgba(0,210,255,0.55),0 2px 8px rgba(0,0,0,0.28)';
+          b.style.transition   = 'all 0.16s ease';
+          b.style.display      = 'flex';
+          b.style.alignItems   = 'center';
+          b.style.justifyContent = 'center';
+          b.style.gap          = '7px';
+          p.style.margin  = '0';
+          p.style.color   = '#000';
+          p.style.fontWeight = '800';
+          p.style.display = 'flex';
+          p.style.alignItems = 'center';
+          p.style.gap = '7px';
+          var icon = doc.createElement('span');
+          icon.innerHTML = _ICON;
+          p.insertBefore(icon, p.firstChild);
+          b.addEventListener('mouseenter',function(){
+            b.style.boxShadow  = '0 6px 30px rgba(0,210,255,0.75),0 2px 8px rgba(0,0,0,0.3)';
+            b.style.transform  = 'translateY(-1px)';
+            b.style.background = 'linear-gradient(135deg,#00d4ee 0%,#33e0ff 100%)';
+          });
+          b.addEventListener('mouseleave',function(){
+            b.style.boxShadow  = '0 4px 20px rgba(0,210,255,0.55),0 2px 8px rgba(0,0,0,0.28)';
+            b.style.transform  = 'translateY(0)';
+            b.style.background = 'linear-gradient(135deg,#00bcd4 0%,#00D2FF 100%)';
+          });
+        });
+      }
+
+      function bindEnterToDeploy(){
+        var doc = parent.document;
+        var cityInput = doc.querySelector('input[aria-label="city_or_county_0"]');
+        if(!cityInput || cityInput.getAttribute('data-brinc-enter-submit')) return;
+        cityInput.setAttribute('data-brinc-enter-submit', '1');
+        cityInput.addEventListener('keydown', function(evt){
+          if(evt.key !== 'Enter' || evt.shiftKey || evt.ctrlKey || evt.altKey || evt.metaKey) return;
+          var deployBtn = Array.from(doc.querySelectorAll('[data-testid="stButton"] > button')).find(function(btn){
+            var p = btn.querySelector('p');
+            return p && p.textContent.trim() === 'Deploy';
+          });
+          if(!deployBtn) return;
+          evt.preventDefault();
+          setTimeout(function(){ deployBtn.click(); }, 30);
+        });
+      }
+
+      new MutationObserver(function(){
+        style();
+        bindEnterToDeploy();
+      }).observe(parent.document.body,{childList:true,subtree:true});
+      style();
+      bindEnterToDeploy();
+      setTimeout(style,150);
+      setTimeout(style,500);
+      setTimeout(bindEnterToDeploy,150);
+      setTimeout(bindEnterToDeploy,500);
+    })();
+    </script>
+    """, height=0)
+
+        with path_upload_col:
+            st.markdown(f"""
+            <div class="path-card" style="--accent:#39FF14;">
+                <span class="pc-icon">📂</span>
+                <div class="pc-tag">Path 02</div>
+                <div class="pc-title">Upload CAD<br>or .brinc Save</div>
+                <div class="pc-desc">
+                    Drop <b>any</b> CAD export CSV — no renaming needed.
+                    Or, drop a previously saved <b>.brinc</b> file to instantly restore your deployment.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+            uploaded_files = st.file_uploader(
+                "Drop CAD calls + optional stations + optional boundary shapefile files",
+                accept_multiple_files=True,
+                type=['csv', 'xlsx', 'xls', 'xlsb', 'xlsm', 'brinc', 'json', 'txt', 'shp', 'shx', 'dbf', 'prj'],
+                label_visibility="collapsed",
+                help="Upload real CAD calls, optional stations, and optional shapefile sidecars (.shp/.shx/.dbf/.prj) for a display-only boundary overlay. OR drop a .brinc file to restore a previous session."
+            )
+
+            st.markdown("""
+            <div class="field-footnote">
+                <b style='color:#555;'>1 file</b> — any CAD export (CSV or Excel); stations auto-built from OSM<br>
+                <b style='color:#555;'>2+ files</b> - calls + optional stations + optional .shp/.shx/.dbf/.prj overlay files<br>
+                <b style='color:#39FF14;'>.brinc file</b> — instantly restore a saved deployment<br>
+                Max 25,000 calls · 100 stations
+            </div>
+            """, unsafe_allow_html=True)
+
+            def _looks_like_stations(fname):
+                n = fname.lower()
+                return any(k in n for k in ['station','facility','loc'])
+
+            def _is_boundary_sidecar(fname):
+                return Path(fname).suffix.lower() in {'.shp', '.shx', '.dbf', '.prj'}
+
+            if uploaded_files and len(uploaded_files) >= 1:
+            
+                # --- 1. INTELLIGENTLY CHECK FOR .BRINC FILE ---
+                # Browsers sometimes append .json to .brinc files on download
+                brinc_file = None
+                for f in uploaded_files:
+                    fname = f.name.lower()
+                    if '.brinc' in fname or fname.endswith('.json'):
+                        try:
+                            # Quick peek inside to see if it has our save data keys
+                            f.seek(0)
+                            peek = json.loads(f.getvalue().decode('utf-8'))
+                            if 'k_resp' in peek and 'calls_data' in peek:
+                                brinc_file = f
+                                break
+                        except:
+                            pass
+
+                if brinc_file:
+                    with st.spinner("💾 Restoring saved deployment..."):
+                        try:
+                            brinc_file.seek(0)
+                            save_data = json.loads(brinc_file.getvalue().decode('utf-8'))
                         
-                        st.session_state['active_city']   = str(save_data.get('city', 'Unknown')).title()
-                        st.session_state['active_state']  = save_data.get('state', 'US')
-                        st.session_state['k_resp']        = save_data.get('k_resp', 2)
-                        st.session_state['k_guard']       = save_data.get('k_guard', 0)
-                        st.session_state['r_resp']        = save_data.get('r_resp', 2.0)
-                        st.session_state['r_guard']       = save_data.get('r_guard', 8.0)
-                        st.session_state['dfr_rate']      = save_data.get('dfr_rate', 12)
-                        st.session_state['deflect_rate']  = save_data.get('deflect_rate', 25)
+                            st.session_state['active_city']   = str(save_data.get('city', 'Unknown')).title()
+                            st.session_state['active_state']  = save_data.get('state', 'US')
+                            st.session_state['k_resp']        = save_data.get('k_resp', 2)
+                            st.session_state['k_guard']       = save_data.get('k_guard', 0)
+                            st.session_state['r_resp']        = save_data.get('r_resp', 2.0)
+                            st.session_state['r_guard']       = save_data.get('r_guard', 8.0)
+                            st.session_state['dfr_rate']      = save_data.get('dfr_rate', 12)
+                            st.session_state['deflect_rate']  = save_data.get('deflect_rate', 25)
 
-                        # Restore locked stations
-                        st.session_state['pinned_guard_names'] = save_data.get('pinned_guard_names', [])
-                        st.session_state['pinned_resp_names']  = save_data.get('pinned_resp_names',  [])
-                        st.session_state['lock_guard_ms'] = list(st.session_state['pinned_guard_names'])
-                        st.session_state['lock_resp_ms']  = [
-                            s for s in st.session_state['pinned_resp_names']
-                            if s not in st.session_state['pinned_guard_names']
-                        ]
+                            # Restore locked stations
+                            st.session_state['pinned_guard_names'] = save_data.get('pinned_guard_names', [])
+                            st.session_state['pinned_resp_names']  = save_data.get('pinned_resp_names',  [])
+                            st.session_state['lock_guard_ms'] = list(st.session_state['pinned_guard_names'])
+                            st.session_state['lock_resp_ms']  = [
+                                s for s in st.session_state['pinned_resp_names']
+                                if s not in st.session_state['pinned_guard_names']
+                            ]
 
-                        # Restore custom / pin-dropped stations
-                        _cs_records = save_data.get('custom_stations')
-                        if _cs_records:
-                            try:
-                                _cs_df = pd.DataFrame(_cs_records)
-                                if not _cs_df.empty and 'lat' in _cs_df.columns and 'lon' in _cs_df.columns:
-                                    st.session_state['custom_stations'] = _cs_df
-                            except Exception:
-                                pass
+                            # Restore custom / pin-dropped stations
+                            _cs_records = save_data.get('custom_stations')
+                            if _cs_records:
+                                try:
+                                    _cs_df = pd.DataFrame(_cs_records)
+                                    if not _cs_df.empty and 'lat' in _cs_df.columns and 'lon' in _cs_df.columns:
+                                        st.session_state['custom_stations'] = _cs_df
+                                except Exception:
+                                    pass
 
-                        # Restore optimization strategy indices
-                        _rstr = save_data.get('resp_strategy', 'Call Coverage')
-                        _gstr = save_data.get('guard_strategy', 'Land Coverage')
-                        st.session_state['resp_strat_idx']  = 0 if _rstr == 'Call Coverage' else 1
-                        st.session_state['guard_strat_idx'] = 0 if _gstr == 'Call Coverage' else 1
-                        st.session_state['deployment_mode_idx'] = save_data.get('deployment_mode_idx', 1)
-                        st.session_state['incremental_build']   = save_data.get('incremental_build', True)
-                        st.session_state['auto_cap_dfr']        = save_data.get('auto_cap_dfr', True)
+                            # Restore optimization strategy indices
+                            _rstr = save_data.get('resp_strategy', 'Call Coverage')
+                            _gstr = save_data.get('guard_strategy', 'Land Coverage')
+                            st.session_state['resp_strat_idx']  = 0 if _rstr == 'Call Coverage' else 1
+                            st.session_state['guard_strat_idx'] = 0 if _gstr == 'Call Coverage' else 1
+                            st.session_state['deployment_mode_idx'] = save_data.get('deployment_mode_idx', 1)
+                            st.session_state['incremental_build']   = save_data.get('incremental_build', True)
+                            st.session_state['auto_cap_dfr']        = save_data.get('auto_cap_dfr', True)
 
-                        # Restore boundary selection (county vs place)
-                        st.session_state['use_county_boundary'] = save_data.get('use_county_boundary', False)
+                            # Restore boundary selection (county vs place)
+                            st.session_state['use_county_boundary'] = save_data.get('use_county_boundary', False)
 
-                        # Restore pin-drop mode flag
-                        st.session_state['pin_drop_used'] = save_data.get('pin_drop_used', False)
+                            # Restore pin-drop mode flag
+                            st.session_state['pin_drop_used'] = save_data.get('pin_drop_used', False)
 
-                        # Prevent auto-minimums from overriding the restored k values.
-                        # _brinc_k_override tells the auto-minimums block to skip one cycle
-                        # and lock the sig so subsequent reruns also stay stable.
-                        st.session_state['_brinc_k_override'] = True
-                        st.session_state.pop('_auto_minimums_sig', None)
+                            # Prevent auto-minimums from overriding the restored k values.
+                            # _brinc_k_override tells the auto-minimums block to skip one cycle
+                            # and lock the sig so subsequent reruns also stay stable.
+                            st.session_state['_brinc_k_override'] = True
+                            st.session_state.pop('_auto_minimums_sig', None)
 
-                        # Clear optimizer caches so the restored fleet is recalculated fresh
-                        for _ck in ['_opt_cache_key', '_opt_best_combo',
-                                    '_opt_chrono_r', '_opt_chrono_g']:
-                            st.session_state.pop(_ck, None)
+                            # Clear optimizer caches so the restored fleet is recalculated fresh
+                            for _ck in ['_opt_cache_key', '_opt_best_combo',
+                                        '_opt_chrono_r', '_opt_chrono_g']:
+                                st.session_state.pop(_ck, None)
                         
-                        if save_data.get('calls_data'):
-                            df_c = pd.DataFrame(save_data['calls_data'])
-                            if 'lat' not in df_c.columns or 'lon' not in df_c.columns:
-                                st.error("❌ .brinc file is missing required 'lat'/'lon' columns in calls data.")
-                                st.stop()
-                            df_c['lat'] = pd.to_numeric(df_c['lat'], errors='coerce')
-                            df_c['lon'] = pd.to_numeric(df_c['lon'], errors='coerce')
-                            df_c = df_c.dropna(subset=['lat', 'lon']).reset_index(drop=True)
-                            if df_c.empty:
-                                st.error("❌ .brinc file contains no valid coordinate data after parsing.")
-                                st.stop()
-                            st.session_state['df_calls'] = df_c
-                            st.session_state['df_calls_full'] = df_c.copy()
-                            st.session_state['total_original_calls'] = len(df_c)
-                            st.session_state['total_modeled_calls'] = len(df_c)
+                            if save_data.get('calls_data'):
+                                df_c = pd.DataFrame(save_data['calls_data'])
+                                if 'lat' not in df_c.columns or 'lon' not in df_c.columns:
+                                    st.error("❌ .brinc file is missing required 'lat'/'lon' columns in calls data.")
+                                    st.stop()
+                                df_c['lat'] = pd.to_numeric(df_c['lat'], errors='coerce')
+                                df_c['lon'] = pd.to_numeric(df_c['lon'], errors='coerce')
+                                df_c = df_c.dropna(subset=['lat', 'lon']).reset_index(drop=True)
+                                if df_c.empty:
+                                    st.error("❌ .brinc file contains no valid coordinate data after parsing.")
+                                    st.stop()
+                                st.session_state['df_calls'] = df_c
+                                st.session_state['df_calls_full'] = df_c.copy()
+                                st.session_state['total_original_calls'] = len(df_c)
+                                st.session_state['total_modeled_calls'] = len(df_c)
 
-                        if save_data.get('stations_data'):
-                            df_s = pd.DataFrame(save_data['stations_data'])
-                            if 'lat' not in df_s.columns or 'lon' not in df_s.columns:
-                                st.warning("⚠️ .brinc stations data missing lat/lon — stations will be re-generated.")
+                            if save_data.get('stations_data'):
+                                df_s = pd.DataFrame(save_data['stations_data'])
+                                if 'lat' not in df_s.columns or 'lon' not in df_s.columns:
+                                    st.warning("⚠️ .brinc stations data missing lat/lon — stations will be re-generated.")
+                                else:
+                                    df_s['lat'] = pd.to_numeric(df_s['lat'], errors='coerce')
+                                    df_s['lon'] = pd.to_numeric(df_s['lon'], errors='coerce')
+                                    df_s = df_s.dropna(subset=['lat', 'lon']).reset_index(drop=True)
+                                    st.session_state['df_stations'] = df_s
+
+                            if save_data.get('boundary_geojson'):
+                                try:
+                                    import io as _io
+                                    _bgdf = gpd.read_file(_io.StringIO(save_data['boundary_geojson']))
+                                    if not _bgdf.empty:
+                                        st.session_state['master_gdf_override'] = _bgdf
+                                except Exception:
+                                    pass
+                            st.session_state['boundary_kind'] = save_data.get('boundary_kind', 'place')
+                            st.session_state['boundary_source_path'] = save_data.get('boundary_source_path', '')
+                            st.session_state['boundary_overlay_gdf'] = None
+                            st.session_state['boundary_overlay_name'] = ''
+                            st.session_state['boundary_overlay_file'] = ''
+
+                            # Restore FAA LAANC airspace data (if present)
+                            if save_data.get('faa_geojson'):
+                                st.session_state['_faa_geojson_cache'] = save_data['faa_geojson']
+
+                            # Restore sidebar settings — BRINC rep info
+                            st.session_state['brinc_user'] = save_data.get('brinc_user', 'steven.beltran')
+                            # Restore pricing tier selection
+                            st.session_state['pricing_tier'] = save_data.get('pricing_tier', 'Safe Guard')
+
+                            st.session_state['data_source'] = 'brinc_file'
+                            st.session_state['demo_mode_used'] = False
+                            st.session_state['sim_mode_used'] = False
+                            st.session_state['map_build_logged'] = False
+                            st.session_state['csvs_ready'] = True
+                            st.toast("✅ Deployment restored successfully!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error loading .brinc file: {e}")
+                            st.stop()
+
+                else:
+                    # --- 2. OTHERWISE, PROCESS AS NORMAL CSV CAD DATA ---
+                    st.session_state['active_city'] = ""
+                    st.session_state['active_state'] = ""
+                    st.session_state['target_cities'] = []
+
+                    f_list = list(uploaded_files)
+                    call_files = []
+                    station_file = None
+                    boundary_files = []
+                    st.session_state['boundary_overlay_gdf'] = None
+                    st.session_state['boundary_overlay_name'] = ''
+                    st.session_state['boundary_overlay_file'] = ''
+
+                    for f in f_list:
+                        if _is_boundary_sidecar(f.name):
+                            boundary_files.append(f)
+                        elif _looks_like_stations(f.name):
+                            station_file = f
+                        else:
+                            call_files.append(f)
+                
+                    if len(call_files) == 2 and not station_file:
+                        f0, f1 = call_files
+                        f0.seek(0); sz0 = len(f0.read()); f0.seek(0)
+                        f1.seek(0); sz1 = len(f1.read()); f1.seek(0)
+                        if sz0 >= sz1:
+                            call_files = [f0]
+                            station_file = f1
+                        else:
+                            call_files = [f1]
+                            station_file = f0
+
+                    if call_files:
+                        with st.spinner("🔍 Detecting column types in CAD export…"):
+                            df_c = aggressive_parse_calls(call_files)
+
+                        if df_c is None or df_c.empty:
+                            st.error("❌ Calls file error: Could not parse valid coordinates.")
+                            st.stop()
+
+                        df_c_full = df_c.reset_index(drop=True).copy()
+
+                        if len(df_c_full) > 25000:
+                            df_c = df_c_full.sample(25000, random_state=42).reset_index(drop=True)
+                            st.toast(f"⚠️ Optimization modeled with {len(df_c):,} representative calls out of {len(df_c_full):,} total incidents.")
+                        else:
+                            df_c = df_c_full.copy()
+
+                        st.session_state.update({
+                            'total_original_calls': len(df_c_full),
+                            'total_modeled_calls': len(df_c),
+                        })
+
+                        if station_file is not None:
+                            with st.spinner("🔍 Reading stations file…"):
+                                try:
+                                    sfname = station_file.name.lower()
+                                    if sfname.endswith(('.xlsx', '.xls', '.xlsm', '.xlsb')):
+                                        engine = 'xlrd' if sfname.endswith('.xls') else 'pyxlsb' if sfname.endswith('.xlsb') else 'openpyxl'
+                                        df_s = pd.read_excel(io.BytesIO(station_file.getvalue()), engine=engine)
+                                    else:
+                                        df_s = pd.read_csv(station_file)
+                                    df_s.columns = [str(c).lower().strip() for c in df_s.columns]
+                                    if 'latitude' in df_s.columns: df_s = df_s.rename(columns={'latitude':'lat'})
+                                    if 'longitude' in df_s.columns: df_s = df_s.rename(columns={'longitude':'lon'})
+                                    if 'station_name' in df_s.columns: df_s = df_s.rename(columns={'station_name':'name'})
+                                    if 'station_type' in df_s.columns: df_s = df_s.rename(columns={'station_type':'type'})
+                                
+                                    if 'lat' in df_s.columns and 'lon' in df_s.columns:
+                                        df_s['lat'] = pd.to_numeric(df_s['lat'], errors='coerce')
+                                        df_s['lon'] = pd.to_numeric(df_s['lon'], errors='coerce')
+                                    else:
+                                        raise ValueError("Could not find lat/lon columns.")
+
+                                    if 'name' not in df_s.columns: 
+                                        df_s['name'] = [f"Site {i+1}" for i in range(len(df_s))]
+                                    else:
+                                        df_s['name'] = df_s['name'].fillna('').astype(str).str.strip()
+                                        df_s['name'] = df_s['name'].replace(r'(?i)^(null|<null>|nan|none)$', '', regex=True)
+                                        df_s['name'] = [n if n else f"Site {i+1}" for i, n in enumerate(df_s['name'])]
+
+                                    counts = {}
+                                    new_names = []
+                                    for n in df_s['name']:
+                                        if n in counts:
+                                            counts[n] += 1
+                                            new_names.append(f"{n} ({counts[n]})")
+                                        else:
+                                            counts[n] = 0
+                                            new_names.append(n)
+                                    df_s['name'] = new_names
+
+                                    if 'type' not in df_s.columns: df_s['type'] = 'Police'
+                                    df_s = df_s.dropna(subset=['lat', 'lon']).reset_index(drop=True)
+                                    osm_note = "Loaded stations from file."
+                                    st.session_state['stations_user_uploaded'] = True
+                                except Exception as e:
+                                    df_s, osm_note = None, f"Failed: {e}"
+                            if df_s is None or df_s.empty:
+                                st.error(f"❌ Stations file error: {osm_note}")
+                                st.stop()
+                        else:
+                            st.session_state['stations_user_uploaded'] = False
+                            with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools…"):
+                                df_s, osm_note = generate_stations_from_calls(df_c)
+                            if df_s is None or df_s.empty:
+                                # Final safety net: scatter stations across call bounding box
+                                df_s = _make_random_stations(df_c, n=40)
+                                osm_note = "⚠️ Could not reach any map source — using estimated station positions from call data."
+                                st.warning(osm_note)
                             else:
-                                df_s['lat'] = pd.to_numeric(df_s['lat'], errors='coerce')
-                                df_s['lon'] = pd.to_numeric(df_s['lon'], errors='coerce')
-                                df_s = df_s.dropna(subset=['lat', 'lon']).reset_index(drop=True)
-                                st.session_state['df_stations'] = df_s
+                                st.toast(f"✅ {osm_note}")
 
-                        if save_data.get('boundary_geojson'):
-                            try:
-                                import io as _io
-                                _bgdf = gpd.read_file(_io.StringIO(save_data['boundary_geojson']))
-                                if not _bgdf.empty:
-                                    st.session_state['master_gdf_override'] = _bgdf
-                            except Exception:
-                                pass
-                        st.session_state['boundary_kind'] = save_data.get('boundary_kind', 'place')
-                        st.session_state['boundary_source_path'] = save_data.get('boundary_source_path', '')
-                        st.session_state['boundary_overlay_gdf'] = None
-                        st.session_state['boundary_overlay_name'] = ''
-                        st.session_state['boundary_overlay_file'] = ''
+                        if len(df_s) > 100:
+                            df_s = df_s.sample(100, random_state=42).reset_index(drop=True)
 
-                        # Restore FAA LAANC airspace data (if present)
-                        if save_data.get('faa_geojson'):
-                            st.session_state['_faa_geojson_cache'] = save_data['faa_geojson']
+                        detected_city = None
+                        detected_state = None
+                        detection_source = 'unknown'
 
-                        # Restore sidebar settings — BRINC rep info
-                        st.session_state['brinc_user'] = save_data.get('brinc_user', 'steven.beltran')
-                        # Restore pricing tier selection
-                        st.session_state['pricing_tier'] = save_data.get('pricing_tier', 'Safe Guard')
+                        with st.spinner(get_jurisdiction_message()):
+                            # Priority 1: city/state extracted directly from the CAD export
+                            if '_csv_city' in df_c.columns:
+                                city_val = str(df_c['_csv_city'].iloc[0]).strip().title()
+                                if city_val and city_val.lower() not in ('nan', 'none', ''):
+                                    detected_city = city_val
+                                    detection_source = 'file'
 
-                        st.session_state['data_source'] = 'brinc_file'
+                            if '_csv_state' in df_c.columns:
+                                state_val = str(df_c['_csv_state'].iloc[0]).strip().upper()
+                                if state_val in STATE_FIPS:
+                                    detected_state = state_val
+                                    detection_source = 'file'
+                                elif state_val.title() in US_STATES_ABBR:
+                                    detected_state = US_STATES_ABBR[state_val.title()]
+                                    detection_source = 'file'
+
+                            # If the export gives us a city but not a state, forward-geocode the city name.
+                            if detected_city and not detected_state:
+                                try:
+                                    geo_url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(detected_city)}&limit=1&countrycodes=us"
+                                    req_geo = urllib.request.Request(geo_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+                                    with urllib.request.urlopen(req_geo, timeout=8) as resp_geo:
+                                        geo_result = json.loads(resp_geo.read().decode('utf-8'))
+                                    if geo_result:
+                                        display_name = geo_result[0].get('display_name', '')
+                                        parts = [p.strip() for p in display_name.split(',')]
+                                        state_full = parts[2] if len(parts) >= 3 else ''
+                                        if state_full in US_STATES_ABBR:
+                                            detected_state = US_STATES_ABBR[state_full]
+                                            detection_source = 'file'
+                                except Exception:
+                                    pass
+
+                            # Priority 2: reverse-geocode the centroid of the calls, not the first row.
+                            if not detected_city or not detected_state:
+                                try:
+                                    cen_lat = float(df_c['lat'].median())
+                                    cen_lon = float(df_c['lon'].median())
+                                    detected_state_full, detected_city_rg = reverse_geocode_state(cen_lat, cen_lon)
+                                    if detected_state_full and detected_state_full in US_STATES_ABBR:
+                                        if not detected_state:
+                                            detected_state = US_STATES_ABBR[detected_state_full]
+                                        if not detected_city and detected_city_rg and detected_city_rg != 'Unknown City':
+                                            detected_city = detected_city_rg
+                                        detection_source = 'centroid'
+                                except Exception:
+                                    pass
+
+                            # ── Fallback: derive city/state from coordinate centroid bbox ──
+                            # If Nominatim failed or returned nothing, try the Census FCC API
+                            # which is reliable and returns county + state from a lat/lon.
+                            if not detected_city or not detected_state:
+                                try:
+                                    cen_lat_fb = float(df_c['lat'].median())
+                                    cen_lon_fb = float(df_c['lon'].median())
+                                    _fcc_url = (
+                                        f"https://geo.fcc.gov/api/census/block/find"
+                                        f"?latitude={cen_lat_fb}&longitude={cen_lon_fb}"
+                                        f"&format=json&showall=false"
+                                    )
+                                    _fcc_req = urllib.request.Request(
+                                        _fcc_url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"}
+                                    )
+                                    with urllib.request.urlopen(_fcc_req, timeout=8) as _fcc_resp:
+                                        _fcc_data = json.loads(_fcc_resp.read().decode("utf-8"))
+                                    _fcc_county = _fcc_data.get("County", {}).get("name", "")
+                                    _fcc_state  = _fcc_data.get("State", {}).get("code", "")
+                                    if _fcc_county and _fcc_state and _fcc_state in STATE_FIPS:
+                                        if not detected_state:
+                                            detected_state = _fcc_state
+                                        if not detected_city:
+                                            # Use "County Name County" so fetch_county_boundary_local can find it
+                                            detected_city = _fcc_county
+                                        detection_source = "fcc_centroid"
+                                except Exception:
+                                    pass
+
+                            # Last resort: derive state from coordinate range alone
+                            # (FL: lat 24-31, lon -87 to -80; this catches most US states uniquely)
+                            if not detected_state:
+                                try:
+                                    _cen_lat = float(df_c['lat'].median())
+                                    _cen_lon = float(df_c['lon'].median())
+                                    _BBOX_STATES = [
+                                        ("FL", 24.5, 31.0, -87.6, -79.9),
+                                        ("CA", 32.5, 42.0, -124.5, -114.1),
+                                        ("TX", 25.8, 36.5, -106.6, -93.5),
+                                        ("NY", 40.5, 45.0, -79.8, -71.9),
+                                        ("IL", 36.9, 42.5, -91.5, -87.0),
+                                        ("GA", 30.4, 35.0, -85.6, -80.8),
+                                        ("NC", 33.8, 36.6, -84.3, -75.5),
+                                        ("OH", 38.4, 42.0, -84.8, -80.5),
+                                        ("PA", 39.7, 42.3, -80.5, -74.7),
+                                        ("WA", 45.5, 49.0, -124.7, -116.9),
+                                        ("AZ", 31.3, 37.0, -114.8, -109.0),
+                                        ("CO", 36.9, 41.0, -109.1, -102.0),
+                                        ("MO", 35.9, 40.6, -95.8, -89.1),
+                                        ("NM", 31.3, 37.0, -109.1, -103.0),
+                                        ("OR", 41.9, 46.2, -124.6, -116.5),
+                                        ("TN", 34.9, 36.7, -90.3, -81.6),
+                                        ("VA", 36.5, 39.5, -83.7, -75.2),
+                                        ("SC", 32.0, 35.2, -83.4, -78.5),
+                                        ("MI", 41.7, 48.3, -90.4, -82.4),
+                                        ("WI", 42.5, 47.1, -92.9, -86.2),
+                                        ("MN", 43.5, 49.4, -97.2, -89.5),
+                                        ("IA", 40.4, 43.5, -96.6, -90.1),
+                                        ("KS", 36.9, 40.0, -102.1, -94.6),
+                                        ("NE", 40.0, 43.0, -104.1, -95.3),
+                                        ("OK", 33.6, 37.0, -103.0, -94.4),
+                                        ("AR", 33.0, 36.5, -94.6, -89.6),
+                                        ("LA", 28.9, 33.0, -94.0, -88.8),
+                                        ("MS", 30.2, 35.0, -91.7, -88.1),
+                                        ("AL", 30.2, 35.0, -88.5, -84.9),
+                                        ("IN", 37.8, 41.8, -88.1, -84.8),
+                                        ("KY", 36.5, 39.1, -89.6, -81.9),
+                                        ("WV", 37.2, 40.6, -82.6, -77.7),
+                                        ("MD", 37.9, 39.7, -79.5, -75.0),
+                                        ("DE", 38.4, 39.8, -75.8, -75.0),
+                                        ("NJ", 38.9, 41.4, -75.6, -73.9),
+                                        ("CT", 41.0, 42.1, -73.7, -71.8),
+                                        ("RI", 41.1, 42.0, -71.9, -71.1),
+                                        ("MA", 41.2, 42.9, -73.5, -69.9),
+                                        ("VT", 42.7, 45.0, -73.4, -71.5),
+                                        ("NH", 42.7, 45.3, -72.6, -70.7),
+                                        ("ME", 43.1, 47.5, -71.1, -66.9),
+                                        ("NV", 35.0, 42.0, -120.0, -114.0),
+                                        ("UT", 36.9, 42.0, -114.1, -109.0),
+                                        ("ID", 41.9, 49.0, -117.2, -111.0),
+                                        ("MT", 44.4, 49.0, -116.1, -104.0),
+                                        ("WY", 40.9, 45.0, -111.1, -104.0),
+                                        ("ND", 45.9, 49.0, -104.1, -96.6),
+                                        ("SD", 42.5, 45.9, -104.1, -96.4),
+                                        ("AK", 54.0, 71.5, -168.0, -130.0),
+                                        ("HI", 18.9, 22.2, -160.2, -154.8),
+                                    ]
+                                    for _st, _lat0, _lat1, _lon0, _lon1 in _BBOX_STATES:
+                                        if _lat0 <= _cen_lat <= _lat1 and _lon0 <= _cen_lon <= _lon1:
+                                            detected_state = _st
+                                            detection_source = "coord_bbox"
+                                            break
+                                except Exception:
+                                    pass
+
+                            if detected_city and detected_state:
+                                st.session_state['active_city'] = str(detected_city).title()
+                                st.session_state['active_state'] = detected_state
+                                st.session_state['target_cities'] = [{"city": detected_city, "state": detected_state}]
+                                st.session_state['location_detection_source'] = detection_source
+                                st.toast(f"📍 Detected: {detected_city}, {detected_state}")
+                            elif detected_state:
+                                # We have state but no city — store state and let boundary
+                                # selection use the FCC county name as a county lookup
+                                st.session_state['active_state'] = detected_state
+                                st.session_state['location_detection_source'] = detection_source
+
+                        # Keep uploaded calls intact here. Boundary validation should be the first real geographic filter.
+                        st.session_state['df_calls']             = df_c
+                        st.session_state['df_calls_full']        = df_c_full
+                        st.session_state['df_stations']          = df_s
+                        st.session_state['total_original_calls'] = len(df_c_full)
+                        st.session_state['total_modeled_calls']  = len(df_c)
+
+                        # ── Clear stale shapefiles from previous sessions ──────────────
+                        # Old .shp files from prior cities (e.g. Bernalillo) would otherwise
+                        # be picked up by find_relevant_jurisdictions when no fresh boundary
+                        # is saved, causing completely wrong jurisdiction boundaries.
+                        try:
+                            import glob as _glob
+                            for _stale in _glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp")):
+                                for _ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
+                                    _f = _stale.replace(".shp", _ext)
+                                    try:
+                                        if os.path.exists(_f): os.remove(_f)
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            pass
+                        st.session_state['boundary_source_path'] = ''
+                        st.session_state['master_gdf_override'] = None
+
+                        with st.spinner(get_jurisdiction_message()):
+                            _calls_for_boundary = df_c_full if df_c_full is not None and len(df_c_full) > 0 else df_c
+
+                            # ── PRIMARY: pure coordinate spatial join against local parquets ──
+                            # Works for any file regardless of whether city/state was detected.
+                            # Returns ALL jurisdictions that contain ≥1% of calls.
+                            coord_gdf = find_jurisdictions_by_coordinates(_calls_for_boundary)
+
+                            if coord_gdf is not None and not coord_gdf.empty:
+                                # Store the GeoDataFrame directly in session state — no disk
+                                # round-trip needed. The render pass reads it back directly.
+                                st.session_state['master_gdf_override'] = coord_gdf
+                                st.session_state['boundary_source_path'] = 'local_parquet'
+                                st.session_state['boundary_kind'] = 'place'
+                                st.session_state['active_city'] = str(coord_gdf.iloc[0]['DISPLAY_NAME']).title()
+
+                            else:
+                                st.session_state['master_gdf_override'] = None
+                                # ── FALLBACK: name-based lookup (original path) ──
+                                detected_city_for_boundary = st.session_state.get('active_city', '')
+                                detected_state_for_boundary = st.session_state.get('active_state', '')
+                                if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
+                                    city_text = str(detected_city_for_boundary or '').strip()
+                                    prefer_county = str(st.session_state.get('location_detection_source', '')) == 'centroid'
+                                    b_success, b_gdf, b_kind, b_hits = _select_best_boundary_for_calls(
+                                        _calls_for_boundary,
+                                        city_text,
+                                        detected_state_for_boundary,
+                                        prefer_county=prefer_county
+                                    )
+                                    st.session_state['boundary_kind'] = b_kind
+                                    if b_success and b_gdf is not None:
+                                        _saved = save_boundary_gdf(b_gdf, b_kind, city_text, detected_state_for_boundary)
+                                        st.session_state['boundary_source_path'] = _saved or ''
+
+                        st.session_state['data_source'] = 'cad_upload'
                         st.session_state['demo_mode_used'] = False
                         st.session_state['sim_mode_used'] = False
                         st.session_state['map_build_logged'] = False
                         st.session_state['csvs_ready'] = True
-                        st.toast("✅ Deployment restored successfully!")
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Error loading .brinc file: {e}")
-                        st.stop()
 
-            else:
-                # --- 2. OTHERWISE, PROCESS AS NORMAL CSV CAD DATA ---
-                st.session_state['active_city'] = ""
-                st.session_state['active_state'] = ""
-                st.session_state['target_cities'] = []
+        with path_demo_col:
+            st.markdown(f"""
+            <div class="path-card" style="--accent:#FFD700;">
+                <span class="pc-icon">⚡</span>
+                <div class="pc-tag">Path 03</div>
+                <div class="pc-title">1-Click Demo<br>Large US City</div>
+                <div class="pc-desc">Instantly spin up a fully pre-configured scenario for a major US city. Ideal for live stakeholder presentations and platform walkthroughs.</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-                f_list = list(uploaded_files)
-                call_files = []
-                station_file = None
-                boundary_files = []
-                st.session_state['boundary_overlay_gdf'] = None
-                st.session_state['boundary_overlay_name'] = ''
-                st.session_state['boundary_overlay_file'] = ''
+            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-                for f in f_list:
-                    if _is_boundary_sidecar(f.name):
-                        boundary_files.append(f)
-                    elif _looks_like_stations(f.name):
-                        station_file = f
-                    else:
-                        call_files.append(f)
-                
-                if len(call_files) == 2 and not station_file:
-                    f0, f1 = call_files
-                    f0.seek(0); sz0 = len(f0.read()); f0.seek(0)
-                    f1.seek(0); sz1 = len(f1.read()); f1.seek(0)
-                    if sz0 >= sz1:
-                        call_files = [f0]
-                        station_file = f1
-                    else:
-                        call_files = [f1]
-                        station_file = f0
-
-                if call_files:
-                    with st.spinner("🔍 Detecting column types in CAD export…"):
-                        df_c = aggressive_parse_calls(call_files)
-
-                    if df_c is None or df_c.empty:
-                        st.error("❌ Calls file error: Could not parse valid coordinates.")
-                        st.stop()
-
-                    df_c_full = df_c.reset_index(drop=True).copy()
-
-                    if len(df_c_full) > 25000:
-                        df_c = df_c_full.sample(25000, random_state=42).reset_index(drop=True)
-                        st.toast(f"⚠️ Optimization modeled with {len(df_c):,} representative calls out of {len(df_c_full):,} total incidents.")
-                    else:
-                        df_c = df_c_full.copy()
-
-                    st.session_state.update({
-                        'total_original_calls': len(df_c_full),
-                        'total_modeled_calls': len(df_c),
-                    })
-
-                    if station_file is not None:
-                        with st.spinner("🔍 Reading stations file…"):
-                            try:
-                                sfname = station_file.name.lower()
-                                if sfname.endswith(('.xlsx', '.xls', '.xlsm', '.xlsb')):
-                                    engine = 'xlrd' if sfname.endswith('.xls') else 'pyxlsb' if sfname.endswith('.xlsb') else 'openpyxl'
-                                    df_s = pd.read_excel(io.BytesIO(station_file.getvalue()), engine=engine)
-                                else:
-                                    df_s = pd.read_csv(station_file)
-                                df_s.columns = [str(c).lower().strip() for c in df_s.columns]
-                                if 'latitude' in df_s.columns: df_s = df_s.rename(columns={'latitude':'lat'})
-                                if 'longitude' in df_s.columns: df_s = df_s.rename(columns={'longitude':'lon'})
-                                if 'station_name' in df_s.columns: df_s = df_s.rename(columns={'station_name':'name'})
-                                if 'station_type' in df_s.columns: df_s = df_s.rename(columns={'station_type':'type'})
-                                
-                                if 'lat' in df_s.columns and 'lon' in df_s.columns:
-                                    df_s['lat'] = pd.to_numeric(df_s['lat'], errors='coerce')
-                                    df_s['lon'] = pd.to_numeric(df_s['lon'], errors='coerce')
-                                else:
-                                    raise ValueError("Could not find lat/lon columns.")
-
-                                if 'name' not in df_s.columns: 
-                                    df_s['name'] = [f"Site {i+1}" for i in range(len(df_s))]
-                                else:
-                                    df_s['name'] = df_s['name'].fillna('').astype(str).str.strip()
-                                    df_s['name'] = df_s['name'].replace(r'(?i)^(null|<null>|nan|none)$', '', regex=True)
-                                    df_s['name'] = [n if n else f"Site {i+1}" for i, n in enumerate(df_s['name'])]
-
-                                counts = {}
-                                new_names = []
-                                for n in df_s['name']:
-                                    if n in counts:
-                                        counts[n] += 1
-                                        new_names.append(f"{n} ({counts[n]})")
-                                    else:
-                                        counts[n] = 0
-                                        new_names.append(n)
-                                df_s['name'] = new_names
-
-                                if 'type' not in df_s.columns: df_s['type'] = 'Police'
-                                df_s = df_s.dropna(subset=['lat', 'lon']).reset_index(drop=True)
-                                osm_note = "Loaded stations from file."
-                                st.session_state['stations_user_uploaded'] = True
-                            except Exception as e:
-                                df_s, osm_note = None, f"Failed: {e}"
-                        if df_s is None or df_s.empty:
-                            st.error(f"❌ Stations file error: {osm_note}")
-                            st.stop()
-                    else:
-                        st.session_state['stations_user_uploaded'] = False
-                        with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools…"):
-                            df_s, osm_note = generate_stations_from_calls(df_c)
-                        if df_s is None or df_s.empty:
-                            # Final safety net: scatter stations across call bounding box
-                            df_s = _make_random_stations(df_c, n=40)
-                            osm_note = "⚠️ Could not reach any map source — using estimated station positions from call data."
-                            st.warning(osm_note)
-                        else:
-                            st.toast(f"✅ {osm_note}")
-
-                    if len(df_s) > 100:
-                        df_s = df_s.sample(100, random_state=42).reset_index(drop=True)
-
-                    detected_city = None
-                    detected_state = None
-                    detection_source = 'unknown'
-
-                    with st.spinner(get_jurisdiction_message()):
-                        # Priority 1: city/state extracted directly from the CAD export
-                        if '_csv_city' in df_c.columns:
-                            city_val = str(df_c['_csv_city'].iloc[0]).strip().title()
-                            if city_val and city_val.lower() not in ('nan', 'none', ''):
-                                detected_city = city_val
-                                detection_source = 'file'
-
-                        if '_csv_state' in df_c.columns:
-                            state_val = str(df_c['_csv_state'].iloc[0]).strip().upper()
-                            if state_val in STATE_FIPS:
-                                detected_state = state_val
-                                detection_source = 'file'
-                            elif state_val.title() in US_STATES_ABBR:
-                                detected_state = US_STATES_ABBR[state_val.title()]
-                                detection_source = 'file'
-
-                        # If the export gives us a city but not a state, forward-geocode the city name.
-                        if detected_city and not detected_state:
-                            try:
-                                geo_url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(detected_city)}&limit=1&countrycodes=us"
-                                req_geo = urllib.request.Request(geo_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
-                                with urllib.request.urlopen(req_geo, timeout=8) as resp_geo:
-                                    geo_result = json.loads(resp_geo.read().decode('utf-8'))
-                                if geo_result:
-                                    display_name = geo_result[0].get('display_name', '')
-                                    parts = [p.strip() for p in display_name.split(',')]
-                                    state_full = parts[2] if len(parts) >= 3 else ''
-                                    if state_full in US_STATES_ABBR:
-                                        detected_state = US_STATES_ABBR[state_full]
-                                        detection_source = 'file'
-                            except Exception:
-                                pass
-
-                        # Priority 2: reverse-geocode the centroid of the calls, not the first row.
-                        if not detected_city or not detected_state:
-                            try:
-                                cen_lat = float(df_c['lat'].median())
-                                cen_lon = float(df_c['lon'].median())
-                                detected_state_full, detected_city_rg = reverse_geocode_state(cen_lat, cen_lon)
-                                if detected_state_full and detected_state_full in US_STATES_ABBR:
-                                    if not detected_state:
-                                        detected_state = US_STATES_ABBR[detected_state_full]
-                                    if not detected_city and detected_city_rg and detected_city_rg != 'Unknown City':
-                                        detected_city = detected_city_rg
-                                    detection_source = 'centroid'
-                            except Exception:
-                                pass
-
-                        # ── Fallback: derive city/state from coordinate centroid bbox ──
-                        # If Nominatim failed or returned nothing, try the Census FCC API
-                        # which is reliable and returns county + state from a lat/lon.
-                        if not detected_city or not detected_state:
-                            try:
-                                cen_lat_fb = float(df_c['lat'].median())
-                                cen_lon_fb = float(df_c['lon'].median())
-                                _fcc_url = (
-                                    f"https://geo.fcc.gov/api/census/block/find"
-                                    f"?latitude={cen_lat_fb}&longitude={cen_lon_fb}"
-                                    f"&format=json&showall=false"
-                                )
-                                _fcc_req = urllib.request.Request(
-                                    _fcc_url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"}
-                                )
-                                with urllib.request.urlopen(_fcc_req, timeout=8) as _fcc_resp:
-                                    _fcc_data = json.loads(_fcc_resp.read().decode("utf-8"))
-                                _fcc_county = _fcc_data.get("County", {}).get("name", "")
-                                _fcc_state  = _fcc_data.get("State", {}).get("code", "")
-                                if _fcc_county and _fcc_state and _fcc_state in STATE_FIPS:
-                                    if not detected_state:
-                                        detected_state = _fcc_state
-                                    if not detected_city:
-                                        # Use "County Name County" so fetch_county_boundary_local can find it
-                                        detected_city = _fcc_county
-                                    detection_source = "fcc_centroid"
-                            except Exception:
-                                pass
-
-                        # Last resort: derive state from coordinate range alone
-                        # (FL: lat 24-31, lon -87 to -80; this catches most US states uniquely)
-                        if not detected_state:
-                            try:
-                                _cen_lat = float(df_c['lat'].median())
-                                _cen_lon = float(df_c['lon'].median())
-                                _BBOX_STATES = [
-                                    ("FL", 24.5, 31.0, -87.6, -79.9),
-                                    ("CA", 32.5, 42.0, -124.5, -114.1),
-                                    ("TX", 25.8, 36.5, -106.6, -93.5),
-                                    ("NY", 40.5, 45.0, -79.8, -71.9),
-                                    ("IL", 36.9, 42.5, -91.5, -87.0),
-                                    ("GA", 30.4, 35.0, -85.6, -80.8),
-                                    ("NC", 33.8, 36.6, -84.3, -75.5),
-                                    ("OH", 38.4, 42.0, -84.8, -80.5),
-                                    ("PA", 39.7, 42.3, -80.5, -74.7),
-                                    ("WA", 45.5, 49.0, -124.7, -116.9),
-                                    ("AZ", 31.3, 37.0, -114.8, -109.0),
-                                    ("CO", 36.9, 41.0, -109.1, -102.0),
-                                    ("MO", 35.9, 40.6, -95.8, -89.1),
-                                    ("NM", 31.3, 37.0, -109.1, -103.0),
-                                    ("OR", 41.9, 46.2, -124.6, -116.5),
-                                    ("TN", 34.9, 36.7, -90.3, -81.6),
-                                    ("VA", 36.5, 39.5, -83.7, -75.2),
-                                    ("SC", 32.0, 35.2, -83.4, -78.5),
-                                    ("MI", 41.7, 48.3, -90.4, -82.4),
-                                    ("WI", 42.5, 47.1, -92.9, -86.2),
-                                    ("MN", 43.5, 49.4, -97.2, -89.5),
-                                    ("IA", 40.4, 43.5, -96.6, -90.1),
-                                    ("KS", 36.9, 40.0, -102.1, -94.6),
-                                    ("NE", 40.0, 43.0, -104.1, -95.3),
-                                    ("OK", 33.6, 37.0, -103.0, -94.4),
-                                    ("AR", 33.0, 36.5, -94.6, -89.6),
-                                    ("LA", 28.9, 33.0, -94.0, -88.8),
-                                    ("MS", 30.2, 35.0, -91.7, -88.1),
-                                    ("AL", 30.2, 35.0, -88.5, -84.9),
-                                    ("IN", 37.8, 41.8, -88.1, -84.8),
-                                    ("KY", 36.5, 39.1, -89.6, -81.9),
-                                    ("WV", 37.2, 40.6, -82.6, -77.7),
-                                    ("MD", 37.9, 39.7, -79.5, -75.0),
-                                    ("DE", 38.4, 39.8, -75.8, -75.0),
-                                    ("NJ", 38.9, 41.4, -75.6, -73.9),
-                                    ("CT", 41.0, 42.1, -73.7, -71.8),
-                                    ("RI", 41.1, 42.0, -71.9, -71.1),
-                                    ("MA", 41.2, 42.9, -73.5, -69.9),
-                                    ("VT", 42.7, 45.0, -73.4, -71.5),
-                                    ("NH", 42.7, 45.3, -72.6, -70.7),
-                                    ("ME", 43.1, 47.5, -71.1, -66.9),
-                                    ("NV", 35.0, 42.0, -120.0, -114.0),
-                                    ("UT", 36.9, 42.0, -114.1, -109.0),
-                                    ("ID", 41.9, 49.0, -117.2, -111.0),
-                                    ("MT", 44.4, 49.0, -116.1, -104.0),
-                                    ("WY", 40.9, 45.0, -111.1, -104.0),
-                                    ("ND", 45.9, 49.0, -104.1, -96.6),
-                                    ("SD", 42.5, 45.9, -104.1, -96.4),
-                                    ("AK", 54.0, 71.5, -168.0, -130.0),
-                                    ("HI", 18.9, 22.2, -160.2, -154.8),
-                                ]
-                                for _st, _lat0, _lat1, _lon0, _lon1 in _BBOX_STATES:
-                                    if _lat0 <= _cen_lat <= _lat1 and _lon0 <= _cen_lon <= _lon1:
-                                        detected_state = _st
-                                        detection_source = "coord_bbox"
-                                        break
-                            except Exception:
-                                pass
-
-                        if detected_city and detected_state:
-                            st.session_state['active_city'] = str(detected_city).title()
-                            st.session_state['active_state'] = detected_state
-                            st.session_state['target_cities'] = [{"city": detected_city, "state": detected_state}]
-                            st.session_state['location_detection_source'] = detection_source
-                            st.toast(f"📍 Detected: {detected_city}, {detected_state}")
-                        elif detected_state:
-                            # We have state but no city — store state and let boundary
-                            # selection use the FCC county name as a county lookup
-                            st.session_state['active_state'] = detected_state
-                            st.session_state['location_detection_source'] = detection_source
-
-                    # Keep uploaded calls intact here. Boundary validation should be the first real geographic filter.
-                    st.session_state['df_calls']             = df_c
-                    st.session_state['df_calls_full']        = df_c_full
-                    st.session_state['df_stations']          = df_s
-                    st.session_state['total_original_calls'] = len(df_c_full)
-                    st.session_state['total_modeled_calls']  = len(df_c)
-
-                    # ── Clear stale shapefiles from previous sessions ──────────────
-                    # Old .shp files from prior cities (e.g. Bernalillo) would otherwise
-                    # be picked up by find_relevant_jurisdictions when no fresh boundary
-                    # is saved, causing completely wrong jurisdiction boundaries.
-                    try:
-                        import glob as _glob
-                        for _stale in _glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp")):
-                            for _ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
-                                _f = _stale.replace(".shp", _ext)
-                                try:
-                                    if os.path.exists(_f): os.remove(_f)
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-                    st.session_state['boundary_source_path'] = ''
-                    st.session_state['master_gdf_override'] = None
-
-                    with st.spinner(get_jurisdiction_message()):
-                        _calls_for_boundary = df_c_full if df_c_full is not None and len(df_c_full) > 0 else df_c
-
-                        # ── PRIMARY: pure coordinate spatial join against local parquets ──
-                        # Works for any file regardless of whether city/state was detected.
-                        # Returns ALL jurisdictions that contain ≥1% of calls.
-                        coord_gdf = find_jurisdictions_by_coordinates(_calls_for_boundary)
-
-                        if coord_gdf is not None and not coord_gdf.empty:
-                            # Store the GeoDataFrame directly in session state — no disk
-                            # round-trip needed. The render pass reads it back directly.
-                            st.session_state['master_gdf_override'] = coord_gdf
-                            st.session_state['boundary_source_path'] = 'local_parquet'
-                            st.session_state['boundary_kind'] = 'place'
-                            st.session_state['active_city'] = str(coord_gdf.iloc[0]['DISPLAY_NAME']).title()
-
-                        else:
-                            st.session_state['master_gdf_override'] = None
-                            # ── FALLBACK: name-based lookup (original path) ──
-                            detected_city_for_boundary = st.session_state.get('active_city', '')
-                            detected_state_for_boundary = st.session_state.get('active_state', '')
-                            if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
-                                city_text = str(detected_city_for_boundary or '').strip()
-                                prefer_county = str(st.session_state.get('location_detection_source', '')) == 'centroid'
-                                b_success, b_gdf, b_kind, b_hits = _select_best_boundary_for_calls(
-                                    _calls_for_boundary,
-                                    city_text,
-                                    detected_state_for_boundary,
-                                    prefer_county=prefer_county
-                                )
-                                st.session_state['boundary_kind'] = b_kind
-                                if b_success and b_gdf is not None:
-                                    _saved = save_boundary_gdf(b_gdf, b_kind, city_text, detected_state_for_boundary)
-                                    st.session_state['boundary_source_path'] = _saved or ''
-
-                    st.session_state['data_source'] = 'cad_upload'
-                    st.session_state['demo_mode_used'] = False
-                    st.session_state['sim_mode_used'] = False
-                    st.session_state['map_build_logged'] = False
-                    st.session_state['csvs_ready'] = True
-                    st.rerun()
-
-    with path_demo_col:
-        st.markdown(f"""
-        <div class="path-card" style="--accent:#FFD700;">
-            <span class="pc-icon">⚡</span>
-            <div class="pc-tag">Path 03</div>
-            <div class="pc-title">1-Click Demo<br>Large US City</div>
-            <div class="pc-desc">Instantly spin up a fully pre-configured scenario for a major US city. Ideal for live stakeholder presentations and platform walkthroughs.</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-
-        if st.button("⚡ Launch Random Demo City", use_container_width=True, key="demo_btn"):
-            random.seed(datetime.datetime.now().microsecond + os.getpid())
-            already_used = st.session_state.get('_last_demo_city', '')
-            candidates = [c for c in FAST_DEMO_CITIES if c[0] != already_used]
-            rcity, rstate = random.choice(candidates)
-            st.session_state['_last_demo_city'] = rcity
-            st.session_state['target_cities'] = [{"city": rcity, "state": rstate}]
-            st.session_state.city_count = 1
-            for i in range(10):
-                st.session_state.pop(f"c_{i}", None)
-                st.session_state.pop(f"s_{i}", None)
-            st.session_state['trigger_sim'] = True
-            st.session_state['demo_mode_used'] = True
-            st.rerun()
-
-        city_chips = "  ·  ".join([f"{c}" for c, _ in DEMO_CITIES[:12]]) + "  · and more…"
-        st.markdown(f"""
-        <div class="demo-cities">
-            <b>Available Cities</b><br>
-            {city_chips}
-        </div>
-        <div class="demo-check">
-            <span>✓</span>Real Census boundaries<br>
-            <span>✓</span>Clustered 911 simulation<br>
-            <span>✓</span>100 station candidates<br>
-            <span>✓</span>Full optimization & export
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown(f"""
-    <div style="text-align:center; margin-top:8px; font-size:0.63rem; color:#2a2a2a;">
-        BRINC Drones, Inc. · <a href="https://brincdrones.com" target="_blank"
-        style="color:#333; text-decoration:none;">brincdrones.com</a>
-        · All coverage estimates are for planning purposes only.
-    </div>
-    """, unsafe_allow_html=True)
-
-    if submit_demo or st.session_state.get('trigger_sim', False):
-        if st.session_state.get('trigger_sim', False):
-            st.session_state['trigger_sim'] = False
-            # trigger_sim is set by the demo button — mark accordingly
-            if not st.session_state.get('demo_mode_used', False):
+            if st.button("⚡ Launch Random Demo City", use_container_width=True, key="demo_btn"):
+                random.seed(datetime.datetime.now().microsecond + os.getpid())
+                already_used = st.session_state.get('_last_demo_city', '')
+                candidates = [c for c in FAST_DEMO_CITIES if c[0] != already_used]
+                rcity, rstate = random.choice(candidates)
+                st.session_state['_last_demo_city'] = rcity
+                st.session_state['target_cities'] = [{"city": rcity, "state": rstate}]
+                st.session_state.city_count = 1
+                for i in range(10):
+                    st.session_state.pop(f"c_{i}", None)
+                    st.session_state.pop(f"s_{i}", None)
+                st.session_state['trigger_sim'] = True
                 st.session_state['demo_mode_used'] = True
+                st.rerun()
 
-        active_targets = [loc for loc in st.session_state['target_cities'] if loc['city'].strip()]
-        if not active_targets:
-            st.error("Please enter at least one valid city name.")
-            st.stop()
+            city_chips = "  ·  ".join([f"{c}" for c, _ in DEMO_CITIES[:12]]) + "  · and more…"
+            st.markdown(f"""
+            <div class="demo-cities">
+                <b>Available Cities</b><br>
+                {city_chips}
+            </div>
+            <div class="demo-check">
+                <span>✓</span>Real Census boundaries<br>
+                <span>✓</span>Clustered 911 simulation<br>
+                <span>✓</span>100 station candidates<br>
+                <span>✓</span>Full optimization & export
+            </div>
+            """, unsafe_allow_html=True)
 
-        if len(active_targets) == 1:
-            st.session_state['active_city']  = str(active_targets[0]['city']).title()
-            st.session_state['active_state'] = active_targets[0]['state']
-        else:
-            st.session_state['active_city']  = f"{str(active_targets[0]['city']).title()} & {len(active_targets)-1} others"
-            st.session_state['active_state'] = active_targets[0]['state']
+        st.markdown(f"""
+        <div style="text-align:center; margin-top:8px; font-size:0.63rem; color:#2a2a2a;">
+            BRINC Drones, Inc. · <a href="https://brincdrones.com" target="_blank"
+            style="color:#333; text-decoration:none;">brincdrones.com</a>
+            · All coverage estimates are for planning purposes only.
+        </div>
+        """, unsafe_allow_html=True)
 
-        prog = st.progress(0, text="🫡 Preparing tools worthy of those who serve…")
-        all_gdfs = []
-        total_estimated_pop = 0
+        if submit_demo or st.session_state.get('trigger_sim', False):
+            if st.session_state.get('trigger_sim', False):
+                st.session_state['trigger_sim'] = False
+                # trigger_sim is set by the demo button — mark accordingly
+                if not st.session_state.get('demo_mode_used', False):
+                    st.session_state['demo_mode_used'] = True
 
-        for i, loc in enumerate(active_targets):
-            c_name = loc['city'].strip()
-            s_name = loc['state']
-            is_county = c_name.lower().endswith(" county")
-            boundary_kind = 'county' if is_county else 'place'
-            
-            prog.progress(10 + int((i / len(active_targets)) * 20),
-                          text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
-            
-            if is_county:
-                success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
-                if not success:
-                    success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
-                if success:
-                    boundary_kind = 'county'
+            active_targets = [loc for loc in st.session_state['target_cities'] if loc['city'].strip()]
+            if not active_targets:
+                st.error("Please enter at least one valid city name.")
+                st.stop()
+
+            if len(active_targets) == 1:
+                st.session_state['active_city']  = str(active_targets[0]['city']).title()
+                st.session_state['active_state'] = active_targets[0]['state']
             else:
-                # Try place first, auto-fall back to county if not found
-                success, temp_gdf = fetch_place_boundary_local(s_name, c_name)
-                if success:
-                    boundary_kind = 'place'
-                else:
+                st.session_state['active_city']  = f"{str(active_targets[0]['city']).title()} & {len(active_targets)-1} others"
+                st.session_state['active_state'] = active_targets[0]['state']
+
+            prog = st.progress(0, text="🫡 Preparing tools worthy of those who serve…")
+            all_gdfs = []
+            total_estimated_pop = 0
+
+            for i, loc in enumerate(active_targets):
+                c_name = loc['city'].strip()
+                s_name = loc['state']
+                is_county = c_name.lower().endswith(" county")
+                boundary_kind = 'county' if is_county else 'place'
+            
+                prog.progress(10 + int((i / len(active_targets)) * 20),
+                              text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
+            
+                if is_county:
                     success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
                     if not success:
                         success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
                     if success:
                         boundary_kind = 'county'
-            is_county = (boundary_kind == 'county')
-            st.session_state['boundary_kind'] = boundary_kind
-
-            # County boundaries come from the parquet, not from TIGER, so they are
-            # never written to SHAPEFILE_DIR. find_relevant_jurisdictions() only scans
-            # that directory, so without this save it always falls back to
-            # "Auto-Generated Boundary". Save any successfully loaded county GDF now.
-            if success and temp_gdf is not None:
-                _saved = save_boundary_gdf(temp_gdf, boundary_kind, c_name, s_name)
-                if i == 0:
-                    st.session_state['boundary_source_path'] = _saved or ''
-
-            if success:
-                all_gdfs.append(temp_gdf)
-                pop = fetch_census_population(STATE_FIPS[s_name], c_name, is_county=is_county)
-                if pop:
-                    total_estimated_pop += pop
-                    st.toast(f"✅ {c_name} population verified: {pop:,}")
                 else:
-                    gdf_proj   = temp_gdf.to_crs(epsg=3857)
-                    area_sq_mi = gdf_proj.geometry.area.sum() / 2589988.11
-                    est = KNOWN_POPULATIONS.get(c_name, int(area_sq_mi * 3500))
-                    total_estimated_pop += est
-                    st.toast(f"⚠️ {c_name} population estimated: {est:,}")
-            else:
-                st.warning(f"⚠️ Could not find a boundary for {c_name}, {s_name}. Try another city.")
-                if st.session_state.get('_last_demo_city') == c_name:
-                    random.seed(datetime.datetime.now().microsecond + os.getpid())
-                    candidates = [c for c in DEMO_CITIES if c[0] != c_name]
-                    rcity, rstate = random.choice(candidates)
-                    st.session_state['_last_demo_city'] = rcity
-                    st.session_state['target_cities'] = [{"city": rcity, "state": rstate}]
-                    for j in range(10):
-                        st.session_state.pop(f"c_{j}", None)
-                        st.session_state.pop(f"s_{j}", None)
-                    st.rerun()
+                    # Try place first, auto-fall back to county if not found
+                    success, temp_gdf = fetch_place_boundary_local(s_name, c_name)
+                    if success:
+                        boundary_kind = 'place'
+                    else:
+                        success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
+                        if not success:
+                            success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
+                        if success:
+                            boundary_kind = 'county'
+                is_county = (boundary_kind == 'county')
+                st.session_state['boundary_kind'] = boundary_kind
 
-        if not all_gdfs:
-            prog.empty()
-            st.error("❌ Could not find Census boundaries for any of the entered locations. Check spelling.")
-            st.stop()
+                # County boundaries come from the parquet, not from TIGER, so they are
+                # never written to SHAPEFILE_DIR. find_relevant_jurisdictions() only scans
+                # that directory, so without this save it always falls back to
+                # "Auto-Generated Boundary". Save any successfully loaded county GDF now.
+                if success and temp_gdf is not None:
+                    _saved = save_boundary_gdf(temp_gdf, boundary_kind, c_name, s_name)
+                    if i == 0:
+                        st.session_state['boundary_source_path'] = _saved or ''
 
-        prog.progress(35, text="💙 Boundaries loaded — honoring the officers who know every street…")
-        active_city_gdf = pd.concat(all_gdfs, ignore_index=True)
-        city_poly = active_city_gdf.geometry.union_all()
-        st.session_state['estimated_pop'] = total_estimated_pop
+                if success:
+                    all_gdfs.append(temp_gdf)
+                    pop = fetch_census_population(STATE_FIPS[s_name], c_name, is_county=is_county)
+                    if pop:
+                        total_estimated_pop += pop
+                        st.toast(f"✅ {c_name} population verified: {pop:,}")
+                    else:
+                        gdf_proj   = temp_gdf.to_crs(epsg=3857)
+                        area_sq_mi = gdf_proj.geometry.area.sum() / 2589988.11
+                        est = KNOWN_POPULATIONS.get(c_name, int(area_sq_mi * 3500))
+                        total_estimated_pop += est
+                        st.toast(f"⚠️ {c_name} population estimated: {est:,}")
+                else:
+                    st.warning(f"⚠️ Could not find a boundary for {c_name}, {s_name}. Try another city.")
+                    if st.session_state.get('_last_demo_city') == c_name:
+                        random.seed(datetime.datetime.now().microsecond + os.getpid())
+                        candidates = [c for c in DEMO_CITIES if c[0] != c_name]
+                        rcity, rstate = random.choice(candidates)
+                        st.session_state['_last_demo_city'] = rcity
+                        st.session_state['target_cities'] = [{"city": rcity, "state": rstate}]
+                        for j in range(10):
+                            st.session_state.pop(f"c_{j}", None)
+                            st.session_state.pop(f"s_{j}", None)
+                        st.rerun()
 
-        annual_cfs = int(total_estimated_pop * 0.6)
-        st.session_state['total_original_calls'] = annual_cfs
-        simulated_points_count = min(max(int(annual_cfs), 365), 36500)
+            if not all_gdfs:
+                prog.empty()
+                st.error("❌ Could not find Census boundaries for any of the entered locations. Check spelling.")
+                st.stop()
 
-        prog.progress(55, text="🚔 Modeling 911 calls — every one represents someone who needed help…")
-        np.random.seed(42)
-        random.seed(42)
-        call_points = generate_clustered_calls(city_poly, simulated_points_count)
+            prog.progress(35, text="💙 Boundaries loaded — honoring the officers who know every street…")
+            active_city_gdf = pd.concat(all_gdfs, ignore_index=True)
+            city_poly = active_city_gdf.geometry.union_all()
+            st.session_state['estimated_pop'] = total_estimated_pop
+
+            annual_cfs = int(total_estimated_pop * 0.6)
+            st.session_state['total_original_calls'] = annual_cfs
+            simulated_points_count = min(max(int(annual_cfs), 365), 36500)
+
+            prog.progress(55, text="🚔 Modeling 911 calls — every one represents someone who needed help…")
+            np.random.seed(42)
+            random.seed(42)
+            call_points = generate_clustered_calls(city_poly, simulated_points_count)
         
-        base_date = datetime.datetime.now() - datetime.timedelta(days=364)
-        fake_dts = [(base_date + datetime.timedelta(days=random.randint(0, 364), hours=random.randint(0, 23), minutes=random.randint(0, 59))) for _ in range(simulated_points_count)]
+            base_date = datetime.datetime.now() - datetime.timedelta(days=364)
+            fake_dts = [(base_date + datetime.timedelta(days=random.randint(0, 364), hours=random.randint(0, 23), minutes=random.randint(0, 59))) for _ in range(simulated_points_count)]
         
-        df_demo = pd.DataFrame({
-            'lat':      [p[0] for p in call_points],
-            'lon':      [p[1] for p in call_points],
-            'priority': np.random.choice([1, 2, 3], simulated_points_count, p=[0.15, 0.35, 0.50]),
-            'date':     [d.strftime('%Y-%m-%d') for d in fake_dts],
-            'time':     [d.strftime('%H:%M:%S') for d in fake_dts]
-        })
-        st.session_state['df_calls'] = df_demo
-        st.session_state['df_calls_full'] = df_demo.copy()
-        st.session_state['total_modeled_calls'] = len(df_demo)
+            df_demo = pd.DataFrame({
+                'lat':      [p[0] for p in call_points],
+                'lon':      [p[1] for p in call_points],
+                'priority': np.random.choice([1, 2, 3], simulated_points_count, p=[0.15, 0.35, 0.50]),
+                'date':     [d.strftime('%Y-%m-%d') for d in fake_dts],
+                'time':     [d.strftime('%H:%M:%S') for d in fake_dts]
+            })
+            st.session_state['df_calls'] = df_demo
+            st.session_state['df_calls_full'] = df_demo.copy()
+            st.session_state['total_modeled_calls'] = len(df_demo)
 
-        # --- PROCESS OPTIONAL CUSTOM STATIONS ---
-        custom_stations_used = False
-        sim_uploader = st.session_state.get('sim_station_uploader')
+            # --- PROCESS OPTIONAL CUSTOM STATIONS ---
+            custom_stations_used = False
+            sim_uploader = st.session_state.get('sim_station_uploader')
         
-        if sim_uploader is not None:
-            prog.progress(80, text="🏅 Geocoding custom stations from CSV…")
-            import time
-            try:
-                sim_uploader.seek(0)
-                s_df = pd.read_csv(sim_uploader)
-                s_df.columns = [str(c).lower().strip() for c in s_df.columns]
+            if sim_uploader is not None:
+                prog.progress(80, text="🏅 Geocoding custom stations from CSV…")
+                import time
+                try:
+                    sim_uploader.seek(0)
+                    s_df = pd.read_csv(sim_uploader)
+                    s_df.columns = [str(c).lower().strip() for c in s_df.columns]
                 
-                # Detect what columns the user provided
-                lat_col = next((c for c in s_df.columns if c in ['lat', 'latitude', 'y']), None)
-                lon_col = next((c for c in s_df.columns if c in ['lon', 'long', 'longitude', 'x']), None)
-                addr_col = next((c for c in s_df.columns if any(a in c for a in ['address', 'street', 'location'])), None)
-                name_col = next((c for c in s_df.columns if any(n in c for n in ['name', 'station', 'facility', 'dept'])), None)
-                type_col = next((c for c in s_df.columns if any(t in c for t in ['type', 'category'])), None)
+                    # Detect what columns the user provided
+                    lat_col = next((c for c in s_df.columns if c in ['lat', 'latitude', 'y']), None)
+                    lon_col = next((c for c in s_df.columns if c in ['lon', 'long', 'longitude', 'x']), None)
+                    addr_col = next((c for c in s_df.columns if any(a in c for a in ['address', 'street', 'location'])), None)
+                    name_col = next((c for c in s_df.columns if any(n in c for n in ['name', 'station', 'facility', 'dept'])), None)
+                    type_col = next((c for c in s_df.columns if any(t in c for t in ['type', 'category'])), None)
                 
-                parsed_stations = []
-                for idx, row in s_df.iterrows():
-                    s_name = str(row[name_col]) if name_col and pd.notna(row[name_col]) else f"Custom Station {idx+1}"
-                    s_type = str(row[type_col]) if type_col and pd.notna(row[type_col]) else 'Custom'
-                    s_lat, s_lon = None, None
+                    parsed_stations = []
+                    for idx, row in s_df.iterrows():
+                        s_name = str(row[name_col]) if name_col and pd.notna(row[name_col]) else f"Custom Station {idx+1}"
+                        s_type = str(row[type_col]) if type_col and pd.notna(row[type_col]) else 'Custom'
+                        s_lat, s_lon = None, None
                     
-                    if lat_col and lon_col and pd.notna(row[lat_col]) and pd.notna(row[lon_col]):
-                        s_lat, s_lon = float(row[lat_col]), float(row[lon_col])
-                    elif addr_col and pd.notna(row[addr_col]):
-                        addr_str = str(row[addr_col])
-                        # Attempt geocoding
-                        s_lat, s_lon = forward_geocode(addr_str)
-                        if s_lat is None:
-                            # Fallback: Try appending the city and state to the address string
-                            s_lat, s_lon = forward_geocode(f"{addr_str}, {active_targets[0]['city']}, {active_targets[0]['state']}")
-                        if s_lat is None:
-                            st.toast(f"⚠️ Could not geocode: {addr_str}")
-                        time.sleep(1) # Slow down requests slightly to prevent API blocking
+                        if lat_col and lon_col and pd.notna(row[lat_col]) and pd.notna(row[lon_col]):
+                            s_lat, s_lon = float(row[lat_col]), float(row[lon_col])
+                        elif addr_col and pd.notna(row[addr_col]):
+                            addr_str = str(row[addr_col])
+                            # Attempt geocoding
+                            s_lat, s_lon = forward_geocode(addr_str)
+                            if s_lat is None:
+                                # Fallback: Try appending the city and state to the address string
+                                s_lat, s_lon = forward_geocode(f"{addr_str}, {active_targets[0]['city']}, {active_targets[0]['state']}")
+                            if s_lat is None:
+                                st.toast(f"⚠️ Could not geocode: {addr_str}")
+                            time.sleep(1) # Slow down requests slightly to prevent API blocking
                         
-                    if s_lat and s_lon:
-                        parsed_stations.append({
-                            'name': s_name,
-                            'lat': s_lat,
-                            'lon': s_lon,
-                            'type': s_type
-                        })
+                        if s_lat and s_lon:
+                            parsed_stations.append({
+                                'name': s_name,
+                                'lat': s_lat,
+                                'lon': s_lon,
+                                'type': s_type
+                            })
                         
-                if parsed_stations:
-                    st.session_state['df_stations'] = pd.DataFrame(parsed_stations)
-                    custom_stations_used = True
+                    if parsed_stations:
+                        st.session_state['df_stations'] = pd.DataFrame(parsed_stations)
+                        custom_stations_used = True
+                    else:
+                        st.warning("⚠️ Could not geocode or parse your custom stations. Falling back to 100 random stations.")
+                except Exception as e:
+                    st.warning(f"⚠️ Error reading custom stations: {e}. Falling back to random stations.")
+
+            # --- FALLBACK: PULL REAL STATIONS FROM OPENSTREETMAP ---
+            if not custom_stations_used:
+                prog.progress(80, text="🌐 Querying OpenStreetMap for real police, fire & schools…")
+            
+                # Use the simulated calls we just made to find the bounding box, and pull real OSM data!
+                df_s, osm_note = generate_stations_from_calls(st.session_state['df_calls'])
+            
+                if df_s is not None and not df_s.empty:
+                    st.session_state['df_stations'] = df_s
+                    st.toast(f"✅ {osm_note}")
                 else:
-                    st.warning("⚠️ Could not geocode or parse your custom stations. Falling back to 100 random stations.")
-            except Exception as e:
-                st.warning(f"⚠️ Error reading custom stations: {e}. Falling back to random stations.")
+                    # Absolute worst-case scenario (no internet or OSM API is down): fall back to random
+                    st.warning("⚠️ Could not reach OpenStreetMap for real stations. Falling back to random placements.")
+                    station_points = generate_random_points_in_polygon(city_poly, 100)
+                    types = ['Police', 'Fire', 'EMS'] * 34
+                    st.session_state['df_stations'] = pd.DataFrame({
+                        'name': [f'Station {i+1}' for i in range(len(station_points))],
+                        'lat':  [p[0] for p in station_points],
+                        'lon':  [p[1] for p in station_points],
+                        'type': types[:len(station_points)]
+                    })
 
-        # --- FALLBACK: PULL REAL STATIONS FROM OPENSTREETMAP ---
-        if not custom_stations_used:
-            prog.progress(80, text="🌐 Querying OpenStreetMap for real police, fire & schools…")
-            
-            # Use the simulated calls we just made to find the bounding box, and pull real OSM data!
-            df_s, osm_note = generate_stations_from_calls(st.session_state['df_calls'])
-            
-            if df_s is not None and not df_s.empty:
-                st.session_state['df_stations'] = df_s
-                st.toast(f"✅ {osm_note}")
-            else:
-                # Absolute worst-case scenario (no internet or OSM API is down): fall back to random
-                st.warning("⚠️ Could not reach OpenStreetMap for real stations. Falling back to random placements.")
-                station_points = generate_random_points_in_polygon(city_poly, 100)
-                types = ['Police', 'Fire', 'EMS'] * 34
-                st.session_state['df_stations'] = pd.DataFrame({
-                    'name': [f'Station {i+1}' for i in range(len(station_points))],
-                    'lat':  [p[0] for p in station_points],
-                    'lon':  [p[1] for p in station_points],
-                    'type': types[:len(station_points)]
-                })
+            prog.progress(100, text="✅ Ready — built for the communities they protect and serve.")
+            st.session_state['inferred_daily_calls_override'] = int(annual_cfs / 365)
+            st.session_state['data_source'] = 'simulation'
+            st.session_state['sim_mode_used'] = True
+            st.session_state['map_build_logged'] = False
+            st.session_state['csvs_ready'] = True
+            st.rerun()
 
-        prog.progress(100, text="✅ Ready — built for the communities they protect and serve.")
-        st.session_state['inferred_daily_calls_override'] = int(annual_cfs / 365)
-        st.session_state['data_source'] = 'simulation'
-        st.session_state['sim_mode_used'] = True
-        st.session_state['map_build_logged'] = False
-        st.session_state['csvs_ready'] = True
-        st.rerun()
+    # ============================================================
+    # COMMUNITY IMPACT DASHBOARD
+    # ============================================================
 
-# ============================================================
-# COMMUNITY IMPACT DASHBOARD
-# ============================================================
+    # ============================================================
+    # MAIN MAP INTERFACE
+    # ============================================================
+    if st.session_state['csvs_ready']:
+        components.html("<script>window._brincHasData = true;</script>", height=0)
 
-# ============================================================
-# MAIN MAP INTERFACE
-# ============================================================
-if st.session_state['csvs_ready']:
-    components.html("<script>window._brincHasData = true;</script>", height=0)
+        df_calls = st.session_state['df_calls'].copy()
+        df_calls_full = st.session_state.get('df_calls_full')
+        if df_calls_full is None:
+            df_calls_full = df_calls.copy()
+        else:
+            df_calls_full = df_calls_full.copy()
+        df_stations_all = st.session_state['df_stations'].copy()
+        full_total_calls = _get_annualized_calls(int(st.session_state.get('total_original_calls', len(df_calls_full) if df_calls_full is not None else len(df_calls)) or 0))
+        full_daily_calls = max(1, int(full_total_calls / 365)) if full_total_calls else 1
 
-    df_calls = st.session_state['df_calls'].copy()
-    df_calls_full = st.session_state.get('df_calls_full')
-    if df_calls_full is None:
-        df_calls_full = df_calls.copy()
-    else:
-        df_calls_full = df_calls_full.copy()
-    df_stations_all = st.session_state['df_stations'].copy()
-    full_total_calls = _get_annualized_calls(int(st.session_state.get('total_original_calls', len(df_calls_full) if df_calls_full is not None else len(df_calls)) or 0))
-    full_daily_calls = max(1, int(full_total_calls / 365)) if full_total_calls else 1
-
-    # ── MAP BUILD EVENT: log to sheets once per session ──────────────────────
-    if not st.session_state.get('map_build_logged', False):
-        try:
-            _map_city  = st.session_state.get('active_city', '')
-            _map_state = st.session_state.get('active_state', '')
-            _brinc_raw = st.session_state.get('brinc_user', 'steven.beltran').strip()
-            if not _brinc_raw: _brinc_raw = 'steven.beltran'
-            _map_name  = " ".join([w.capitalize() for w in _brinc_raw.split('.')])
-            _map_email = f"{_brinc_raw}@brincdrones.com"
-            _map_pop   = st.session_state.get('estimated_pop', 0)
-            _map_calls = st.session_state.get('total_original_calls', 0)
-            _map_daily = max(1, int(_map_calls / 365))
-            _session_start = st.session_state.get('session_start', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        # ── MAP BUILD EVENT: log to sheets once per session ──────────────────────
+        if not st.session_state.get('map_build_logged', False):
             try:
-                _start_dt = datetime.datetime.strptime(_session_start, '%Y-%m-%d %H:%M:%S')
-                _dur_min  = round((datetime.datetime.now() - _start_dt).total_seconds() / 60, 1)
+                _map_city  = st.session_state.get('active_city', '')
+                _map_state = st.session_state.get('active_state', '')
+                _brinc_raw = st.session_state.get('brinc_user', 'steven.beltran').strip()
+                if not _brinc_raw: _brinc_raw = 'steven.beltran'
+                _map_name  = " ".join([w.capitalize() for w in _brinc_raw.split('.')])
+                _map_email = f"{_brinc_raw}@brincdrones.com"
+                _map_pop   = st.session_state.get('estimated_pop', 0)
+                _map_calls = st.session_state.get('total_original_calls', 0)
+                _map_daily = max(1, int(_map_calls / 365))
+                _session_start = st.session_state.get('session_start', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                try:
+                    _start_dt = datetime.datetime.strptime(_session_start, '%Y-%m-%d %H:%M:%S')
+                    _dur_min  = round((datetime.datetime.now() - _start_dt).total_seconds() / 60, 1)
+                except Exception:
+                    _dur_min = ''
+                _map_details = {
+                    'session_id':       st.session_state.get('session_id', ''),
+                    'session_start':    _session_start,
+                    'session_duration_min': _dur_min,
+                    'data_source':      st.session_state.get('data_source', 'unknown'),
+                    'population':       _map_pop,
+                    'total_calls':      _map_calls,
+                    'daily_calls':      _map_daily,
+                    'area_sq_mi':       0,
+                    'fleet_capex':      0,
+                    'annual_savings':   0,
+                    'break_even':       'N/A',
+                    'opt_strategy':     '',
+                    'dfr_rate':         st.session_state.get('dfr_rate', 0),
+                    'deflect_rate':     st.session_state.get('deflect_rate', 0),
+                    'incremental_build': False,
+                    'allow_redundancy': False,
+                    'avg_response_min': 0,
+                    'avg_time_saved_min': 0,
+                    'area_covered_pct': 0,
+                    'active_drones':    [],
+                }
+                _log_to_sheets(_map_city, _map_state, 'MAP_BUILD', 0, 0, 0.0,
+                               _map_name, _map_email, _map_details)
+                st.session_state['map_build_logged'] = True
             except Exception:
-                _dur_min = ''
-            _map_details = {
-                'session_id':       st.session_state.get('session_id', ''),
-                'session_start':    _session_start,
-                'session_duration_min': _dur_min,
-                'data_source':      st.session_state.get('data_source', 'unknown'),
-                'population':       _map_pop,
-                'total_calls':      _map_calls,
-                'daily_calls':      _map_daily,
-                'area_sq_mi':       0,
-                'fleet_capex':      0,
-                'annual_savings':   0,
-                'break_even':       'N/A',
-                'opt_strategy':     '',
-                'dfr_rate':         st.session_state.get('dfr_rate', 0),
-                'deflect_rate':     st.session_state.get('deflect_rate', 0),
-                'incremental_build': False,
-                'allow_redundancy': False,
-                'avg_response_min': 0,
-                'avg_time_saved_min': 0,
-                'area_covered_pct': 0,
-                'active_drones':    [],
-            }
-            _log_to_sheets(_map_city, _map_state, 'MAP_BUILD', 0, 0, 0.0,
-                           _map_name, _map_email, _map_details)
-            st.session_state['map_build_logged'] = True
+                pass
+
+        # ── Jurisdiction boundary: use coordinate-lookup result if available,
+        #    otherwise fall back to shapefile scan (demo/brinc restore paths) ──
+        #    When the user enables "County Boundary" in Display Options, swap in the
+        #    county-level polygon for the active city/state instead.
+        _use_county    = st.session_state.get('use_county_boundary', False)
+        _master_override = st.session_state.get('master_gdf_override')
+
+        if _use_county:
+            _active_state = st.session_state.get('active_state', '')
+            _county_cache_key = f"{_active_state}|county"
+            if (st.session_state.get('_county_boundary_cache_key') == _county_cache_key
+                    and st.session_state.get('_county_boundary_gdf') is not None):
+                master_gdf = st.session_state['_county_boundary_gdf'].copy()
+            else:
+                with st.spinner("Loading county boundary…"):
+                    _ok, _cgdf = fetch_county_by_centroid(df_calls, _active_state)
+                if _ok and _cgdf is not None:
+                    _cgdf = _cgdf.copy()
+                    _cgdf['DISPLAY_NAME'] = _cgdf['NAME'].astype(str)
+                    _cgdf['data_count']   = len(df_calls)
+                    st.session_state['_county_boundary_gdf'] = _cgdf.copy()
+                    st.session_state['_county_boundary_cache_key'] = _county_cache_key
+                    master_gdf = _cgdf.copy()
+                else:
+                    st.warning("County boundary not found — check that counties_lite.parquet is present.")
+                    if _master_override is not None and not _master_override.empty:
+                        master_gdf = _master_override.copy()
+                    else:
+                        with st.spinner(get_jurisdiction_message()):
+                            _preferred_shp = st.session_state.get('boundary_source_path', '') or None
+                            master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
+        elif _master_override is not None and not _master_override.empty:
+            master_gdf = _master_override.copy()
+        else:
+            with st.spinner(get_jurisdiction_message()):
+                _preferred_shp = st.session_state.get('boundary_source_path', '') or None
+                master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
+
+        _boundary_kind_note = st.session_state.get('boundary_kind', 'place')
+        _boundary_src_note = st.session_state.get('boundary_source_path', '')
+
+        if master_gdf is None or master_gdf.empty:
+            # ── Fallback 1: load any saved shapefile directly (spatial join may have
+            #    failed if coordinate conversion was imperfect, but the shapefile exists) ──
+            shp_files = glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp"))
+            if shp_files:
+                try:
+                    preferred_kind = st.session_state.get('boundary_kind', 'place')
+                    active_city = st.session_state.get('active_city', '')
+                    active_state = st.session_state.get('active_state', '')
+                    best = st.session_state.get('boundary_source_path', '') or None
+
+                    # Prefer exact typed boundary path first
+                    if not best:
+                        exact = _boundary_shp_base(preferred_kind, active_city, active_state) + ".shp"
+                        if os.path.exists(exact):
+                            best = exact
+
+                    # Then prefer typed files whose basename matches the active city
+                    if not best:
+                        city_key = _sanitize_boundary_token(active_city).lower()
+                        typed = []
+                        other = []
+                        for sf in shp_files:
+                            base = os.path.basename(sf).lower()
+                            if base.startswith(preferred_kind + "__"):
+                                typed.append(sf)
+                            else:
+                                other.append(sf)
+                        for sf in typed + other:
+                            if city_key and city_key in os.path.basename(sf).lower():
+                                best = sf
+                                break
+
+                    if best is None:
+                        # Before falling back to shp_files[0], verify it overlaps
+                        # the call coordinate bounding box — skip stale files from
+                        # prior sessions that are geographically unrelated
+                        _fb_lat_min = df_calls['lat'].min()
+                        _fb_lat_max = df_calls['lat'].max()
+                        _fb_lon_min = df_calls['lon'].min()
+                        _fb_lon_max = df_calls['lon'].max()
+                        _overlap_pad = 2.0  # degrees
+                        for _sf_cand in shp_files:
+                            try:
+                                import fiona as _fiona
+                                with _fiona.open(_sf_cand) as _sc:
+                                    _sb = _sc.bounds
+                                _overlaps = not (
+                                    _sb[2] < _fb_lon_min - _overlap_pad or
+                                    _sb[0] > _fb_lon_max + _overlap_pad or
+                                    _sb[3] < _fb_lat_min - _overlap_pad or
+                                    _sb[1] > _fb_lat_max + _overlap_pad
+                                )
+                                if _overlaps:
+                                    best = _sf_cand
+                                    break
+                            except Exception:
+                                best = _sf_cand
+                                break
+                        # If every file failed the overlap check, skip loading —
+                        # let Fallback 2 (bbox polygon) handle it cleanly
+                        if best is None:
+                            master_gdf = None
+                            raise ValueError("No overlapping shapefiles found")
+
+                    fallback_gdf = gpd.read_file(best)
+                    if fallback_gdf.crs is None:
+                        fallback_gdf = fallback_gdf.set_crs(epsg=4269)
+                    fallback_gdf = fallback_gdf.to_crs(epsg=4326)
+                    name_col = next((c for c in ['NAME', 'DISTRICT', 'NAMELSAD'] if c in fallback_gdf.columns), fallback_gdf.columns[0])
+                    fallback_gdf['DISPLAY_NAME'] = fallback_gdf[name_col].astype(str)
+                    fallback_gdf['data_count'] = len(df_calls)
+                    master_gdf = fallback_gdf[['DISPLAY_NAME', 'data_count', 'geometry']]
+                    st.session_state['boundary_source_path'] = best
+                except Exception:
+                    master_gdf = None
+
+        if master_gdf is None or master_gdf.empty:
+            # ── Fallback 2: bounding box around call points ──
+            min_lon, min_lat = df_calls['lon'].min(), df_calls['lat'].min()
+            max_lon, max_lat = df_calls['lon'].max(), df_calls['lat'].max()
+            lon_pad = (max_lon - min_lon) * 0.1
+            lat_pad = (max_lat - min_lat) * 0.1
+            poly = box(min_lon-lon_pad, min_lat-lat_pad, max_lon+lon_pad, max_lat+lat_pad)
+            master_gdf = gpd.GeoDataFrame({'DISPLAY_NAME':['Auto-Generated Boundary'],'data_count':[len(df_calls)]}, geometry=[poly], crs="EPSG:4326")
+
+        # --- DRAW SIDEBAR LOGO FIRST SO IT IS AT THE ABSOLUTE TOP ---
+        logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
+        if logo_b64:
+            st.sidebar.markdown(f"""
+            <div style="background-color: transparent; padding: 40px 20px 10px 20px; margin: -60px -20px 20px -20px; text-align: center; pointer-events: none;">
+                <img src="data:image/png;base64,{logo_b64}" style="height: 60px;">
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.sidebar.markdown(f"""
+            <div style="background-color: transparent; padding: 40px 20px 10px 20px; margin: -60px -20px 20px -20px; text-align: center; pointer-events: none;">
+                <div style="font-size:26px; font-weight:900; letter-spacing:3px; color:#ffffff;">BRINC</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.sidebar.markdown('<div class="sidebar-section-header">① Configure</div>', unsafe_allow_html=True)
+        _jur_src_file = st.session_state.get('_jur_source_file', '')
+        _boundary_src_display = (
+            _jur_src_file if _boundary_src_note == 'local_parquet' and _jur_src_file
+            else 'local_parquet' if _boundary_src_note == 'local_parquet'
+            else (_boundary_src_note.split(chr(47))[-1].split(chr(92))[-1] if _boundary_src_note else 'live lookup')
+        )
+        st.sidebar.caption(f"Boundary: {_boundary_kind_note} - {_boundary_src_display}")
+        _sidebar_overlay_gdf = st.session_state.get('boundary_overlay_gdf')
+        if _sidebar_overlay_gdf is not None and not _sidebar_overlay_gdf.empty:
+            _overlay_file = st.session_state.get('boundary_overlay_file', '') or st.session_state.get('boundary_overlay_name', 'uploaded boundary')
+            st.sidebar.caption(f"Overlay: {_overlay_file} (display only)")
+            _sidebar_overlay_status = None
+            if 'city_boundary_geom' in locals() and city_boundary_geom is not None and not city_boundary_geom.is_empty and 'epsg_code' in locals():
+                _sidebar_overlay_status = _boundary_overlay_status(city_boundary_geom, _sidebar_overlay_gdf, epsg_code)
+            if _sidebar_overlay_status:
+                if _sidebar_overlay_status['status'] == 'inside':
+                    st.sidebar.info(_sidebar_overlay_status['message'])
+                else:
+                    st.sidebar.warning(_sidebar_overlay_status['message'])
+
+        total_pts = master_gdf['data_count'].sum()
+        master_gdf['LABEL'] = master_gdf['DISPLAY_NAME'] + " (" + (master_gdf['data_count']/total_pts*100).round(1).astype(str) + "%)"
+        options_map = dict(zip(master_gdf['LABEL'], master_gdf['DISPLAY_NAME']))
+        all_options = master_gdf['LABEL'].tolist()
+    
+        default_selection = [all_options[0]] if all_options else []
+        selected_labels = st.sidebar.multiselect("Jurisdictions", options=all_options, default=default_selection,
+                                                 help="Select which geographic areas to include in coverage analysis.")
+
+        _jur_debug = st.session_state.get('_jur_debug', [])
+        _jur_source = next((m.split(': ')[1].split(' ')[0] for m in _jur_debug if 'parquet exists' in m and 'True' in m), None)
+        if _jur_source:
+            st.session_state['_jur_source_file'] = _jur_source
+
+        if not selected_labels:
+            st.warning("Please select at least one jurisdiction from the sidebar.")
+            st.stop()
+        
+        selected_names = [options_map[l] for l in selected_labels]
+        active_gdf = master_gdf[master_gdf['DISPLAY_NAME'].isin(selected_names)]
+        if selected_names and st.session_state.get('active_city') == "Orlando":
+            st.session_state['active_city'] = str(selected_names[0]).title()
+
+        filter_expander = st.sidebar.expander("⚙️ Data Filters", expanded=False)
+        with filter_expander:
+            if 'type' in df_stations_all.columns:
+                all_types = sorted(df_stations_all['type'].dropna().astype(str).unique().tolist())
+                if all_types:
+                    selected_types = st.multiselect("Facility Type", options=all_types, default=all_types,
+                                                    help="Filter which station types are eligible for drone deployment.")
+                    if not selected_types:
+                        st.warning("Select at least one facility type.")
+                        st.stop()
+                    df_stations_all = df_stations_all[df_stations_all['type'].astype(str).isin(selected_types)].copy().reset_index(drop=True)
+                    df_stations_all['name'] = "[" + df_stations_all['type'].astype(str) + "] " + df_stations_all['name'].astype(str)
+            priority_source = df_calls_full if (df_calls_full is not None and 'priority' in df_calls_full.columns) else df_calls
+            if 'priority' in priority_source.columns:
+                all_priorities = sorted(pd.Series(priority_source['priority']).dropna().astype(int).unique().tolist())
+                if all_priorities:
+                    selected_priorities = st.multiselect("Incident Priority", options=all_priorities, default=all_priorities,
+                                                         help="Filter which call priorities to include in coverage scoring.")
+                    if not selected_priorities:
+                        st.warning("Select at least one priority level.")
+                        st.stop()
+                    df_calls = df_calls[df_calls['priority'].isin(selected_priorities)].copy().reset_index(drop=True)
+                    if df_calls_full is not None and 'priority' in df_calls_full.columns:
+                        df_calls_full = df_calls_full[df_calls_full['priority'].isin(selected_priorities)].copy().reset_index(drop=True)
+
+        if len(df_stations_all) == 0:
+            st.error("No stations match the selected filters."); st.stop()
+        if len(df_calls) == 0:
+            st.error("No calls match the selected filters."); st.stop()
+
+        disp_expander = st.sidebar.expander("👁️ Display Options", expanded=False)
+        with disp_expander:
+            show_boundaries = st.toggle("Jurisdiction Boundaries", value=True)
+            st.toggle("County Boundary", value=False, key='use_county_boundary',
+                      help="Redraw the map using the county boundary instead of the city/place boundary.")
+            show_heatmap    = st.toggle("911 Call Heatmap", value=False)
+            show_health     = st.toggle("Health Score", value=False)
+            show_satellite  = st.toggle("Satellite Imagery", value=False)
+            show_cards      = True
+            simple_cards    = st.toggle("Simple Cards", value=False,
+                                        help="Show a compact card with just the key numbers — name, type, response time, annual savings, and CapEx.")
+            show_dots       = st.toggle("Incident Dots", value=True,
+                                        help="Show individual 911 call locations as dots on the map.")
+
+            # Regulatory overlays (stacked vertically)
+            show_faa        = st.toggle("FAA LAANC Airspace", value=False,
+                                       help="Show FAA-authorized flight ceilings by area (LAANC). Lighter = higher altitude allowed.")
+            show_obstacles  = st.toggle("Flight Hazards", value=False,
+                                       help="FAA Digital Obstacle File — obstacles > 200 ft AGL. Diamond markers.")
+            show_cell_towers = st.toggle("Cell Towers", value=False,
+                                        help="OpenCelliD cell tower locations. Useful for data-link RF validation.")
+            show_no_fly = st.toggle("No-Fly Zones", value=False,
+                                   help="Parks, protected areas, and water. Reference for deployment planning.")
+
+            show_coverage   = st.toggle("4G LTE Coverage", value=False,
+                                        help="Show AT&T, T-Mobile, and Verizon 4G LTE coverage polygons. Toggle individual carriers in the map legend.")
+            simulate_traffic = st.toggle("Simulate Ground Traffic", value=False)
+            traffic_level   = st.slider("Traffic Congestion", 0, 100, 40) if simulate_traffic else 40
+
+        strat_expander = st.sidebar.expander("⚙️ Deployment Strategy", expanded=False)
+        with strat_expander:
+            # ── PRICING TIER SELECTOR ──────────────────────────────────────────────────
+            st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:0 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Pricing Plan</div>", unsafe_allow_html=True)
+            pricing_tier = st.radio(
+                "Pricing Plan",
+                ("Safe Guard", "Safe Guard Lite"),
+                index=0 if st.session_state.get('pricing_tier', 'Safe Guard') == 'Safe Guard' else 1,
+                label_visibility="collapsed",
+                help="Safe Guard (Responder $79,999 | Guardian $159,999): Advanced custom features and add-ons. Safe Guard Lite (Responder $59,999 | Guardian $119,999): Core functionality. See DFR Safeguard Option Comparison Sheet for feature breakdown."
+            )
+            st.session_state['pricing_tier'] = pricing_tier
+
+            # Update CONFIG with tier-specific pricing
+            if pricing_tier == "Safe Guard":
+                CONFIG["RESPONDER_COST"] = 79999
+                CONFIG["GUARDIAN_COST"] = 159999
+                _tier_badge = "🛡️ Safe Guard"
+                _tier_desc = "Advanced Custom Features"
+            else:
+                CONFIG["RESPONDER_COST"] = 59999
+                CONFIG["GUARDIAN_COST"] = 119999
+                _tier_badge = "🛡️ Safe Guard Lite"
+                _tier_desc = "Core Functionality"
+
+            st.markdown("---")
+
+            incremental_build = st.toggle("Phased Rollout", value=st.session_state.get('incremental_build', True),
+                key='incremental_build',
+                help="Place drones one at a time in priority order. Disable to find the global optimum in a single pass.")
+            auto_cap_dfr = st.toggle("Auto-cap over-utilized stations", value=True,
+                key='auto_cap_dfr',
+                help="When on, each station's DFR rate is clamped to its own physical capacity limit — "
+                     "over-utilized stations run at their personal max without reducing the rate for all other stations.")
+
+            st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:8px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Deployment Mode</div>", unsafe_allow_html=True)
+            deployment_mode = st.radio(
+                "Deployment Mode", 
+                ("Complement — push apart", "Independent — each maximises own area", "Shared — allow full overlap"),
+                index=st.session_state.get('deployment_mode_idx', 1),
+                label_visibility="collapsed",
+                help=(
+                    "Complement: Responders fill gaps left by Guardians — no wasted overlap. "
+                    "Independent: each fleet optimises on its own objective; overlap allowed but not forced. "
+                    "Shared: both fleets optimise together against the same call set — hotspot stacking."
+                )
+            )
+            _mode_map = {"Complement — push apart": 0, "Independent — each maximises own area": 1, "Shared — allow full overlap": 2}
+            st.session_state['deployment_mode_idx'] = _mode_map.get(deployment_mode, 1)
+
+            # Derived flags used by the optimizer
+            allow_redundancy  = (deployment_mode != "Complement — push apart")
+            complement_mode   = (deployment_mode == "Complement — push apart")
+            shared_mode       = (deployment_mode == "Shared — allow full overlap")
+
+            st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Guardian Objective</div>", unsafe_allow_html=True)
+            guard_strategy_raw = st.radio(
+                "Guardian Objective",
+                ("Call Coverage", "Land Coverage"),
+                index=st.session_state.get('guard_strat_idx', 1),
+                horizontal=True,
+                label_visibility="collapsed",
+                help="What the Guardian optimizer maximises. Land Coverage = wide area patrol. Call Coverage = respond to highest-volume locations."
+            )
+            st.session_state['guard_strat_idx'] = 0 if guard_strategy_raw == "Call Coverage" else 1
+            guard_strategy = "Maximize Call Coverage" if guard_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
+
+            st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Responder Objective</div>", unsafe_allow_html=True)
+            resp_strategy_raw = st.radio(
+                "Responder Objective",
+                ("Call Coverage", "Land Coverage"),
+                index=st.session_state.get('resp_strat_idx', 1),
+                horizontal=True,
+                label_visibility="collapsed",
+                help="What the Responder optimizer maximises. Call Coverage = densest incident areas. Land Coverage = broadest geographic reach."
+            )
+            st.session_state['resp_strat_idx'] = 0 if resp_strategy_raw == "Call Coverage" else 1
+            resp_strategy = "Maximize Call Coverage" if resp_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
+
+            st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Coverage Ranges</div>", unsafe_allow_html=True)
+            resp_radius_mi  = st.slider("🚁 Responder Range (mi)", 2.0, 3.0, float(st.session_state.get('r_resp', 2.0)), step=0.5)
+            guard_radius_mi = st.slider("🦅 Guardian Range (mi) [⚡ 5mi Rapid]", 1, 8, int(st.session_state.get('r_guard', 8)), help="The 5-mile rapid response focus zone will automatically be highlighted inside the maximum perimeter.")
+
+        # Keep opt_strategy for any code that still references it (used in export/logs)
+        opt_strategy = guard_strategy  # primary strategy label for reporting
+
+        st.sidebar.markdown('<div class="sidebar-section-header">② Optimize Fleet</div>', unsafe_allow_html=True)
+
+        minx, miny, maxx, maxy = active_gdf.to_crs(epsg=4326).total_bounds
+        center_lon = (minx + maxx) / 2
+        center_lat = (miny + maxy) / 2
+        dynamic_zoom = calculate_zoom(minx, maxx, miny, maxy)
+        utm_zone = int((center_lon + 180) / 6) + 1
+        epsg_code = int(f"326{utm_zone}") if center_lat > 0 else int(f"327{utm_zone}")
+
+        city_m = None
+        city_boundary_geom = None
+        try:
+            active_utm = active_gdf.to_crs(epsg=epsg_code)
+            raw_union = (active_utm.geometry.union_all() if hasattr(active_utm.geometry, 'union_all')
+                         else active_utm.geometry.unary_union)
+            # buffer(0.1).buffer(-0.1) cleans self-intersections but can collapse thin geometries.
+            # Use a larger initial buffer and validate before shrinking.
+            clean_geom = raw_union.buffer(1.0).buffer(-1.0)
+            if clean_geom.is_empty or not clean_geom.is_valid:
+                clean_geom = raw_union.buffer(0)  # zero-buffer repair only
+            if clean_geom.is_empty:
+                clean_geom = raw_union          # use as-is if still empty
+            city_m = clean_geom
+            city_boundary_geom = gpd.GeoSeries([clean_geom], crs=epsg_code).to_crs(epsg=4326).iloc[0]
+        except Exception as e:
+            st.error(f"Geometry Error: {e}"); st.stop()
+
+        boundary_overlay_gdf = st.session_state.get('boundary_overlay_gdf')
+        boundary_overlay_status = _boundary_overlay_status(city_boundary_geom, boundary_overlay_gdf, epsg_code)
+
+        # --- GEOGRAPHIC FILTERING FOR STATIONS ---
+        # Keep stations inside city boundary + generous buffer.
+        # If OSM found nothing inside the boundary (e.g. small cities with few public
+        # buildings tagged), fall back to call-density-derived synthetic stations so
+        # the tool never dead-ends on legitimate data.
+        # User-uploaded station files are never silently replaced — they are trusted as-is.
+        _stations_user_uploaded = st.session_state.get('stations_user_uploaded', False)
+        if not df_stations_all.empty and city_m is not None:
+            st_gdf = gpd.GeoDataFrame(df_stations_all,
+                                       geometry=gpd.points_from_xy(df_stations_all.lon, df_stations_all.lat),
+                                       crs="EPSG:4326")
+            st_gdf_utm = st_gdf.to_crs(epsg=epsg_code)
+
+            # Keep candidate sites strictly inside the jurisdiction whenever possible.
+            mask = st_gdf_utm.within(city_m)
+            df_inside = df_stations_all[mask].reset_index(drop=True)
+
+            if df_inside.empty:
+                if _stations_user_uploaded:
+                    # Try a 5 km buffer before giving up — handles county-boundary
+                    # mode where the active polygon differs from the original city extent.
+                    mask_buf = st_gdf_utm.within(city_m.buffer(5000))
+                    df_inside_buf = df_stations_all[mask_buf].reset_index(drop=True)
+                    if not df_inside_buf.empty:
+                        df_stations_all = df_inside_buf
+                    # else: keep all uploaded stations — user knows their data
+                else:
+                    st.info(
+                        "ℹ️ No OSM public buildings were found inside the jurisdiction boundary. "
+                        "Using call-density station placement — stations are snapped to incident "
+                        "locations that fall inside the city limits."
+                    )
+                try:
+                    if not _stations_user_uploaded:
+                        df_stations_all = _make_random_stations(df_calls, n=60, boundary_geom=city_m, epsg_code=epsg_code)
+                except Exception:
+                    df_stations_all = pd.DataFrame()
+
+                # Absolute last resort: build a simple grid from call quantiles
+                if df_stations_all.empty:
+                    try:
+                        _lats = df_calls['lat'].dropna()
+                        _lons = df_calls['lon'].dropna()
+                        _grid_lats = np.linspace(_lats.quantile(0.1), _lats.quantile(0.9), 8)
+                        _grid_lons = np.linspace(_lons.quantile(0.1), _lons.quantile(0.9), 8)
+                        _glat, _glon = np.meshgrid(_grid_lats, _grid_lons)
+                        df_stations_all = pd.DataFrame({
+                            'name':  [f'Station {i+1}' for i in range(len(_glat.ravel()))],
+                            'lat':   _glat.ravel(),
+                            'lon':   _glon.ravel(),
+                            'type':  (['Police', 'Fire', 'School'] * 30)[:len(_glat.ravel())],
+                        })
+                    except Exception:
+                        df_stations_all = pd.DataFrame()
+            else:
+                df_stations_all = df_inside
+
+            if not df_stations_all.empty and not _stations_user_uploaded:
+                try:
+                    _final_st_gdf = gpd.GeoDataFrame(df_stations_all, geometry=gpd.points_from_xy(df_stations_all.lon, df_stations_all.lat), crs="EPSG:4326").to_crs(epsg=epsg_code)
+                    _final_mask = _final_st_gdf.within(city_m)
+                    if _final_mask.any():
+                        df_stations_all = df_stations_all[_final_mask].reset_index(drop=True)
+                except Exception:
+                    pass
+
+            if df_stations_all.empty:
+                st.error(
+                    "⚠️ No station candidates could be generated. Please upload a CAD file "
+                    "with valid coordinates, or switch to Simulation mode."
+                )
+                st.stop()
+
+        # ── Inject custom stations (bypass boundary clip & type filter) ──────────
+        _custom_st = st.session_state.get('custom_stations', pd.DataFrame())
+        if not _custom_st.empty:
+            # Apply the same type-prefix rename the filter block uses, so pin lookups match
+            _cst_renamed = _custom_st.copy()
+            _cst_renamed['name'] = "[" + _cst_renamed['type'].astype(str) + "] " + _cst_renamed['name'].astype(str)
+            # Drop columns that might not exist in df_stations_all to avoid concat issues
+            _keep_cols = [c for c in _cst_renamed.columns if c in list(df_stations_all.columns) + ['name','lat','lon','type','custom']]
+            _cst_renamed = _cst_renamed[_keep_cols]
+            df_stations_all = pd.concat([df_stations_all, _cst_renamed], ignore_index=True)
+
+        n = len(df_stations_all)
+
+        # Dynamic Sliders based on Area Size
+        area_sq_mi = city_m.area / 2589988.11 if city_m and not city_m.is_empty else 100.0
+        r_resp_est = st.session_state.get('r_resp', 2.0)
+        r_guard_est = st.session_state.get('r_guard', 8.0)
+    
+        max_resp_calc = min(n, int(math.ceil(area_sq_mi / (math.pi * (r_resp_est**2)))) + 5)
+        max_guard_calc = min(n, int(math.ceil(area_sq_mi / (math.pi * (r_guard_est**2)))) + 5)
+
+        # Default minimum fleet: 1 Guardian and enough Responders to reach 85% responder call coverage (minimum 2).
+        try:
+            _pin_r_count = len(st.session_state.get('pinned_resp_names',  []))
+            _pin_g_count = len(st.session_state.get('pinned_guard_names', []))
+            _pin_drop_used = st.session_state.get('pin_drop_used', False)
+            _auto_sig = (
+                f"{st.session_state.get('active_city','')}|{st.session_state.get('active_state','')}|"
+                f"{round(area_sq_mi,1)}|{n}|{round(r_resp_est,1)}|{round(r_guard_est,1)}|"
+                f"{_pin_r_count}|{_pin_g_count}|{int(_pin_drop_used)}"
+            )
+            if st.session_state.get('_auto_minimums_sig') != _auto_sig:
+                if st.session_state.pop('_brinc_k_override', False):
+                    # BRINC import: k_resp/k_guard were already restored from the file —
+                    # just lock the sig so this block doesn't fire again on the next render.
+                    pass
+                elif _pin_drop_used:
+                    # Pin-drop mode: fleet sizes driven entirely by pin counts — no auto-fill
+                    st.session_state['k_resp']  = _pin_r_count
+                    st.session_state['k_guard'] = _pin_g_count
+                else:
+                    _resp_default = 2
+                    try:
+                        _resp_curve = df_curve[['Drones', 'Responder (Calls)']].dropna()
+                        _hit = _resp_curve[_resp_curve['Responder (Calls)'] >= 85.0]
+                        if not _hit.empty:
+                            _resp_default = int(_hit.iloc[0]['Drones'])
+                    except Exception:
+                        pass
+                    _resp_default = max(2, min(int(_resp_default), max(1, max_resp_calc)))
+                    _guard_default = max(1, min(1, max(1, max_guard_calc)))
+                    st.session_state['k_resp']  = max(_resp_default, _pin_r_count)
+                    st.session_state['k_guard'] = max(_guard_default, _pin_g_count)
+                st.session_state['_auto_minimums_sig'] = _auto_sig
         except Exception:
             pass
 
-    # ── Jurisdiction boundary: use coordinate-lookup result if available,
-    #    otherwise fall back to shapefile scan (demo/brinc restore paths) ──
-    #    When the user enables "County Boundary" in Display Options, swap in the
-    #    county-level polygon for the active city/state instead.
-    _use_county    = st.session_state.get('use_county_boundary', False)
-    _master_override = st.session_state.get('master_gdf_override')
 
-    if _use_county:
-        _active_state = st.session_state.get('active_state', '')
-        _county_cache_key = f"{_active_state}|county"
-        if (st.session_state.get('_county_boundary_cache_key') == _county_cache_key
-                and st.session_state.get('_county_boundary_gdf') is not None):
-            master_gdf = st.session_state['_county_boundary_gdf'].copy()
-        else:
-            with st.spinner("Loading county boundary…"):
-                _ok, _cgdf = fetch_county_by_centroid(df_calls, _active_state)
-            if _ok and _cgdf is not None:
-                _cgdf = _cgdf.copy()
-                _cgdf['DISPLAY_NAME'] = _cgdf['NAME'].astype(str)
-                _cgdf['data_count']   = len(df_calls)
-                st.session_state['_county_boundary_gdf'] = _cgdf.copy()
-                st.session_state['_county_boundary_cache_key'] = _county_cache_key
-                master_gdf = _cgdf.copy()
-            else:
-                st.warning("County boundary not found — check that counties_lite.parquet is present.")
-                if _master_override is not None and not _master_override.empty:
-                    master_gdf = _master_override.copy()
-                else:
-                    with st.spinner(get_jurisdiction_message()):
-                        _preferred_shp = st.session_state.get('boundary_source_path', '') or None
-                        master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
-    elif _master_override is not None and not _master_override.empty:
-        master_gdf = _master_override.copy()
-    else:
-        with st.spinner(get_jurisdiction_message()):
-            _preferred_shp = st.session_state.get('boundary_source_path', '') or None
-            master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
+        # Safely pull the default values without exceeding the allowed maximums
+        val_r = min(st.session_state.get('k_resp', 2), max_resp_calc)
+        val_g = min(st.session_state.get('k_guard', 0), max_guard_calc)
 
-    _boundary_kind_note = st.session_state.get('boundary_kind', 'place')
-    _boundary_src_note = st.session_state.get('boundary_source_path', '')
+        k_responder = st.sidebar.slider("🚁 Responder Count", 0, max(1, max_resp_calc), val_r, help="Short-range tactical drones (2-3mi radius).")
+        k_guardian  = st.sidebar.slider("🦅 Guardian Count", 0, max(1, max_guard_calc), val_g, help="Long-range overwatch drones (5-8mi radius).")
 
-    if master_gdf is None or master_gdf.empty:
-        # ── Fallback 1: load any saved shapefile directly (spatial join may have
-        #    failed if coordinate conversion was imperfect, but the shapefile exists) ──
-        shp_files = glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp"))
-        if shp_files:
-            try:
-                preferred_kind = st.session_state.get('boundary_kind', 'place')
-                active_city = st.session_state.get('active_city', '')
-                active_state = st.session_state.get('active_state', '')
-                best = st.session_state.get('boundary_source_path', '') or None
+        st.session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
 
-                # Prefer exact typed boundary path first
-                if not best:
-                    exact = _boundary_shp_base(preferred_kind, active_city, active_state) + ".shp"
-                    if os.path.exists(exact):
-                        best = exact
-
-                # Then prefer typed files whose basename matches the active city
-                if not best:
-                    city_key = _sanitize_boundary_token(active_city).lower()
-                    typed = []
-                    other = []
-                    for sf in shp_files:
-                        base = os.path.basename(sf).lower()
-                        if base.startswith(preferred_kind + "__"):
-                            typed.append(sf)
-                        else:
-                            other.append(sf)
-                    for sf in typed + other:
-                        if city_key and city_key in os.path.basename(sf).lower():
-                            best = sf
-                            break
-
-                if best is None:
-                    # Before falling back to shp_files[0], verify it overlaps
-                    # the call coordinate bounding box — skip stale files from
-                    # prior sessions that are geographically unrelated
-                    _fb_lat_min = df_calls['lat'].min()
-                    _fb_lat_max = df_calls['lat'].max()
-                    _fb_lon_min = df_calls['lon'].min()
-                    _fb_lon_max = df_calls['lon'].max()
-                    _overlap_pad = 2.0  # degrees
-                    for _sf_cand in shp_files:
-                        try:
-                            import fiona as _fiona
-                            with _fiona.open(_sf_cand) as _sc:
-                                _sb = _sc.bounds
-                            _overlaps = not (
-                                _sb[2] < _fb_lon_min - _overlap_pad or
-                                _sb[0] > _fb_lon_max + _overlap_pad or
-                                _sb[3] < _fb_lat_min - _overlap_pad or
-                                _sb[1] > _fb_lat_max + _overlap_pad
-                            )
-                            if _overlaps:
-                                best = _sf_cand
-                                break
-                        except Exception:
-                            best = _sf_cand
-                            break
-                    # If every file failed the overlap check, skip loading —
-                    # let Fallback 2 (bbox polygon) handle it cleanly
-                    if best is None:
-                        master_gdf = None
-                        raise ValueError("No overlapping shapefiles found")
-
-                fallback_gdf = gpd.read_file(best)
-                if fallback_gdf.crs is None:
-                    fallback_gdf = fallback_gdf.set_crs(epsg=4269)
-                fallback_gdf = fallback_gdf.to_crs(epsg=4326)
-                name_col = next((c for c in ['NAME', 'DISTRICT', 'NAMELSAD'] if c in fallback_gdf.columns), fallback_gdf.columns[0])
-                fallback_gdf['DISPLAY_NAME'] = fallback_gdf[name_col].astype(str)
-                fallback_gdf['data_count'] = len(df_calls)
-                master_gdf = fallback_gdf[['DISPLAY_NAME', 'data_count', 'geometry']]
-                st.session_state['boundary_source_path'] = best
-            except Exception:
-                master_gdf = None
-
-    if master_gdf is None or master_gdf.empty:
-        # ── Fallback 2: bounding box around call points ──
-        min_lon, min_lat = df_calls['lon'].min(), df_calls['lat'].min()
-        max_lon, max_lat = df_calls['lon'].max(), df_calls['lat'].max()
-        lon_pad = (max_lon - min_lon) * 0.1
-        lat_pad = (max_lat - min_lat) * 0.1
-        poly = box(min_lon-lon_pad, min_lat-lat_pad, max_lon+lon_pad, max_lat+lat_pad)
-        master_gdf = gpd.GeoDataFrame({'DISPLAY_NAME':['Auto-Generated Boundary'],'data_count':[len(df_calls)]}, geometry=[poly], crs="EPSG:4326")
-
-    # --- DRAW SIDEBAR LOGO FIRST SO IT IS AT THE ABSOLUTE TOP ---
-    logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
-    if logo_b64:
-        st.sidebar.markdown(f"""
-        <div style="background-color: transparent; padding: 40px 20px 10px 20px; margin: -60px -20px 20px -20px; text-align: center; pointer-events: none;">
-            <img src="data:image/png;base64,{logo_b64}" style="height: 60px;">
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.sidebar.markdown(f"""
-        <div style="background-color: transparent; padding: 40px 20px 10px 20px; margin: -60px -20px 20px -20px; text-align: center; pointer-events: none;">
-            <div style="font-size:26px; font-weight:900; letter-spacing:3px; color:#ffffff;">BRINC</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.sidebar.markdown('<div class="sidebar-section-header">① Configure</div>', unsafe_allow_html=True)
-    _jur_src_file = st.session_state.get('_jur_source_file', '')
-    _boundary_src_display = (
-        _jur_src_file if _boundary_src_note == 'local_parquet' and _jur_src_file
-        else 'local_parquet' if _boundary_src_note == 'local_parquet'
-        else (_boundary_src_note.split(chr(47))[-1].split(chr(92))[-1] if _boundary_src_note else 'live lookup')
-    )
-    st.sidebar.caption(f"Boundary: {_boundary_kind_note} - {_boundary_src_display}")
-    _sidebar_overlay_gdf = st.session_state.get('boundary_overlay_gdf')
-    if _sidebar_overlay_gdf is not None and not _sidebar_overlay_gdf.empty:
-        _overlay_file = st.session_state.get('boundary_overlay_file', '') or st.session_state.get('boundary_overlay_name', 'uploaded boundary')
-        st.sidebar.caption(f"Overlay: {_overlay_file} (display only)")
-        _sidebar_overlay_status = None
-        if 'city_boundary_geom' in locals() and city_boundary_geom is not None and not city_boundary_geom.is_empty and 'epsg_code' in locals():
-            _sidebar_overlay_status = _boundary_overlay_status(city_boundary_geom, _sidebar_overlay_gdf, epsg_code)
-        if _sidebar_overlay_status:
-            if _sidebar_overlay_status['status'] == 'inside':
-                st.sidebar.info(_sidebar_overlay_status['message'])
-            else:
-                st.sidebar.warning(_sidebar_overlay_status['message'])
-
-    total_pts = master_gdf['data_count'].sum()
-    master_gdf['LABEL'] = master_gdf['DISPLAY_NAME'] + " (" + (master_gdf['data_count']/total_pts*100).round(1).astype(str) + "%)"
-    options_map = dict(zip(master_gdf['LABEL'], master_gdf['DISPLAY_NAME']))
-    all_options = master_gdf['LABEL'].tolist()
-    
-    default_selection = [all_options[0]] if all_options else []
-    selected_labels = st.sidebar.multiselect("Jurisdictions", options=all_options, default=default_selection,
-                                             help="Select which geographic areas to include in coverage analysis.")
-
-    _jur_debug = st.session_state.get('_jur_debug', [])
-    _jur_source = next((m.split(': ')[1].split(' ')[0] for m in _jur_debug if 'parquet exists' in m and 'True' in m), None)
-    if _jur_source:
-        st.session_state['_jur_source_file'] = _jur_source
-
-    if not selected_labels:
-        st.warning("Please select at least one jurisdiction from the sidebar.")
-        st.stop()
-        
-    selected_names = [options_map[l] for l in selected_labels]
-    active_gdf = master_gdf[master_gdf['DISPLAY_NAME'].isin(selected_names)]
-    if selected_names and st.session_state.get('active_city') == "Orlando":
-        st.session_state['active_city'] = str(selected_names[0]).title()
-
-    filter_expander = st.sidebar.expander("⚙️ Data Filters", expanded=False)
-    with filter_expander:
-        if 'type' in df_stations_all.columns:
-            all_types = sorted(df_stations_all['type'].dropna().astype(str).unique().tolist())
-            if all_types:
-                selected_types = st.multiselect("Facility Type", options=all_types, default=all_types,
-                                                help="Filter which station types are eligible for drone deployment.")
-                if not selected_types:
-                    st.warning("Select at least one facility type.")
-                    st.stop()
-                df_stations_all = df_stations_all[df_stations_all['type'].astype(str).isin(selected_types)].copy().reset_index(drop=True)
-                df_stations_all['name'] = "[" + df_stations_all['type'].astype(str) + "] " + df_stations_all['name'].astype(str)
-        priority_source = df_calls_full if (df_calls_full is not None and 'priority' in df_calls_full.columns) else df_calls
-        if 'priority' in priority_source.columns:
-            all_priorities = sorted(pd.Series(priority_source['priority']).dropna().astype(int).unique().tolist())
-            if all_priorities:
-                selected_priorities = st.multiselect("Incident Priority", options=all_priorities, default=all_priorities,
-                                                     help="Filter which call priorities to include in coverage scoring.")
-                if not selected_priorities:
-                    st.warning("Select at least one priority level.")
-                    st.stop()
-                df_calls = df_calls[df_calls['priority'].isin(selected_priorities)].copy().reset_index(drop=True)
-                if df_calls_full is not None and 'priority' in df_calls_full.columns:
-                    df_calls_full = df_calls_full[df_calls_full['priority'].isin(selected_priorities)].copy().reset_index(drop=True)
-
-    if len(df_stations_all) == 0:
-        st.error("No stations match the selected filters."); st.stop()
-    if len(df_calls) == 0:
-        st.error("No calls match the selected filters."); st.stop()
-
-    disp_expander = st.sidebar.expander("👁️ Display Options", expanded=False)
-    with disp_expander:
-        show_boundaries = st.toggle("Jurisdiction Boundaries", value=True)
-        st.toggle("County Boundary", value=False, key='use_county_boundary',
-                  help="Redraw the map using the county boundary instead of the city/place boundary.")
-        show_heatmap    = st.toggle("911 Call Heatmap", value=False)
-        show_health     = st.toggle("Health Score", value=False)
-        show_satellite  = st.toggle("Satellite Imagery", value=False)
-        show_cards      = True
-        simple_cards    = st.toggle("Simple Cards", value=False,
-                                    help="Show a compact card with just the key numbers — name, type, response time, annual savings, and CapEx.")
-        show_dots       = st.toggle("Incident Dots", value=True,
-                                    help="Show individual 911 call locations as dots on the map.")
-
-        # Regulatory overlays (stacked vertically)
-        show_faa        = st.toggle("FAA LAANC Airspace", value=False,
-                                   help="Show FAA-authorized flight ceilings by area (LAANC). Lighter = higher altitude allowed.")
-        show_obstacles  = st.toggle("Flight Hazards", value=False,
-                                   help="FAA Digital Obstacle File — obstacles > 200 ft AGL. Diamond markers.")
-        show_cell_towers = st.toggle("Cell Towers", value=False,
-                                    help="OpenCelliD cell tower locations. Useful for data-link RF validation.")
-        show_no_fly = st.toggle("No-Fly Zones", value=False,
-                               help="Parks, protected areas, and water. Reference for deployment planning.")
-
-        show_coverage   = st.toggle("4G LTE Coverage", value=False,
-                                    help="Show AT&T, T-Mobile, and Verizon 4G LTE coverage polygons. Toggle individual carriers in the map legend.")
-        simulate_traffic = st.toggle("Simulate Ground Traffic", value=False)
-        traffic_level   = st.slider("Traffic Congestion", 0, 100, 40) if simulate_traffic else 40
-
-    strat_expander = st.sidebar.expander("⚙️ Deployment Strategy", expanded=False)
-    with strat_expander:
-        # ── PRICING TIER SELECTOR ──────────────────────────────────────────────────
-        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:0 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Pricing Plan</div>", unsafe_allow_html=True)
-        pricing_tier = st.radio(
-            "Pricing Plan",
-            ("Safe Guard", "Safe Guard Lite"),
-            index=0 if st.session_state.get('pricing_tier', 'Safe Guard') == 'Safe Guard' else 1,
-            label_visibility="collapsed",
-            help="Safe Guard (Responder $79,999 | Guardian $159,999): Advanced custom features and add-ons. Safe Guard Lite (Responder $59,999 | Guardian $119,999): Core functionality. See DFR Safeguard Option Comparison Sheet for feature breakdown."
-        )
-        st.session_state['pricing_tier'] = pricing_tier
-
-        # Update CONFIG with tier-specific pricing
-        if pricing_tier == "Safe Guard":
-            CONFIG["RESPONDER_COST"] = 79999
-            CONFIG["GUARDIAN_COST"] = 159999
-            _tier_badge = "🛡️ Safe Guard"
-            _tier_desc = "Advanced Custom Features"
-        else:
-            CONFIG["RESPONDER_COST"] = 59999
-            CONFIG["GUARDIAN_COST"] = 119999
-            _tier_badge = "🛡️ Safe Guard Lite"
-            _tier_desc = "Core Functionality"
-
-        st.markdown("---")
-
-        incremental_build = st.toggle("Phased Rollout", value=st.session_state.get('incremental_build', True),
-            key='incremental_build',
-            help="Place drones one at a time in priority order. Disable to find the global optimum in a single pass.")
-        auto_cap_dfr = st.toggle("Auto-cap over-utilized stations", value=True,
-            key='auto_cap_dfr',
-            help="When on, each station's DFR rate is clamped to its own physical capacity limit — "
-                 "over-utilized stations run at their personal max without reducing the rate for all other stations.")
-
-        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:8px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Deployment Mode</div>", unsafe_allow_html=True)
-        deployment_mode = st.radio(
-            "Deployment Mode", 
-            ("Complement — push apart", "Independent — each maximises own area", "Shared — allow full overlap"),
-            index=st.session_state.get('deployment_mode_idx', 1),
-            label_visibility="collapsed",
-            help=(
-                "Complement: Responders fill gaps left by Guardians — no wasted overlap. "
-                "Independent: each fleet optimises on its own objective; overlap allowed but not forced. "
-                "Shared: both fleets optimise together against the same call set — hotspot stacking."
-            )
-        )
-        _mode_map = {"Complement — push apart": 0, "Independent — each maximises own area": 1, "Shared — allow full overlap": 2}
-        st.session_state['deployment_mode_idx'] = _mode_map.get(deployment_mode, 1)
-
-        # Derived flags used by the optimizer
-        allow_redundancy  = (deployment_mode != "Complement — push apart")
-        complement_mode   = (deployment_mode == "Complement — push apart")
-        shared_mode       = (deployment_mode == "Shared — allow full overlap")
-
-        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Guardian Objective</div>", unsafe_allow_html=True)
-        guard_strategy_raw = st.radio(
-            "Guardian Objective",
-            ("Call Coverage", "Land Coverage"),
-            index=st.session_state.get('guard_strat_idx', 1),
-            horizontal=True,
-            label_visibility="collapsed",
-            help="What the Guardian optimizer maximises. Land Coverage = wide area patrol. Call Coverage = respond to highest-volume locations."
-        )
-        st.session_state['guard_strat_idx'] = 0 if guard_strategy_raw == "Call Coverage" else 1
-        guard_strategy = "Maximize Call Coverage" if guard_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
-
-        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Responder Objective</div>", unsafe_allow_html=True)
-        resp_strategy_raw = st.radio(
-            "Responder Objective",
-            ("Call Coverage", "Land Coverage"),
-            index=st.session_state.get('resp_strat_idx', 1),
-            horizontal=True,
-            label_visibility="collapsed",
-            help="What the Responder optimizer maximises. Call Coverage = densest incident areas. Land Coverage = broadest geographic reach."
-        )
-        st.session_state['resp_strat_idx'] = 0 if resp_strategy_raw == "Call Coverage" else 1
-        resp_strategy = "Maximize Call Coverage" if resp_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
-
-        st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Coverage Ranges</div>", unsafe_allow_html=True)
-        resp_radius_mi  = st.slider("🚁 Responder Range (mi)", 2.0, 3.0, float(st.session_state.get('r_resp', 2.0)), step=0.5)
-        guard_radius_mi = st.slider("🦅 Guardian Range (mi) [⚡ 5mi Rapid]", 1, 8, int(st.session_state.get('r_guard', 8)), help="The 5-mile rapid response focus zone will automatically be highlighted inside the maximum perimeter.")
-
-    # Keep opt_strategy for any code that still references it (used in export/logs)
-    opt_strategy = guard_strategy  # primary strategy label for reporting
-
-    st.sidebar.markdown('<div class="sidebar-section-header">② Optimize Fleet</div>', unsafe_allow_html=True)
-
-    minx, miny, maxx, maxy = active_gdf.to_crs(epsg=4326).total_bounds
-    center_lon = (minx + maxx) / 2
-    center_lat = (miny + maxy) / 2
-    dynamic_zoom = calculate_zoom(minx, maxx, miny, maxy)
-    utm_zone = int((center_lon + 180) / 6) + 1
-    epsg_code = int(f"326{utm_zone}") if center_lat > 0 else int(f"327{utm_zone}")
-
-    city_m = None
-    city_boundary_geom = None
-    try:
-        active_utm = active_gdf.to_crs(epsg=epsg_code)
-        raw_union = (active_utm.geometry.union_all() if hasattr(active_utm.geometry, 'union_all')
-                     else active_utm.geometry.unary_union)
-        # buffer(0.1).buffer(-0.1) cleans self-intersections but can collapse thin geometries.
-        # Use a larger initial buffer and validate before shrinking.
-        clean_geom = raw_union.buffer(1.0).buffer(-1.0)
-        if clean_geom.is_empty or not clean_geom.is_valid:
-            clean_geom = raw_union.buffer(0)  # zero-buffer repair only
-        if clean_geom.is_empty:
-            clean_geom = raw_union          # use as-is if still empty
-        city_m = clean_geom
-        city_boundary_geom = gpd.GeoSeries([clean_geom], crs=epsg_code).to_crs(epsg=4326).iloc[0]
-    except Exception as e:
-        st.error(f"Geometry Error: {e}"); st.stop()
-
-    boundary_overlay_gdf = st.session_state.get('boundary_overlay_gdf')
-    boundary_overlay_status = _boundary_overlay_status(city_boundary_geom, boundary_overlay_gdf, epsg_code)
-
-    # --- GEOGRAPHIC FILTERING FOR STATIONS ---
-    # Keep stations inside city boundary + generous buffer.
-    # If OSM found nothing inside the boundary (e.g. small cities with few public
-    # buildings tagged), fall back to call-density-derived synthetic stations so
-    # the tool never dead-ends on legitimate data.
-    # User-uploaded station files are never silently replaced — they are trusted as-is.
-    _stations_user_uploaded = st.session_state.get('stations_user_uploaded', False)
-    if not df_stations_all.empty and city_m is not None:
-        st_gdf = gpd.GeoDataFrame(df_stations_all,
-                                   geometry=gpd.points_from_xy(df_stations_all.lon, df_stations_all.lat),
-                                   crs="EPSG:4326")
-        st_gdf_utm = st_gdf.to_crs(epsg=epsg_code)
-
-        # Keep candidate sites strictly inside the jurisdiction whenever possible.
-        mask = st_gdf_utm.within(city_m)
-        df_inside = df_stations_all[mask].reset_index(drop=True)
-
-        if df_inside.empty:
-            if _stations_user_uploaded:
-                # Try a 5 km buffer before giving up — handles county-boundary
-                # mode where the active polygon differs from the original city extent.
-                mask_buf = st_gdf_utm.within(city_m.buffer(5000))
-                df_inside_buf = df_stations_all[mask_buf].reset_index(drop=True)
-                if not df_inside_buf.empty:
-                    df_stations_all = df_inside_buf
-                # else: keep all uploaded stations — user knows their data
-            else:
-                st.info(
-                    "ℹ️ No OSM public buildings were found inside the jurisdiction boundary. "
-                    "Using call-density station placement — stations are snapped to incident "
-                    "locations that fall inside the city limits."
+        # ── LOCK STATIONS (sidebar multiselect) ──────────────────────────────────
+        def _make_unique_station_label(raw_label, station_type, lat, lon):
+            """Return a stable, unique custom-station label."""
+            _label = (raw_label or "").strip() or f"{lat:.5f}, {lon:.5f}"
+            _existing_prefixed = set(df_stations_all['name'].astype(str).tolist())
+            _custom_existing = st.session_state.get('custom_stations', pd.DataFrame())
+            if not _custom_existing.empty and {'name', 'type'}.issubset(_custom_existing.columns):
+                _existing_prefixed.update(
+                    f"[{row['type']}] {row['name']}"
+                    for _, row in _custom_existing[['name', 'type']].dropna().iterrows()
                 )
-            try:
-                if not _stations_user_uploaded:
-                    df_stations_all = _make_random_stations(df_calls, n=60, boundary_geom=city_m, epsg_code=epsg_code)
-            except Exception:
-                df_stations_all = pd.DataFrame()
+            _prefixed = f"[{station_type}] {_label}"
+            if _prefixed not in _existing_prefixed:
+                return _label
 
-            # Absolute last resort: build a simple grid from call quantiles
-            if df_stations_all.empty:
-                try:
-                    _lats = df_calls['lat'].dropna()
-                    _lons = df_calls['lon'].dropna()
-                    _grid_lats = np.linspace(_lats.quantile(0.1), _lats.quantile(0.9), 8)
-                    _grid_lons = np.linspace(_lons.quantile(0.1), _lons.quantile(0.9), 8)
-                    _glat, _glon = np.meshgrid(_grid_lats, _grid_lons)
-                    df_stations_all = pd.DataFrame({
-                        'name':  [f'Station {i+1}' for i in range(len(_glat.ravel()))],
-                        'lat':   _glat.ravel(),
-                        'lon':   _glon.ravel(),
-                        'type':  (['Police', 'Fire', 'School'] * 30)[:len(_glat.ravel())],
-                    })
-                except Exception:
-                    df_stations_all = pd.DataFrame()
-        else:
-            df_stations_all = df_inside
+            _coord_suffix = f" ({lat:.5f}, {lon:.5f})"
+            _label_with_coords = f"{_label}{_coord_suffix}"
+            _prefixed_with_coords = f"[{station_type}] {_label_with_coords}"
+            if _prefixed_with_coords not in _existing_prefixed:
+                return _label_with_coords
 
-        if not df_stations_all.empty and not _stations_user_uploaded:
-            try:
-                _final_st_gdf = gpd.GeoDataFrame(df_stations_all, geometry=gpd.points_from_xy(df_stations_all.lon, df_stations_all.lat), crs="EPSG:4326").to_crs(epsg=epsg_code)
-                _final_mask = _final_st_gdf.within(city_m)
-                if _final_mask.any():
-                    df_stations_all = df_stations_all[_final_mask].reset_index(drop=True)
-            except Exception:
-                pass
+            _n = 2
+            while f"[{station_type}] {_label_with_coords} #{_n}" in _existing_prefixed:
+                _n += 1
+            return f"{_label_with_coords} #{_n}"
 
-        if df_stations_all.empty:
-            st.error(
-                "⚠️ No station candidates could be generated. Please upload a CAD file "
-                "with valid coordinates, or switch to Simulation mode."
+        _station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
+        _saved_g = [s for s in st.session_state.get('pinned_guard_names', []) if s in _station_names]
+        _saved_r = [s for s in st.session_state.get('pinned_resp_names',  []) if s in _station_names]
+        st.session_state['pinned_guard_names'] = list(_saved_g)
+        st.session_state['pinned_resp_names'] = list(_saved_r)
+
+        _saved_r_excl = [s for s in _saved_r if s not in _saved_g]
+        _guard_ms = [s for s in st.session_state.get('lock_guard_ms', _saved_g) if s in _station_names]
+        _resp_ms = [s for s in st.session_state.get('lock_resp_ms', _saved_r_excl) if s in _station_names and s not in _guard_ms]
+        st.session_state['lock_guard_ms'] = _guard_ms
+        st.session_state['lock_resp_ms'] = _resp_ms
+
+        lock_expander = st.sidebar.expander("🔒 Lock Stations", expanded=bool(_saved_g or _saved_r))
+        with lock_expander:
+            st.caption("Force specific stations into the optimized solution.")
+            _new_g = st.multiselect(
+                "🦅 Lock as Guardian",
+                options=_station_names,
+                key="lock_guard_ms",
+                help="These stations will always be assigned a Guardian drone regardless of optimizer output."
             )
-            st.stop()
-
-    # ── Inject custom stations (bypass boundary clip & type filter) ──────────
-    _custom_st = st.session_state.get('custom_stations', pd.DataFrame())
-    if not _custom_st.empty:
-        # Apply the same type-prefix rename the filter block uses, so pin lookups match
-        _cst_renamed = _custom_st.copy()
-        _cst_renamed['name'] = "[" + _cst_renamed['type'].astype(str) + "] " + _cst_renamed['name'].astype(str)
-        # Drop columns that might not exist in df_stations_all to avoid concat issues
-        _keep_cols = [c for c in _cst_renamed.columns if c in list(df_stations_all.columns) + ['name','lat','lon','type','custom']]
-        _cst_renamed = _cst_renamed[_keep_cols]
-        df_stations_all = pd.concat([df_stations_all, _cst_renamed], ignore_index=True)
-
-    n = len(df_stations_all)
-
-    # Dynamic Sliders based on Area Size
-    area_sq_mi = city_m.area / 2589988.11 if city_m and not city_m.is_empty else 100.0
-    r_resp_est = st.session_state.get('r_resp', 2.0)
-    r_guard_est = st.session_state.get('r_guard', 8.0)
-    
-    max_resp_calc = min(n, int(math.ceil(area_sq_mi / (math.pi * (r_resp_est**2)))) + 5)
-    max_guard_calc = min(n, int(math.ceil(area_sq_mi / (math.pi * (r_guard_est**2)))) + 5)
-
-    # Default minimum fleet: 1 Guardian and enough Responders to reach 85% responder call coverage (minimum 2).
-    try:
-        _pin_r_count = len(st.session_state.get('pinned_resp_names',  []))
-        _pin_g_count = len(st.session_state.get('pinned_guard_names', []))
-        _pin_drop_used = st.session_state.get('pin_drop_used', False)
-        _auto_sig = (
-            f"{st.session_state.get('active_city','')}|{st.session_state.get('active_state','')}|"
-            f"{round(area_sq_mi,1)}|{n}|{round(r_resp_est,1)}|{round(r_guard_est,1)}|"
-            f"{_pin_r_count}|{_pin_g_count}|{int(_pin_drop_used)}"
-        )
-        if st.session_state.get('_auto_minimums_sig') != _auto_sig:
-            if st.session_state.pop('_brinc_k_override', False):
-                # BRINC import: k_resp/k_guard were already restored from the file —
-                # just lock the sig so this block doesn't fire again on the next render.
-                pass
-            elif _pin_drop_used:
-                # Pin-drop mode: fleet sizes driven entirely by pin counts — no auto-fill
-                st.session_state['k_resp']  = _pin_r_count
-                st.session_state['k_guard'] = _pin_g_count
-            else:
-                _resp_default = 2
-                try:
-                    _resp_curve = df_curve[['Drones', 'Responder (Calls)']].dropna()
-                    _hit = _resp_curve[_resp_curve['Responder (Calls)'] >= 85.0]
-                    if not _hit.empty:
-                        _resp_default = int(_hit.iloc[0]['Drones'])
-                except Exception:
-                    pass
-                _resp_default = max(2, min(int(_resp_default), max(1, max_resp_calc)))
-                _guard_default = max(1, min(1, max(1, max_guard_calc)))
-                st.session_state['k_resp']  = max(_resp_default, _pin_r_count)
-                st.session_state['k_guard'] = max(_guard_default, _pin_g_count)
-            st.session_state['_auto_minimums_sig'] = _auto_sig
-    except Exception:
-        pass
-
-
-    # Safely pull the default values without exceeding the allowed maximums
-    val_r = min(st.session_state.get('k_resp', 2), max_resp_calc)
-    val_g = min(st.session_state.get('k_guard', 0), max_guard_calc)
-
-    k_responder = st.sidebar.slider("🚁 Responder Count", 0, max(1, max_resp_calc), val_r, help="Short-range tactical drones (2-3mi radius).")
-    k_guardian  = st.sidebar.slider("🦅 Guardian Count", 0, max(1, max_guard_calc), val_g, help="Long-range overwatch drones (5-8mi radius).")
-
-    st.session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
-
-    # ── LOCK STATIONS (sidebar multiselect) ──────────────────────────────────
-    def _make_unique_station_label(raw_label, station_type, lat, lon):
-        """Return a stable, unique custom-station label."""
-        _label = (raw_label or "").strip() or f"{lat:.5f}, {lon:.5f}"
-        _existing_prefixed = set(df_stations_all['name'].astype(str).tolist())
-        _custom_existing = st.session_state.get('custom_stations', pd.DataFrame())
-        if not _custom_existing.empty and {'name', 'type'}.issubset(_custom_existing.columns):
-            _existing_prefixed.update(
-                f"[{row['type']}] {row['name']}"
-                for _, row in _custom_existing[['name', 'type']].dropna().iterrows()
+            _new_r = st.multiselect(
+                "🚁 Lock as Responder",
+                options=[s for s in _station_names if s not in _new_g],
+                key="lock_resp_ms",
+                help="These stations will always be assigned a Responder drone regardless of optimizer output."
             )
-        _prefixed = f"[{station_type}] {_label}"
-        if _prefixed not in _existing_prefixed:
-            return _label
-
-        _coord_suffix = f" ({lat:.5f}, {lon:.5f})"
-        _label_with_coords = f"{_label}{_coord_suffix}"
-        _prefixed_with_coords = f"[{station_type}] {_label_with_coords}"
-        if _prefixed_with_coords not in _existing_prefixed:
-            return _label_with_coords
-
-        _n = 2
-        while f"[{station_type}] {_label_with_coords} #{_n}" in _existing_prefixed:
-            _n += 1
-        return f"{_label_with_coords} #{_n}"
-
-    _station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
-    _saved_g = [s for s in st.session_state.get('pinned_guard_names', []) if s in _station_names]
-    _saved_r = [s for s in st.session_state.get('pinned_resp_names',  []) if s in _station_names]
-    st.session_state['pinned_guard_names'] = list(_saved_g)
-    st.session_state['pinned_resp_names'] = list(_saved_r)
-
-    _saved_r_excl = [s for s in _saved_r if s not in _saved_g]
-    _guard_ms = [s for s in st.session_state.get('lock_guard_ms', _saved_g) if s in _station_names]
-    _resp_ms = [s for s in st.session_state.get('lock_resp_ms', _saved_r_excl) if s in _station_names and s not in _guard_ms]
-    st.session_state['lock_guard_ms'] = _guard_ms
-    st.session_state['lock_resp_ms'] = _resp_ms
-
-    lock_expander = st.sidebar.expander("🔒 Lock Stations", expanded=bool(_saved_g or _saved_r))
-    with lock_expander:
-        st.caption("Force specific stations into the optimized solution.")
-        _new_g = st.multiselect(
-            "🦅 Lock as Guardian",
-            options=_station_names,
-            key="lock_guard_ms",
-            help="These stations will always be assigned a Guardian drone regardless of optimizer output."
-        )
-        _new_r = st.multiselect(
-            "🚁 Lock as Responder",
-            options=[s for s in _station_names if s not in _new_g],
-            key="lock_resp_ms",
-            help="These stations will always be assigned a Responder drone regardless of optimizer output."
-        )
-        if _new_g != _saved_g or _new_r != _saved_r_excl:
-            st.session_state['lock_guard_ms'] = list(_new_g)
-            st.session_state['lock_resp_ms']  = list(_new_r)
-            st.session_state['pinned_guard_names'] = list(_new_g)
-            st.session_state['pinned_resp_names']  = list(_new_r)
-            st.session_state.pop('pin_drop_used', None)
-            st.session_state.pop('_auto_minimums_sig', None)
-            if '_opt_cache_key' in st.session_state:
-                del st.session_state['_opt_cache_key']
-            st.rerun()
-
-    # Use session state as the authoritative source; only update from widget if
-    # the user interacted with it (handled in the if-block above).
-    pinned_guard_names = _saved_g
-    pinned_resp_names  = _saved_r
-
-    # Warn if locked count exceeds slider
-    if len(pinned_guard_names) > k_guardian:
-        st.sidebar.warning(f"⚠️ Raise Guardian Count ≥ {len(pinned_guard_names)} to honour all Guardian locks.")
-    if len(pinned_resp_names) > k_responder:
-        st.sidebar.warning(f"⚠️ Raise Responder Count ≥ {len(pinned_resp_names)} to honour all Responder locks.")
-
-    # ── MAP-CLICK PIN DROP ─────────────────────────────────────────────────────
-    _pin_mode = bool(st.session_state.get('pin_drop_mode', False))
-
-    if _pin_mode:
-        st.sidebar.markdown(
-            "<div style='background:rgba(0,210,255,0.08);border:1px solid rgba(0,210,255,0.35);"
-            "border-radius:6px;padding:8px 10px;margin-bottom:8px;font-size:0.72rem;color:#e0e0f0;'>"
-            "<b>Drop Pin Mode Active</b><br>Click-and-drag a small box on the map to place a station."
-            "</div>",
-            unsafe_allow_html=True
-        )
-        if st.sidebar.button("Cancel Drop Pin", use_container_width=True, key="cancel_drop_pin_mode_btn"):
-            st.session_state['pin_drop_mode'] = False
-            st.session_state['pending_pin'] = None
-            st.rerun()
-    # If pin mode was just turned off, clear any pending pin
-    if not _pin_mode and st.session_state.get('pending_pin') is not None:
-        st.session_state['pending_pin'] = None
-
-    # Pending-pin confirmation form (appears after a map click)
-    _pending = st.session_state.get('pending_pin')
-    if _pin_mode and _pending is not None:
-        with st.sidebar.container():
-            st.sidebar.markdown(
-                f"<div style='background:rgba(0,210,255,0.08);border:1px solid rgba(0,210,255,0.35);"
-                f"border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:0.72rem;color:#e0e0f0;'>"
-                f"📍 <b>Pin dropped</b> — {_pending['lat']:.5f}, {_pending['lon']:.5f}</div>",
-                unsafe_allow_html=True
-            )
-            if 'pp_label_buf' not in st.session_state: st.session_state['pp_label_buf'] = ""
-            if 'pp_type_buf'  not in st.session_state: st.session_state['pp_type_buf']  = "Police"
-            if 'pp_role_buf'  not in st.session_state: st.session_state['pp_role_buf']  = "🦅 Lock as Guardian"
-
-            _pp_label = st.sidebar.text_input("Station name", value=st.session_state['pp_label_buf'],
-                                               placeholder="Fire Station 4", key="pp_label_input")
-            _pp_type  = st.sidebar.selectbox("Type", ["Police","Fire","School","Government","Hospital","Library","Other"],
-                                              index=["Police","Fire","School","Government","Hospital","Library","Other"].index(
-                                                  st.session_state['pp_type_buf']) if st.session_state['pp_type_buf'] in
-                                                  ["Police","Fire","School","Government","Hospital","Library","Other"] else 0,
-                                              key="pp_type_select")
-            _pp_role  = st.sidebar.radio("Pin as", ["🦅 Lock as Guardian","🚁 Lock as Responder"],
-                                          index=0, horizontal=True, key="pp_role_radio")
-            st.session_state['pp_label_buf'] = _pp_label
-            st.session_state['pp_type_buf']  = _pp_type
-            st.session_state['pp_role_buf']  = _pp_role
-
-            _pin_cols = st.sidebar.columns(2)
-            if _pin_cols[0].button("✅ Add Station", use_container_width=True, key="pp_confirm_btn"):
-                _label = _make_unique_station_label(_pp_label, _pp_type, _pending['lat'], _pending['lon'])
-                _prefixed_label = f"[{_pp_type}] {_label}"
-                _new_pin_row = pd.DataFrame([{
-                    "name":   _label,
-                    "lat":    _pending['lat'],
-                    "lon":    _pending['lon'],
-                    "type":   _pp_type,
-                    "custom": True,
-                }])
-                # Store in custom_stations (same path as address geocoder) so the
-                # boundary clip and station type filter never drop it
-                _cst = st.session_state.get('custom_stations', pd.DataFrame())
-                st.session_state['custom_stations'] = (
-                    pd.concat([_cst, _new_pin_row], ignore_index=True)
-                    if not _cst.empty else _new_pin_row
-                )
-                # Lock into the chosen fleet.
-                # Set BOTH k values to exactly the pin counts so the optimizer
-                # doesn't fill extra open slots with auto-selected stations.
-                if "Guardian" in _pp_role:
-                    _pg = list(st.session_state.get('pinned_guard_names', []))
-                    if _prefixed_label not in _pg:
-                        _pg.append(_prefixed_label)
-                    st.session_state['pinned_resp_names'] = [
-                        x for x in st.session_state.get('pinned_resp_names', [])
-                        if x != _prefixed_label]
-                    st.session_state['pinned_guard_names'] = _pg
-                else:
-                    _pr = list(st.session_state.get('pinned_resp_names', []))
-                    if _prefixed_label not in _pr:
-                        _pr.append(_prefixed_label)
-                    st.session_state['pinned_guard_names'] = [
-                        x for x in st.session_state.get('pinned_guard_names', [])
-                        if x != _prefixed_label]
-                    st.session_state['pinned_resp_names'] = _pr
-                st.session_state['lock_guard_ms'] = list(st.session_state.get('pinned_guard_names', []))
-                st.session_state['lock_resp_ms'] = [
-                    x for x in st.session_state.get('pinned_resp_names', [])
-                    if x not in st.session_state.get('pinned_guard_names', [])
-                ]
-
-                st.session_state['k_guard'] = len(st.session_state.get('pinned_guard_names', []))
-                st.session_state['k_resp']  = len(st.session_state.get('pinned_resp_names',  []))
-                st.session_state['pin_drop_used'] = True
-                # Bust the auto-minimums sig so the block re-evaluates with pin counts
-                st.session_state.pop('_auto_minimums_sig', None)
-                # Clear optimizer caches so the new station enters the LP solver
-                for _ck in ['_opt_cache_key', '_opt_best_combo',
-                            '_opt_chrono_r', '_opt_chrono_g']:
-                    st.session_state.pop(_ck, None)
-                st.session_state['pending_pin']         = None
-                st.session_state['pp_label_buf']        = ""
-                st.session_state['pin_drop_mode']       = False
-                st.session_state.pop('_pin_sel_hash', None)
-                st.toast(f"✅ {_label} pinned as {'Guardian' if 'Guardian' in _pp_role else 'Responder'}.")
-                st.rerun()
-            if _pin_cols[1].button("✕ Cancel", use_container_width=True, key="pp_cancel_btn"):
-                st.session_state['pending_pin'] = None
-                st.session_state['pin_drop_mode'] = False
-                st.session_state.pop('_pin_sel_hash', None)
-                st.rerun()
-
-    # ── ADD CUSTOM STATION BY ADDRESS ─────────────────────────────────────────
-    add_expander = st.sidebar.expander("➕ Add Custom Station", expanded=False)
-    with add_expander:
-        st.markdown(
-            f"<div style='font-size:0.7rem; color:{text_muted}; margin-bottom:8px;'>"
-            "Enter an address to add a custom deployment location. "
-            "Address suggestions use Census + OpenStreetMap lookup. Custom stations persist for this session.</div>",
-            unsafe_allow_html=True
-        )
-        # Use value= (not key=) so we can clear via session_state buffer without
-        # triggering the "cannot modify after instantiation" error.
-        if 'cs_addr_buf'  not in st.session_state: st.session_state['cs_addr_buf']  = ""
-        if 'cs_label_buf' not in st.session_state: st.session_state['cs_label_buf'] = ""
-        if 'cs_type_buf'  not in st.session_state: st.session_state['cs_type_buf']  = "Police"
-
-        _custom_addr  = st.text_input("Address", value=st.session_state['cs_addr_buf'],
-                                       placeholder="123 Main St, Mobile, AL",
-                                       key="custom_station_addr")
-        _custom_label = st.text_input("Label (optional)", value=st.session_state['cs_label_buf'],
-                                       placeholder="Fire Station 7",
-                                       key="custom_station_label")
-        _type_opts    = ["Police", "Fire", "School", "Government", "Hospital", "Library", "Other"]
-        _type_idx     = _type_opts.index(st.session_state['cs_type_buf']) if st.session_state['cs_type_buf'] in _type_opts else 0
-        _custom_type  = st.selectbox("Type", _type_opts, index=_type_idx,
-                                      key="custom_station_type")
-
-        _addr_query = _custom_addr.strip()
-        _addr_matches = search_address_candidates(_addr_query, limit=6) if len(_addr_query) >= 4 else []
-        _addr_options = [f"{m['matched_address']} [{m['source']}]" for m in _addr_matches]
-        if _addr_options:
-            _addr_pick = st.selectbox(
-                "Suggested match",
-                options=_addr_options,
-                index=0,
-                key="custom_station_match",
-                help="Suggestions refresh from Census and OpenStreetMap as you type. The selected match will be used when adding the station."
-            )
-            _selected_match = _addr_matches[_addr_options.index(_addr_pick)]
-            st.caption(f"Using: {_selected_match['matched_address']} | {_selected_match['lat']:.5f}, {_selected_match['lon']:.5f}")
-        elif len(_addr_query) >= 4:
-            _selected_match = None
-            st.caption("No live address suggestions found yet. You can still try the geocode button for fallback matching.")
-        else:
-            _selected_match = None
-
-        # Explicit drone role selector — user decides, no auto-guessing
-        if 'cs_role_buf' not in st.session_state: st.session_state['cs_role_buf'] = "🦅 Lock as Guardian"
-        _role_opts = ["🦅 Lock as Guardian", "🚁 Lock as Responder"]
-        _role_idx  = _role_opts.index(st.session_state['cs_role_buf']) if st.session_state['cs_role_buf'] in _role_opts else 0
-        _custom_role = st.radio("Pin as", _role_opts, index=_role_idx,
-                                horizontal=True, key="custom_station_role",
-                                help="Choose which fleet this station will be locked into.")
-
-        # Sync buffer keys from live widget values each run
-        st.session_state['cs_addr_buf']  = _custom_addr
-        st.session_state['cs_label_buf'] = _custom_label
-        st.session_state['cs_type_buf']  = _custom_type
-        st.session_state['cs_role_buf']  = _custom_role
-
-        # Buttons for drop pin and lock stations - PROMINENT
-        st.markdown("---")
-        st.markdown("**Quick Actions:**")
-        col_pin, col_lock = st.columns(2)
-        if col_pin.button("📌 Drop Pin on Map", use_container_width=True, key="drop_pin_btn",
-                          help="Click on the map to add a custom station by location."):
-            st.session_state['pin_drop_mode'] = True
-            st.rerun()
-
-        if col_lock.button("🔒 Lock Stations", use_container_width=True, key="lock_stations_btn",
-                          help="Prevent custom stations from being removed or modified."):
-            st.session_state['stations_locked'] = not st.session_state.get('stations_locked', False)
-            st.rerun()
-
-        st.markdown("---")
-        st.markdown("**Or use Address Geocoding:**")
-        if st.button("📍 Geocode & Add Station", use_container_width=True, key="geocode_btn"):
-            _addr_to_geocode = _custom_addr.strip()
-            if _addr_to_geocode:
-                try:
-                    _match = _selected_match
-                    if not _match:
-                        _fallback_matches = search_address_candidates(_addr_to_geocode, limit=1)
-                        _match = _fallback_matches[0] if _fallback_matches else None
-                    if _match:
-                        _geo_lat = float(_match['lat'])
-                        _geo_lon = float(_match['lon'])
-                        _matched_addr = _match.get('matched_address', _addr_to_geocode)
-                        _label = _make_unique_station_label(
-                            _custom_label.strip() or _matched_addr,
-                            _custom_type,
-                            _geo_lat,
-                            _geo_lon,
-                        )
-                        # The type-prefix rename later produces "[Type] label"
-                        # Store both original and prefixed name so pin lookup works
-                        _prefixed_label = f"[{_custom_type}] {_label}"
-                        _new_row = pd.DataFrame([{
-                            "name":   _label,          # original, pre-prefix
-                            "lat":    _geo_lat,
-                            "lon":    _geo_lon,
-                            "type":   _custom_type,
-                            "custom": True,
-                        }])
-                        # Store in dedicated 'custom_stations' key so boundary clip
-                        # and type filter can't drop them
-                        _cst = st.session_state.get('custom_stations', pd.DataFrame())
-                        st.session_state['custom_stations'] = pd.concat(
-                            [_cst, _new_row], ignore_index=True
-                        ) if not _cst.empty else _new_row
-
-                        # Pin using the user's explicit role choice
-                        if _custom_role == "🦅 Lock as Guardian":
-                            _pg = list(st.session_state.get('pinned_guard_names', []))
-                            if _prefixed_label not in _pg:
-                                _pg.append(_prefixed_label)
-                            # Remove from responder list if it was there
-                            st.session_state['pinned_resp_names'] = [
-                                x for x in st.session_state.get('pinned_resp_names', [])
-                                if x != _prefixed_label]
-                            st.session_state['pinned_guard_names'] = _pg
-                            if st.session_state.get('k_guard', 0) < len(_pg):
-                                st.session_state['k_guard'] = len(_pg)
-                            _pin_note = f"🦅 Pinned as Guardian."
-                        else:
-                            _pr = list(st.session_state.get('pinned_resp_names', []))
-                            if _prefixed_label not in _pr:
-                                _pr.append(_prefixed_label)
-                            st.session_state['pinned_guard_names'] = [
-                                x for x in st.session_state.get('pinned_guard_names', [])
-                                if x != _prefixed_label]
-                            st.session_state['pinned_resp_names'] = _pr
-                            if st.session_state.get('k_resp', 0) < len(_pr):
-                                st.session_state['k_resp'] = len(_pr)
-                            _pin_note = f"🚁 Pinned as Responder."
-
-                        st.session_state['lock_guard_ms'] = list(st.session_state.get('pinned_guard_names', []))
-                        st.session_state['lock_resp_ms'] = [
-                            x for x in st.session_state.get('pinned_resp_names', [])
-                            if x not in st.session_state.get('pinned_guard_names', [])
-                        ]
-
-                        st.success(f"Added & locked: **{_label}** ({_geo_lat:.4f}, {_geo_lon:.4f})\n{_pin_note}")
-                        st.caption(f"Matched address: {_matched_addr} [{_match.get('source', 'lookup')}]")
-                        # Clear buffers (role intentionally kept so user can add more of same type)
-                        st.session_state['cs_addr_buf']  = ""
-                        st.session_state['cs_label_buf'] = ""
-                        # Clear ALL optimizer caches so the new station
-                        # enters both the spatial precompute AND the LP solver
-                        for _ck in ['_opt_cache_key', '_opt_best_combo',
-                                    '_opt_chrono_r', '_opt_chrono_g']:
-                            st.session_state.pop(_ck, None)
-                        st.rerun()
-                    else:
-                        st.warning("Address not found. Try selecting a suggested match or include city and state.")
-                except Exception as _ge:
-                    st.error(f"Geocoding failed: {_ge}")
-            else:
-                st.warning("Enter an address first.")
-
-        # Show custom stations added this session
-        _cst_display = st.session_state.get('custom_stations', pd.DataFrame())
-        if not _cst_display.empty:
-            _custom_added = _cst_display['name'].tolist()
-        else:
-            _custom_added = []
-        if _custom_added:
-            st.markdown(f"<div style='font-size:0.65rem; color:{text_muted}; margin-top:6px;'>"
-                        f"Pinned this session:</div>", unsafe_allow_html=True)
-            _pg_set = set(st.session_state.get('pinned_guard_names', []))
-            _pr_set = set(st.session_state.get('pinned_resp_names', []))
-            _cst_disp = st.session_state.get('custom_stations', pd.DataFrame())
-            for _cn in _custom_added[:8]:
-                # Check both original and prefixed name
-                _cst_row = _cst_disp[_cst_disp['name'] == _cn].iloc[0] if not _cst_disp.empty and (_cst_disp['name'] == _cn).any() else None
-                _pfx = f"[{_cst_row['type']}] {_cn}" if _cst_row is not None else _cn
-                _is_g = _pfx in _pg_set or _cn in _pg_set
-                _badge = "🦅" if _is_g else "🚁"
-                _color = "#FFD700" if _is_g else "#00D2FF"
-                st.markdown(f"<div style='font-size:0.65rem; color:{_color}; padding:1px 0;'>{_badge} {_pfx}</div>",
-                            unsafe_allow_html=True)
-            if st.button("🗑 Remove all custom stations", key="remove_custom",
-                         use_container_width=True):
-                _cst_to_rm = st.session_state.get('custom_stations', pd.DataFrame())
-                # Build set of both original and prefixed names to un-pin
-                _rm_names = set()
-                if not _cst_to_rm.empty:
-                    for _, _row in _cst_to_rm.iterrows():
-                        _rm_names.add(str(_row['name']))
-                        _rm_names.add(f"[{_row['type']}] {_row['name']}")
-                st.session_state['custom_stations'] = pd.DataFrame()
-                st.session_state['pinned_guard_names'] = [
-                    x for x in st.session_state.get('pinned_guard_names', []) if x not in _rm_names]
-                st.session_state['pinned_resp_names']  = [
-                    x for x in st.session_state.get('pinned_resp_names',  []) if x not in _rm_names]
-                st.session_state['lock_guard_ms'] = list(st.session_state.get('pinned_guard_names', []))
-                st.session_state['lock_resp_ms'] = [
-                    x for x in st.session_state.get('pinned_resp_names', [])
-                    if x not in st.session_state.get('pinned_guard_names', [])
-                ]
-
-                if not st.session_state.get('pinned_guard_names') and not st.session_state.get('pinned_resp_names'):
-                    st.session_state['pin_drop_used'] = False
+            if _new_g != _saved_g or _new_r != _saved_r_excl:
+                st.session_state['lock_guard_ms'] = list(_new_g)
+                st.session_state['lock_resp_ms']  = list(_new_r)
+                st.session_state['pinned_guard_names'] = list(_new_g)
+                st.session_state['pinned_resp_names']  = list(_new_r)
+                st.session_state.pop('pin_drop_used', None)
                 st.session_state.pop('_auto_minimums_sig', None)
                 if '_opt_cache_key' in st.session_state:
                     del st.session_state['_opt_cache_key']
                 st.rerun()
 
-    # Convert pin names → station indices for the optimizer
-    _name_to_idx = {row['name']: i for i, row in df_stations_all.iterrows()}
-    locked_g_pins = [_name_to_idx[n] for n in pinned_guard_names if n in _name_to_idx]
-    locked_r_pins = [_name_to_idx[n] for n in pinned_resp_names  if n in _name_to_idx]
+        # Use session state as the authoritative source; only update from widget if
+        # the user interacted with it (handled in the if-block above).
+        pinned_guard_names = _saved_g
+        pinned_resp_names  = _saved_r
 
-    bounds_hash = f"{minx}_{miny}_{maxx}_{maxy}_{n}_{resp_radius_mi}_{guard_radius_mi}"
+        # Warn if locked count exceeds slider
+        if len(pinned_guard_names) > k_guardian:
+            st.sidebar.warning(f"⚠️ Raise Guardian Count ≥ {len(pinned_guard_names)} to honour all Guardian locks.")
+        if len(pinned_resp_names) > k_responder:
+            st.sidebar.warning(f"⚠️ Raise Responder Count ≥ {len(pinned_resp_names)} to honour all Responder locks.")
 
-    prog2 = st.sidebar.empty()
-    prog2.caption(get_spatial_message())
-    calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls = optimization.precompute_spatial_data(
-        df_calls, df_calls_full, df_stations_all, city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash
-    )
-    if total_calls == 0 and len(df_calls) > 0:
-        st.warning("No uploaded calls fell inside the selected jurisdiction boundary. Coverage rings can still render, but call coverage will be 0%. Check city/state selection or clean outlier coordinates in the CAD file.")
-    df_curve = optimization.compute_all_elbow_curves(
-        total_calls, resp_matrix, guard_matrix,
-        [s['clipped_2m'] for s in station_metadata],
-        [s['clipped_guard'] for s in station_metadata],
-        city_m.area if city_m else 1.0, bounds_hash,
-        max_stations=100
-    )
-    prog2.empty()
+        # ── MAP-CLICK PIN DROP ─────────────────────────────────────────────────────
+        _pin_mode = bool(st.session_state.get('pin_drop_mode', False))
 
-    # (Scored station table removed — station scores shown in Add Custom Station expander)
+        if _pin_mode:
+            st.sidebar.markdown(
+                "<div style='background:rgba(0,210,255,0.08);border:1px solid rgba(0,210,255,0.35);"
+                "border-radius:6px;padding:8px 10px;margin-bottom:8px;font-size:0.72rem;color:#e0e0f0;'>"
+                "<b>Drop Pin Mode Active</b><br>Click-and-drag a small box on the map to place a station."
+                "</div>",
+                unsafe_allow_html=True
+            )
+            if st.sidebar.button("Cancel Drop Pin", use_container_width=True, key="cancel_drop_pin_mode_btn"):
+                st.session_state['pin_drop_mode'] = False
+                st.session_state['pending_pin'] = None
+                st.rerun()
+        # If pin mode was just turned off, clear any pending pin
+        if not _pin_mode and st.session_state.get('pending_pin') is not None:
+            st.session_state['pending_pin'] = None
 
-    def get_max_drones(col_name):
-        series = df_curve[col_name].dropna()
-        if len(series) == 0: return 1
-        idx_99 = series[series >= 99.0].first_valid_index()
-        fallback = series.index[-1]
-        return int(df_curve.loc[idx_99 if idx_99 is not None else fallback, 'Drones'])
+        # Pending-pin confirmation form (appears after a map click)
+        _pending = st.session_state.get('pending_pin')
+        if _pin_mode and _pending is not None:
+            with st.sidebar.container():
+                st.sidebar.markdown(
+                    f"<div style='background:rgba(0,210,255,0.08);border:1px solid rgba(0,210,255,0.35);"
+                    f"border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:0.72rem;color:#e0e0f0;'>"
+                    f"📍 <b>Pin dropped</b> — {_pending['lat']:.5f}, {_pending['lon']:.5f}</div>",
+                    unsafe_allow_html=True
+                )
+                if 'pp_label_buf' not in st.session_state: st.session_state['pp_label_buf'] = ""
+                if 'pp_type_buf'  not in st.session_state: st.session_state['pp_type_buf']  = "Police"
+                if 'pp_role_buf'  not in st.session_state: st.session_state['pp_role_buf']  = "🦅 Lock as Guardian"
 
-    with st.spinner(get_faa_message()):
-        faa_geojson = load_faa_parquet(minx, miny, maxx, maxy)
-        faa_feature_count = len(faa_geojson.get('features', [])) if isinstance(faa_geojson, dict) and faa_geojson.get('features') else 0
-        # Debug FAA loading
-        if faa_feature_count == 0:
-            st.sidebar.warning("FAA data not loading (0 zones). Check Display Options.")
-    with st.spinner(get_airfield_message()):
-        airfields = fetch_airfields(minx, miny, maxx, maxy)
+                _pp_label = st.sidebar.text_input("Station name", value=st.session_state['pp_label_buf'],
+                                                   placeholder="Fire Station 4", key="pp_label_input")
+                _pp_type  = st.sidebar.selectbox("Type", ["Police","Fire","School","Government","Hospital","Library","Other"],
+                                                  index=["Police","Fire","School","Government","Hospital","Library","Other"].index(
+                                                      st.session_state['pp_type_buf']) if st.session_state['pp_type_buf'] in
+                                                      ["Police","Fire","School","Government","Hospital","Library","Other"] else 0,
+                                                  key="pp_type_select")
+                _pp_role  = st.sidebar.radio("Pin as", ["🦅 Lock as Guardian","🚁 Lock as Responder"],
+                                              index=0, horizontal=True, key="pp_role_radio")
+                st.session_state['pp_label_buf'] = _pp_label
+                st.session_state['pp_type_buf']  = _pp_type
+                st.session_state['pp_role_buf']  = _pp_role
 
-    st.sidebar.markdown('<div class="sidebar-section-header">③ Budget & Downloads</div>', unsafe_allow_html=True)
+                _pin_cols = st.sidebar.columns(2)
+                if _pin_cols[0].button("✅ Add Station", use_container_width=True, key="pp_confirm_btn"):
+                    _label = _make_unique_station_label(_pp_label, _pp_type, _pending['lat'], _pending['lon'])
+                    _prefixed_label = f"[{_pp_type}] {_label}"
+                    _new_pin_row = pd.DataFrame([{
+                        "name":   _label,
+                        "lat":    _pending['lat'],
+                        "lon":    _pending['lon'],
+                        "type":   _pp_type,
+                        "custom": True,
+                    }])
+                    # Store in custom_stations (same path as address geocoder) so the
+                    # boundary clip and station type filter never drop it
+                    _cst = st.session_state.get('custom_stations', pd.DataFrame())
+                    st.session_state['custom_stations'] = (
+                        pd.concat([_cst, _new_pin_row], ignore_index=True)
+                        if not _cst.empty else _new_pin_row
+                    )
+                    # Lock into the chosen fleet.
+                    # Set BOTH k values to exactly the pin counts so the optimizer
+                    # doesn't fill extra open slots with auto-selected stations.
+                    if "Guardian" in _pp_role:
+                        _pg = list(st.session_state.get('pinned_guard_names', []))
+                        if _prefixed_label not in _pg:
+                            _pg.append(_prefixed_label)
+                        st.session_state['pinned_resp_names'] = [
+                            x for x in st.session_state.get('pinned_resp_names', [])
+                            if x != _prefixed_label]
+                        st.session_state['pinned_guard_names'] = _pg
+                    else:
+                        _pr = list(st.session_state.get('pinned_resp_names', []))
+                        if _prefixed_label not in _pr:
+                            _pr.append(_prefixed_label)
+                        st.session_state['pinned_guard_names'] = [
+                            x for x in st.session_state.get('pinned_guard_names', [])
+                            if x != _prefixed_label]
+                        st.session_state['pinned_resp_names'] = _pr
+                    st.session_state['lock_guard_ms'] = list(st.session_state.get('pinned_guard_names', []))
+                    st.session_state['lock_resp_ms'] = [
+                        x for x in st.session_state.get('pinned_resp_names', [])
+                        if x not in st.session_state.get('pinned_guard_names', [])
+                    ]
 
-    # We use the strat_expander we defined earlier in the sidebar to inject the sliders
-    with strat_expander:
-        st.markdown("---")
-        inferred_daily = st.session_state.get('inferred_daily_calls_override', full_daily_calls)
-        inferred_daily = max(1, int(inferred_daily))
-        calls_per_day = st.slider("Total Daily Calls (citywide)", 1, max(100, inferred_daily*3), inferred_daily)
-        st.caption(f"Derived from the full uploaded CAD total ({full_total_calls:,} incidents), not the optimization sample.")
+                    st.session_state['k_guard'] = len(st.session_state.get('pinned_guard_names', []))
+                    st.session_state['k_resp']  = len(st.session_state.get('pinned_resp_names',  []))
+                    st.session_state['pin_drop_used'] = True
+                    # Bust the auto-minimums sig so the block re-evaluates with pin counts
+                    st.session_state.pop('_auto_minimums_sig', None)
+                    # Clear optimizer caches so the new station enters the LP solver
+                    for _ck in ['_opt_cache_key', '_opt_best_combo',
+                                '_opt_chrono_r', '_opt_chrono_g']:
+                        st.session_state.pop(_ck, None)
+                    st.session_state['pending_pin']         = None
+                    st.session_state['pp_label_buf']        = ""
+                    st.session_state['pin_drop_mode']       = False
+                    st.session_state.pop('_pin_sel_hash', None)
+                    st.toast(f"✅ {_label} pinned as {'Guardian' if 'Guardian' in _pp_role else 'Responder'}.")
+                    st.rerun()
+                if _pin_cols[1].button("✕ Cancel", use_container_width=True, key="pp_cancel_btn"):
+                    st.session_state['pending_pin'] = None
+                    st.session_state['pin_drop_mode'] = False
+                    st.session_state.pop('_pin_sel_hash', None)
+                    st.rerun()
 
-        st.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>DFR Dispatch Rate (%)</div>", unsafe_allow_html=True)
-        st.markdown(f"<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>What % of in-range calls will the drone be sent to?</div>", unsafe_allow_html=True)
-        dfr_dispatch_rate = st.slider("DFR Dispatch Rate", 1, 100, st.session_state.get('dfr_rate',12), label_visibility="collapsed") / 100.0
+        # ── ADD CUSTOM STATION BY ADDRESS ─────────────────────────────────────────
+        add_expander = st.sidebar.expander("➕ Add Custom Station", expanded=False)
+        with add_expander:
+            st.markdown(
+                f"<div style='font-size:0.7rem; color:{text_muted}; margin-bottom:8px;'>"
+                "Enter an address to add a custom deployment location. "
+                "Address suggestions use Census + OpenStreetMap lookup. Custom stations persist for this session.</div>",
+                unsafe_allow_html=True
+            )
+            # Use value= (not key=) so we can clear via session_state buffer without
+            # triggering the "cannot modify after instantiation" error.
+            if 'cs_addr_buf'  not in st.session_state: st.session_state['cs_addr_buf']  = ""
+            if 'cs_label_buf' not in st.session_state: st.session_state['cs_label_buf'] = ""
+            if 'cs_type_buf'  not in st.session_state: st.session_state['cs_type_buf']  = "Police"
 
-        st.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>Calls Resolved Without Officer Dispatch (%)</div>", unsafe_allow_html=True)
-        st.markdown(f"<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>Of drone-attended calls, what % close without a patrol car?</div>", unsafe_allow_html=True)
-        deflection_rate = st.slider("Resolution Rate", 0, 100, st.session_state.get('deflect_rate',25), label_visibility="collapsed") / 100.0
+            _custom_addr  = st.text_input("Address", value=st.session_state['cs_addr_buf'],
+                                           placeholder="123 Main St, Mobile, AL",
+                                           key="custom_station_addr")
+            _custom_label = st.text_input("Label (optional)", value=st.session_state['cs_label_buf'],
+                                           placeholder="Fire Station 7",
+                                           key="custom_station_label")
+            _type_opts    = ["Police", "Fire", "School", "Government", "Hospital", "Library", "Other"]
+            _type_idx     = _type_opts.index(st.session_state['cs_type_buf']) if st.session_state['cs_type_buf'] in _type_opts else 0
+            _custom_type  = st.selectbox("Type", _type_opts, index=_type_idx,
+                                          key="custom_station_type")
 
-        st.session_state['dfr_rate']    = int(dfr_dispatch_rate * 100)
-        st.session_state['deflect_rate'] = int(deflection_rate * 100)
+            _addr_query = _custom_addr.strip()
+            _addr_matches = search_address_candidates(_addr_query, limit=6) if len(_addr_query) >= 4 else []
+            _addr_options = [f"{m['matched_address']} [{m['source']}]" for m in _addr_matches]
+            if _addr_options:
+                _addr_pick = st.selectbox(
+                    "Suggested match",
+                    options=_addr_options,
+                    index=0,
+                    key="custom_station_match",
+                    help="Suggestions refresh from Census and OpenStreetMap as you type. The selected match will be used when adding the station."
+                )
+                _selected_match = _addr_matches[_addr_options.index(_addr_pick)]
+                st.caption(f"Using: {_selected_match['matched_address']} | {_selected_match['lat']:.5f}, {_selected_match['lon']:.5f}")
+            elif len(_addr_query) >= 4:
+                _selected_match = None
+                st.caption("No live address suggestions found yet. You can still try the geocode button for fallback matching.")
+            else:
+                _selected_match = None
 
-    # ── OPTIMIZATION ──────────────────────────────────────────────────
-    active_resp_names, active_guard_names = [], []
-    active_resp_idx, active_guard_idx = [], []  
-    chrono_r, chrono_g = [], []
-    best_combo = None
+            # Explicit drone role selector — user decides, no auto-guessing
+            if 'cs_role_buf' not in st.session_state: st.session_state['cs_role_buf'] = "🦅 Lock as Guardian"
+            _role_opts = ["🦅 Lock as Guardian", "🚁 Lock as Responder"]
+            _role_idx  = _role_opts.index(st.session_state['cs_role_buf']) if st.session_state['cs_role_buf'] in _role_opts else 0
+            _custom_role = st.radio("Pin as", _role_opts, index=_role_idx,
+                                    horizontal=True, key="custom_station_role",
+                                    help="Choose which fleet this station will be locked into.")
 
-    _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
-    opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{guard_strategy}_{resp_strategy}_{deployment_mode}_{incremental_build}_{bounds_hash}_{_pins_key}"
+            # Sync buffer keys from live widget values each run
+            st.session_state['cs_addr_buf']  = _custom_addr
+            st.session_state['cs_label_buf'] = _custom_label
+            st.session_state['cs_type_buf']  = _custom_type
+            st.session_state['cs_role_buf']  = _custom_role
 
-    if k_responder + k_guardian > n:
-        st.error("⚠️ Over-Deployment: Total drones exceed available stations.")
+            # Buttons for drop pin and lock stations - PROMINENT
+            st.markdown("---")
+            st.markdown("**Quick Actions:**")
+            col_pin, col_lock = st.columns(2)
+            if col_pin.button("📌 Drop Pin on Map", use_container_width=True, key="drop_pin_btn",
+                              help="Click on the map to add a custom station by location."):
+                st.session_state['pin_drop_mode'] = True
+                st.rerun()
+
+            if col_lock.button("🔒 Lock Stations", use_container_width=True, key="lock_stations_btn",
+                              help="Prevent custom stations from being removed or modified."):
+                st.session_state['stations_locked'] = not st.session_state.get('stations_locked', False)
+                st.rerun()
+
+            st.markdown("---")
+            st.markdown("**Or use Address Geocoding:**")
+            if st.button("📍 Geocode & Add Station", use_container_width=True, key="geocode_btn"):
+                _addr_to_geocode = _custom_addr.strip()
+                if _addr_to_geocode:
+                    try:
+                        _match = _selected_match
+                        if not _match:
+                            _fallback_matches = search_address_candidates(_addr_to_geocode, limit=1)
+                            _match = _fallback_matches[0] if _fallback_matches else None
+                        if _match:
+                            _geo_lat = float(_match['lat'])
+                            _geo_lon = float(_match['lon'])
+                            _matched_addr = _match.get('matched_address', _addr_to_geocode)
+                            _label = _make_unique_station_label(
+                                _custom_label.strip() or _matched_addr,
+                                _custom_type,
+                                _geo_lat,
+                                _geo_lon,
+                            )
+                            # The type-prefix rename later produces "[Type] label"
+                            # Store both original and prefixed name so pin lookup works
+                            _prefixed_label = f"[{_custom_type}] {_label}"
+                            _new_row = pd.DataFrame([{
+                                "name":   _label,          # original, pre-prefix
+                                "lat":    _geo_lat,
+                                "lon":    _geo_lon,
+                                "type":   _custom_type,
+                                "custom": True,
+                            }])
+                            # Store in dedicated 'custom_stations' key so boundary clip
+                            # and type filter can't drop them
+                            _cst = st.session_state.get('custom_stations', pd.DataFrame())
+                            st.session_state['custom_stations'] = pd.concat(
+                                [_cst, _new_row], ignore_index=True
+                            ) if not _cst.empty else _new_row
+
+                            # Pin using the user's explicit role choice
+                            if _custom_role == "🦅 Lock as Guardian":
+                                _pg = list(st.session_state.get('pinned_guard_names', []))
+                                if _prefixed_label not in _pg:
+                                    _pg.append(_prefixed_label)
+                                # Remove from responder list if it was there
+                                st.session_state['pinned_resp_names'] = [
+                                    x for x in st.session_state.get('pinned_resp_names', [])
+                                    if x != _prefixed_label]
+                                st.session_state['pinned_guard_names'] = _pg
+                                if st.session_state.get('k_guard', 0) < len(_pg):
+                                    st.session_state['k_guard'] = len(_pg)
+                                _pin_note = f"🦅 Pinned as Guardian."
+                            else:
+                                _pr = list(st.session_state.get('pinned_resp_names', []))
+                                if _prefixed_label not in _pr:
+                                    _pr.append(_prefixed_label)
+                                st.session_state['pinned_guard_names'] = [
+                                    x for x in st.session_state.get('pinned_guard_names', [])
+                                    if x != _prefixed_label]
+                                st.session_state['pinned_resp_names'] = _pr
+                                if st.session_state.get('k_resp', 0) < len(_pr):
+                                    st.session_state['k_resp'] = len(_pr)
+                                _pin_note = f"🚁 Pinned as Responder."
+
+                            st.session_state['lock_guard_ms'] = list(st.session_state.get('pinned_guard_names', []))
+                            st.session_state['lock_resp_ms'] = [
+                                x for x in st.session_state.get('pinned_resp_names', [])
+                                if x not in st.session_state.get('pinned_guard_names', [])
+                            ]
+
+                            st.success(f"Added & locked: **{_label}** ({_geo_lat:.4f}, {_geo_lon:.4f})\n{_pin_note}")
+                            st.caption(f"Matched address: {_matched_addr} [{_match.get('source', 'lookup')}]")
+                            # Clear buffers (role intentionally kept so user can add more of same type)
+                            st.session_state['cs_addr_buf']  = ""
+                            st.session_state['cs_label_buf'] = ""
+                            # Clear ALL optimizer caches so the new station
+                            # enters both the spatial precompute AND the LP solver
+                            for _ck in ['_opt_cache_key', '_opt_best_combo',
+                                        '_opt_chrono_r', '_opt_chrono_g']:
+                                st.session_state.pop(_ck, None)
+                            st.rerun()
+                        else:
+                            st.warning("Address not found. Try selecting a suggested match or include city and state.")
+                    except Exception as _ge:
+                        st.error(f"Geocoding failed: {_ge}")
+                else:
+                    st.warning("Enter an address first.")
+
+            # Show custom stations added this session
+            _cst_display = st.session_state.get('custom_stations', pd.DataFrame())
+            if not _cst_display.empty:
+                _custom_added = _cst_display['name'].tolist()
+            else:
+                _custom_added = []
+            if _custom_added:
+                st.markdown(f"<div style='font-size:0.65rem; color:{text_muted}; margin-top:6px;'>"
+                            f"Pinned this session:</div>", unsafe_allow_html=True)
+                _pg_set = set(st.session_state.get('pinned_guard_names', []))
+                _pr_set = set(st.session_state.get('pinned_resp_names', []))
+                _cst_disp = st.session_state.get('custom_stations', pd.DataFrame())
+                for _cn in _custom_added[:8]:
+                    # Check both original and prefixed name
+                    _cst_row = _cst_disp[_cst_disp['name'] == _cn].iloc[0] if not _cst_disp.empty and (_cst_disp['name'] == _cn).any() else None
+                    _pfx = f"[{_cst_row['type']}] {_cn}" if _cst_row is not None else _cn
+                    _is_g = _pfx in _pg_set or _cn in _pg_set
+                    _badge = "🦅" if _is_g else "🚁"
+                    _color = "#FFD700" if _is_g else "#00D2FF"
+                    st.markdown(f"<div style='font-size:0.65rem; color:{_color}; padding:1px 0;'>{_badge} {_pfx}</div>",
+                                unsafe_allow_html=True)
+                if st.button("🗑 Remove all custom stations", key="remove_custom",
+                             use_container_width=True):
+                    _cst_to_rm = st.session_state.get('custom_stations', pd.DataFrame())
+                    # Build set of both original and prefixed names to un-pin
+                    _rm_names = set()
+                    if not _cst_to_rm.empty:
+                        for _, _row in _cst_to_rm.iterrows():
+                            _rm_names.add(str(_row['name']))
+                            _rm_names.add(f"[{_row['type']}] {_row['name']}")
+                    st.session_state['custom_stations'] = pd.DataFrame()
+                    st.session_state['pinned_guard_names'] = [
+                        x for x in st.session_state.get('pinned_guard_names', []) if x not in _rm_names]
+                    st.session_state['pinned_resp_names']  = [
+                        x for x in st.session_state.get('pinned_resp_names',  []) if x not in _rm_names]
+                    st.session_state['lock_guard_ms'] = list(st.session_state.get('pinned_guard_names', []))
+                    st.session_state['lock_resp_ms'] = [
+                        x for x in st.session_state.get('pinned_resp_names', [])
+                        if x not in st.session_state.get('pinned_guard_names', [])
+                    ]
+
+                    if not st.session_state.get('pinned_guard_names') and not st.session_state.get('pinned_resp_names'):
+                        st.session_state['pin_drop_used'] = False
+                    st.session_state.pop('_auto_minimums_sig', None)
+                    if '_opt_cache_key' in st.session_state:
+                        del st.session_state['_opt_cache_key']
+                    st.rerun()
+
+        # Convert pin names → station indices for the optimizer
+        _name_to_idx = {row['name']: i for i, row in df_stations_all.iterrows()}
+        locked_g_pins = [_name_to_idx[n] for n in pinned_guard_names if n in _name_to_idx]
+        locked_r_pins = [_name_to_idx[n] for n in pinned_resp_names  if n in _name_to_idx]
+
+        bounds_hash = f"{minx}_{miny}_{maxx}_{maxy}_{n}_{resp_radius_mi}_{guard_radius_mi}"
+
+        prog2 = st.sidebar.empty()
+        prog2.caption(get_spatial_message())
+        calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls = optimization.precompute_spatial_data(
+            df_calls, df_calls_full, df_stations_all, city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash
+        )
+        if total_calls == 0 and len(df_calls) > 0:
+            st.warning("No uploaded calls fell inside the selected jurisdiction boundary. Coverage rings can still render, but call coverage will be 0%. Check city/state selection or clean outlier coordinates in the CAD file.")
+        df_curve = optimization.compute_all_elbow_curves(
+            total_calls, resp_matrix, guard_matrix,
+            [s['clipped_2m'] for s in station_metadata],
+            [s['clipped_guard'] for s in station_metadata],
+            city_m.area if city_m else 1.0, bounds_hash,
+            max_stations=100
+        )
+        prog2.empty()
+
+        # (Scored station table removed — station scores shown in Add Custom Station expander)
+
+        def get_max_drones(col_name):
+            series = df_curve[col_name].dropna()
+            if len(series) == 0: return 1
+            idx_99 = series[series >= 99.0].first_valid_index()
+            fallback = series.index[-1]
+            return int(df_curve.loc[idx_99 if idx_99 is not None else fallback, 'Drones'])
+
+        with st.spinner(get_faa_message()):
+            faa_geojson = load_faa_parquet(minx, miny, maxx, maxy)
+            faa_feature_count = len(faa_geojson.get('features', [])) if isinstance(faa_geojson, dict) and faa_geojson.get('features') else 0
+            # Debug FAA loading
+            if faa_feature_count == 0:
+                st.sidebar.warning("FAA data not loading (0 zones). Check Display Options.")
+        with st.spinner(get_airfield_message()):
+            airfields = fetch_airfields(minx, miny, maxx, maxy)
+
+        st.sidebar.markdown('<div class="sidebar-section-header">③ Budget & Downloads</div>', unsafe_allow_html=True)
+
+        # We use the strat_expander we defined earlier in the sidebar to inject the sliders
+        with strat_expander:
+            st.markdown("---")
+            inferred_daily = st.session_state.get('inferred_daily_calls_override', full_daily_calls)
+            inferred_daily = max(1, int(inferred_daily))
+            calls_per_day = st.slider("Total Daily Calls (citywide)", 1, max(100, inferred_daily*3), inferred_daily)
+            st.caption(f"Derived from the full uploaded CAD total ({full_total_calls:,} incidents), not the optimization sample.")
+
+            st.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>DFR Dispatch Rate (%)</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>What % of in-range calls will the drone be sent to?</div>", unsafe_allow_html=True)
+            dfr_dispatch_rate = st.slider("DFR Dispatch Rate", 1, 100, st.session_state.get('dfr_rate',12), label_visibility="collapsed") / 100.0
+
+            st.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>Calls Resolved Without Officer Dispatch (%)</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>Of drone-attended calls, what % close without a patrol car?</div>", unsafe_allow_html=True)
+            deflection_rate = st.slider("Resolution Rate", 0, 100, st.session_state.get('deflect_rate',25), label_visibility="collapsed") / 100.0
+
+            st.session_state['dfr_rate']    = int(dfr_dispatch_rate * 100)
+            st.session_state['deflect_rate'] = int(deflection_rate * 100)
+
+        # ── OPTIMIZATION ──────────────────────────────────────────────────
         active_resp_names, active_guard_names = [], []
+        active_resp_idx, active_guard_idx = [], []  
         chrono_r, chrono_g = [], []
         best_combo = None
-    elif k_responder == 0 and k_guardian == 0:
-        active_resp_names, active_guard_names = [], []
-        chrono_r, chrono_g = [], []
-        best_combo = None
-    else:
-        if st.session_state.get('_opt_cache_key') != opt_cache_key:
-            stage_bar = st.empty()
 
-            # ── HELPER: greedy area-coverage for one fleet ───────────────────
-            def _greedy_area(matrix, geo_list, k, forced, exclude_set):
-                """Greedily pick k stations maximising unary_union area,
-                starting from forced pins and skipping exclude_set."""
-                chosen = list(forced)
-                chrono  = list(forced)
-                current_union = unary_union([geo_list[i] for i in chosen]) if chosen else None
-                for _ in range(k - len(forced)):
-                    best_s, best_gain = -1, -1.0
-                    for s in range(len(geo_list)):
-                        if s in chosen or s in exclude_set:
-                            continue
-                        g = geo_list[s]
-                        new_area = current_union.union(g).area if current_union else g.area
-                        gain = new_area - (current_union.area if current_union else 0)
-                        if gain > best_gain:
-                            best_gain, best_s = gain, s
-                    if best_s != -1:
-                        chosen.append(best_s)
-                        chrono.append(best_s)
-                        g = geo_list[best_s]
-                        current_union = current_union.union(g) if current_union else g
-                return chosen, chrono
+        _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
+        opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{guard_strategy}_{resp_strategy}_{deployment_mode}_{incremental_build}_{bounds_hash}_{_pins_key}"
 
-            # ── PASS 1: Optimise Guardians independently ─────────────────────
-            stage_bar.info("🦅 Optimising Guardian fleet…")
-            if k_guardian > 0:
-                if guard_strategy == "Maximize Call Coverage":
-                    # solve_mclp returns (r_best, g_best, chrono_r, chrono_g)
-                    # Pass 1 runs Guardians only (num_resp=0) so r_best=[] and g_best has the result
-                    _, g_best, _, chrono_g = optimization.solve_mclp(
-                        resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g,
-                        0, k_guardian, True, incremental=incremental_build,
-                        forced_r=[], forced_g=locked_g_pins
-                    )
-                else:
-                    g_best, chrono_g = _greedy_area(
-                        guard_matrix,
-                        [station_metadata[i]['clipped_guard'] for i in range(len(station_metadata))],
-                        k_guardian, locked_g_pins, set()
-                    )
-                g_best = list(g_best)
-            else:
-                g_best, chrono_g = [], []
-
-            # ── PASS 2: Optimise Responders around Guardian result ────────────
-            stage_bar.info("🚁 Optimising Responder fleet…")
-            if k_responder > 0:
-                # In complement mode, mask out calls already covered by Guardians
-                # so Responders fill the gaps rather than stacking on the same calls.
-                if complement_mode and g_best and total_calls > 0:
-                    guard_covered = guard_matrix[g_best].any(axis=0)
-                    # Build a reduced matrix: zero out already-covered calls for Responders
-                    resp_matrix_eff = resp_matrix.copy()
-                    resp_matrix_eff[:, guard_covered] = False
-                    dist_matrix_r_eff = dist_matrix_r.copy()
-                else:
-                    resp_matrix_eff    = resp_matrix
-                    dist_matrix_r_eff  = dist_matrix_r
-
-                # In complement mode, Responders also can't reuse Guardian stations
-                _excl = set(g_best) if not allow_redundancy else set()
-
-                if resp_strategy == "Maximize Call Coverage":
-                    r_best, _, chrono_r, _ = optimization.solve_mclp(
-                        resp_matrix_eff, guard_matrix, dist_matrix_r_eff, dist_matrix_g,
-                        k_responder, 0, allow_redundancy, incremental=incremental_build,
-                        forced_r=locked_r_pins, forced_g=[]
-                    )
-                    # Filter out Guardian stations if complement mode
-                    if complement_mode:
-                        r_best = [s for s in r_best if s not in set(g_best)]
-                        # Pad back to k_responder if exclusion removed some
-                        if len(r_best) < k_responder:
-                            remaining = [s for s in range(n)
-                                         if s not in r_best and s not in set(g_best)]
-                            r_best += remaining[:k_responder - len(r_best)]
-                else:
-                    _excl_resp = set(g_best) if complement_mode else set()
-                    r_best, chrono_r = _greedy_area(
-                        resp_matrix_eff,
-                        [station_metadata[i]['clipped_2m'] for i in range(len(station_metadata))],
-                        k_responder, locked_r_pins, _excl_resp
-                    )
-            else:
-                r_best, chrono_r = [], []
-
-            best_combo = (tuple(r_best), tuple(g_best))
-            stage_bar.empty()
-            st.toast("✅ Independent optimisation complete!", icon="✅")
-
-            st.session_state['_opt_cache_key']  = opt_cache_key
-            st.session_state['_opt_best_combo'] = best_combo
-            st.session_state['_opt_chrono_r']   = chrono_r
-            st.session_state['_opt_chrono_g']   = chrono_g
-        else:
-            best_combo = st.session_state.get('_opt_best_combo')
-            chrono_r   = st.session_state.get('_opt_chrono_r', [])
-            chrono_g   = st.session_state.get('_opt_chrono_g', [])
-
-        if best_combo is not None:
-            r_best, g_best = best_combo
-            active_resp_names  = [station_metadata[i]['name'] for i in r_best]
-            active_guard_names = [station_metadata[i]['name'] for i in g_best]
-            active_resp_idx  = list(r_best)
-            active_guard_idx = list(g_best)
-        else:
+        if k_responder + k_guardian > n:
+            st.error("⚠️ Over-Deployment: Total drones exceed available stations.")
             active_resp_names, active_guard_names = [], []
-            active_resp_idx, active_guard_idx = [], []
-
-    # ── METRICS ───────────────────────────────────────────────────────
-    # ── SPLIT METRICS: Guardian and Responder computed independently ─────────
-    area_covered_perc = overlap_perc = calls_covered_perc = 0.0
-    guard_calls_perc  = guard_area_perc  = 0.0
-    resp_calls_perc   = resp_area_perc   = 0.0
-    cov_r = np.zeros(total_calls, bool) if total_calls > 0 else np.zeros(0, bool)
-    cov_g = np.zeros(total_calls, bool) if total_calls > 0 else np.zeros(0, bool)
-
-    ordered_deployments_raw = []
-    for idx in chrono_g:
-        if idx in active_guard_idx: ordered_deployments_raw.append((idx,'GUARDIAN'))
-    for idx in chrono_r:
-        if idx in active_resp_idx: ordered_deployments_raw.append((idx,'RESPONDER'))
-    for idx in active_resp_idx:
-        if idx not in chrono_r: ordered_deployments_raw.append((idx,'RESPONDER'))
-    for idx in active_guard_idx:
-        if idx not in chrono_g: ordered_deployments_raw.append((idx,'GUARDIAN'))
-
-    active_color_map = {}
-    c_idx = 0
-    for idx, d_type in ordered_deployments_raw:
-        key = f"{idx}_{d_type}"
-        if key not in active_color_map:
-            active_color_map[key] = STATION_COLORS[c_idx % len(STATION_COLORS)]
-            c_idx += 1
-
-    guard_geos = [station_metadata[i]['clipped_guard'] for i in active_guard_idx]
-    resp_geos  = [station_metadata[i]['clipped_2m']    for i in active_resp_idx]
-    active_geos = resp_geos + guard_geos
-
-    city_area = city_m.area if (city_m and not city_m.is_empty) else 1.0
-
-    # Guardian-only metrics
-    if guard_geos:
-        guard_area_perc = (unary_union(guard_geos).area / city_area) * 100
-    if active_guard_idx and total_calls > 0:
-        cov_g = guard_matrix[active_guard_idx].any(axis=0)
-        guard_calls_perc = cov_g.sum() / total_calls * 100
-
-    # Responder-only metrics
-    if resp_geos:
-        resp_area_perc = (unary_union(resp_geos).area / city_area) * 100
-    if active_resp_idx and total_calls > 0:
-        cov_r = resp_matrix[active_resp_idx].any(axis=0)
-        resp_calls_perc = cov_r.sum() / total_calls * 100
-
-    # Combined metrics
-    if active_geos:
-        area_covered_perc = (unary_union(active_geos).area / city_area) * 100
-    if total_calls > 0:
-        calls_covered_perc = (np.logical_or(cov_r, cov_g).sum() / total_calls) * 100
-        st.session_state['calls_covered_perc'] = calls_covered_perc
-    if len(active_geos) >= 2:
-        inters = [active_geos[i].intersection(active_geos[j])
-                  for i in range(len(active_geos))
-                  for j in range(i+1, len(active_geos))
-                  if not active_geos[i].is_empty and not active_geos[j].is_empty
-                  and active_geos[i].intersects(active_geos[j])]
-        if inters:
-            overlap_perc = (unary_union(inters).area / city_area) * 100
-
-    # ── BUDGET CALCULATIONS ───────────────────────────────────────────
-    actual_k_responder = len(active_resp_names)
-    actual_k_guardian  = len(active_guard_names)
-    capex_resp  = actual_k_responder * CONFIG["RESPONDER_COST"]
-    capex_guard = actual_k_guardian  * CONFIG["GUARDIAN_COST"]
-    fleet_capex = capex_resp + capex_guard
-
-    annual_savings = 0
-    break_even_text = "N/A"
-    daily_drone_only_calls = 0
-    covered_daily_calls = 0
-    daily_dfr_responses = 0
-
-    if fleet_capex > 0:
-        covered_daily_calls    = calls_per_day * (calls_covered_perc / 100.0)
-        daily_dfr_responses    = covered_daily_calls * dfr_dispatch_rate
-        daily_drone_only_calls = daily_dfr_responses * deflection_rate
-        if daily_drone_only_calls > 0:
-            monthly_savings = (CONFIG["OFFICER_COST_PER_CALL"] - CONFIG["DRONE_COST_PER_CALL"]) * daily_drone_only_calls * 30.4
-            annual_savings  = monthly_savings * 12
-            break_even_text = f"{fleet_capex / monthly_savings:.1f} MONTHS"
-
-    specialty_savings = html_reports.estimate_specialty_response_savings(
-        st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None else st.session_state.get('df_calls'),
-        st.session_state.get('total_original_calls', total_calls),
-        calls_covered_perc=calls_covered_perc
-    )
-    thermal_savings = float(specialty_savings.get('thermal_savings', 0) or 0)
-    k9_savings      = float(specialty_savings.get('k9_savings', 0) or 0)
-    fire_savings    = float(specialty_savings.get('fire_savings', 0) or 0)
-    fire_calls_annual = float(specialty_savings.get('fire_calls_annual', 0) or 0)
-    possible_additional_savings = float(specialty_savings.get('additional_savings_total', 0) or 0)
-
-    _sidebar_annual_cap_placeholder = st.sidebar.empty()
-    if fleet_capex <= 0:
-        st.sidebar.info("👈 Set Responder/Guardian counts above to calculate budget impact.")
-
-    # ── BUILD DRONE OBJECTS ───────────────────────────────────────────
-    active_drones = []
-    cumulative_mask = np.zeros(total_calls, dtype=bool) if total_calls > 0 else None
-    step = 1
-    for idx, d_type in ordered_deployments_raw:
-        if d_type == 'RESPONDER':
-            cov_array = resp_matrix[idx]; cost = CONFIG["RESPONDER_COST"]
-            speed_mph = CONFIG["RESPONDER_SPEED"]; avg_dist = station_metadata[idx]['avg_dist_r']
-            radius_m  = resp_radius_mi * 1609.34
+            chrono_r, chrono_g = [], []
+            best_combo = None
+        elif k_responder == 0 and k_guardian == 0:
+            active_resp_names, active_guard_names = [], []
+            chrono_r, chrono_g = [], []
+            best_combo = None
         else:
-            cov_array = guard_matrix[idx]; cost = CONFIG["GUARDIAN_COST"]
-            speed_mph = CONFIG["GUARDIAN_SPEED"]; avg_dist = station_metadata[idx]['avg_dist_g']
-            radius_m  = guard_radius_mi * 1609.34
-        map_color    = active_color_map[f"{idx}_{d_type}"]
-        avg_time_min = (avg_dist / speed_mph) * 60
-        d_lat = station_metadata[idx]['lat']; d_lon = station_metadata[idx]['lon']
+            if st.session_state.get('_opt_cache_key') != opt_cache_key:
+                stage_bar = st.empty()
 
-        _is_pinned = (d_type == 'GUARDIAN' and idx in locked_g_pins) or (d_type == 'RESPONDER' and idx in locked_r_pins)
-        d = {
-            'idx': idx, 'name': station_metadata[idx]['name'],
-            'lat': d_lat, 'lon': d_lon, 'type': d_type, 'cost': cost,
-            'cov_array': cov_array, 'color': map_color,
-            'pinned': _is_pinned,
-            'deploy_step': step if (idx in chrono_r or idx in chrono_g) else "MANUAL",
-            'avg_time_min': avg_time_min, 'speed_mph': speed_mph, 'radius_m': radius_m,
-            'faa_ceiling': get_station_faa_ceiling(d_lat, d_lon, faa_geojson),
-            'nearest_airport': get_nearest_airfield(d_lat, d_lon, airfields)
-        }
+                # ── HELPER: greedy area-coverage for one fleet ───────────────────
+                def _greedy_area(matrix, geo_list, k, forced, exclude_set):
+                    """Greedily pick k stations maximising unary_union area,
+                    starting from forced pins and skipping exclude_set."""
+                    chosen = list(forced)
+                    chrono  = list(forced)
+                    current_union = unary_union([geo_list[i] for i in chosen]) if chosen else None
+                    for _ in range(k - len(forced)):
+                        best_s, best_gain = -1, -1.0
+                        for s in range(len(geo_list)):
+                            if s in chosen or s in exclude_set:
+                                continue
+                            g = geo_list[s]
+                            new_area = current_union.union(g).area if current_union else g.area
+                            gain = new_area - (current_union.area if current_union else 0)
+                            if gain > best_gain:
+                                best_gain, best_s = gain, s
+                        if best_s != -1:
+                            chosen.append(best_s)
+                            chrono.append(best_s)
+                            g = geo_list[best_s]
+                            current_union = current_union.union(g) if current_union else g
+                    return chosen, chrono
 
-        if total_calls > 0 and cumulative_mask is not None:
-            # ── DEDUPLICATION: track unique calls added for combined KPI totals ──
-            marginal_mask     = cov_array & ~cumulative_mask
-            marginal_historic = np.sum(marginal_mask)
-            d['assigned_indices'] = np.where(marginal_mask)[0]
-            cumulative_mask   = cumulative_mask | cov_array
+                # ── PASS 1: Optimise Guardians independently ─────────────────────
+                stage_bar.info("🦅 Optimising Guardian fleet…")
+                if k_guardian > 0:
+                    if guard_strategy == "Maximize Call Coverage":
+                        # solve_mclp returns (r_best, g_best, chrono_r, chrono_g)
+                        # Pass 1 runs Guardians only (num_resp=0) so r_best=[] and g_best has the result
+                        _, g_best, _, chrono_g = optimization.solve_mclp(
+                            resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g,
+                            0, k_guardian, True, incremental=incremental_build,
+                            forced_r=[], forced_g=locked_g_pins
+                        )
+                    else:
+                        g_best, chrono_g = _greedy_area(
+                            guard_matrix,
+                            [station_metadata[i]['clipped_guard'] for i in range(len(station_metadata))],
+                            k_guardian, locked_g_pins, set()
+                        )
+                    g_best = list(g_best)
+                else:
+                    g_best, chrono_g = [], []
 
-            # ── RAW ZONE COVERAGE: how many calls fall in this drone's zone ───
-            # Used for per-unit economics. Independent of iteration order so
-            # Responders are never penalised for a Guardian claiming the same calls.
-            _raw_zone_calls = int(np.sum(cov_array))  # all calls inside this drone's radius
-            _raw_zone_perc  = _raw_zone_calls / total_calls
+                # ── PASS 2: Optimise Responders around Guardian result ────────────
+                stage_bar.info("🚁 Optimising Responder fleet…")
+                if k_responder > 0:
+                    # In complement mode, mask out calls already covered by Guardians
+                    # so Responders fill the gaps rather than stacking on the same calls.
+                    if complement_mode and g_best and total_calls > 0:
+                        guard_covered = guard_matrix[g_best].any(axis=0)
+                        # Build a reduced matrix: zero out already-covered calls for Responders
+                        resp_matrix_eff = resp_matrix.copy()
+                        resp_matrix_eff[:, guard_covered] = False
+                        dist_matrix_r_eff = dist_matrix_r.copy()
+                    else:
+                        resp_matrix_eff    = resp_matrix
+                        dist_matrix_r_eff  = dist_matrix_r
 
-            # Shared zone: calls covered by at least one OTHER active drone
-            all_cov = np.vstack([resp_matrix[i] for i in active_resp_idx] + [guard_matrix[i] for i in active_guard_idx]) if (active_resp_idx or active_guard_idx) else np.zeros((1, total_calls), dtype=bool)
-            shared_mask   = d['cov_array'] & (all_cov.sum(axis=0) > 1)
-            _shared_calls = int(np.sum(shared_mask))
-            _excl_calls   = _raw_zone_calls - _shared_calls  # calls ONLY this drone covers
+                    # In complement mode, Responders also can't reuse Guardian stations
+                    _excl = set(g_best) if not allow_redundancy else set()
 
-            # ── UTILIZATION: based on full zone call load, not marginal residual ─
-            # Responders should reflect how busy they truly are in their patrol zone.
-            # daily calls dispatched to this drone = zone calls × dispatch rate
-            _is_guard    = (d_type == 'GUARDIAN')
-            _budget_min  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] if _is_guard else (CONFIG["RESPONDER_PATROL_HOURS"] * 60)
-            _zone_flights = _raw_zone_perc * calls_per_day * dfr_dispatch_rate
+                    if resp_strategy == "Maximize Call Coverage":
+                        r_best, _, chrono_r, _ = optimization.solve_mclp(
+                            resp_matrix_eff, guard_matrix, dist_matrix_r_eff, dist_matrix_g,
+                            k_responder, 0, allow_redundancy, incremental=incremental_build,
+                            forced_r=locked_r_pins, forced_g=[]
+                        )
+                        # Filter out Guardian stations if complement mode
+                        if complement_mode:
+                            r_best = [s for s in r_best if s not in set(g_best)]
+                            # Pad back to k_responder if exclusion removed some
+                            if len(r_best) < k_responder:
+                                remaining = [s for s in range(n)
+                                             if s not in r_best and s not in set(g_best)]
+                                r_best += remaining[:k_responder - len(r_best)]
+                    else:
+                        _excl_resp = set(g_best) if complement_mode else set()
+                        r_best, chrono_r = _greedy_area(
+                            resp_matrix_eff,
+                            [station_metadata[i]['clipped_2m'] for i in range(len(station_metadata))],
+                            k_responder, locked_r_pins, _excl_resp
+                        )
+                else:
+                    r_best, chrono_r = [], []
 
-            # ── CAPACITY MODEL: 10-minute on-scene floor ──────────────────────
-            # Every sortie consumes travel_time + on_scene_time from the daily budget.
-            # We require at least 10 min on-scene so the drone isn't rushing back.
-            # Deficit triggers when available on-scene time per flight drops below 10 min.
-            #
-            #   max_flights   = budget_min / (avg_time_min + 10)
-            #   on_scene_min  = (budget_min / zone_flights) - avg_time_min   [if zone_flights > 0]
-            #   deficit       = on_scene_min < 10  ↔  zone_flights > max_flights
-            _MIN_SCENE_MIN   = 10.0
-            _g_budget        = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]
-            _r_budget        = CONFIG["RESPONDER_PATROL_HOURS"] * 60
-            _alt_is_guard    = not _is_guard   # cross-type recommendation
-            _alt_budget      = _g_budget if _alt_is_guard else _r_budget
-            _alt_max_single  = CONFIG["GUARDIAN_FLIGHT_MIN"] if _alt_is_guard else CONFIG["RESPONDER_FLIGHT_MIN"]
+                best_combo = (tuple(r_best), tuple(g_best))
+                stage_bar.empty()
+                st.toast("✅ Independent optimisation complete!", icon="✅")
 
-            # Capacity of THIS drone type (flights/day with 10-min scene floor)
-            # Guardian is continuously airborne — a response costs round-trip travel
-            # (fly TO scene + on-scene + fly BACK to patrol), so use 2×avg_time.
-            # Guardian is also bounded by its duty cycle: 22.857 sorties/day,
-            # each sortie fitting floor(60 / response_cost) responses max.
-            import math as _math2
-            _SORTIES_PER_DAY = (24 * 60) / (CONFIG["GUARDIAN_FLIGHT_MIN"] + CONFIG["GUARDIAN_CHARGE_MIN"])
-            if _is_guard:
-                _response_cost_g  = 2 * avg_time_min + _MIN_SCENE_MIN  # round-trip + scene
-                _airtime_cap_g    = _budget_min / _response_cost_g
-                _per_sortie_g     = max(1, _math2.floor(CONFIG["GUARDIAN_FLIGHT_MIN"] / _response_cost_g))
-                _duty_cap_g       = _SORTIES_PER_DAY * _per_sortie_g
-                _max_flights_cap  = min(_airtime_cap_g, _duty_cap_g)
+                st.session_state['_opt_cache_key']  = opt_cache_key
+                st.session_state['_opt_best_combo'] = best_combo
+                st.session_state['_opt_chrono_r']   = chrono_r
+                st.session_state['_opt_chrono_g']   = chrono_g
             else:
-                _max_flights_cap  = _budget_min / (avg_time_min + _MIN_SCENE_MIN)
-            # Alternate type cap (for cross-type deficit recommendation)
-            if _alt_is_guard:
-                _response_cost_ag = 2 * avg_time_min + _MIN_SCENE_MIN
-                _airtime_cap_ag   = _alt_budget / _response_cost_ag
-                _per_sortie_ag    = max(1, _math2.floor(CONFIG["GUARDIAN_FLIGHT_MIN"] / _response_cost_ag))
-                _duty_cap_ag      = _SORTIES_PER_DAY * _per_sortie_ag
-                _alt_max_flights  = min(_airtime_cap_ag, _duty_cap_ag)
+                best_combo = st.session_state.get('_opt_best_combo')
+                chrono_r   = st.session_state.get('_opt_chrono_r', [])
+                chrono_g   = st.session_state.get('_opt_chrono_g', [])
+
+            if best_combo is not None:
+                r_best, g_best = best_combo
+                active_resp_names  = [station_metadata[i]['name'] for i in r_best]
+                active_guard_names = [station_metadata[i]['name'] for i in g_best]
+                active_resp_idx  = list(r_best)
+                active_guard_idx = list(g_best)
             else:
-                _alt_max_flights  = _alt_budget / (avg_time_min + _MIN_SCENE_MIN)
+                active_resp_names, active_guard_names = [], []
+                active_resp_idx, active_guard_idx = [], []
 
-            # ── Auto-cap: clamp this station's effective DFR rate to its
-            #    physical capacity limit so it doesn't show a deficit while
-            #    leaving every other station's rate untouched.
-            _raw_demand = _raw_zone_perc * calls_per_day
-            if auto_cap_dfr and _max_flights_cap > 0 and _raw_demand > 0:
-                _station_max_rate = _max_flights_cap / _raw_demand
-                _effective_dfr    = min(dfr_dispatch_rate, _station_max_rate)
-                _zone_flights     = _raw_demand * _effective_dfr
+        # ── METRICS ───────────────────────────────────────────────────────
+        # ── SPLIT METRICS: Guardian and Responder computed independently ─────────
+        area_covered_perc = overlap_perc = calls_covered_perc = 0.0
+        guard_calls_perc  = guard_area_perc  = 0.0
+        resp_calls_perc   = resp_area_perc   = 0.0
+        cov_r = np.zeros(total_calls, bool) if total_calls > 0 else np.zeros(0, bool)
+        cov_g = np.zeros(total_calls, bool) if total_calls > 0 else np.zeros(0, bool)
+
+        ordered_deployments_raw = []
+        for idx in chrono_g:
+            if idx in active_guard_idx: ordered_deployments_raw.append((idx,'GUARDIAN'))
+        for idx in chrono_r:
+            if idx in active_resp_idx: ordered_deployments_raw.append((idx,'RESPONDER'))
+        for idx in active_resp_idx:
+            if idx not in chrono_r: ordered_deployments_raw.append((idx,'RESPONDER'))
+        for idx in active_guard_idx:
+            if idx not in chrono_g: ordered_deployments_raw.append((idx,'GUARDIAN'))
+
+        active_color_map = {}
+        c_idx = 0
+        for idx, d_type in ordered_deployments_raw:
+            key = f"{idx}_{d_type}"
+            if key not in active_color_map:
+                active_color_map[key] = STATION_COLORS[c_idx % len(STATION_COLORS)]
+                c_idx += 1
+
+        guard_geos = [station_metadata[i]['clipped_guard'] for i in active_guard_idx]
+        resp_geos  = [station_metadata[i]['clipped_2m']    for i in active_resp_idx]
+        active_geos = resp_geos + guard_geos
+
+        city_area = city_m.area if (city_m and not city_m.is_empty) else 1.0
+
+        # Guardian-only metrics
+        if guard_geos:
+            guard_area_perc = (unary_union(guard_geos).area / city_area) * 100
+        if active_guard_idx and total_calls > 0:
+            cov_g = guard_matrix[active_guard_idx].any(axis=0)
+            guard_calls_perc = cov_g.sum() / total_calls * 100
+
+        # Responder-only metrics
+        if resp_geos:
+            resp_area_perc = (unary_union(resp_geos).area / city_area) * 100
+        if active_resp_idx and total_calls > 0:
+            cov_r = resp_matrix[active_resp_idx].any(axis=0)
+            resp_calls_perc = cov_r.sum() / total_calls * 100
+
+        # Combined metrics
+        if active_geos:
+            area_covered_perc = (unary_union(active_geos).area / city_area) * 100
+        if total_calls > 0:
+            calls_covered_perc = (np.logical_or(cov_r, cov_g).sum() / total_calls) * 100
+            st.session_state['calls_covered_perc'] = calls_covered_perc
+        if len(active_geos) >= 2:
+            inters = [active_geos[i].intersection(active_geos[j])
+                      for i in range(len(active_geos))
+                      for j in range(i+1, len(active_geos))
+                      if not active_geos[i].is_empty and not active_geos[j].is_empty
+                      and active_geos[i].intersects(active_geos[j])]
+            if inters:
+                overlap_perc = (unary_union(inters).area / city_area) * 100
+
+        # ── BUDGET CALCULATIONS ───────────────────────────────────────────
+        actual_k_responder = len(active_resp_names)
+        actual_k_guardian  = len(active_guard_names)
+        capex_resp  = actual_k_responder * CONFIG["RESPONDER_COST"]
+        capex_guard = actual_k_guardian  * CONFIG["GUARDIAN_COST"]
+        fleet_capex = capex_resp + capex_guard
+
+        annual_savings = 0
+        break_even_text = "N/A"
+        daily_drone_only_calls = 0
+        covered_daily_calls = 0
+        daily_dfr_responses = 0
+
+        if fleet_capex > 0:
+            covered_daily_calls    = calls_per_day * (calls_covered_perc / 100.0)
+            daily_dfr_responses    = covered_daily_calls * dfr_dispatch_rate
+            daily_drone_only_calls = daily_dfr_responses * deflection_rate
+            if daily_drone_only_calls > 0:
+                monthly_savings = (CONFIG["OFFICER_COST_PER_CALL"] - CONFIG["DRONE_COST_PER_CALL"]) * daily_drone_only_calls * 30.4
+                annual_savings  = monthly_savings * 12
+                break_even_text = f"{fleet_capex / monthly_savings:.1f} MONTHS"
+
+        specialty_savings = html_reports.estimate_specialty_response_savings(
+            st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None else st.session_state.get('df_calls'),
+            st.session_state.get('total_original_calls', total_calls),
+            calls_covered_perc=calls_covered_perc
+        )
+        thermal_savings = float(specialty_savings.get('thermal_savings', 0) or 0)
+        k9_savings      = float(specialty_savings.get('k9_savings', 0) or 0)
+        fire_savings    = float(specialty_savings.get('fire_savings', 0) or 0)
+        fire_calls_annual = float(specialty_savings.get('fire_calls_annual', 0) or 0)
+        possible_additional_savings = float(specialty_savings.get('additional_savings_total', 0) or 0)
+
+        _sidebar_annual_cap_placeholder = st.sidebar.empty()
+        if fleet_capex <= 0:
+            st.sidebar.info("👈 Set Responder/Guardian counts above to calculate budget impact.")
+
+        # ── BUILD DRONE OBJECTS ───────────────────────────────────────────
+        active_drones = []
+        cumulative_mask = np.zeros(total_calls, dtype=bool) if total_calls > 0 else None
+        step = 1
+        for idx, d_type in ordered_deployments_raw:
+            if d_type == 'RESPONDER':
+                cov_array = resp_matrix[idx]; cost = CONFIG["RESPONDER_COST"]
+                speed_mph = CONFIG["RESPONDER_SPEED"]; avg_dist = station_metadata[idx]['avg_dist_r']
+                radius_m  = resp_radius_mi * 1609.34
             else:
-                _effective_dfr = dfr_dispatch_rate
+                cov_array = guard_matrix[idx]; cost = CONFIG["GUARDIAN_COST"]
+                speed_mph = CONFIG["GUARDIAN_SPEED"]; avg_dist = station_metadata[idx]['avg_dist_g']
+                radius_m  = guard_radius_mi * 1609.34
+            map_color    = active_color_map[f"{idx}_{d_type}"]
+            avg_time_min = (avg_dist / speed_mph) * 60
+            d_lat = station_metadata[idx]['lat']; d_lon = station_metadata[idx]['lon']
 
-            # On-scene minutes available per flight given current demand
-            _on_scene_min = (_budget_min / max(_zone_flights, 0.001)) - avg_time_min if _zone_flights > 0 else 99.0
+            _is_pinned = (d_type == 'GUARDIAN' and idx in locked_g_pins) or (d_type == 'RESPONDER' and idx in locked_r_pins)
+            d = {
+                'idx': idx, 'name': station_metadata[idx]['name'],
+                'lat': d_lat, 'lon': d_lon, 'type': d_type, 'cost': cost,
+                'cov_array': cov_array, 'color': map_color,
+                'pinned': _is_pinned,
+                'deploy_step': step if (idx in chrono_r or idx in chrono_g) else "MANUAL",
+                'avg_time_min': avg_time_min, 'speed_mph': speed_mph, 'radius_m': radius_m,
+                'faa_ceiling': get_station_faa_ceiling(d_lat, d_lon, faa_geojson),
+                'nearest_airport': get_nearest_airfield(d_lat, d_lon, airfields)
+            }
 
-            # True (uncapped) utilization using scene-inclusive budget
-            _true_util = (_zone_flights * (avg_time_min + _MIN_SCENE_MIN)) / max(1.0, _budget_min)
-            # Display util capped at 1.0 (100%) for progress bars; deficit shown separately
-            _util = min(1.0, _true_util)
+            if total_calls > 0 and cumulative_mask is not None:
+                # ── DEDUPLICATION: track unique calls added for combined KPI totals ──
+                marginal_mask     = cov_array & ~cumulative_mask
+                marginal_historic = np.sum(marginal_mask)
+                d['assigned_indices'] = np.where(marginal_mask)[0]
+                cumulative_mask   = cumulative_mask | cov_array
 
-            # Deficit: flights demanded beyond physical capacity
-            import math as _math
-            _deficit_flights  = max(0.0, _zone_flights - _max_flights_cap)
-            _has_deficit      = _deficit_flights > 0.01
-            _unserv_calls_day = _deficit_flights / max(dfr_dispatch_rate, 0.01) if _has_deficit else 0.0
-            _unserv_calls_yr  = _unserv_calls_day * 365
+                # ── RAW ZONE COVERAGE: how many calls fall in this drone's zone ───
+                # Used for per-unit economics. Independent of iteration order so
+                # Responders are never penalised for a Guardian claiming the same calls.
+                _raw_zone_calls = int(np.sum(cov_array))  # all calls inside this drone's radius
+                _raw_zone_perc  = _raw_zone_calls / total_calls
 
-            # Extra stations needed to clear deficit (same type and alternate type)
-            _extra_same = int(_math.ceil(_deficit_flights / _max_flights_cap)) if _has_deficit else 0
-            _extra_alt  = int(_math.ceil(_deficit_flights / _alt_max_flights))  if _has_deficit else 0
+                # Shared zone: calls covered by at least one OTHER active drone
+                all_cov = np.vstack([resp_matrix[i] for i in active_resp_idx] + [guard_matrix[i] for i in active_guard_idx]) if (active_resp_idx or active_guard_idx) else np.zeros((1, total_calls), dtype=bool)
+                shared_mask   = d['cov_array'] & (all_cov.sum(axis=0) > 1)
+                _shared_calls = int(np.sum(shared_mask))
+                _excl_calls   = _raw_zone_calls - _shared_calls  # calls ONLY this drone covers
 
-            # CapEx cost of each resolution path
-            _same_type_cost = CONFIG["GUARDIAN_COST"] if _is_guard else CONFIG["RESPONDER_COST"]
-            _alt_type_cost  = CONFIG["RESPONDER_COST"] if _is_guard else CONFIG["GUARDIAN_COST"]
-            _extra_same_capex = _extra_same * _same_type_cost
-            _extra_alt_capex  = _extra_alt  * _alt_type_cost
-            _same_type_label  = "Guardian"  if _is_guard else "Responder"
-            _alt_type_label   = "Responder" if _is_guard else "Guardian"
+                # ── UTILIZATION: based on full zone call load, not marginal residual ─
+                # Responders should reflect how busy they truly are in their patrol zone.
+                # daily calls dispatched to this drone = zone calls × dispatch rate
+                _is_guard    = (d_type == 'GUARDIAN')
+                _budget_min  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] if _is_guard else (CONFIG["RESPONDER_PATROL_HOURS"] * 60)
+                _zone_flights = _raw_zone_perc * calls_per_day * dfr_dispatch_rate
 
-            # ── BASE VALUE: calls uniquely covered (non-shared zone) ──────────
-            # Cap savings to physically serviceable flights when in deficit
-            _excl_daily        = (_excl_calls / total_calls) * calls_per_day
-            _excl_flights_raw  = _excl_daily * dfr_dispatch_rate
-            # Clamp exclusive flights to what the drone can actually serve
-            _excl_flights      = min(_excl_flights_raw, _max_flights_cap) if _has_deficit else _excl_flights_raw
-            _excl_deflected    = _excl_flights * deflection_rate
-            _cost_delta        = CONFIG["OFFICER_COST_PER_CALL"] - CONFIG["DRONE_COST_PER_CALL"]
-            _base_monthly      = _cost_delta * _excl_deflected * 30.4
-            _base_annual       = _base_monthly * 12
+                # ── CAPACITY MODEL: 10-minute on-scene floor ──────────────────────
+                # Every sortie consumes travel_time + on_scene_time from the daily budget.
+                # We require at least 10 min on-scene so the drone isn't rushing back.
+                # Deficit triggers when available on-scene time per flight drops below 10 min.
+                #
+                #   max_flights   = budget_min / (avg_time_min + 10)
+                #   on_scene_min  = (budget_min / zone_flights) - avg_time_min   [if zone_flights > 0]
+                #   deficit       = on_scene_min < 10  ↔  zone_flights > max_flights
+                _MIN_SCENE_MIN   = 10.0
+                _g_budget        = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]
+                _r_budget        = CONFIG["RESPONDER_PATROL_HOURS"] * 60
+                _alt_is_guard    = not _is_guard   # cross-type recommendation
+                _alt_budget      = _g_budget if _alt_is_guard else _r_budget
+                _alt_max_single  = CONFIG["GUARDIAN_FLIGHT_MIN"] if _alt_is_guard else CONFIG["RESPONDER_FLIGHT_MIN"]
 
-            # ── CONCURRENT VALUE: shared-zone calls captured while partner is busy ─
-            _shared_daily      = (_shared_calls / total_calls) * calls_per_day
-            _shared_dfr        = _shared_daily * dfr_dispatch_rate
-            _concurrent_daily  = _shared_dfr * _util
-            # In deficit, the drone is already at or over capacity from exclusive zone
-            # flights alone. Cap concurrent to whatever flight capacity remains so the
-            # Annual Capacity Value reflects only calls the drone can physically service.
-            if _has_deficit:
-                _remaining_cap_day = max(0.0, _max_flights_cap - _excl_flights)
-                _concurrent_daily  = min(_concurrent_daily, _remaining_cap_day)
-            _concurrent_month  = _cost_delta * (_concurrent_daily * deflection_rate) * 30.4
-            _concurrent_annual = _concurrent_month * 12
+                # Capacity of THIS drone type (flights/day with 10-min scene floor)
+                # Guardian is continuously airborne — a response costs round-trip travel
+                # (fly TO scene + on-scene + fly BACK to patrol), so use 2×avg_time.
+                # Guardian is also bounded by its duty cycle: 22.857 sorties/day,
+                # each sortie fitting floor(60 / response_cost) responses max.
+                import math as _math2
+                _SORTIES_PER_DAY = (24 * 60) / (CONFIG["GUARDIAN_FLIGHT_MIN"] + CONFIG["GUARDIAN_CHARGE_MIN"])
+                if _is_guard:
+                    _response_cost_g  = 2 * avg_time_min + _MIN_SCENE_MIN  # round-trip + scene
+                    _airtime_cap_g    = _budget_min / _response_cost_g
+                    _per_sortie_g     = max(1, _math2.floor(CONFIG["GUARDIAN_FLIGHT_MIN"] / _response_cost_g))
+                    _duty_cap_g       = _SORTIES_PER_DAY * _per_sortie_g
+                    _max_flights_cap  = min(_airtime_cap_g, _duty_cap_g)
+                else:
+                    _max_flights_cap  = _budget_min / (avg_time_min + _MIN_SCENE_MIN)
+                # Alternate type cap (for cross-type deficit recommendation)
+                if _alt_is_guard:
+                    _response_cost_ag = 2 * avg_time_min + _MIN_SCENE_MIN
+                    _airtime_cap_ag   = _alt_budget / _response_cost_ag
+                    _per_sortie_ag    = max(1, _math2.floor(CONFIG["GUARDIAN_FLIGHT_MIN"] / _response_cost_ag))
+                    _duty_cap_ag      = _SORTIES_PER_DAY * _per_sortie_ag
+                    _alt_max_flights  = min(_airtime_cap_ag, _duty_cap_ag)
+                else:
+                    _alt_max_flights  = _alt_budget / (avg_time_min + _MIN_SCENE_MIN)
 
-            # ── BEST CASE: base + full concurrent (partner always available) ──
-            _best_monthly  = _base_monthly + _concurrent_month
-            _best_annual   = _base_annual  + _concurrent_annual
+                # ── Auto-cap: clamp this station's effective DFR rate to its
+                #    physical capacity limit so it doesn't show a deficit while
+                #    leaving every other station's rate untouched.
+                _raw_demand = _raw_zone_perc * calls_per_day
+                if auto_cap_dfr and _max_flights_cap > 0 and _raw_demand > 0:
+                    _station_max_rate = _max_flights_cap / _raw_demand
+                    _effective_dfr    = min(dfr_dispatch_rate, _station_max_rate)
+                    _zone_flights     = _raw_demand * _effective_dfr
+                else:
+                    _effective_dfr = dfr_dispatch_rate
 
-            # ── STORE — use best_case as primary display value ─────────────────
-            d['marginal_perc']       = marginal_historic / total_calls
-            d['marginal_flights']    = _excl_flights
-            d['marginal_deflected']  = _excl_deflected
-            d['shared_flights']      = _shared_dfr
-            d['zone_flights']        = _zone_flights
-            d['zone_calls_annual']   = _raw_zone_calls
-            d['zone_flights_annual'] = _zone_flights * 365.0
-            d['utilization']         = _util
-            d['true_util']           = _true_util
-            d['on_scene_min']        = _on_scene_min
-            d['max_flights_cap']     = _max_flights_cap
-            d['effective_dfr_rate']  = _effective_dfr
-            d['has_deficit']         = _has_deficit
-            d['deficit_flights']     = _deficit_flights
-            d['unserv_calls_day']    = _unserv_calls_day
-            d['unserv_calls_yr']     = _unserv_calls_yr
-            d['extra_same']          = _extra_same
-            d['extra_alt']           = _extra_alt
-            d['extra_same_capex']    = _extra_same_capex
-            d['extra_alt_capex']     = _extra_alt_capex
-            d['same_type_label']     = _same_type_label
-            d['alt_type_label']      = _alt_type_label
-            d['blocked_per_day']     = _concurrent_daily
-            d['monthly_savings']     = _best_monthly
-            d['annual_savings']      = _best_annual
-            d['base_annual']         = _base_annual
-            d['concurrent_annual']   = _concurrent_annual
-            d['best_case_annual']    = _best_annual
-            d['concurrent_monthly']  = _concurrent_month
-            d['be_text']     = f"{d['cost']/_best_monthly:.1f} MO" if _best_monthly > 0 else "N/A"
-            d['best_be_text']= d['be_text']
-        else:
-            d.update({'assigned_indices':[],'annual_savings':0,'marginal_flights':0,
-                      'marginal_deflected':0,'shared_flights':0,'be_text':"N/A",
-                      'utilization':0,'true_util':0,'on_scene_min':99,'max_flights_cap':0,
-                      'has_deficit':False,'deficit_flights':0,'unserv_calls_day':0,
-                      'unserv_calls_yr':0,'extra_same':0,'extra_alt':0,
-                      'extra_same_capex':0,'extra_alt_capex':0,
-                      'same_type_label':'Responder','alt_type_label':'Guardian',
-                      'concurrent_monthly':0,'best_case_annual':0,
-                      'blocked_per_day':0,'best_be_text':"N/A",'base_annual':0,
-                      'concurrent_annual':0,'zone_flights':0,'zone_calls_annual':0,
-                      'zone_flights_annual':0})
-        active_drones.append(d)
-        step += 1
+                # On-scene minutes available per flight given current demand
+                _on_scene_min = (_budget_min / max(_zone_flights, 0.001)) - avg_time_min if _zone_flights > 0 else 99.0
 
-    # ── RECONCILE UNIT ECONOMICS TO FLEET HEADLINE ───────────────────────
-    if active_drones and annual_savings >= 0:
-        _fleet_target_annual = float(max(0, annual_savings))
-        _raw_total_annual = float(sum(max(0, d.get('best_case_annual', d.get('annual_savings', 0)) or 0) for d in active_drones))
-        if _fleet_target_annual > 0:
-            if _raw_total_annual <= 0:
-                _weights = [max(0.0, float(d.get('marginal_perc', 0) or 0)) for d in active_drones]
-                _w_sum = sum(_weights)
-                if _w_sum <= 0:
-                    _weights = [1.0 for _ in active_drones]
-                    _w_sum = float(len(active_drones))
-                for _d, _w in zip(active_drones, _weights):
-                    _alloc_annual = _fleet_target_annual * (_w / _w_sum)
-                    _alloc_monthly = _alloc_annual / 12.0
-                    _d['base_annual'] = _alloc_annual
-                    _d['concurrent_annual'] = 0.0
-                    _d['best_case_annual'] = _alloc_annual
-                    _d['annual_savings'] = _alloc_annual
-                    _d['monthly_savings'] = _alloc_monthly
-                    _d['concurrent_monthly'] = 0.0
-                    _d['be_text'] = f"{_d['cost']/_alloc_monthly:.1f} MO" if _alloc_monthly > 0 else "N/A"
-                    _d['best_be_text'] = _d['be_text']
+                # True (uncapped) utilization using scene-inclusive budget
+                _true_util = (_zone_flights * (avg_time_min + _MIN_SCENE_MIN)) / max(1.0, _budget_min)
+                # Display util capped at 1.0 (100%) for progress bars; deficit shown separately
+                _util = min(1.0, _true_util)
+
+                # Deficit: flights demanded beyond physical capacity
+                import math as _math
+                _deficit_flights  = max(0.0, _zone_flights - _max_flights_cap)
+                _has_deficit      = _deficit_flights > 0.01
+                _unserv_calls_day = _deficit_flights / max(dfr_dispatch_rate, 0.01) if _has_deficit else 0.0
+                _unserv_calls_yr  = _unserv_calls_day * 365
+
+                # Extra stations needed to clear deficit (same type and alternate type)
+                _extra_same = int(_math.ceil(_deficit_flights / _max_flights_cap)) if _has_deficit else 0
+                _extra_alt  = int(_math.ceil(_deficit_flights / _alt_max_flights))  if _has_deficit else 0
+
+                # CapEx cost of each resolution path
+                _same_type_cost = CONFIG["GUARDIAN_COST"] if _is_guard else CONFIG["RESPONDER_COST"]
+                _alt_type_cost  = CONFIG["RESPONDER_COST"] if _is_guard else CONFIG["GUARDIAN_COST"]
+                _extra_same_capex = _extra_same * _same_type_cost
+                _extra_alt_capex  = _extra_alt  * _alt_type_cost
+                _same_type_label  = "Guardian"  if _is_guard else "Responder"
+                _alt_type_label   = "Responder" if _is_guard else "Guardian"
+
+                # ── BASE VALUE: calls uniquely covered (non-shared zone) ──────────
+                # Cap savings to physically serviceable flights when in deficit
+                _excl_daily        = (_excl_calls / total_calls) * calls_per_day
+                _excl_flights_raw  = _excl_daily * dfr_dispatch_rate
+                # Clamp exclusive flights to what the drone can actually serve
+                _excl_flights      = min(_excl_flights_raw, _max_flights_cap) if _has_deficit else _excl_flights_raw
+                _excl_deflected    = _excl_flights * deflection_rate
+                _cost_delta        = CONFIG["OFFICER_COST_PER_CALL"] - CONFIG["DRONE_COST_PER_CALL"]
+                _base_monthly      = _cost_delta * _excl_deflected * 30.4
+                _base_annual       = _base_monthly * 12
+
+                # ── CONCURRENT VALUE: shared-zone calls captured while partner is busy ─
+                _shared_daily      = (_shared_calls / total_calls) * calls_per_day
+                _shared_dfr        = _shared_daily * dfr_dispatch_rate
+                _concurrent_daily  = _shared_dfr * _util
+                # In deficit, the drone is already at or over capacity from exclusive zone
+                # flights alone. Cap concurrent to whatever flight capacity remains so the
+                # Annual Capacity Value reflects only calls the drone can physically service.
+                if _has_deficit:
+                    _remaining_cap_day = max(0.0, _max_flights_cap - _excl_flights)
+                    _concurrent_daily  = min(_concurrent_daily, _remaining_cap_day)
+                _concurrent_month  = _cost_delta * (_concurrent_daily * deflection_rate) * 30.4
+                _concurrent_annual = _concurrent_month * 12
+
+                # ── BEST CASE: base + full concurrent (partner always available) ──
+                _best_monthly  = _base_monthly + _concurrent_month
+                _best_annual   = _base_annual  + _concurrent_annual
+
+                # ── STORE — use best_case as primary display value ─────────────────
+                d['marginal_perc']       = marginal_historic / total_calls
+                d['marginal_flights']    = _excl_flights
+                d['marginal_deflected']  = _excl_deflected
+                d['shared_flights']      = _shared_dfr
+                d['zone_flights']        = _zone_flights
+                d['zone_calls_annual']   = _raw_zone_calls
+                d['zone_flights_annual'] = _zone_flights * 365.0
+                d['utilization']         = _util
+                d['true_util']           = _true_util
+                d['on_scene_min']        = _on_scene_min
+                d['max_flights_cap']     = _max_flights_cap
+                d['effective_dfr_rate']  = _effective_dfr
+                d['has_deficit']         = _has_deficit
+                d['deficit_flights']     = _deficit_flights
+                d['unserv_calls_day']    = _unserv_calls_day
+                d['unserv_calls_yr']     = _unserv_calls_yr
+                d['extra_same']          = _extra_same
+                d['extra_alt']           = _extra_alt
+                d['extra_same_capex']    = _extra_same_capex
+                d['extra_alt_capex']     = _extra_alt_capex
+                d['same_type_label']     = _same_type_label
+                d['alt_type_label']      = _alt_type_label
+                d['blocked_per_day']     = _concurrent_daily
+                d['monthly_savings']     = _best_monthly
+                d['annual_savings']      = _best_annual
+                d['base_annual']         = _base_annual
+                d['concurrent_annual']   = _concurrent_annual
+                d['best_case_annual']    = _best_annual
+                d['concurrent_monthly']  = _concurrent_month
+                d['be_text']     = f"{d['cost']/_best_monthly:.1f} MO" if _best_monthly > 0 else "N/A"
+                d['best_be_text']= d['be_text']
             else:
-                # Cap scale at 1.0: never inflate per-unit values above their raw
-                # pre-reconciliation figures. When _fleet_target_annual exceeds
-                # _raw_total_annual (low-utilisation / no-overlap case) the gap is
-                # handled by the drift correction below rather than by scaling up.
-                _scale = min(1.0, _fleet_target_annual / _raw_total_annual)
-                for _d in active_drones:
-                    _base = float(_d.get('base_annual', 0) or 0)
-                    _conc = float(_d.get('concurrent_annual', 0) or 0)
-                    _best = float(_d.get('best_case_annual', _d.get('annual_savings', 0)) or 0)
-                    _month = float(_d.get('monthly_savings', _best / 12.0) or 0)
-                    _conc_month = float(_d.get('concurrent_monthly', _conc / 12.0) or 0)
+                d.update({'assigned_indices':[],'annual_savings':0,'marginal_flights':0,
+                          'marginal_deflected':0,'shared_flights':0,'be_text':"N/A",
+                          'utilization':0,'true_util':0,'on_scene_min':99,'max_flights_cap':0,
+                          'has_deficit':False,'deficit_flights':0,'unserv_calls_day':0,
+                          'unserv_calls_yr':0,'extra_same':0,'extra_alt':0,
+                          'extra_same_capex':0,'extra_alt_capex':0,
+                          'same_type_label':'Responder','alt_type_label':'Guardian',
+                          'concurrent_monthly':0,'best_case_annual':0,
+                          'blocked_per_day':0,'best_be_text':"N/A",'base_annual':0,
+                          'concurrent_annual':0,'zone_flights':0,'zone_calls_annual':0,
+                          'zone_flights_annual':0})
+            active_drones.append(d)
+            step += 1
 
-                    _d['base_annual'] = _base * _scale
-                    _d['concurrent_annual'] = _conc * _scale
-                    _d['best_case_annual'] = _best * _scale
-                    _d['annual_savings'] = _best * _scale
-                    _d['monthly_savings'] = _month * _scale
-                    _d['concurrent_monthly'] = _conc_month * _scale
-                    _d['be_text'] = f"{_d['cost']/_d['monthly_savings']:.1f} MO" if _d['monthly_savings'] > 0 else "N/A"
-                    _d['best_be_text'] = _d['be_text']
+        # ── RECONCILE UNIT ECONOMICS TO FLEET HEADLINE ───────────────────────
+        if active_drones and annual_savings >= 0:
+            _fleet_target_annual = float(max(0, annual_savings))
+            _raw_total_annual = float(sum(max(0, d.get('best_case_annual', d.get('annual_savings', 0)) or 0) for d in active_drones))
+            if _fleet_target_annual > 0:
+                if _raw_total_annual <= 0:
+                    _weights = [max(0.0, float(d.get('marginal_perc', 0) or 0)) for d in active_drones]
+                    _w_sum = sum(_weights)
+                    if _w_sum <= 0:
+                        _weights = [1.0 for _ in active_drones]
+                        _w_sum = float(len(active_drones))
+                    for _d, _w in zip(active_drones, _weights):
+                        _alloc_annual = _fleet_target_annual * (_w / _w_sum)
+                        _alloc_monthly = _alloc_annual / 12.0
+                        _d['base_annual'] = _alloc_annual
+                        _d['concurrent_annual'] = 0.0
+                        _d['best_case_annual'] = _alloc_annual
+                        _d['annual_savings'] = _alloc_annual
+                        _d['monthly_savings'] = _alloc_monthly
+                        _d['concurrent_monthly'] = 0.0
+                        _d['be_text'] = f"{_d['cost']/_alloc_monthly:.1f} MO" if _alloc_monthly > 0 else "N/A"
+                        _d['best_be_text'] = _d['be_text']
+                else:
+                    # Cap scale at 1.0: never inflate per-unit values above their raw
+                    # pre-reconciliation figures. When _fleet_target_annual exceeds
+                    # _raw_total_annual (low-utilisation / no-overlap case) the gap is
+                    # handled by the drift correction below rather than by scaling up.
+                    _scale = min(1.0, _fleet_target_annual / _raw_total_annual)
+                    for _d in active_drones:
+                        _base = float(_d.get('base_annual', 0) or 0)
+                        _conc = float(_d.get('concurrent_annual', 0) or 0)
+                        _best = float(_d.get('best_case_annual', _d.get('annual_savings', 0)) or 0)
+                        _month = float(_d.get('monthly_savings', _best / 12.0) or 0)
+                        _conc_month = float(_d.get('concurrent_monthly', _conc / 12.0) or 0)
 
-            _reconciled_total = float(sum(max(0, d.get('annual_savings', 0) or 0) for d in active_drones))
-            _drift = _fleet_target_annual - _reconciled_total
-            if abs(_drift) > 0.01 and active_drones:
-                _lead = max(active_drones, key=lambda x: float(x.get('annual_savings', 0) or 0))
-                _lead['annual_savings']   = float(_lead.get('annual_savings',   0) or 0) + _drift
-                _lead['best_case_annual'] = float(_lead.get('best_case_annual', 0) or 0) + _drift
-                _lead['monthly_savings']  = float(_lead.get('monthly_savings',  0) or 0) + (_drift / 12.0)
-                # Distribute drift into base first; overflow goes into concurrent so that
-                # base_annual + concurrent_annual always equals best_case_annual (keeps the
-                # Value Breakdown box consistent with the headline figure).
-                _lead_base = float(_lead.get('base_annual', 0) or 0)
-                _lead_conc = float(_lead.get('concurrent_annual', 0) or 0)
-                _drift_to_base = max(-_lead_base, min(_drift, _drift))  # full drift to base …
-                _new_base = _lead_base + _drift_to_base
-                if _new_base < 0:                                        # … unless base would go negative
-                    _drift_to_base = -_lead_base
-                    _new_base = 0.0
-                _drift_to_conc = _drift - _drift_to_base
-                _lead['base_annual']       = _new_base
-                _lead['concurrent_annual'] = max(0.0, _lead_conc + _drift_to_conc)
-                _lead['be_text']      = f"{_lead['cost']/_lead['monthly_savings']:.1f} MO" if _lead['monthly_savings'] > 0 else "N/A"
-                _lead['best_be_text'] = _lead['be_text']
+                        _d['base_annual'] = _base * _scale
+                        _d['concurrent_annual'] = _conc * _scale
+                        _d['best_case_annual'] = _best * _scale
+                        _d['annual_savings'] = _best * _scale
+                        _d['monthly_savings'] = _month * _scale
+                        _d['concurrent_monthly'] = _conc_month * _scale
+                        _d['be_text'] = f"{_d['cost']/_d['monthly_savings']:.1f} MO" if _d['monthly_savings'] > 0 else "N/A"
+                        _d['best_be_text'] = _d['be_text']
 
-    # ── SIDEBAR: fill Annual Capacity Value box with specialty values that match unit cards ──
-    if fleet_capex > 0:
-        _s_THERMAL_RATE     = float(CONFIG.get("THERMAL_DEFAULT_APPLICABLE_RATE", 0.12) or 0)
-        _s_THERMAL_PER_CALL = float(CONFIG.get("THERMAL_SAVINGS_PER_CALL", 38) or 0)
-        _s_K9_RATE          = float(CONFIG.get("K9_DEFAULT_APPLICABLE_RATE", 0.03) or 0)
-        _s_K9_PER_CALL      = float(CONFIG.get("K9_SAVINGS_PER_CALL", 155) or 0)
-        _s_FIRE_RATE        = float(CONFIG.get("FIRE_DEFAULT_APPLICABLE_RATE", 0.05) or 0)
-        _s_FIRE_PER_CALL    = float(CONFIG.get("FIRE_SAVINGS_PER_CALL", 450) or 0)
+                _reconciled_total = float(sum(max(0, d.get('annual_savings', 0) or 0) for d in active_drones))
+                _drift = _fleet_target_annual - _reconciled_total
+                if abs(_drift) > 0.01 and active_drones:
+                    _lead = max(active_drones, key=lambda x: float(x.get('annual_savings', 0) or 0))
+                    _lead['annual_savings']   = float(_lead.get('annual_savings',   0) or 0) + _drift
+                    _lead['best_case_annual'] = float(_lead.get('best_case_annual', 0) or 0) + _drift
+                    _lead['monthly_savings']  = float(_lead.get('monthly_savings',  0) or 0) + (_drift / 12.0)
+                    # Distribute drift into base first; overflow goes into concurrent so that
+                    # base_annual + concurrent_annual always equals best_case_annual (keeps the
+                    # Value Breakdown box consistent with the headline figure).
+                    _lead_base = float(_lead.get('base_annual', 0) or 0)
+                    _lead_conc = float(_lead.get('concurrent_annual', 0) or 0)
+                    _drift_to_base = max(-_lead_base, min(_drift, _drift))  # full drift to base …
+                    _new_base = _lead_base + _drift_to_base
+                    if _new_base < 0:                                        # … unless base would go negative
+                        _drift_to_base = -_lead_base
+                        _new_base = 0.0
+                    _drift_to_conc = _drift - _drift_to_base
+                    _lead['base_annual']       = _new_base
+                    _lead['concurrent_annual'] = max(0.0, _lead_conc + _drift_to_conc)
+                    _lead['be_text']      = f"{_lead['cost']/_lead['monthly_savings']:.1f} MO" if _lead['monthly_savings'] > 0 else "N/A"
+                    _lead['best_be_text'] = _lead['be_text']
 
-        _s_thermal_total = 0.0
-        _s_k9_total      = 0.0
-        _s_fire_total    = 0.0
-        for _sd in active_drones:
-            _sd_flights  = float(_sd.get("marginal_flights", 0) or 0)
-            _sd_shared   = float(_sd.get("shared_flights", 0) or 0)
-            _sd_zone_calls          = float(_sd.get("zone_calls_annual", 0) or 0)
-            _sd_zone_flights_annual = float(_sd.get("zone_flights_annual", (_sd_flights + _sd_shared) * 365.0) or 0)
-            _sd_serviceable_annual  = float(_sd.get("max_flights_cap", 0) or 0) * 365.0
-            _sd_flight_base = min(_sd_zone_flights_annual, _sd_serviceable_annual) if _sd_serviceable_annual > 0 else _sd_zone_flights_annual
-            _sd_flight_base = min(_sd_flight_base, _sd_zone_calls) if _sd_zone_calls > 0 else _sd_flight_base
-            _s_thermal_total += _sd_flight_base * _s_THERMAL_RATE * _s_THERMAL_PER_CALL
-            _s_k9_total      += _sd_flight_base * _s_K9_RATE      * _s_K9_PER_CALL
-            _s_fire_total    += _sd_flight_base * _s_FIRE_RATE    * _s_FIRE_PER_CALL
+        # ── SIDEBAR: fill Annual Capacity Value box with specialty values that match unit cards ──
+        if fleet_capex > 0:
+            _s_THERMAL_RATE     = float(CONFIG.get("THERMAL_DEFAULT_APPLICABLE_RATE", 0.12) or 0)
+            _s_THERMAL_PER_CALL = float(CONFIG.get("THERMAL_SAVINGS_PER_CALL", 38) or 0)
+            _s_K9_RATE          = float(CONFIG.get("K9_DEFAULT_APPLICABLE_RATE", 0.03) or 0)
+            _s_K9_PER_CALL      = float(CONFIG.get("K9_SAVINGS_PER_CALL", 155) or 0)
+            _s_FIRE_RATE        = float(CONFIG.get("FIRE_DEFAULT_APPLICABLE_RATE", 0.05) or 0)
+            _s_FIRE_PER_CALL    = float(CONFIG.get("FIRE_SAVINGS_PER_CALL", 450) or 0)
 
-        _s_specialty_total = _s_thermal_total + _s_k9_total + _s_fire_total
+            _s_thermal_total = 0.0
+            _s_k9_total      = 0.0
+            _s_fire_total    = 0.0
+            for _sd in active_drones:
+                _sd_flights  = float(_sd.get("marginal_flights", 0) or 0)
+                _sd_shared   = float(_sd.get("shared_flights", 0) or 0)
+                _sd_zone_calls          = float(_sd.get("zone_calls_annual", 0) or 0)
+                _sd_zone_flights_annual = float(_sd.get("zone_flights_annual", (_sd_flights + _sd_shared) * 365.0) or 0)
+                _sd_serviceable_annual  = float(_sd.get("max_flights_cap", 0) or 0) * 365.0
+                _sd_flight_base = min(_sd_zone_flights_annual, _sd_serviceable_annual) if _sd_serviceable_annual > 0 else _sd_zone_flights_annual
+                _sd_flight_base = min(_sd_flight_base, _sd_zone_calls) if _sd_zone_calls > 0 else _sd_flight_base
+                _s_thermal_total += _sd_flight_base * _s_THERMAL_RATE * _s_THERMAL_PER_CALL
+                _s_k9_total      += _sd_flight_base * _s_K9_RATE      * _s_K9_PER_CALL
+                _s_fire_total    += _sd_flight_base * _s_FIRE_RATE    * _s_FIRE_PER_CALL
 
-        _sidebar_annual_cap_placeholder.markdown(f"""
-        <div style="background:{budget_box_bg}; border:1px solid {budget_box_border}; padding:12px; border-radius:4px;
-             text-align:center; margin:8px 0 12px 0; box-shadow:0 2px 5px {budget_box_shadow};">
-            <div style="font-size:0.7rem; color:{text_muted}; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
-            <div style="font-size:1.8rem; font-weight:900; color:{budget_box_border}; font-family:monospace;">${annual_savings:,.0f}</div>
-            <div style="font-size:0.68rem; color:{text_muted}; margin-top:4px;">+ specialty response upside</div>
-            <div style="font-size:1.05rem; font-weight:800; color:#39FF14; font-family:monospace; margin-top:2px;">${_s_specialty_total:,.0f}</div>
-            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-top:6px;">
-                <span style="color:{text_muted};">🔥 Thermal response:</span>
-                <span style="color:#fbbf24; font-weight:700;">${_s_thermal_total:,.0f}/yr</span>
+            _s_specialty_total = _s_thermal_total + _s_k9_total + _s_fire_total
+
+            _sidebar_annual_cap_placeholder.markdown(f"""
+            <div style="background:{budget_box_bg}; border:1px solid {budget_box_border}; padding:12px; border-radius:4px;
+                 text-align:center; margin:8px 0 12px 0; box-shadow:0 2px 5px {budget_box_shadow};">
+                <div style="font-size:0.7rem; color:{text_muted}; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
+                <div style="font-size:1.8rem; font-weight:900; color:{budget_box_border}; font-family:monospace;">${annual_savings:,.0f}</div>
+                <div style="font-size:0.68rem; color:{text_muted}; margin-top:4px;">+ specialty response upside</div>
+                <div style="font-size:1.05rem; font-weight:800; color:#39FF14; font-family:monospace; margin-top:2px;">${_s_specialty_total:,.0f}</div>
+                <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-top:6px;">
+                    <span style="color:{text_muted};">🔥 Thermal response:</span>
+                    <span style="color:#fbbf24; font-weight:700;">${_s_thermal_total:,.0f}/yr</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-top:2px;">
+                    <span style="color:{text_muted};">🐕 K-9 replacement:</span>
+                    <span style="color:#39FF14; font-weight:700;">${_s_k9_total:,.0f}/yr</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-bottom:2px; margin-top:2px;">
+                    <span style="color:{text_muted};">🚒 Fire dept value:</span>
+                    <span style="color:#fb7121; font-weight:700;">${_s_fire_total:,.0f}/yr</span>
+                </div>
+                <div style="border-top:1px solid {card_border}; margin:8px 0;"></div>
+                <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
+                    <span style="color:{text_muted};">Calls in range:</span>
+                    <span style="color:{text_main}; font-weight:700;">{covered_daily_calls:.1f}/day</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
+                    <span style="color:{text_muted};">DFR flights ({int(dfr_dispatch_rate*100)}%):</span>
+                    <span style="color:{text_main}; font-weight:700;">{daily_dfr_responses:.1f}/day</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:8px;">
+                    <span style="color:{text_muted};">Resolved no dispatch:</span>
+                    <span style="color:{text_main}; font-weight:700;">{daily_drone_only_calls:.1f}/day</span>
+                </div>
+                <div style="border-top:1px dashed {card_border}; margin:6px 0;"></div>
+                <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
+                    <span style="color:{text_muted};">Fleet CapEx:</span>
+                    <span style="color:{text_main}; font-weight:700;">${fleet_capex:,.0f}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:0.72rem;">
+                    <span style="color:{text_muted};">Break-even:</span>
+                    <span style="color:{budget_box_border}; font-weight:700;">{break_even_text}</span>
+                </div>
             </div>
-            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-top:2px;">
-                <span style="color:{text_muted};">🐕 K-9 replacement:</span>
-                <span style="color:#39FF14; font-weight:700;">${_s_k9_total:,.0f}/yr</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-bottom:2px; margin-top:2px;">
-                <span style="color:{text_muted};">🚒 Fire dept value:</span>
-                <span style="color:#fb7121; font-weight:700;">${_s_fire_total:,.0f}/yr</span>
-            </div>
-            <div style="border-top:1px solid {card_border}; margin:8px 0;"></div>
-            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
-                <span style="color:{text_muted};">Calls in range:</span>
-                <span style="color:{text_main}; font-weight:700;">{covered_daily_calls:.1f}/day</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
-                <span style="color:{text_muted};">DFR flights ({int(dfr_dispatch_rate*100)}%):</span>
-                <span style="color:{text_main}; font-weight:700;">{daily_dfr_responses:.1f}/day</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:8px;">
-                <span style="color:{text_muted};">Resolved no dispatch:</span>
-                <span style="color:{text_main}; font-weight:700;">{daily_drone_only_calls:.1f}/day</span>
-            </div>
-            <div style="border-top:1px dashed {card_border}; margin:6px 0;"></div>
-            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
-                <span style="color:{text_muted};">Fleet CapEx:</span>
-                <span style="color:{text_main}; font-weight:700;">${fleet_capex:,.0f}</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:0.72rem;">
-                <span style="color:{text_muted};">Break-even:</span>
-                <span style="color:{budget_box_border}; font-weight:700;">{break_even_text}</span>
-            </div>
+            """, unsafe_allow_html=True)
+
+        pop_metric = st.session_state.get('estimated_pop', 250000)
+        grant_bracket = estimate_grants(pop_metric)
+        st.sidebar.markdown(f"""
+        <div style="margin-top:12px; background:{card_bg}; border:1px solid {budget_box_border}; padding:10px; border-radius:4px; margin-bottom:10px;">
+            <div style="font-size:0.68rem; color:{text_muted}; font-weight:bold; text-transform:uppercase;">Est. Grant Eligibility</div>
+            <div style="font-size:1.1rem; color:{budget_box_border}; font-weight:bold; font-family:monospace;">{grant_bracket}</div>
+        </div>
+        <div style="font-size:0.73rem; color:{text_muted}; line-height:1.5; margin-bottom:10px;">
+            <a href="https://bja.ojp.gov/program/jag/overview" target="_blank" style="color:{accent_color}; font-weight:bold;">DOJ Byrne JAG</a> — UAS procurement eligible<br>
+            <a href="https://www.fema.gov/grants/preparedness/homeland-security" target="_blank" style="color:{accent_color}; font-weight:bold;">FEMA HSGP</a> — CapEx offset for tactical deployments
         </div>
         """, unsafe_allow_html=True)
 
-    pop_metric = st.session_state.get('estimated_pop', 250000)
-    grant_bracket = estimate_grants(pop_metric)
-    st.sidebar.markdown(f"""
-    <div style="margin-top:12px; background:{card_bg}; border:1px solid {budget_box_border}; padding:10px; border-radius:4px; margin-bottom:10px;">
-        <div style="font-size:0.68rem; color:{text_muted}; font-weight:bold; text-transform:uppercase;">Est. Grant Eligibility</div>
-        <div style="font-size:1.1rem; color:{budget_box_border}; font-weight:bold; font-family:monospace;">{grant_bracket}</div>
-    </div>
-    <div style="font-size:0.73rem; color:{text_muted}; line-height:1.5; margin-bottom:10px;">
-        <a href="https://bja.ojp.gov/program/jag/overview" target="_blank" style="color:{accent_color}; font-weight:bold;">DOJ Byrne JAG</a> — UAS procurement eligible<br>
-        <a href="https://www.fema.gov/grants/preparedness/homeland-security" target="_blank" style="color:{accent_color}; font-weight:bold;">FEMA HSGP</a> — CapEx offset for tactical deployments
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("---")
-
-    if show_health:
-        norm_redundancy = min(overlap_perc/35.0, 1.0)*100
-        health_score = (calls_covered_perc*0.50) + (area_covered_perc*0.35) + (norm_redundancy*0.15)
-        h_color, h_label = (accent_color,"OPTIMAL") if health_score>=80 else ("#94c11f","GOOD") if health_score>=70 else ("#ffc107","MARGINAL") if health_score>=55 else ("#dc3545","ESSENTIAL")
-        st.markdown(f"""<div style="background:{card_bg}; border-left:5px solid {h_color}; border:1px solid {card_border};
-            padding:10px; border-radius:4px; color:{text_main}; margin-bottom:10px;
-            display:flex; align-items:center; justify-content:space-between;">
-            <span style="font-size:1.4em; font-weight:bold; color:{h_color};">Department Health Score: {health_score:.1f}%</span>
-            <span style="font-size:1.2em; background:rgba(128,128,128,0.15); padding:2px 10px; border-radius:4px;">{h_label}</span>
-            </div>""", unsafe_allow_html=True)
-
-    orig_calls = int(st.session_state.get('total_original_calls', full_total_calls or (len(df_calls_full) if df_calls_full is not None else total_calls)) or total_calls)
-    modeled_calls = int(st.session_state.get('total_modeled_calls', total_calls) or total_calls)
-    displayed_points = len(display_calls) if display_calls is not None else 0
-    call_str = f"{orig_calls:,}"
-
-    # Calculate Date Range of CAD data (if available)
-    date_range_str = "Simulated / Unknown"
-    _date_src_df = df_calls_full if df_calls_full is not None else df_calls
-    _label_dt = html_reports._detect_datetime_series_for_labels(_date_src_df)
-    if _label_dt is not None:
-        try:
-            _label_dt = pd.to_datetime(_label_dt, errors='coerce').dropna()
-            if not _label_dt.empty:
-                min_date = _label_dt.min().strftime('%b %Y')
-                max_date = _label_dt.max().strftime('%b %Y')
-                date_range_str = f"{min_date} – {max_date}" if min_date != max_date else min_date
-        except Exception:
-            pass
-
-    avg_resp_time = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
-
-    # Ground speed: only apply congestion reduction when traffic toggle is on.
-    # Both avg_time_saved and gain_val use the same per-drone avg_time_min basis so
-    # the drone and ground numbers are directly comparable (no full-radius inflation).
-    _base_ground_speed = float(CONFIG["DEFAULT_TRAFFIC_SPEED"])
-    _effective_ground_speed = _base_ground_speed * (1.0 - float(traffic_level) / 100.0) if simulate_traffic else _base_ground_speed
-
-    try:
-        if active_drones and _effective_ground_speed > 0:
-            _fleet_gnd_time = (sum(d['avg_time_min'] * d['speed_mph'] * 1.4 / _effective_ground_speed
-                                   for d in active_drones) / len(active_drones))
-            avg_time_saved = max(0.0, _fleet_gnd_time - avg_resp_time)
-        else:
-            avg_time_saved = 0.0
-    except Exception:
-        avg_time_saved = 0.0
-
-    # gain_val: sub-label shown on the Avg Response KPI cell only when traffic toggle is on
-    if simulate_traffic:
-        gain_val = f"{avg_time_saved:.1f} min" if active_drones and _effective_ground_speed > 0 else "N/A"
-    else:
-        gain_val = None
-
-    # ── Persist live deployment metrics so the apprehension table reads real values ──
-    st.session_state['avg_time_saved_min'] = avg_time_saved
-    st.session_state['avg_resp_time_min']  = avg_resp_time
-
-    # ── Re-establish tier badge variables for display ──────────────────────────
-    _pricing_tier = st.session_state.get('pricing_tier', 'Safe Guard')
-    if _pricing_tier == "Safe Guard":
-        _tier_badge = "🛡️ Safe Guard"
-        _tier_desc = "Advanced Custom Features"
-    else:
-        _tier_badge = "🛡️ Safe Guard Lite"
-        _tier_desc = "Core Functionality"
-
-    # 1. THE SINGLE-LINE EXECUTIVE HEADER
-    logo_b64 = get_transparent_product_base64("gigs.png")
-    main_logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:32px; vertical-align:middle; margin-right:15px;">' if logo_b64 else f'<span style="font-size:1.5rem; font-weight:900; letter-spacing:2px; color:#ffffff; margin-right:15px;">BRINC</span>'
-
-    header_html = f"""
-    <div style="margin-top: 5px; margin-bottom: 15px; padding-bottom: 12px; border-bottom: 1px solid {card_border}; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-        <div style="display: flex; align-items: center; flex-wrap: wrap; font-size: 0.9rem;">
-            <span style="color: {accent_color}; font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; letter-spacing: 1px; text-transform: uppercase; margin-right: 12px;">Strategic Deployment Plan</span>
-            <span style="font-weight: 800; color: {text_main}; font-size: 1.1rem; margin-right: 12px;">{st.session_state.get('active_city', 'Unknown City')}, {st.session_state.get('active_state', 'US')}</span>
-            <span style="color: {text_muted}; margin-right: 12px;">• Serving {st.session_state.get('estimated_pop', 0):,} residents across ~{int(area_sq_mi):,} sq miles</span>
-        </div>
-        <div style="display: flex; align-items: center; font-size: 0.85rem; color: {text_muted}; gap: 15px;">
-            <span>Data Period: <span style="color:#fff;">{date_range_str}</span></span>
-            <span style="color:{card_border};">|</span>
-            <span style="font-weight: 800; color: {text_main}; font-size: 0.95rem;">{actual_k_responder} <span style="color:#888; font-weight:normal;">Resp</span> · {actual_k_guardian} <span style="color:#888; font-weight:normal;">Guard</span></span>
-            <span style="background:#0066aa;border:1px solid #00D2FF;border-radius:4px;padding:3px 8px;font-size:0.75rem;font-weight:700;color:#00D2FF;letter-spacing:0.5px;text-transform:uppercase;">{_tier_badge}</span>
-            {main_logo_html}
-        </div>
-    </div>
-    """
-    st.markdown(header_html, unsafe_allow_html=True)
-
-    # Cleanly evaluate dynamic CSS to avoid f-string syntax errors
-    border_css = 'border-right: 1px solid #222; padding-right: 10px;' if gain_val is not None else ''
-
-    # If traffic simulation is on, nest the time saved right inside the Avg Response box!
-    if gain_val is not None:
-        resp_content = (
-            f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace; line-height: 1.1;">{avg_resp_time:.1f}m</div>'
-            f'<div style="font-size: 0.7rem; color: #39FF14; font-weight: 800; text-transform: uppercase; margin-top: 4px;">▼ Saves {gain_val}</div>'
-        )
-    else:
-        resp_content = f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{avg_resp_time:.1f}m</div>'
-
-    # ── Pre-compute Fleet Summary impact sub-values ───────────────────────
-    _annual_resolved = int(daily_drone_only_calls * 365) if daily_drone_only_calls > 0 else 0
-    _covered_calls_abs = int(calls_covered_perc / 100.0 * total_calls) if total_calls else 0
-    _land_sqmi = int(area_covered_perc / 100.0 * area_sq_mi) if area_sq_mi else 0
-
-    _impact_incidents  = f"~{_annual_resolved:,} resolved/yr" if _annual_resolved > 0 else None
-    _impact_coverage   = f"{_covered_calls_abs:,} calls" if _covered_calls_abs > 0 else None
-    _impact_land       = f"~{_land_sqmi:,} sq mi" if _land_sqmi > 0 else None
-    _impact_overlap    = f"{len(active_drones)} drone{'s' if len(active_drones) != 1 else ''}" if active_drones else None
-
-    if simulate_traffic and gain_val and gain_val != "N/A":
-        _t_label = "Light" if traffic_level < 35 else "Moderate" if traffic_level < 75 else "Heavy"
-        _impact_resp = f"saves {gain_val} w/ {_t_label} traffic"
-    elif avg_time_saved > 0:
-        _impact_resp = f"saves {avg_time_saved:.1f}m vs gnd"
-    else:
-        _impact_resp = None
-
-    # 2. SPLIT KPI BAR — Guardian row + Responder row + combined summary
-    def _kpi_cell(label, value, color=accent_color, border=True, impact=None):
-        br = f"border-right: 1px solid #222; padding-right: 10px;" if border else ""
-        _imp = (f'<div style="font-size:0.65rem; color:#39FF14; font-weight:700; margin-top:2px;">({impact})</div>'
-                if impact else '')
-        return (
-            f'<div style="{br} text-align: center;">'
-            f'<div style="font-size: 0.68rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom:2px;">{label}</div>'
-            f'<div style="font-size: 1.9rem; font-weight: 800; color: {color}; font-family: \'IBM Plex Mono\', monospace;">{value}</div>'
-            f'{_imp}'
-            f'</div>'
-        )
-
-    _GUARD_COL = "#FFD700"   # gold for Guardian
-    _RESP_COL  = "#00D2FF"   # cyan for Responder
-    _COMB_COL  = "#39FF14"   # green for combined
-
-    kpi_html = (
-        # ── Row 1: summary totals ──────────────────────────────────────────
-        f'<div style="background:{card_bg}; border:1px solid {card_border}; border-radius:8px; padding:16px 20px; margin-bottom:8px;">'
-        f'<div style="font-size:0.65rem; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Fleet Summary <span class="tip" data-tip="Sources: Coverage % and response time computed from uploaded CAD incident data using BRINC geospatial optimizer. Hardware specs: BRINC Drones (brincdrones.com). Response time uses drone speed with 1.4× routing factor to approximate real-world travel paths.">?</span></div>'
-        f'<div style="display:grid; grid-template-columns:repeat(5,1fr); gap:8px;">'
-        + _kpi_cell("Total Incidents", call_str, impact=_impact_incidents)
-        + _kpi_cell("Combined Coverage", f"{calls_covered_perc:.1f}%", _COMB_COL, impact=_impact_coverage)
-        + _kpi_cell("Land Covered", f"{area_covered_perc:.1f}%", _COMB_COL, impact=_impact_land)
-        + _kpi_cell("Zone Overlap", f"{overlap_perc:.1f}%", text_muted, impact=_impact_overlap)
-        + _kpi_cell("Avg Response", f"{avg_resp_time:.1f}m", accent_color, border=False, impact=_impact_resp)
-        + f'</div></div>'
-
-        # ── Row 2: Guardian-specific metrics ──────────────────────────────
-        + f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">'
-
-        + f'<div style="background:{card_bg}; border:1px solid #3a3000; border-top:3px solid {_GUARD_COL}; border-radius:8px; padding:14px 16px;">'
-        + f'<div style="font-size:0.65rem; color:{_GUARD_COL}; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; font-weight:700;">🦅 Guardian Fleet — {actual_k_guardian} unit{"s" if actual_k_guardian!=1 else ""} · {guard_strategy_raw}</div>'
-        + f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">'
-        + _kpi_cell("Call Coverage", f"{guard_calls_perc:.1f}%", _GUARD_COL)
-        + _kpi_cell("Area Coverage", f"{guard_area_perc:.1f}%", _GUARD_COL, border=False)
-        + f'</div></div>'
-
-        # ── Row 3: Responder-specific metrics ─────────────────────────────
-        + f'<div style="background:{card_bg}; border:1px solid #003a3a; border-top:3px solid {_RESP_COL}; border-radius:8px; padding:14px 16px;">'
-        + f'<div style="font-size:0.65rem; color:{_RESP_COL}; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; font-weight:700;">🚁 Responder Fleet — {actual_k_responder} unit{"s" if actual_k_responder!=1 else ""} · {resp_strategy_raw}</div>'
-        + f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">'
-        + _kpi_cell("Call Coverage", f"{resp_calls_perc:.1f}%", _RESP_COL)
-        + _kpi_cell("Area Coverage", f"{resp_area_perc:.1f}%", _RESP_COL, border=False)
-        + f'</div></div>'
-
-        + f'</div>'
-    )
-    
-    st.markdown(kpi_html, unsafe_allow_html=True)
-    if orig_calls != modeled_calls:
-        model_note = f"Optimization modeled via {modeled_calls:,} representative CAD samples from {orig_calls:,} total incidents."
-    else:
-        model_note = f"Optimization modeled via all {modeled_calls:,} available incidents."
-    if displayed_points and displayed_points < orig_calls:
-        map_note = f"Map renders {displayed_points:,} incident points using Plotly's WebGL-backed map layer for dense full-call visualization."
-    elif displayed_points:
-        map_note = f"Map renders all {displayed_points:,} incident points."
-    else:
-        map_note = ""
-    full_daily_note = f"Citywide daily-call estimates are based on the full uploaded CAD total of {orig_calls:,} incidents." if orig_calls else ""
-    note_bits = [model_note]
-    if map_note:
-        note_bits.append(map_note)
-    if full_daily_note:
-        note_bits.append(full_daily_note)
-    st.markdown(f"<div style='font-size:0.65rem;color:gray;margin-top:-10px;margin-bottom:12px;text-align:right;'>{' '.join(note_bits)}</div>", unsafe_allow_html=True)
-
-    overtime_stats = html_reports.estimate_high_activity_overtime(
-        df_calls_full if df_calls_full is not None else df_calls,
-        st.session_state.get('active_state', 'TX'),
-        calls_covered_perc,
-        dfr_dispatch_rate,
-        deflection_rate,
-    )
-    cards_below_map = bool(show_cards)
-    map_col = st.container()
-
-    with map_col:
-        fig = go.Figure()
-
-        if show_boundaries and city_boundary_geom is not None and not city_boundary_geom.is_empty:
-            geoms_to_draw = [city_boundary_geom] if isinstance(city_boundary_geom, Polygon) else list(city_boundary_geom.geoms)
-            for gi, geom in enumerate(geoms_to_draw):
-                bx, by = geom.exterior.coords.xy
-                fig.add_trace(go.Scattermap(mode="lines", lon=list(bx), lat=list(by),
-                    line=dict(color=map_boundary_color, width=2), name="Jurisdiction Boundary",
-                    hoverinfo='skip', showlegend=(gi==0)))
-
-        if show_boundaries and boundary_overlay_gdf is not None and not boundary_overlay_gdf.empty:
-            _overlay_parts = []
-            for _overlay_geom in boundary_overlay_gdf.geometry:
-                if _overlay_geom is None or _overlay_geom.is_empty:
-                    continue
-                if isinstance(_overlay_geom, Polygon):
-                    _overlay_parts.append(_overlay_geom)
-                elif isinstance(_overlay_geom, MultiPolygon):
-                    _overlay_parts.extend(list(_overlay_geom.geoms))
-            for oi, geom in enumerate(_overlay_parts):
-                bx, by = geom.exterior.coords.xy
-                fig.add_trace(go.Scattermap(mode="lines", lon=list(bx), lat=list(by),
-                    line=dict(color="#00D2FF", width=2), name="Uploaded Boundary Overlay",
-                    hoverinfo='skip', showlegend=(oi==0)))
-
-        if show_heatmap and not display_calls.empty:
-            fig.add_trace(go.Densitymap(lat=display_calls.geometry.y, lon=display_calls.geometry.x,
-                z=np.ones(len(display_calls)), radius=12, colorscale='Inferno', opacity=0.6,
-                showscale=False, name="Heatmap", hoverinfo='skip'))
-
-        if show_dots and not display_calls.empty:
-            point_size = 1 if len(display_calls) > 150000 else 2 if len(display_calls) > 50000 else 3 if len(display_calls) > 20000 else 4
-            point_opacity = 0.06 if len(display_calls) > 150000 else 0.10 if len(display_calls) > 50000 else 0.18 if len(display_calls) > 20000 else 0.28 if len(display_calls) > 10000 else 0.4
-            # Split by agency so fire calls render red and police calls use the theme colour
-            _has_agency = 'agency' in display_calls.columns
-            _fire_calls   = display_calls[display_calls['agency'].str.lower() == 'fire'] if _has_agency else display_calls.iloc[0:0]
-            _police_calls = display_calls[display_calls['agency'].str.lower() != 'fire'] if _has_agency else display_calls
-            if not _police_calls.empty:
-                fig.add_trace(go.Scattermap(lat=_police_calls.geometry.y, lon=_police_calls.geometry.x,
-                    mode='markers', marker=dict(size=point_size, color=map_incident_color, opacity=point_opacity),
-                    name="Police Incidents", hoverinfo='skip'))
-            if not _fire_calls.empty:
-                fig.add_trace(go.Scattermap(lat=_fire_calls.geometry.y, lon=_fire_calls.geometry.x,
-                    mode='markers', marker=dict(size=point_size, color='#ff3b3b', opacity=point_opacity),
-                    name="Fire Incidents", hoverinfo='skip'))
-
-        if show_faa and faa_geojson and faa_geojson.get("features"):
-            try:
-                add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=not show_satellite)
-            except Exception as e:
-                st.sidebar.error(f"🔴 FAA render error: {str(e)[:100]}")
-
-        if show_obstacles:
-            add_faa_obstacles_layer_to_plotly(fig, minx, miny, maxx, maxy)
-
-        if show_cell_towers:
-            add_cell_towers_layer_to_plotly(fig, st.session_state.get('active_state', 'CA'), minx, miny, maxx, maxy)
-
-        if show_no_fly:
-            add_no_fly_zones_layer_to_plotly(fig, minx, miny, maxx, maxy)
-
-        if show_coverage:
-            _cov_state = st.session_state.get('active_state', '')
-            if _cov_state:
-                add_coverage_traces(fig, _cov_state, visible=True)
-
-        for d in active_drones:
-            clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
-            lbl = f"{d['name'].split(',')[0]} ({'Resp' if d['type']=='RESPONDER' else 'Guard'})"
-            
-            # Determine if this is an extended Guardian (so we can relax the outer ring)
-            is_extended_guardian = (d['type'] == 'GUARDIAN' and d['radius_m']/1609.34 > 5.0)
-            
-            # The outer ring becomes relaxed (thinner, more transparent) if > 5 miles
-            outer_width = 1.5 if is_extended_guardian else 4.5
-            outer_opac = 0.4 if is_extended_guardian else 1.0
-            
-            fig.add_trace(go.Scattermap(
-                lat=list(clats)+[None,d['lat']], lon=list(clons)+[None,d['lon']],
-                mode='lines+markers',
-                opacity=outer_opac,
-                marker=dict(size=[0]*len(clats)+[0,20], color=d['color']),
-                line=dict(color=d['color'], width=outer_width),
-                fill='toself', fillcolor='rgba(0,0,0,0)', name=lbl, hoverinfo='name'))
-
-            # The 5-mile Rapid Response ring gets the "Important" styling (thick, solid, heavier fill)
-            if is_extended_guardian:
-                f_lats, f_lons = get_circle_coords(d['lat'], d['lon'], r_mi=5.0)
-                fig.add_trace(go.Scattermap(
-                    lat=list(f_lats), lon=list(f_lons),
-                    mode='lines',
-                    line=dict(color=d['color'], width=4.5),
-                    opacity=1.0,
-                    fill='toself',
-                    fillcolor=f"rgba({int(d['color'][1:3],16)},{int(d['color'][3:5],16)},{int(d['color'][5:7],16)},0.12)",
-                    name=f"Rapid Response 5mi · {d['name'].split(',')[0]}",
-                    hoverinfo='text',
-                    text=f"⚡ Rapid Response Focus Zone — 5mi<br>{d['name'].split(',')[0]}",
-                    showlegend=False
-                ))
-
-            # Star marker for manually pinned stations
-            if d.get('pinned'):
-                fig.add_trace(go.Scattermap(
-                    lat=[d['lat']], lon=[d['lon']], mode='markers',
-                    marker=dict(size=18, color=d['color'], symbol='star'),
-                    name=f"📍 {d['name'].split(',')[0]} (Pinned)",
-                    hovertemplate=f"<b>🔒 PINNED</b><br>{d['name']}<br>{d['type']}<extra></extra>",
-                    showlegend=False
-                ))
-            if simulate_traffic:
-                t_color = "#28a745" if traffic_level<35 else "#ffc107" if traffic_level<75 else "#dc3545"
-                t_fill  = f"rgba({'40,167,69' if traffic_level<35 else '255,193,7' if traffic_level<75 else '220,53,69'}, 0.15)"
-                t_label = "Light" if traffic_level<35 else "Moderate" if traffic_level<75 else "Heavy"
-                gs = CONFIG["DEFAULT_TRAFFIC_SPEED"]*(1-traffic_level/100)
-                if gs > 0:
-                    gr_mi = (gs/60) * (d['radius_m']/1609.34/d['speed_mph'])*60
-                    ga = np.linspace(0,2*np.pi,9)
-                    fig.add_trace(go.Scattermap(
-                        lat=list(d['lat']+(gr_mi/69.172)*np.sin(ga)),
-                        lon=list(d['lon']+(gr_mi/(69.172*np.cos(np.radians(d['lat']))))*np.cos(ga)),
-                        mode='lines', line=dict(color=t_color, width=2.5),
-                        fill='toself', fillcolor=t_fill,
-                        name=f"Ground ({t_label})", hoverinfo='skip'))
-
-        map_cfg = dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style=map_style)
-        if show_satellite:
-            map_cfg["style"] = "carto-positron"
-            map_cfg["layers"] = [{"below":"traces","sourcetype":"raster",
-                "sourceattribution":"Esri, Maxar, Earthstar Geographics",
-                "source":["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"]}]
-
-        _pin_drop_active = st.session_state.get('pin_drop_mode', False)
-
-        # In pin-drop mode, switch Plotly to 'select' dragmode so a click-drag
-        # draws a selection box instead of panning.  The center of that box
-        # becomes the pin coordinate — no need to hit an invisible point precisely.
-        _layout_extra = dict(dragmode='select') if _pin_drop_active else {}
-
-        fig.update_layout(uirevision="LOCKED_MAP", map=map_cfg,
-            margin=dict(l=0,r=0,t=0,b=0), height=800, font=dict(size=18),
-            showlegend=True,
-            legend=dict(yanchor="top", y=0.98, xanchor="left", x=0.02,
-                        bgcolor=legend_bg, bordercolor=accent_color, borderwidth=1,
-                        font=dict(size=12, color=legend_text), itemclick="toggle"),
-            **_layout_extra)
-
-        if _pin_drop_active:
-            # Dense grid of subtle markers so box-select always captures at least
-            # one point to confirm the lat/lon.  Size=40 ensures full overlap at
-            # typical city zoom levels (no gaps between adjacent markers).
-            _grid_n = 80
-            _grid_lats = np.linspace(miny, maxy, _grid_n)
-            _grid_lons = np.linspace(minx, maxx, _grid_n)
-            _gla, _glo = np.meshgrid(_grid_lats, _grid_lons)
-            fig.add_trace(go.Scattermap(
-                lat=_gla.ravel().tolist(),
-                lon=_glo.ravel().tolist(),
-                mode='markers',
-                marker=dict(size=40, color='rgba(0,210,255,0.04)'),
-                hoverinfo='skip',
-                showlegend=False,
-                name='__pin_grid__',
-            ))
-            fig.add_annotation(
-                text="📍 Pin Drop Mode — click and drag a small box on your target location",
-                xref="paper", yref="paper", x=0.5, y=0.98,
-                showarrow=False, font=dict(size=13, color="#00D2FF"),
-                bgcolor="rgba(0,0,0,0.72)", bordercolor="#00D2FF", borderwidth=1,
-                borderpad=6, xanchor="center",
-            )
-
-        _map_event = st.plotly_chart(
-            fig, use_container_width=True,
-            config={"scrollZoom": not _pin_drop_active, "displayModeBar": _pin_drop_active},
-            on_select="rerun" if _pin_drop_active else "ignore",
-            key="main_map_chart",
-        )
-
-        # Resolve pin location from whichever signal arrives first:
-        #   1. Selection box center  (most reliable — works even on empty map)
-        #   2. First selected point  (fallback)
-        if _pin_drop_active and _map_event and hasattr(_map_event, 'selection') \
-                and st.session_state.get('pending_pin') is None:
-            _sel = _map_event.selection
-            _clicked_lat = _clicked_lon = None
-
-            # Priority 1: bounding box of the drawn selection rectangle
-            _box_list = getattr(_sel, 'box', None) or []
-            if _box_list:
-                _b = _box_list[0]
-                _lats = _b.get('y') or _b.get('lat') or []
-                _lons = _b.get('x') or _b.get('lon') or []
-                if len(_lats) >= 2 and len(_lons) >= 2:
-                    _clicked_lat = (min(_lats) + max(_lats)) / 2.0
-                    _clicked_lon = (min(_lons) + max(_lons)) / 2.0
-
-            # Priority 2: nearest grid point that was selected
-            if _clicked_lat is None:
-                _sel_pts = getattr(_sel, 'points', []) or []
-                if _sel_pts:
-                    _pt = _sel_pts[0]
-                    _clicked_lat = _pt.get('lat') or _pt.get('y')
-                    _clicked_lon = _pt.get('lon') or _pt.get('x')
-
-            if _clicked_lat is not None and _clicked_lon is not None:
-                # Dedup: ignore if this is the same selection that was already processed
-                _sel_hash = hash(f"{_clicked_lat:.4f},{_clicked_lon:.4f}")
-                if _sel_hash != st.session_state.get('_pin_sel_hash'):
-                    st.session_state['_pin_sel_hash'] = _sel_hash
-                    st.session_state['pending_pin'] = {
-                        'lat': round(float(_clicked_lat), 6),
-                        'lon': round(float(_clicked_lon), 6),
-                    }
-                    st.rerun()
-
-    # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────
-    st.markdown("---")
-    st.markdown(f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics <span class='tip' data-tip='Per-drone financial breakdown — annual capacity value, specialty response savings, utilization, break-even, and response time for each deployed unit. Hover each ? badge for metric definitions.'>?</span> <span class='tip' data-tip='Sources: Annual savings formula — DFR dispatch rate × deflection rate × $76 officer dispatch cost × annual zone calls (IACP/DOJ benchmarks). Hardware CapEx — BRINC Drones MSRP. Specialty values — NFPA (fire), BLS (K-9), internal BRINC benchmarks. All figures are model estimates.'>src</span></h4>", unsafe_allow_html=True)
-    st.markdown(
-        f"<div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:10px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>",
-        unsafe_allow_html=True
-    )
-    st.markdown(
-        """<style>
-        .unit-card-grid { position: relative; }
-        .unit-card {
-            transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
-                        box-shadow 0.25s ease-out,
-                        z-index 0s;
-            position: relative;
-            z-index: 1;
-        }
-        .unit-card:hover {
-            transform: scale(1.2);
-            box-shadow: 0 16px 48px rgba(0,210,255,0.28), 0 4px 16px rgba(0,0,0,0.45);
-            z-index: 999;
-        }
-        </style>""",
-        unsafe_allow_html=True
-    )
-    if active_drones:
-        st.markdown(
-            html_reports._build_unit_cards_html(
-                active_drones, text_main, text_muted, card_bg, card_border,
-                card_title, accent_color, columns_per_row=4,
-                simple=simple_cards, deflection_rate=deflection_rate
-            ),
-            unsafe_allow_html=True
-        )
-    else:
-        st.markdown(
-            f"""
-            <div style="background:{card_bg}; border:1px dashed {card_border}; border-radius:6px; padding:22px; text-align:center; margin-top:8px;">
-                <div style="font-size:2rem; margin-bottom:8px;">🚁</div>
-                <div style="font-weight:700; color:{text_main}; margin-bottom:6px;">No drones deployed yet</div>
-                <div style="font-size:0.8rem; color:{text_muted};">
-                    Use the <b>Responder / Guardian Count</b> sliders in the sidebar to deploy drones and see per-unit economics here.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    # ── COVERAGE CURVE + STATION RING CHART (side by side, directly below cards) ──
-    st.markdown("---")
-    st.markdown(f"<h4 style='border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Coverage Curve <span class='tip' data-tip='Shows marginal call and area coverage as you add more Responder or Guardian drones. The curve flattens as overlap increases — use this to find the point of diminishing returns for your fleet size.'>?</span> <span class='tip' data-tip='Sources: Coverage % derived from geospatial analysis of uploaded CAD incident locations. Optimizer tests each candidate station and measures incremental coverage gain. Map tiles: © OpenStreetMap contributors (ODbL). Station candidates: OSM + DHS HIFLD Open Data.'>src</span></h4>", unsafe_allow_html=True)
-    st.markdown(f"<div style='font-size:0.8rem; color:{text_muted}; margin-bottom:8px;'>How added drones improve coverage — and where returns flatten.</div>", unsafe_allow_html=True)
-
-    _curve_col, _ring_col = st.columns([3, 2], gap="medium")
-
-    with _curve_col:
-        if not df_curve.empty:
-            fig_curve = go.Figure()
-            for col, color, dash in [('Responder (Calls)',accent_color,'solid'),('Guardian (Calls)','#FFD700','solid'),
-                                      ('Responder (Area)',accent_color,'dash'),('Guardian (Area)','#FFD700','dash')]:
-                y_data = df_curve[col].dropna()
-                x_data = df_curve.loc[y_data.index,'Drones']
-                if not y_data.empty:
-                    fig_curve.add_trace(go.Scatter(x=x_data, y=y_data, mode='lines+markers', name=col,
-                        line=dict(color=color,width=2,dash=dash), marker=dict(size=4),
-                        hovertemplate=f"<b>{col}</b><br>Drones: %{{x}}<br>Coverage: %{{y:.1f}}%<extra></extra>"))
-                    if 'Calls' in col:
-                        idx_90 = y_data[y_data >= 90.0].first_valid_index()
-                        if idx_90 is not None:
-                            fig_curve.add_trace(go.Scatter(x=[int(x_data.loc[idx_90])], y=[y_data.loc[idx_90]],
-                                mode='markers', marker=dict(color=color,size=12,symbol='star',line=dict(color='white',width=1)),
-                                showlegend=False, hoverinfo='skip'))
-            fig_curve.update_layout(
-                xaxis_title="Drones", yaxis_title="Coverage %",
-                xaxis=dict(showgrid=True, gridcolor=card_border, tickfont=dict(color=text_muted)),
-                yaxis=dict(showgrid=True, gridcolor=card_border, tickfont=dict(color=text_muted),
-                           tickvals=[0,20,40,60,80,90,100], range=[0,105]),
-                legend=dict(orientation="h",yanchor="bottom",y=1.02,xanchor="right",x=1,
-                            font=dict(size=9,color=text_muted)),
-                margin=dict(l=10,r=10,t=20,b=10), height=320,
-                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                hoverlabel=dict(bgcolor=card_bg, font_size=13, font_color=text_main, bordercolor=accent_color)
-            )
-            st.plotly_chart(fig_curve, use_container_width=True, config={'displayModeBar':False})
-        else:
-            st.info("Run optimization to generate coverage curve.")
-
-    with _ring_col:
-        st.markdown(
-            f"<div style='font-size:0.7rem; color:{text_muted}; margin-bottom:4px;'>"
-            f"Call coverage by station <span class='tip' data-tip='Donut chart showing how historical 911 calls are distributed across deployed stations. Each slice is one station&apos;s marginal (non-overlapping) call count. The center % is combined fleet coverage. Hover slices for exact counts.'>?</span></div>",
-            unsafe_allow_html=True
-        )
-        # Split ring: outer ring = Guardians (gold), inner ring = Responders (cyan)
-        if active_drones and total_calls > 0:
-            _g_drones = [d for d in active_drones if d['type'] == 'GUARDIAN']
-            _r_drones = [d for d in active_drones if d['type'] == 'RESPONDER']
-
-            def _build_ring_data(drones, fleet_cov_mask):
-                """Build labels/values/colors for one fleet's ring slices."""
-                labels, values, colors = [], [], []
-                remaining = int(fleet_cov_mask.sum()) if fleet_cov_mask is not None else 0
-                for d in drones:
-                    _m = int(d.get('marginal_perc', 0) * total_calls)
-                    if _m > 0:
-                        labels.append(d['name'].split(',')[0][:18])
-                        values.append(_m)
-                        colors.append(d['color'])
-                        remaining = max(0, remaining - _m)
-                return labels, values, colors
-
-            _g_labels, _g_vals, _g_cols = _build_ring_data(_g_drones, cov_g)
-            _r_labels, _r_vals, _r_cols = _build_ring_data(_r_drones, cov_r)
-
-            # Uncovered slice for combined view
-            _combined_covered = int(np.logical_or(cov_r, cov_g).sum()) if total_calls > 0 else 0
-            _uncovered = max(0, total_calls - _combined_covered)
-
-            # Build a single donut: Guardian slices (gold ring) + Responder slices (cyan ring)
-            # separated by a small "uncovered" gap
-            all_labels = _g_labels + _r_labels + (["Uncovered"] if _uncovered > 0 else [])
-            all_values = _g_vals   + _r_vals   + ([_uncovered] if _uncovered > 0 else [])
-            all_colors = _g_cols   + _r_cols   + (["#1a1a1a"] if _uncovered > 0 else [])
-
-            if all_values:
-                fig_ring = go.Figure(go.Pie(
-                    labels=all_labels,
-                    values=all_values,
-                    hole=0.58,
-                    marker=dict(colors=all_colors, line=dict(color='#000', width=1.5)),
-                    textinfo='none',
-                    hovertemplate='<b>%{label}</b><br>%{value:,} calls (%{percent})<extra></extra>',
-                    sort=False,
-                ))
-                _cov_pct = round(_combined_covered / total_calls * 100, 1)
-                _mode_short = "▶◀" if complement_mode else "↔" if shared_mode else "⊕"
-                fig_ring.update_layout(
-                    annotations=[dict(
-                        text=f"<b>{_cov_pct}%</b><br><span style='font-size:9px'>{_mode_short} combined</span>",
-                        x=0.5, y=0.5, font_size=15, showarrow=False,
-                        font=dict(color=text_main)
-                    )],
-                    showlegend=True,
-                    legend=dict(
-                        orientation='v', x=1.02, y=0.5,
-                        font=dict(size=9, color=text_muted),
-                        bgcolor='rgba(0,0,0,0)',
-                        groupclick='toggleitem',
-                    ),
-                    margin=dict(l=0, r=0, t=10, b=10),
-                    height=320,
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    hoverlabel=dict(bgcolor=card_bg, font_size=12, font_color=text_main),
-                )
-                st.plotly_chart(fig_ring, use_container_width=True, config={'displayModeBar':False})
-
-                # Mode legend below the ring
-                _mode_label = {
-                    "Complement — push apart": "▶◀ Complement — Responders fill Guardian gaps",
-                    "Independent — each maximises own area": "⊕ Independent — each fleet optimised separately",
-                    "Shared — allow full overlap": "↔ Shared — both fleets maximise same call set",
-                }.get(deployment_mode, "")
-                st.markdown(
-                    f"<div style='font-size:0.65rem; color:{text_muted}; text-align:center; margin-top:-8px;'>{_mode_label}</div>",
-                    unsafe_allow_html=True
-                )
-        else:
-            st.markdown(
-                f"<div style='color:{text_muted}; font-size:0.8rem; padding:40px 0; text-align:center;'>Deploy drones to see call distribution ring.</div>",
-                unsafe_allow_html=True
-            )
-
-
-    # Resolve real incident datetime coverage for labels on the stations page
-    _label_dt_series = html_reports._detect_datetime_series_for_labels(df_calls_full if df_calls_full is not None else df_calls)
-    _label_has_real_dates = _label_dt_series is not None and getattr(_label_dt_series, "notna", lambda: pd.Series([], dtype=bool))().sum() > 0
-
-    # ── CAD DATA CHARTS (moved into CAD Ingestion Analytics below) ───────────
-    _cad_src = st.session_state.get('data_source', '')
-    _has_real_calls = _cad_src in ('cad_upload', 'brinc_file') or (
-        'df_calls' in st.session_state and st.session_state['df_calls'] is not None
-        and len(st.session_state['df_calls']) > 100
-    )
-
-    # ── 3D SWARM SIMULATION ───────────────────────────────────────────
-    if fleet_capex > 0:
         st.markdown("---")
-        st.markdown(f"<h3 style='color:{text_main};'>🚁 3D Swarm Simulation <span class='tip' data-tip='Deck.gl-powered 3D animation of all DFR flights compressed into a single 24-hour day. Each arc represents a dispatch flight from station to incident. Use the speed slider to control playback. Best viewed fullscreen for council presentations.'>?</span></h3>", unsafe_allow_html=True)
-        st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Animated deck.gl simulation of all DFR flights over a compressed 24-hour day. Use the speed slider to accelerate or slow the simulation. Great for council presentations.</div>", unsafe_allow_html=True)
 
-        show_sim = st.toggle("🎬 Enable 3D Simulation", value=False)
-        if show_sim:
-            calls_lonlat = calls_in_city.to_crs(epsg=4326)
-            calls_coords = np.column_stack((calls_lonlat.geometry.x, calls_lonlat.geometry.y))
+        if show_health:
+            norm_redundancy = min(overlap_perc/35.0, 1.0)*100
+            health_score = (calls_covered_perc*0.50) + (area_covered_perc*0.35) + (norm_redundancy*0.15)
+            h_color, h_label = (accent_color,"OPTIMAL") if health_score>=80 else ("#94c11f","GOOD") if health_score>=70 else ("#ffc107","MARGINAL") if health_score>=55 else ("#dc3545","ESSENTIAL")
+            st.markdown(f"""<div style="background:{card_bg}; border-left:5px solid {h_color}; border:1px solid {card_border};
+                padding:10px; border-radius:4px; color:{text_main}; margin-bottom:10px;
+                display:flex; align-items:center; justify-content:space-between;">
+                <span style="font-size:1.4em; font-weight:bold; color:{h_color};">Department Health Score: {health_score:.1f}%</span>
+                <span style="font-size:1.2em; background:rgba(128,128,128,0.15); padding:2px 10px; border-radius:4px;">{h_label}</span>
+                </div>""", unsafe_allow_html=True)
 
-            sim_assignments = {i:[] for i in range(len(active_drones))}
-            for c_idx, cc in enumerate(calls_coords):
-                best_d, best_dist = -1, float('inf')
-                for d_idx, d in enumerate(active_drones):
-                    if d['cov_array'][c_idx] if c_idx < len(d['cov_array']) else False:
-                        dist = (cc[0]-d['lon'])**2 + (cc[1]-d['lat'])**2
-                        if dist < best_dist:
-                            best_dist, best_d = dist, d_idx
-                if best_d != -1:
-                    sim_assignments[best_d].append(c_idx)
+        orig_calls = int(st.session_state.get('total_original_calls', full_total_calls or (len(df_calls_full) if df_calls_full is not None else total_calls)) or total_calls)
+        modeled_calls = int(st.session_state.get('total_modeled_calls', total_calls) or total_calls)
+        displayed_points = len(display_calls) if display_calls is not None else 0
+        call_str = f"{orig_calls:,}"
 
-            stations_json, flights_json, legend_html_sim = [], [], ""
-            total_sim_flights = 0
-            for d_idx, d in enumerate(active_drones):
-                hex_c = d['color'].lstrip('#')
-                rgb = [int(hex_c[j:j+2],16) for j in (0,2,4)]
-                stations_json.append({"name":d['name'].split(',')[0][:30],"lon":d['lon'],"lat":d['lat'],"color":rgb,"radius":d['radius_m']})
-                legend_html_sim += f'<div style="margin-bottom:3px;"><span style="display:inline-block;width:9px;height:9px;background:{d["color"]};margin-right:7px;border-radius:50%;"></span>{d["name"].split(",")[0][:28]} ({d["type"][:3]})</div>'
-                frac = len(sim_assignments[d_idx])/len(calls_coords) if calls_coords.shape[0]>0 else 0
-                monthly_for_drone = int(frac * calls_per_day * 30 * dfr_dispatch_rate)
-                pool = sim_assignments[d_idx]
-
-                if not pool: sim_calls = []
-                elif monthly_for_drone > len(pool): sim_calls = random.choices(pool, k=monthly_for_drone)
-                else: sim_calls = random.sample(pool, monthly_for_drone)
-
-                total_sim_flights += len(sim_calls)
-                for ci in sim_calls:
-                    lon1,lat1 = calls_coords[ci]
-                    lon0,lat0 = d['lon'],d['lat']
-                    dist_mi = math.sqrt((lon1-lon0)**2+(lat1-lat0)**2)*69.172
-                    vis_time = max((dist_mi/d['speed_mph'])*3600*8, 240)
-                    launch = random.randint(0, 2592000)
-                    arc_h = min(max(dist_mi*90, 80), 400)
-                    t0 = launch
-                    t1 = launch + vis_time * 0.15
-                    t2 = launch + vis_time * 0.40
-                    t3 = launch + vis_time * 0.75
-                    t4 = launch + vis_time * 0.90
-                    t5 = launch + vis_time
-                    mx1 = lon0 + 0.15*(lon1-lon0);  my1 = lat0 + 0.15*(lat1-lat0)
-                    mx2 = lon0 + 0.35*(lon1-lon0);  my2 = lat0 + 0.35*(lat1-lat0)
-                    mx3 = lon0 + 0.65*(lon1-lon0);  my3 = lat0 + 0.65*(lat1-lat0)
-                    mx4 = lon0 + 0.85*(lon1-lon0);  my4 = lat0 + 0.85*(lat1-lat0)
-                    flights_json.append({
-                        "path": [[lon0, lat0, 0], [mx1, my1, arc_h*0.75], [mx2, my2, arc_h], [mx3, my3, arc_h], [mx4, my4, arc_h*0.75], [lon1, lat1, 0]],
-                        "timestamps": [t0, t1, t2, t3, t4, t5],
-                        "color": rgb
-                    })
-
-            warn_html_sim = ""
-            if len(flights_json) > 3000:
-                flights_json = random.sample(flights_json, 3000)
-                warn_html_sim = f'<div style="background:#440000;border:1px solid #ff4b4b;color:#ffbbbb;padding:5px;font-size:10px;border-radius:4px;margin-bottom:8px;">⚠️ Capped at 3,000 flights for performance (actual: {total_sim_flights:,})</div>'
-
-            drone_svg = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M18 6a2 2 0 100-4 2 2 0 000 4zm-12 0a2 2 0 100-4 2 2 0 000 4zm12 12a2 2 0 100-4 2 2 0 000 4zm-12 0a2 2 0 100-4 2 2 0 000 4z'/%3E%3Cpath stroke='white' stroke-width='2' stroke-linecap='round' d='M8.5 8.5l7 7m0-7l-7 7'/%3E%3Ccircle cx='12' cy='12' r='2' fill='white'/%3E%3C/svg%3E"
-
-            sim_html = f"""<!DOCTYPE html><html><head>
-            <script src="https://unpkg.com/deck.gl@8.9.35/dist.min.js"></script>
-            <script src="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.js"></script>
-            <link href="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.css" rel="stylesheet"/>
-            <style>
-              body{{margin:0;padding:0;overflow:hidden;background:#000;font-family:Manrope,sans-serif;}}
-              #map{{width:100vw;height:100vh;position:absolute;}}
-              #ui{{position:absolute;top:16px;left:16px;background:rgba(17,17,17,0.92);padding:16px;border-radius:8px;
-                   color:white;border:1px solid #333;z-index:10;box-shadow:0 4px 10px rgba(0,0,0,0.5);width:260px;}}
-              button{{background:#00D2FF;color:black;border:none;padding:10px;cursor:pointer;font-weight:bold;
-                      border-radius:4px;width:100%;font-size:13px;text-transform:uppercase;margin-bottom:8px;}}
-              button:disabled{{background:#444;color:#888;cursor:not-allowed;}}
-              #timeDisplay{{font-family:monospace;font-size:16px;color:#00ffcc;font-weight:bold;text-align:center;margin-bottom:8px;}}
-            </style></head><body>
-            <div id="ui">
-              <h3 style="margin:0 0 8px;color:#00D2FF;font-size:14px;">DFR SWARM SIMULATION</h3>
-              {warn_html_sim}
-              <div style="font-size:11px;color:#aaa;margin-bottom:10px;">
-                {total_sim_flights:,} flights over 30 days at {int(dfr_dispatch_rate*100)}% dispatch rate
-              </div>
-              <div style="margin-bottom:10px;">
-                <label style="font-size:11px;color:#ccc;">Speed: <span id="speedLabel">1</span>x</label>
-                <input type="range" id="speedSlider" min="1" max="100" value="1" style="width:100%;margin-top:4px;">
-              </div>
-              <button id="runBtn">▶ LAUNCH SWARM</button>
-              <div id="timeDisplay">00:00</div>
-              <div style="margin-top:10px;border-top:1px solid #333;padding-top:8px;">
-                <div style="font-size:10px;color:#888;text-transform:uppercase;margin-bottom:5px;">Stations</div>
-                <div style="font-size:10px;color:#ddd;max-height:100px;overflow-y:auto;">{legend_html_sim}</div>
-              </div>
-            </div>
-            <div id="map"></div>
-            <script>
-              const stations={json.dumps(stations_json)};
-              const flights={json.dumps(flights_json)};
-              const speedSlider=document.getElementById('speedSlider');
-              const speedLabel=document.getElementById('speedLabel');
-              speedSlider.oninput=()=>speedLabel.innerText=speedSlider.value;
-              const map=new deck.DeckGL({{
-                container:'map',
-                mapStyle:'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-                initialViewState:{{longitude:{center_lon},latitude:{center_lat},zoom:{dynamic_zoom},pitch:50,bearing:0}},
-                controller:true
-              }});
-              let time=0,timer=null,lastTime=0;
-              function render(){{
-                map.setProps({{layers:[
-                  new deck.ScatterplotLayer({{id:'rings',data:stations,getPosition:d=>[d.lon,d.lat],
-                    getFillColor:d=>[d.color[0],d.color[1],d.color[2],25],
-                    getLineColor:d=>[d.color[0],d.color[1],d.color[2],220],
-                    lineWidthMinPixels:2,stroked:true,filled:true,getRadius:d=>d.radius}}),
-                  new deck.ScatterplotLayer({{id:'pads',data:stations,getPosition:d=>[d.lon,d.lat],
-                    getFillColor:d=>[d.color[0],d.color[1],d.color[2],120],getRadius:180}}),
-                  new deck.IconLayer({{id:'icons',data:stations,
-                    getIcon:d=>({{url:"{drone_svg}",width:24,height:24,anchorY:12}}),
-                    getPosition:d=>[d.lon,d.lat],getSize:36,sizeScale:1}}),
-                  new deck.TripsLayer({{id:'flights',data:flights,getPath:d=>d.path,
-                    getTimestamps:d=>d.timestamps,getColor:d=>d.color,
-                    opacity:0.85,widthMinPixels:5,trailLength:13500,currentTime:time,rounded:true}}),
-                  new deck.ScatterplotLayer({{id:'landed',data:flights,getPosition:d=>d.path[5],
-                    getFillColor:d=>time>=d.timestamps[5]?[d.color[0],d.color[1],d.color[2],255]:[0,0,0,0],
-                    getRadius:25,radiusMinPixels:3,updateTriggers:{{getFillColor:time}}}})
-                ]}});
-                let day=Math.floor(time/86400)+1;
-                let h=Math.floor((time%86400)/3600).toString().padStart(2,'0');
-                let m=Math.floor((time%3600)/60).toString().padStart(2,'0');
-                document.getElementById('timeDisplay').innerText=`Day ${{day}} · ${{h}}:${{m}}`;
-              }}
-              const animate=()=>{{
-                let now=performance.now();
-                let dt=Math.min(now-lastTime,100);
-                lastTime=now;
-                time+=dt/1000*43200*parseFloat(speedSlider.value);
-                render();
-                if(time<2592000){{timer=requestAnimationFrame(animate);}}
-                else{{
-                  document.getElementById('runBtn').disabled=false;
-                  document.getElementById('runBtn').innerText='↺ RESTART';
-                  time=0;
-                }}
-              }};
-              document.getElementById('runBtn').onclick=()=>{{
-                document.getElementById('runBtn').disabled=true;
-                document.getElementById('runBtn').innerText='SIMULATING…';
-                time=0;lastTime=performance.now();
-                if(timer)cancelAnimationFrame(timer);
-                animate();
-              }};
-              render();
-            </script></body></html>"""
-
-            components.html(sim_html, height=700)
-
-    # ── COMMAND CENTER ANALYTICS DASHBOARD ──
-    st.markdown("---")
-    st.markdown(f"<h3 style='color:{text_main};'>📊 CAD Ingestion Analytics <span class='tip' data-tip='Temporal analysis of your uploaded CAD (Computer-Aided Dispatch) data. Shows when calls are most frequent by hour and day, identifies optimal DFR shift windows, and renders a call-volume calendar heatmap.'>?</span></h3>", unsafe_allow_html=True)
-    st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Temporal patterns derived from your uploaded CAD data — hourly volumes, day-of-week distribution, optimal DFR shift windows, and a higher-contrast 5-band call-volume calendar.</div>", unsafe_allow_html=True)
-
-    _analytics_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
-    analytics_html_block = html_reports.generate_command_center_html(
-        _analytics_df,
-        total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls)
-    )
-    _analytics_unavailable = (
-        "Analytics unavailable." in analytics_html_block
-        or "No valid dates found in data." in analytics_html_block
-    )
-    if _analytics_unavailable:
-        _analytics_height = 180
-    else:
-        # Compute height from actual data so the iframe fits exactly with no dead space.
-        # Calendar grid is auto-fill / minmax(250px, 1fr). At typical Streamlit content
-        # width (~900px with sidebar open) that yields 3 columns.
-        import math as _math
-        try:
-            _n_months = int(_analytics_df['date'].astype(str).str[:7].nunique()) if (
-                _analytics_df is not None and not _analytics_df.empty and 'date' in _analytics_df.columns
-            ) else 6
-        except Exception:
-            _n_months = 6
-        _n_months = max(1, min(_n_months, 12))
-        _cal_cols = 3                        # columns at typical sidebar-open viewport
-        _cal_rows = _math.ceil(_n_months / _cal_cols)
-        _cal_px   = _cal_rows * 260          # ~260px per calendar row (tightened)
-        # Fixed chrome above the calendar:
-        #   section header 60 + controls bar 70 + KPI cards 110 + shift/dow panel 210 + legend+label 55
-        _fixed_px = 460
-        _analytics_height = _fixed_px + _cal_px
-    components.html(analytics_html_block, height=_analytics_height, scrolling=False)
-
-    if _analytics_unavailable:
-        # Remove the dead gap when the analytics component only contains a short fallback message.
-        st.markdown("<div style='margin-top:-6px;'></div>", unsafe_allow_html=True)
-    elif _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
-        # Collapse gap between components.html block and the plotly charts below
-        st.markdown("<div style='margin-top:-80px;'></div>", unsafe_allow_html=True)
-        html_reports._build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
-
-    # ── COMMUNITY IMPACT DASHBOARD ────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown(
-        f"<h3 style='color:{text_main};'>🏛️ Community Impact Dashboard <span class='tip' data-tip='Public-facing transparency report for city council presentations and community portals. Hover the ? badges inside each section for detailed explanations of every metric.'>?</span> <span class='tip' data-tip='Sources: Population — US Census Bureau ACS. Officer wages — Bureau of Labor Statistics (BLS) OES. Flight hour projections — BRINC hardware specs. Financial figures — BRINC COS optimization model. Fourth Amendment framework — DOJ/ACLU DFR policy guidelines.'>src</span></h3>",
-        unsafe_allow_html=True
-    )
-    st.markdown(
-        f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>"
-        "Public-facing transparency report — flight hours &amp; uptime, response time advantage, "
-        "Fourth Amendment safeguards, community outcomes, call type distribution, equity commitments, "
-        "and taxpayer ROI. Designed for city council presentations and citizen engagement portals."
-        "</div>",
-        unsafe_allow_html=True
-    )
-    _cid_fac_counts = {}
-    if 'type' in df_stations_all.columns:
-        for _t in df_stations_all['type'].dropna().astype(str):
-            _cid_fac_counts[_t] = _cid_fac_counts.get(_t, 0) + 1
-    _cid_html = html_reports.generate_community_impact_dashboard_html(
-        city=st.session_state.get('active_city', 'City'),
-        state=st.session_state.get('active_state', 'TX'),
-        population=int(st.session_state.get('estimated_pop', 65000) or 65000),
-        total_calls=int(st.session_state.get('total_original_calls', full_total_calls or total_calls) or 0),
-        calls_covered_perc=float(calls_covered_perc or 0),
-        area_covered_perc=float(area_covered_perc or 0),
-        avg_resp_time_min=float(avg_resp_time or 0),
-        avg_time_saved_min=float(avg_time_saved or 0),
-        fleet_capex=float(fleet_capex or 0),
-        annual_savings=float(annual_savings or 0),
-        break_even_text=str(break_even_text or 'N/A'),
-        actual_k_responder=int(actual_k_responder or 0),
-        actual_k_guardian=int(actual_k_guardian or 0),
-        dfr_dispatch_rate=float(dfr_dispatch_rate or 0.25),
-        deflection_rate=float(deflection_rate or 0.30),
-        daily_dfr_responses=float(daily_dfr_responses or 0),
-        daily_drone_only_calls=float(daily_drone_only_calls or 0),
-        active_drones=active_drones or [],
-        df_calls_full=df_calls_full,
-        facility_counts=_cid_fac_counts or None,
-    )
-    components.html(_cid_html, height=3600, scrolling=False)
-
-    # ── SCHOOL SAFETY IMPACT MATRIX ──────────────────────────────────────────
-    st.markdown("---")
-    _sro_cost_low   = 75_000
-    _sro_cost_high  = 120_000
-    _dfr_amortized  = int(fleet_capex / 7) if fleet_capex > 0 else 0
-    _dfr_amort_str  = f"${_dfr_amortized:,}/yr" if _dfr_amortized > 0 else "~$11K–22K/yr"
-
-    def _ss_row(label, sro_val, dfr_val, alt, cb, cbrd, tm, tmain, acc, last=False):
-        bg = f"background:rgba(255,255,255,0.02);" if alt else ""
-        brd = "" if last else f"border-bottom:1px solid {cbrd};"
-        sro_color = "#f59e0b"
-        dfr_color = acc
-        return (
-            f'<tr style="{bg}{brd}">'
-            f'<td style="padding:8px 12px;color:{tmain};font-weight:600;font-size:0.72rem;">{label}</td>'
-            f'<td style="padding:8px 12px;text-align:center;color:{sro_color};font-size:0.71rem;">{sro_val}</td>'
-            f'<td style="padding:8px 12px;text-align:center;color:{dfr_color};font-size:0.71rem;">{dfr_val}</td>'
-            f'</tr>'
-        )
-
-    _school_rows = (
-        _ss_row("Annual Cost / Campus",
-                f"${_sro_cost_low:,}–${_sro_cost_high:,} per officer",
-                f"{_dfr_amort_str} amortized (7-yr) · {actual_k_responder + actual_k_guardian} units",
-                False, card_bg, card_border, text_muted, text_main, accent_color) +
-        _ss_row("Coverage Hours / Year",
-                "~1,260 hrs/yr (school hours only)",
-                "8,760 hrs/yr — 24 / 7 / 365",
-                True, card_bg, card_border, text_muted, text_main, accent_color) +
-        _ss_row("Campuses Covered",
-                "1 building per officer",
-                f"Multi-campus — {actual_k_responder + actual_k_guardian} simultaneous coverage zones",
-                False, card_bg, card_border, text_muted, text_main, accent_color) +
-        _ss_row("On-Campus Response Time",
-                "2–5 min (foot/vehicle across campus)",
-                f"&lt;90 sec airborne · {avg_resp_time:.1f} min avg aerial",
-                True, card_bg, card_border, text_muted, text_main, accent_color) +
-        _ss_row("After-Hours / Weekend Coverage",
-                "❌ None",
-                "✅ Full thermal surveillance 24/7",
-                False, card_bg, card_border, text_muted, text_main, accent_color) +
-        _ss_row("Thermal / Night Vision",
-                "❌ Flashlight only",
-                "✅ 640px FLIR thermal (BRINC Responder)",
-                True, card_bg, card_border, text_muted, text_main, accent_color) +
-        _ss_row("Perimeter Monitoring",
-                "❌ Not feasible at scale",
-                "✅ Automated aerial patrol",
-                False, card_bg, card_border, text_muted, text_main, accent_color) +
-        _ss_row("Active Threat Intel",
-                "Single officer — blind hallway entry",
-                "✅ Live HD + thermal to dispatch before officer entry",
-                True, card_bg, card_border, text_muted, text_main, accent_color) +
-        _ss_row("Indoor Operations",
-                "✅ On foot",
-                "✅ BRINC LEMUR 2 — glass-breaker, perch mode, 2-way comms",
-                False, card_bg, card_border, text_muted, text_main, accent_color) +
-        _ss_row("Court-Admissible Evidence",
-                "Body cam (ground-level only)",
-                "✅ Aerial HD video + chain-of-custody flight log",
-                True, card_bg, card_border, text_muted, text_main, accent_color) +
-        _ss_row("Mass Shooting Prevention Evidence",
-                "❌ No proven effect (RAND, 2023)",
-                "✅ Pre-entry intel enables faster tactical coordination",
-                False, card_bg, card_border, text_muted, text_main, accent_color) +
-        _ss_row("Disciplinary Side Effects",
-                "⚠️ +35–80% suspensions · +25–90% expulsions (RAND)",
-                "✅ Zero school-discipline impact",
-                True, card_bg, card_border, text_muted, text_main, accent_color, last=True)
-    )
-
-    _school_html = f"""
-    <style>
-    .ss-tip {{
-      display:inline-flex;align-items:center;justify-content:center;
-      width:13px;height:13px;border-radius:50%;
-      background:rgba(255,255,255,0.12);color:#888;font-size:9px;font-weight:700;
-      cursor:default;margin-left:3px;vertical-align:middle;position:relative;flex-shrink:0;
-    }}
-    .ss-tip:hover::after {{
-      content:attr(data-tip);position:absolute;bottom:130%;left:50%;
-      transform:translateX(-50%);background:#1a1a2e;color:#e0e0e0;
-      font-size:10.5px;font-weight:400;padding:6px 10px;border-radius:5px;
-      white-space:normal;width:260px;line-height:1.5;z-index:9999;
-      border:1px solid #333;box-shadow:0 4px 12px rgba(0,0,0,0.5);
-      pointer-events:none;text-transform:none;letter-spacing:normal;
-    }}
-    </style>
-
-    <div>
-      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;">
-        <h3 style="color:{text_main};margin:0;">🏫 School Safety Impact <span class='tip' data-tip='Sources: FBI Crime in Schools 2020–2024 · NCES Indicators of School Crime &amp; Safety 2023 · FBI Active Shooter Study · RAND Corp. SRO Research (2023) · NIJ Effects of SROs on School Crime · K-12 School Shooting Database · BJS School Crime Statistics 2024 · ZipRecruiter/Volt.ai SRO salary data · BRINC technical specifications · Chula Vista PD DFR Program outcomes.'>src</span></h3>
-        <span style="font-size:0.7rem;color:{text_muted};">National statistics · DFR vs SRO analysis · cited sources</span>
-      </div>
-      <div style="font-size:0.78rem;color:{text_muted};margin-bottom:16px;max-width:740px;line-height:1.6;">
-        BRINC DFR delivers 24/7 aerial first-response to school campuses — faster and at lower total lifecycle cost than
-        traditional School Resource Officers, with no coverage blind spots, no off-hours gaps, and full HD + thermal
-        scene intelligence before any ground unit enters a building.
-      </div>
-
-      <!-- NATIONAL STATS HERO ROW -->
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;">
-
-        <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid #ef4444;border-radius:8px;padding:14px 12px;text-align:center;">
-          <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
-            School Crimes 2020–24
-            <span class="ss-tip" data-tip="Source: FBI Crime in Schools Special Report 2020–2024. Over 1.3 million criminal incidents recorded at K-12 school locations across the US over the five-year period, with approximately 1.5 million victims.">?</span>
-          </div>
-          <div style="font-size:1.75rem;font-weight:900;color:#ef4444;font-family:'IBM Plex Mono',monospace;">1.3M</div>
-          <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">criminal incidents on campus</div>
-        </div>
-
-        <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid #f59e0b;border-radius:8px;padding:14px 12px;text-align:center;">
-          <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
-            Student Victimization
-            <span class="ss-tip" data-tip="Source: NCES Indicators of School Crime &amp; Safety 2023 (NCES 2024-145). 22 nonfatal criminal victimizations per 1,000 students ages 12-18 in 2022 — includes theft, violent crime, and serious threats. Down from 52/1,000 in 2012 but remains elevated.">?</span>
-          </div>
-          <div style="font-size:1.75rem;font-weight:900;color:#f59e0b;font-family:'IBM Plex Mono',monospace;">22</div>
-          <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">per 1,000 students annually</div>
-        </div>
-
-        <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid #8b5cf6;border-radius:8px;padding:14px 12px;text-align:center;">
-          <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
-            Incidents End ≤5 min
-            <span class="ss-tip" data-tip="Source: FBI Active Shooter Study (64 incidents analyzed). 69% of active shooter events conclude within 5 minutes — 23 ended in under 2 minutes. Average incident duration at educational facilities: 3 min 18 sec. Most incidents end before police arrive.">?</span>
-          </div>
-          <div style="font-size:1.75rem;font-weight:900;color:#8b5cf6;font-family:'IBM Plex Mono',monospace;">69%</div>
-          <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">active shooter events ≤5 min</div>
-        </div>
-
-        <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid {accent_color};border-radius:8px;padding:14px 12px;text-align:center;">
-          <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
-            BRINC On-Scene
-            <span class="ss-tip" data-tip="Source: BRINC technical specifications; Chula Vista PD DFR Program outcomes. BRINC launches in &lt;20 sec and is on-scene in &lt;90 sec. Chula Vista documented average DFR response under 2 minutes citywide — vs. 14-15 min national ground average.">?</span>
-          </div>
-          <div style="font-size:1.75rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">&lt;90s</div>
-          <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">airborne &amp; streaming live video</div>
-        </div>
-
-      </div>
-
-      <!-- CRITICAL RESPONSE WINDOW -->
-      <div style="background:rgba(239,68,68,0.06);border-left:3px solid #ef4444;border-radius:0 6px 6px 0;padding:12px 16px;margin-bottom:16px;">
-        <div style="font-size:0.7rem;font-weight:700;color:#ef4444;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">
-          ⚠️ The Critical Response Window
-          <span class="ss-tip" data-tip="Sources: FBI Law Enforcement Bulletin 'Those Terrible First Few Minutes'; FBI Active Shooter Study (51-case median analysis); ALICE Training Institute; K-12 School Shooting Database (k12ssdb.org). Education-setting data: FBI subset of 51 incidents in schools.">?</span>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
-          <div style="text-align:center;background:rgba(0,0,0,0.25);border-radius:6px;padding:10px 8px;">
-            <div style="font-size:1.25rem;font-weight:900;color:#ef4444;font-family:'IBM Plex Mono',monospace;">14–15 min</div>
-            <div style="font-size:0.63rem;color:{text_muted};margin-top:3px;">National avg ground police<br>arrival to active shooter</div>
-          </div>
-          <div style="text-align:center;background:rgba(0,0,0,0.25);border-radius:6px;padding:10px 8px;">
-            <div style="font-size:1.25rem;font-weight:900;color:#f59e0b;font-family:'IBM Plex Mono',monospace;">3m 18s</div>
-            <div style="font-size:0.63rem;color:{text_muted};margin-top:3px;">Avg incident duration<br>at schools (FBI education subset)</div>
-          </div>
-          <div style="text-align:center;background:rgba(0,0,0,0.25);border-radius:6px;padding:10px 8px;">
-            <div style="font-size:1.25rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">&lt;90 sec</div>
-            <div style="font-size:0.63rem;color:{text_muted};margin-top:3px;">BRINC on-scene with live<br>HD + thermal to dispatch</div>
-          </div>
-        </div>
-        <div style="font-size:0.69rem;color:{text_muted};font-style:italic;line-height:1.55;">
-          "Most active shooter incidents in schools are over before a responding officer reaches the building entrance.
-          DFR doesn't replace the officer — it gives the officer eyes on every hallway, stairwell, and exit
-          before they open the first door." — FBI Law Enforcement Bulletin, 'Those Terrible First Few Minutes'
-        </div>
-      </div>
-
-      <!-- DFR vs SRO COMPARISON TABLE -->
-      <div style="font-size:0.7rem;font-weight:700;color:{text_main};text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
-        DFR vs. School Resource Officer (SRO) — Capability Matrix
-        <span class="ss-tip" data-tip="SRO data: RAND 'The Role and Impact of School Resource Officers' (2023); NIJ Effects of SROs on School Crime (OJP); ZipRecruiter SRO Salary 2025; Volt.ai SRO Cost Analysis. DFR data: BRINC technical specifications; Chula Vista PD DFR outcomes; Skydio Campus DFR documentation.">?</span>
-      </div>
-      <div style="overflow-x:auto;border-radius:8px;border:1px solid {card_border};">
-        <table style="width:100%;border-collapse:collapse;font-size:0.72rem;">
-          <thead>
-            <tr style="background:rgba(0,0,0,0.45);">
-              <th style="padding:10px 14px;text-align:left;font-size:0.61rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:{text_muted};">Capability</th>
-              <th style="padding:10px 14px;text-align:center;font-size:0.61rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#f59e0b;">School Resource Officer</th>
-              <th style="padding:10px 14px;text-align:center;font-size:0.61rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:{accent_color};">BRINC DFR</th>
-            </tr>
-          </thead>
-          <tbody>
-            {_school_rows}
-          </tbody>
-        </table>
-      </div>
-
-      <!-- COST COMPARISON CARDS -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;margin-bottom:12px;">
-
-        <div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:16px;">
-          <div style="font-size:0.63rem;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
-            📋 10-School District — Traditional SRO Model
-            <span class="ss-tip" data-tip="Source: ZipRecruiter SRO Salary Data 2025; DeSoto County SRO detailed cost breakdown ($94,147/yr blended total); Volt.ai SRO Cost Analysis. 1 officer per campus at $75K–$120K total annual cost. School-hours coverage only: 7hr/day × 180 school days = 1,260 hrs/yr per campus.">?</span>
-          </div>
-          <div style="font-size:1.6rem;font-weight:900;color:#f59e0b;font-family:'IBM Plex Mono',monospace;">${940_000:,} – ${1_200_000:,}</div>
-          <div style="font-size:0.67rem;color:{text_muted};margin-top:3px;">per year · 10 officers · school hours only</div>
-          <div style="margin-top:10px;display:flex;flex-direction:column;gap:3px;font-size:0.65rem;color:{text_muted};">
-            <div>Coverage: ~1,260 hrs/campus/yr (14.4% of annual hours)</div>
-            <div>Nights, weekends, summer: ❌ no coverage</div>
-            <div>Perimeter / multi-campus: ❌ single building only</div>
-            <div>Proven mass-shooting impact: ❌ no evidence (RAND)</div>
-          </div>
-        </div>
-
-        <div style="background:rgba(0,210,255,0.06);border:1px solid rgba(0,210,255,0.2);border-radius:8px;padding:16px;">
-          <div style="font-size:0.63rem;font-weight:700;color:{accent_color};text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
-            🚁 BRINC DFR — Multi-Campus Deployment
-            <span class="ss-tip" data-tip="BRINC fleet CapEx amortized over 7 years. One hub station covers multiple campuses within patrol radius 24/7. Includes hardware and BRINC support onboarding. Does not include cellular/network costs.">?</span>
-          </div>
-          <div style="font-size:1.6rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">${fleet_capex:,.0f} CapEx</div>
-          <div style="font-size:0.67rem;color:{text_muted};margin-top:3px;">{_dfr_amort_str} amortized · {actual_k_responder + actual_k_guardian} units deployed</div>
-          <div style="margin-top:10px;display:flex;flex-direction:column;gap:3px;font-size:0.65rem;color:{text_muted};">
-            <div>Coverage: 8,760 hrs/yr — 24/7/365 per hub</div>
-            <div>Nights, weekends, summer: ✅ full thermal patrol</div>
-            <div>Multi-campus zones: ✅ {actual_k_responder + actual_k_guardian} simultaneous coverage areas</div>
-            <div>Response time advantage vs ground: +{avg_time_saved:.1f} min saved per incident</div>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- SOURCES FOOTER -->
-      <div style="font-size:0.6rem;color:{text_muted};border-top:1px solid {card_border};padding-top:8px;line-height:1.8;">
-        <strong style="color:{text_main};">Data Sources:</strong>
-        FBI Crime in Schools 2020–2024 Special Report ·
-        NCES Indicators of School Crime &amp; Safety 2023 (NCES 2024-145) ·
-        FBI Active Shooter Study (51-case &amp; 64-incident analyses) ·
-        RAND Corp. "The Role and Impact of School Resource Officers" (2023) ·
-        NIJ Effects of SROs on School Crime (OJP) ·
-        BJS School Crime Statistics 2024 ·
-        Chula Vista PD DFR Program outcomes ·
-        BRINC Drones technical specifications ·
-        K-12 School Shooting Database (k12ssdb.org) ·
-        ZipRecruiter / Volt.ai SRO Salary &amp; Cost Data 2025
-      </div>
-    </div>
-    """
-    _school_full_html = (
-        "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
-        "<meta name='viewport' content='width=device-width,initial-scale=1.0'>"
-        "</head>"
-        f"<body style='margin:0;padding:12px 4px 16px;background:#000000;"
-        "font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;'>"
-        f"{_school_html}</body></html>"
-    )
-    components.html(_school_full_html, height=1300, scrolling=False)
-
-    # ── 4G LTE CELL COVERAGE — 3 carrier maps with % coverage ────────────────
-    st.markdown("---")
-    st.markdown(f"<h3 style='color:{text_main};'>📶 4G LTE Cell Coverage</h3>", unsafe_allow_html=True)
-
-    _cov_state    = st.session_state.get('active_state', '')
-    _cov_boundary = city_boundary_geom  # may be None if no boundary loaded
-
-    _carrier_results = _carrier_coverage_analysis(_cov_state, _cov_boundary)
-
-    if _carrier_results:
-        # ── 3 small maps in a row, sorted highest → lowest coverage ──────────
-        _cov_cols = st.columns(3)
-        for _ci, _cr in enumerate(_carrier_results[:3]):
-            with _cov_cols[_ci]:
-                _pct_display = f"{_cr['pct']:.1f}%" if _cr['pct'] > 0 else "No data"
-                _badge_color = "#22c55e" if _cr['pct'] >= 90 else "#f59e0b" if _cr['pct'] >= 70 else "#ef4444"
-                st.markdown(
-                    f"<div style='text-align:center;padding:6px 0 4px;'>"
-                    f"<span style='font-size:1.1rem;font-weight:800;color:{_cr['color']};'>{_cr['carrier']}</span>"
-                    f"<br><span style='font-size:1.9rem;font-weight:900;color:{_badge_color};font-family:monospace;'>{_pct_display}</span>"
-                    f"<br><span style='font-size:0.62rem;color:#667;text-transform:uppercase;letter-spacing:1px;'>of jurisdiction covered</span>"
-                    f"</div>",
-                    unsafe_allow_html=True
-                )
-                _mini_fig = _build_carrier_mini_map(
-                    _cr, _cov_boundary, center_lat, center_lon,
-                    dynamic_zoom, map_style
-                )
-                st.plotly_chart(_mini_fig, use_container_width=True, config={"displayModeBar": False})
-
-        # Rank line
-        if len(_carrier_results) > 1:
-            _rank_txt = " → ".join(
-                f"<span style='color:{r['color']};font-weight:700;'>{r['carrier']} {r['pct']:.1f}%</span>"
-                for r in _carrier_results[:3]
-            )
-            st.markdown(
-                f"<div style='font-size:0.75rem;color:#556;margin-top:4px;text-align:center;'>"
-                f"Coverage rank: {_rank_txt}</div>",
-                unsafe_allow_html=True
-            )
-    else:
-        # Fallback: FCC link card if parquet not available for this state
-        _fcc_zoom_lte = round(min(13, max(9, dynamic_zoom + 1)), 2)
-        _fcc_url_lte  = (f"https://broadbandmap.fcc.gov/home?version=dec2023"
-                         f"&zoom={_fcc_zoom_lte}&vlon={center_lon:.6f}&vlat={center_lat:.6f}"
-                         f"&speed=25&tech=300&br=4")
-        st.markdown(f"""
-        <a href="{_fcc_url_lte}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
-          <div style="display:flex;align-items:center;justify-content:space-between;
-            background:#0d1b2e;border:1px solid #1e3a5f;border-radius:10px;padding:20px 28px;cursor:pointer;">
-            <div>
-              <div style="color:#00b4d8;font-size:1rem;font-weight:600;margin-bottom:4px;">📶 Open FCC 4G LTE Coverage Map</div>
-              <div style="color:#6b7f99;font-size:0.78rem;">FCC National Broadband Map · AT&amp;T, T-Mobile, Verizon</div>
-            </div>
-            <div style="color:#00b4d8;font-size:1.4rem;">↗</div>
-          </div>
-        </a>""", unsafe_allow_html=True)
-
-    # ── RF LINK COVERAGE — GEOGRAPHY-AWARE ADVANCED MODEL ──────────────────────────
-    st.markdown("---")
-    st.markdown(f"<h3 style='color:{text_main};'>📡 RF Link Coverage — 3390 MHz</h3>", unsafe_allow_html=True)
-
-    # Mode selector
-    _rf_mode = st.radio(
-        "RF Model Mode",
-        ["Advanced (Grid-Based Coverage Probability)", "Quick Estimate (Free-Space Rings)"],
-        index=0,
-        horizontal=True,
-        label_visibility="collapsed"
-    )
-
-    if _rf_mode == "Advanced (Grid-Based Coverage Probability)":
-        # ── ADVANCED RF COVERAGE MODE ──────────────────────────────────────
-        st.markdown(
-            f"<div style='font-size:0.82rem;color:{text_muted};margin-bottom:12px;'>"
-            "<b>Advanced Coverage Probability Model</b> — Geographic terrain, clutter, and building loss. "
-            "Separate uplink (drone→infra) and downlink (infra→drone) paths. "
-            "Combined coverage is the intersection of both links."
-            "</div>",
-            unsafe_allow_html=True
-        )
-
-        # Control panel
-        _adv_col1, _adv_col2, _adv_col3, _adv_col4 = st.columns(4)
-        with _adv_col1:
-            _adv_freq_mhz = st.number_input("Frequency (MHz)", value=3390, min_value=800, max_value=6000, step=100, key='adv_freq')
-        with _adv_col2:
-            _adv_tx_dbm = st.number_input("TX Power (dBm)", value=33, min_value=0, max_value=47, step=1, key='adv_tx_pwr')
-        with _adv_col3:
-            _adv_tx_gain = st.number_input("TX/RX Gain (dBi)", value=3, min_value=0, max_value=12, step=1, key='adv_gain')
-        with _adv_col4:
-            _adv_bw_mhz = st.number_input("Bandwidth (MHz)", value=20, min_value=5, max_value=160, step=5, key='adv_bw')
-
-        _adv_col5, _adv_col6, _adv_col7, _adv_col8 = st.columns(4)
-        with _adv_col5:
-            _adv_drone_alt = st.number_input("Drone Alt (ft AGL)", value=200, min_value=50, max_value=400, step=50, key='adv_drone_alt')
-        with _adv_col6:
-            _adv_infra_ht = st.number_input("Antenna Ht (ft above ground)", value=30, min_value=5, max_value=150, step=5, key='adv_infra_ht')
-        with _adv_col7:
-            _adv_nf_db = st.number_input("Noise Figure (dB)", value=7.0, min_value=2.0, max_value=15.0, step=0.5, key='adv_nf')
-        with _adv_col8:
-            _adv_land_use = st.selectbox("Environment", ["Urban", "Suburban", "Rural", "Water"], index=1, key='adv_landuse')
-
-        _adv_col9, _adv_col10, _adv_col11 = st.columns(3)
-        with _adv_col9:
-            _adv_layer = st.selectbox("Layer", ["Coverage Probability", "SNR (dB)", "Received Power (dBm)"], index=0, key='adv_layer')
-        with _adv_col10:
-            _adv_link = st.selectbox("Link", ["Combined", "Uplink", "Downlink"], index=0, key='adv_link')
-        with _adv_col11:
-            _adv_grid_res = st.selectbox("Grid Resolution", ["Coarse (500m)", "Medium (250m)", "Fine (100m)"], index=1, key='adv_grid')
-
-        _adv_grid_res_map = {"Coarse (500m)": 500, "Medium (250m)": 250, "Fine (100m)": 100}
-        _adv_grid_m = _adv_grid_res_map.get(_adv_grid_res, 250)
-
-        # Compute coverage
-        if active_drones:
-            st.write("Computing coverage grid...")
-            _adv_progress = st.progress(0)
-
-            # Compute grids for all active stations, combine
-            _adv_all_grids = []
-            for _adv_idx, _adv_stn in enumerate(active_drones):
-                _adv_progress.progress(int(100 * _adv_idx / len(active_drones)))
-
-                _adv_grid = _compute_rf_grid_coverage(
-                    tx_lat=_adv_stn['lat'],
-                    tx_lon=_adv_stn['lon'],
-                    tx_alt_m=_adv_infra_ht * 0.3048,
-                    boundary_geom=city_boundary_geom,
-                    freq_mhz=_adv_freq_mhz,
-                    tx_power_dbm=_adv_tx_dbm,
-                    tx_gain_dbi=_adv_tx_gain,
-                    rx_gain_dbi=_adv_tx_gain,
-                    noise_figure_db=_adv_nf_db,
-                    bandwidth_mhz=_adv_bw_mhz,
-                    land_use=_adv_land_use.lower(),
-                    grid_resolution_m=_adv_grid_m,
-                )
-                _adv_all_grids.append((_adv_stn['name'], _adv_grid))
-
-            _adv_progress.progress(100)
-
-            # Layer mapping
-            _adv_layer_map = {
-                "Coverage Probability": "coverage_prob",
-                "SNR (dB)": "snr_db",
-                "Received Power (dBm)": "rx_power_dbm",
-            }
-            _adv_link_map = {
-                "Combined": "combined",
-                "Uplink": "uplink",
-                "Downlink": "downlink",
-            }
-
-            # Display combined heatmap or individual station maps
-            for _stn_name, _stn_grid in _adv_all_grids:
-                st.markdown(f"**{_stn_name}** — {_adv_layer} ({_adv_link})")
-                _adv_fig = _plot_rf_coverage_heatmap(
-                    _stn_grid,
-                    _stn_name,
-                    center_lat=_adv_stn['lat'],
-                    center_lon=_adv_stn['lon'],
-                    zoom=dynamic_zoom,
-                    layer_type=_adv_layer_map.get(_adv_layer, "coverage_prob"),
-                    link_type=_adv_link_map.get(_adv_link, "combined"),
-                )
-                st.plotly_chart(_adv_fig, use_container_width=True, config={"displayModeBar": False})
-
-            # Disclaimer
-            st.markdown(
-                f"<div style='font-size:0.65rem;color:#445;margin-top:12px;padding:8px;background:rgba(0,210,255,0.05);border-left:3px solid #00D2FF;'>"
-                f"<b>Model Notes:</b> "
-                f"Coverage Probability estimates link viability based on SNR thresholds. "
-                f"Terrain blockage uses simplified Fresnel zone calculations. "
-                f"Clutter loss estimated from land-use classification (not surveyed). "
-                f"Path loss includes free-space, clutter, terrain, and fade margin. "
-                f"Results are planning estimates — field measurement recommended for final site survey."
-                f"</div>",
-                unsafe_allow_html=True
-            )
-
-    else:
-        # ── QUICK ESTIMATE MODE (Original Free-Space Model) ────────────────
-        st.markdown(
-            f"<div style='font-size:0.82rem;color:{text_muted};margin-bottom:12px;'>"
-            "<b>Quick Estimate</b> — Simplified Friis free-space model. "
-            "Circular range rings based on SNR tiers. Fast, suitable for initial planning only. "
-            "Use Advanced mode for geography-aware coverage."
-            "</div>",
-            unsafe_allow_html=True
-        )
-
-        _rf_col1, _rf_col2, _rf_col3 = st.columns([2, 1, 1])
-        with _rf_col2:
-            _rf_clutter_label = st.selectbox(
-                "Environment", ["Urban (+15 dB)", "Suburban (+10 dB)", "Rural (+5 dB)"],
-                index=0, key='rf_clutter_sel',
-                help="Clutter correction added to path loss for terrain/building obstruction."
-            )
-        with _rf_col3:
-            _rf_drone_alt = st.number_input("Drone Alt (ft)", value=200, min_value=50, max_value=400, step=50, key='rf_drone_alt')
-        with _rf_col1:
-            _rf_infra_ht  = st.number_input("Tower Ht above station (ft)", value=30, min_value=5, max_value=100, step=5, key='rf_tower_ht')
-
-        _rf_clutter_map = {"Urban (+15 dB)": 15.0, "Suburban (+10 dB)": 10.0, "Rural (+5 dB)": 5.0}
-        _rf_clutter_db  = _rf_clutter_map.get(_rf_clutter_label, 15.0)
-        _rf_infra_m     = _rf_infra_ht * 0.3048      # ft → m
-        _rf_drone_m     = _rf_drone_alt * 0.3048
-
-        _rf_rings = _rf_range_rings_3390(
-            infra_height_m=_rf_infra_m,
-            drone_alt_m=_rf_drone_m,
-            clutter_db=_rf_clutter_db,
-        )
-
-        # Build RF coverage figure
-        _rf_fig = go.Figure()
-
-        # Jurisdiction boundary
-        if city_boundary_geom is not None and not city_boundary_geom.is_empty:
-            _bgeoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
-                       else list(city_boundary_geom.geoms))
-            for _bgi, _bg in enumerate(_bgeoms):
-                _bx, _by = _bg.exterior.coords.xy
-                _rf_fig.add_trace(go.Scattermap(
-                    mode='lines', lon=list(_bx), lat=list(_by),
-                    line=dict(color='#ffffff', width=1.5),
-                    name='Jurisdiction', showlegend=(_bgi == 0), hoverinfo='skip'
-                ))
-
-        # RF rings per station
-        for _rfd in active_drones:
-            for _rf_label, _rf_color, _rf_r_mi in _rf_rings:
-                if _rf_r_mi <= 0:
-                    continue
-                _rf_clats, _rf_clons = get_circle_coords(_rfd['lat'], _rfd['lon'], r_mi=_rf_r_mi)
-                _rf_fig.add_trace(go.Scattermap(
-                    lat=list(_rf_clats), lon=list(_rf_clons),
-                    mode='lines', fill='toself',
-                    line=dict(color=_rf_color, width=1.5),
-                    fillcolor=f"rgba({int(_rf_color[1:3],16)},{int(_rf_color[3:5],16)},{int(_rf_color[5:7],16)},0.08)",
-                    name=f"{_rfd['name'].split(',')[0]} · {_rf_label}",
-                    hovertext=f"<b>{_rfd['name'].split(',')[0]}</b><br>{_rf_label}<br>Radius: {_rf_r_mi:.1f} mi",
-                    hoverinfo='text',
-                    showlegend=True,
-                ))
-
-        # Station dots
-        if active_drones:
-            _rf_fig.add_trace(go.Scattermap(
-                lat=[d['lat'] for d in active_drones],
-                lon=[d['lon'] for d in active_drones],
-                mode='markers+text',
-                marker=dict(size=10, color=[d['color'] for d in active_drones]),
-                text=[d['name'].split(',')[0] for d in active_drones],
-                textposition='top right',
-                textfont=dict(size=10, color='#ffffff'),
-                name='Stations', hoverinfo='text',
-                showlegend=True,
-            ))
-
-        _rf_fig.update_layout(
-            map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style=map_style),
-            margin=dict(l=0, r=0, t=0, b=0), height=520,
-            showlegend=True,
-            legend=dict(yanchor='top', y=0.98, xanchor='left', x=0.02,
-                        bgcolor=legend_bg, bordercolor='#444', borderwidth=1,
-                        font=dict(size=11, color=legend_text)),
-        )
-        st.plotly_chart(_rf_fig, use_container_width=True, config={"displayModeBar": False})
-
-        # Link budget table
-        _rf_budget_rows = ""
-        for _lb, _lc, _lr in _rf_rings:
-            _rf_budget_rows += (
-                f"<tr><td style='padding:5px 10px;color:{_lc};font-weight:600;'>{_lb}</td>"
-                f"<td style='padding:5px 10px;color:#aabbcc;font-family:monospace;'>{_lr:.2f} mi ({_lr*1609.34/1000:.1f} km)</td></tr>"
-            )
-        st.markdown(
-            f"<table style='width:100%;border-collapse:collapse;font-size:0.78rem;margin-top:8px;'>"
-            f"<thead><tr style='border-bottom:1px solid #1e2535;'>"
-            f"<th style='padding:5px 10px;color:#556;text-align:left;'>SNR Tier</th>"
-            f"<th style='padding:5px 10px;color:#556;text-align:left;'>Max Horizontal Range</th>"
-            f"</tr></thead><tbody>{_rf_budget_rows}</tbody></table>"
-            f"<div style='font-size:0.65rem;color:#445;margin-top:6px;'>Model assumptions: 3390 MHz, TX 2W (+33 dBm), gains 3+3 dBi, 20 MHz BW, 7 dB noise figure, {_rf_clutter_label}, drone at {_rf_drone_alt} ft AGL, RF tower {_rf_infra_ht} ft above roofline. <b>Free-space path loss (Friis)</b>. Does not account for terrain, buildings, or multipath — planning estimate only.</div>",
-            unsafe_allow_html=True
-        )
-
-    # ── MOBILE QR CODE ────────────────────────────────────────────────────────
-    st.markdown("---")
-    try:
-        import qrcode as _qrcode
-        from PIL import Image as _PILImage
-        import io as _io_qr, urllib.parse as _up, socket as _sock
-
-        # Build base URL from Streamlit context headers
-        try:
-            _qr_host = st.context.headers.get("host", "") or st.context.headers.get("Host", "")
-            _qr_proto = "https" if (_qr_host and ("streamlit.app" in _qr_host or "share" in _qr_host)) else "http"
-            if not _qr_host:
-                _qr_host = f"{_sock.gethostbyname(_sock.gethostname())}:8501"
-            _qr_base = f"{_qr_proto}://{_qr_host}"
-        except Exception:
+        # Calculate Date Range of CAD data (if available)
+        date_range_str = "Simulated / Unknown"
+        _date_src_df = df_calls_full if df_calls_full is not None else df_calls
+        _label_dt = html_reports._detect_datetime_series_for_labels(_date_src_df)
+        if _label_dt is not None:
             try:
-                _qr_base = f"http://{_sock.gethostbyname(_sock.gethostname())}:8501"
+                _label_dt = pd.to_datetime(_label_dt, errors='coerce').dropna()
+                if not _label_dt.empty:
+                    min_date = _label_dt.min().strftime('%b %Y')
+                    max_date = _label_dt.max().strftime('%b %Y')
+                    date_range_str = f"{min_date} – {max_date}" if min_date != max_date else min_date
             except Exception:
-                _qr_base = "http://localhost:8501"
+                pass
 
-        # Compute area inline (may not yet be in scope)
+        avg_resp_time = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
+
+        # Ground speed: only apply congestion reduction when traffic toggle is on.
+        # Both avg_time_saved and gain_val use the same per-drone avg_time_min basis so
+        # the drone and ground numbers are directly comparable (no full-radius inflation).
+        _base_ground_speed = float(CONFIG["DEFAULT_TRAFFIC_SPEED"])
+        _effective_ground_speed = _base_ground_speed * (1.0 - float(traffic_level) / 100.0) if simulate_traffic else _base_ground_speed
+
         try:
-            _qr_df_c = df_calls_full if df_calls_full is not None else df_calls
-            _qr_lons = _qr_df_c["lon"].dropna(); _qr_lats = _qr_df_c["lat"].dropna()
-            _qr_area = max(1, int((float(_qr_lons.max()) - float(_qr_lons.min())) *
-                                   (float(_qr_lats.max()) - float(_qr_lats.min())) * 3280))
+            if active_drones and _effective_ground_speed > 0:
+                _fleet_gnd_time = (sum(d['avg_time_min'] * d['speed_mph'] * 1.4 / _effective_ground_speed
+                                       for d in active_drones) / len(active_drones))
+                avg_time_saved = max(0.0, _fleet_gnd_time - avg_resp_time)
+            else:
+                avg_time_saved = 0.0
         except Exception:
-            _qr_area = 0
+            avg_time_saved = 0.0
 
-        # Encode active station positions compactly for mobile map
-        # Format: "lat1,lon1;lat2,lon2" (4 decimal places, ≈10m accuracy)
-        try:
-            _stn_parts = [f"{d['lat']:.4f},{d['lon']:.4f}" for d in active_drones[:12]]
-            _stn_str   = ";".join(_stn_parts)
-        except Exception:
-            _stn_str = ""
+        # gain_val: sub-label shown on the Avg Response KPI cell only when traffic toggle is on
+        if simulate_traffic:
+            gain_val = f"{avg_time_saved:.1f} min" if active_drones and _effective_ground_speed > 0 else "N/A"
+        else:
+            gain_val = None
 
-        # Encode incident data compactly for mobile map (minimal sample to keep URL under QR version 40)
-        # Format: "lat1,lon1;lat2,lon2;..." (1 decimal place for ~10km accuracy)
-        _calls_str = ""
-        try:
-            _qr_df_calls = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
-            if _qr_df_calls is not None and not _qr_df_calls.empty and 'lat' in _qr_df_calls.columns and 'lon' in _qr_df_calls.columns:
-                # Sample up to 20 calls to keep URL under QR version 40 limit
-                _call_sample = _qr_df_calls.sample(min(20, len(_qr_df_calls)), random_state=42)
-                _call_parts = [f"{row['lat']:.1f},{row['lon']:.1f}" for _, row in _call_sample.iterrows()
-                               if pd.notna(row.get('lat')) and pd.notna(row.get('lon'))]
-                _calls_str = ";".join(_call_parts[:20])
-        except Exception:
-            pass
+        # ── Persist live deployment metrics so the apprehension table reads real values ──
+        st.session_state['avg_time_saved_min'] = avg_time_saved
+        st.session_state['avg_resp_time_min']  = avg_resp_time
 
-        # Note: Boundary/shapefile outline removed from QR mobile map to avoid misleading simplified versions
-        # The main program renders the full detailed boundary; mobile map focuses on station locations and calls
-
-        _qr_params = _up.urlencode({
-            "city":  str(st.session_state.get("active_city", "")).title(),
-            "state": st.session_state.get("active_state", ""),
-            "pop":   int(st.session_state.get("estimated_pop", 0) or 0),
-            "cov":   round(float(calls_covered_perc or 0), 1),
-            "resp":  round(float(avg_resp_time or 0), 2),
-            "saves": int(annual_savings or 0),
-            "capex": int(fleet_capex or 0),
-            "r":     int(actual_k_responder or 0),
-            "g":     int(actual_k_guardian or 0),
-            "calls": int(total_calls or 0),
-            "area":  _qr_area,
-            "tsav":  round(float(avg_time_saved or 0), 2),
-            "clat":  round(center_lat, 4),
-            "clon":  round(center_lon, 4),
-            "zoom":  round(dynamic_zoom, 1),
-            "s":     _stn_str,
-            "m_calls": _calls_str,
-        })
-        _qr_url = f"{_qr_base}/?view=mobile&{_qr_params}"
-
-        # ── QR code image — high readability with BRINC logo overlay ──────────
-        # Use highest error correction (H) for better phone scanning reliability
-        _qr = _qrcode.QRCode(version=None, error_correction=_qrcode.constants.ERROR_CORRECT_H,
-                              box_size=28, border=8)
-        _qr.add_data(_qr_url)
-        _qr.make(fit=True)
-        _qr_img = _qr.make_image(fill_color="#000000", back_color="#FFFFFF").convert('RGB')
-
-        # Overlay BRINC logo in center
-        try:
-            _logo_path = "logo.png"
-            if Path(_logo_path).exists():
-                _logo = _PILImage.open(_logo_path).convert('RGBA')
-                # Logo should be ~20% of QR code size for good scannability with error correction H
-                _logo_size = int(_qr_img.size[0] * 0.20)
-                _logo = _logo.resize((_logo_size, _logo_size), _PILImage.Resampling.LANCZOS)
-
-                # Create white background square for logo
-                _bg_size = int(_logo_size * 1.15)
-                _white_bg = _PILImage.new('RGB', (_bg_size, _bg_size), 'white')
-                _bg_pos = (((_bg_size - _logo_size) // 2), ((_bg_size - _logo_size) // 2))
-                _white_bg.paste(_logo, _bg_pos, _logo)
-
-                # Paste white background (with logo) centered on QR code
-                _qr_pos = ((_qr_img.size[0] - _bg_size) // 2, (_qr_img.size[1] - _bg_size) // 2)
-                _qr_img.paste(_white_bg, _qr_pos)
-        except Exception:
-            pass
-
-        _qr_buf = _io_qr.BytesIO()
-        _qr_img.save(_qr_buf, format="PNG")
-        import base64 as _b64
-        _qr_b64 = _b64.b64encode(_qr_buf.getvalue()).decode()
-
-        # ── Salesman info from session state ───────────────────────────────────
-        _qr_user  = str(st.session_state.get("brinc_user", "steven.beltran")).strip() or "steven.beltran"
-        _qr_name  = " ".join(w.capitalize() for w in _qr_user.split("."))
-        _qr_email = f"{_qr_user}@brincdrones.com"
-        _qr_city  = st.session_state.get("active_city", "")
-        _qr_state = st.session_state.get("active_state", "")
-        _qr_loc   = f"{_qr_city}, {_qr_state}" if _qr_city else "your city"
-
-        # Get department/jurisdiction name for personalization
-        _qr_dept = st.session_state.get('active_dept_name', '') or _qr_city or 'Jurisdiction'
-        _qr_dept = str(_qr_dept).strip().title()
-
-
-        # ── Render full-width banner ───────────────────────────────────────────
-        # Build as a variable (no leading indentation) to avoid Markdown treating
-        # 4+ leading spaces as a code block, which renders HTML as raw text.
-        _qr_banner = (
-            '<div style="background:linear-gradient(135deg,#0a1220 0%,#0d1630 50%,#080d18 100%);'
-            'border:2px solid #00D2FF;border-radius:20px;padding:40px;margin-top:12px;overflow:hidden;">'
-
-            # Header with department name and info
-            '<div style="margin-bottom:28px;">'
-            '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap;">'
-
-            # Left side: Department info
-            '<div style="flex:1;min-width:280px;">'
-            f'<div style="font-size:2.2rem;font-weight:900;color:#ffffff;line-height:1.2;margin-bottom:8px;">{_qr_dept}</div>'
-            f'<div style="font-size:0.95rem;color:#00D2FF;font-weight:600;letter-spacing:0.5px;margin-bottom:4px;">DFR Deployment Proposal</div>'
-            f'<div style="font-size:0.85rem;color:#889aaa;">{_qr_city}, {_qr_state}</div>'
-            '</div>'
-
-            # Right side: BRINC contact and socials
-            '<div style="flex:0 0 auto;text-align:right;">'
-            '<div style="font-size:0.75rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-bottom:8px;">BRINC Drones</div>'
-            '<div style="font-size:0.85rem;color:#aabbcc;margin-bottom:8px;">'
-            '<div>🌐 <a href="https://brincdrones.com" target="_blank" style="color:#00D2FF;text-decoration:none;font-weight:600;">brincdrones.com</a></div>'
-            '<div>✉ <a href="mailto:info@brincdrones.com" style="color:#00D2FF;text-decoration:none;">info@brincdrones.com</a></div>'
-            '</div>'
-            '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">'
-            '<a href="https://linkedin.com/company/brinc" target="_blank" style="font-size:0.7rem;color:#0a66c2;background:rgba(10,102,194,0.15);border:1px solid rgba(10,102,194,0.4);border-radius:6px;padding:4px 10px;text-decoration:none;font-weight:600;transition:all 0.2s;">LinkedIn</a>'
-            '<a href="https://instagram.com/brincdrones" target="_blank" style="font-size:0.7rem;color:#e1306c;background:rgba(225,48,108,0.12);border:1px solid rgba(225,48,108,0.4);border-radius:6px;padding:4px 10px;text-decoration:none;font-weight:600;transition:all 0.2s;">Instagram</a>'
-            '<a href="https://x.com/BRINCDrones" target="_blank" style="font-size:0.7rem;color:#d0d0d0;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.25);border-radius:6px;padding:4px 10px;text-decoration:none;font-weight:600;transition:all 0.2s;">X/Twitter</a>'
-            '<a href="https://youtube.com/@BRINCDrones" target="_blank" style="font-size:0.7rem;color:#ff0000;background:rgba(255,0,0,0.12);border:1px solid rgba(255,0,0,0.35);border-radius:6px;padding:4px 10px;text-decoration:none;font-weight:600;transition:all 0.2s;">YouTube</a>'
-            '</div>'
-            '</div>'
-
-            '</div>'  # end flex row
-            '</div>'  # end header
-
-            # QR code section — large and centered with white background for readability
-            '<div style="display:flex;flex-direction:column;align-items:center;gap:16px;margin:24px 0 28px;">'
-            f'<div style="background:#ffffff;border-radius:18px;padding:18px;display:inline-block;box-shadow:0 12px 32px rgba(0,210,255,0.25);">'
-            f'<img src="data:image/png;base64,{_qr_b64}" style="width:380px;height:380px;display:block;border-radius:14px;" alt="BRINC Mobile Summary QR"/>'
-            '</div>'
-            '<div style="text-align:center;">'
-            '<div style="font-size:1.05rem;font-weight:800;color:#00D2FF;letter-spacing:0.3px;margin-bottom:6px;">📱 Scan with any smartphone</div>'
-            '<div style="font-size:0.8rem;color:#889aaa;">No login required • Works on iOS & Android • Landscape viewing recommended</div>'
-            '</div>'
-            '</div>'
-
-            # Footer: Rep info
-            '<div style="border-top:1px solid rgba(0,210,255,0.15);padding-top:20px;">'
-            '<div style="font-size:0.7rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-bottom:6px;">Your BRINC Representative</div>'
-            f'<div style="font-size:1.15rem;font-weight:800;color:#ffffff;margin-bottom:4px;">{_qr_name}</div>'
-            f'<div style="font-size:0.85rem;color:#00D2FF;">✉ <a href="mailto:{_qr_email}" style="color:#00D2FF;text-decoration:none;">{_qr_email}</a></div>'
-            '</div>'
-
-            '</div>'  # end banner
-        )
-        st.markdown(_qr_banner, unsafe_allow_html=True)
-    except Exception as _qr_err:
-        st.caption(f"📱 QR code unavailable — install `qrcode` package. ({_qr_err})")
-
-    # ── EXPORT BUTTONS — always visible in sidebar ──
-    st.sidebar.markdown("---")
-
-    # Display authenticated user info (read-only, from Google OAuth)
-    _google_email = st.session_state.get('google_user_email', 'user@brincdrones.com')
-    _google_name_raw = st.session_state.get('google_user_name', 'User')
-
-    st.sidebar.markdown(
-        f"<div style='font-size:0.75rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-bottom:6px;'>BRINC Representative</div>",
-        unsafe_allow_html=True
-    )
-    st.sidebar.markdown(
-        f"<div style='font-size:1rem;font-weight:700;color:#ffffff;margin-bottom:3px;'>{_google_name_raw.replace('.', ' ').title()}</div>",
-        unsafe_allow_html=True
-    )
-    st.sidebar.markdown(
-        f"<div style='font-size:0.8rem;color:#aabbcc;margin-bottom:8px;'>{_google_email}</div>",
-        unsafe_allow_html=True
-    )
-    st.sidebar.caption("*(Authenticated via Google OAuth)*")
-
-    # Use Google auth data for exports
-    user_clean = _google_name_raw.replace('.', ' ').title()
-    prop_email = _google_email
-    prop_name = user_clean
-
-    # Always define these so download buttons work regardless of fleet_capex
-    prop_city  = st.session_state.get('active_city', 'City')
-    prop_state = st.session_state.get('active_state', 'FL')
-    _safe_city_base = prop_city.replace(" ", "_").replace("/", "_")
-
-    if fleet_capex > 0:
-
-        prop_city  = st.session_state.get('active_city', 'City')
-        prop_state = st.session_state.get('active_state', 'FL')
-
-        pop_metric = st.session_state.get('estimated_pop', 250000)
-        current_time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        safe_city = prop_city.replace(" ","_").replace("/","_")
-
-        _session_start = st.session_state.get('session_start', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-        try:
-            _start_dt = datetime.datetime.strptime(_session_start, '%Y-%m-%d %H:%M:%S')
-            _dur_min  = round((datetime.datetime.now() - _start_dt).total_seconds() / 60, 1)
-        except Exception:
-            _dur_min = ''
-
-        avg_resp_time    = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
-        _exp_base_gs     = float(CONFIG["DEFAULT_TRAFFIC_SPEED"])
-        _exp_eff_gs      = _exp_base_gs * (1.0 - float(traffic_level) / 100.0) if simulate_traffic else _exp_base_gs
-        avg_time_saved   = (max(0.0, (sum(d['avg_time_min'] * d['speed_mph'] * 1.4 / _exp_eff_gs for d in active_drones) / len(active_drones)) - avg_resp_time)) if active_drones and _exp_eff_gs > 0 else 0.0
-        _calls_lons = (df_calls_full if df_calls_full is not None else df_calls)['lon'].dropna()
-        _calls_lats = (df_calls_full if df_calls_full is not None else df_calls)['lat'].dropna()
-        minx = float(_calls_lons.min()) if len(_calls_lons) else 0
-        maxx = float(_calls_lons.max()) if len(_calls_lons) else 0
-        miny = float(_calls_lats.min()) if len(_calls_lats) else 0
-        maxy = float(_calls_lats.max()) if len(_calls_lats) else 0
-        area_sq_mi_est   = max(1, int((maxx - minx) * (maxy - miny) * 3280))
-        export_details = {
-            # Session
-            "session_id":            st.session_state.get('session_id', ''),
-            "session_start":         _session_start,
-            "session_duration_min":  _dur_min,
-            "data_source":           st.session_state.get('data_source', 'unknown'),
-            # Jurisdiction (user-selected)
-            "population":            pop_metric,
-            "total_calls":           st.session_state.get('total_original_calls', 0),
-            "daily_calls":           max(1, int(st.session_state.get('total_original_calls', 0) / 365)),
-            "area_sq_mi":            area_sq_mi_est,
-            # City/state enrichment
-            "city_confirmed_match":  (
-                st.session_state.get('file_meta', {}).get('file_inferred_city', '').lower().strip() ==
-                prop_city.lower().strip()
-                if st.session_state.get('file_meta', {}).get('file_inferred_city', '') else ''
-            ),
-            "multi_city_targets":    json.dumps(st.session_state.get('target_cities', [])),
-            "num_cities_targeted":   len(st.session_state.get('target_cities', [])),
-            # Financials
-            "opt_strategy":          opt_strategy,
-            "incremental_build":     incremental_build,
-            "allow_redundancy":      allow_redundancy,
-            "dfr_rate":              int(dfr_dispatch_rate*100),
-            "deflect_rate":          int(deflection_rate*100),
-            "fleet_capex":           fleet_capex,
-            "annual_savings":        annual_savings,
-            "thermal_savings":       thermal_savings,
-            "k9_savings":            k9_savings,
-            "possible_additional_savings": possible_additional_savings,
-            "break_even":            break_even_text,
-            # Operational
-            "avg_response_min":      round(avg_resp_time, 2),
-            "avg_time_saved_min":    round(avg_time_saved, 2),
-            "area_covered_pct":      round(area_covered_perc, 1),
-            "calls_per_capita":      round(st.session_state.get('total_original_calls', 0) / max(pop_metric, 1), 4),
-            # Engagement / depth signals
-            "r_resp_radius":         st.session_state.get('r_resp', ''),
-            "r_guard_radius":        st.session_state.get('r_guard', ''),
-            "estimated_pop_input":   pop_metric,
-            "boundary_kind":         st.session_state.get('boundary_kind', ''),
-            "boundary_source_path":  st.session_state.get('boundary_source_path', ''),
-            "sim_or_upload":         st.session_state.get('data_source', 'unknown'),
-            "onboarding_completed":  st.session_state.get('onboarding_done', False),
-            "demo_mode_used":        st.session_state.get('demo_mode_used', False),
-            "map_viewed":            st.session_state.get('map_build_logged', False),
-            "export_type_sequence":  json.dumps(st.session_state.get('export_event_log', [])),
-            "total_exports_in_session": st.session_state.get('export_count', 0),
-            # File data matrix (populated by aggressive_parse_calls → _extract_file_meta)
-            "file_meta":             st.session_state.get('file_meta', {}),
-            # Drones
-            "active_drones": [{
-                "name": d['name'], "type": d['type'],
-                "lat": d['lat'],   "lon": d['lon'],
-                "avg_time_min":    d.get('avg_time_min', 0),
-                "faa_ceiling":     d.get('faa_ceiling', ''),
-                "annual_savings":  d.get('annual_savings', 0),
-            } for d in active_drones],
-        }
-
-        _mgdf_export = st.session_state.get('master_gdf_override')
-        _boundary_geojson_export = None
-        if _mgdf_export is not None and not _mgdf_export.empty:
-            try:
-                _boundary_geojson_export = _mgdf_export.to_crs(epsg=4326).to_json()
-            except Exception:
-                _boundary_geojson_export = None
-
-        export_dict = {
-            "city": prop_city, "state": prop_state,
-            "_disclaimer": (
-                "SIMULATION TOOL: All figures in this file are model estimates based on user-provided inputs. "
-                "Real-world results will vary. This is not a legal recommendation, binding proposal, contract, "
-                "or guarantee of any product, service, or financial outcome."
-            ),
-            # Fleet counts and ranges
-            "k_resp": k_responder, "k_guard": k_guardian,
-            "r_resp": resp_radius_mi, "r_guard": guard_radius_mi,
-            # Rates
-            "dfr_rate": int(dfr_dispatch_rate*100), "deflect_rate": int(deflection_rate*100),
-            # Optimization strategies
-            "resp_strategy": resp_strategy_raw,
-            "guard_strategy": guard_strategy_raw,
-            "deployment_mode_idx": st.session_state.get('deployment_mode_idx', 1),
-            "incremental_build": st.session_state.get('incremental_build', True),
-            "auto_cap_dfr": st.session_state.get('auto_cap_dfr', True),
-            # Boundary selection
-            "use_county_boundary": st.session_state.get('use_county_boundary', False),
-            # Locked stations (must restore before auto-minimums runs)
-            "pinned_guard_names": list(pinned_guard_names),
-            "pinned_resp_names":  list(pinned_resp_names),
-            # Custom / pin-dropped stations (bypass OSM on reimport)
-            "custom_stations": html_reports._safe_df_to_records(st.session_state.get('custom_stations')),
-            # Whether fleet was manually built via pin-drop
-            "pin_drop_used": st.session_state.get('pin_drop_used', False),
-            # Call and station data
-            "calls_data": html_reports._safe_df_to_records(
-                st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None
-                else st.session_state.get('df_calls')
-            ),
-            "stations_data": html_reports._safe_df_to_records(st.session_state.get('df_stations')),
-            "faa_geojson": faa_geojson,
-            # Boundary / shapefile
-            "boundary_geojson": _boundary_geojson_export,
-            "boundary_kind": st.session_state.get('boundary_kind', 'place'),
-            "boundary_source_path": st.session_state.get('boundary_source_path', ''),
-            # Sidebar settings — BRINC rep info
-            "brinc_user": st.session_state.get('brinc_user', 'steven.beltran'),
-            # Pricing tier selection
-            "pricing_tier": st.session_state.get('pricing_tier', 'Safe Guard'),
-            "app_version": __version__,
-        }
-
-        fig_for_export = go.Figure()
-
-        # ── Boundary polygon ─────────────────────────────────────────────────
-        if city_boundary_geom is not None and not city_boundary_geom.is_empty:
-            _export_geoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
-                             else list(city_boundary_geom.geoms))
-            for _gi, _geom in enumerate(_export_geoms):
-                _bx, _by = _geom.exterior.coords.xy
-                fig_for_export.add_trace(go.Scattermap(
-                    mode="lines", lon=list(_bx), lat=list(_by),
-                    line=dict(color=map_boundary_color, width=2),
-                    name="Jurisdiction Boundary", hoverinfo='skip',
-                    showlegend=(_gi == 0)
-                ))
-
-        # ── Incident call dots ──────────────────────────────────────────��────
-        _export_calls = display_calls if (display_calls is not None and not display_calls.empty) else None
-        if _export_calls is not None:
-            # Cap at 40K for export file-size; sample deterministically
-            _EC_MAX = 40_000
-            if len(_export_calls) > _EC_MAX:
-                _export_calls = _export_calls.sample(_EC_MAX, random_state=42)
-            _exp_pt_size = (2 if len(_export_calls) > 20_000 else
-                            3 if len(_export_calls) > 8_000 else 4)
-            _exp_opacity = (0.18 if len(_export_calls) > 20_000 else
-                            0.28 if len(_export_calls) > 8_000 else 0.40)
-            _has_agency = 'agency' in _export_calls.columns
-            _exp_fire   = _export_calls[_export_calls['agency'].str.lower() == 'fire'] if _has_agency else _export_calls.iloc[0:0]
-            _exp_police = _export_calls[_export_calls['agency'].str.lower() != 'fire'] if _has_agency else _export_calls
-            if not _exp_police.empty:
-                fig_for_export.add_trace(go.Scattermap(
-                    lat=_exp_police.geometry.y, lon=_exp_police.geometry.x,
-                    mode='markers',
-                    marker=dict(size=_exp_pt_size, color=map_incident_color, opacity=_exp_opacity),
-                    name="Incidents", hoverinfo='skip'
-                ))
-            if not _exp_fire.empty:
-                fig_for_export.add_trace(go.Scattermap(
-                    lat=_exp_fire.geometry.y, lon=_exp_fire.geometry.x,
-                    mode='markers',
-                    marker=dict(size=_exp_pt_size, color='#ff3b3b', opacity=_exp_opacity),
-                    name="Fire Incidents", hoverinfo='skip'
-                ))
-
-        # ── 4G LTE coverage polygons (legendonly, toggleable in export) ─────
-        _exp_cov_state = st.session_state.get('active_state', '')
-        if _exp_cov_state:
-            add_coverage_traces(fig_for_export, _exp_cov_state, visible='legendonly')
-
-        # ── Coverage circles + station pins ──────────────────────────────────
-        for d in active_drones:
-            clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
-            fig_for_export.add_trace(go.Scattermap(
-                lat=list(clats)+[None,d['lat']], lon=list(clons)+[None,d['lon']],
-                mode='lines+markers', line=dict(color=d['color'], width=3),
-                marker=dict(size=[0]*len(clats)+[0,16], color=d['color']),
-                fill='toself', fillcolor='rgba(0,0,0,0)', name=d['name'][:30]
-            ))
-
-        fig_for_export.update_layout(
-            map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
-            margin=dict(l=0,r=0,t=0,b=0), height=500, showlegend=True,
-            legend=dict(
-                yanchor="top", y=0.98, xanchor="left", x=0.02,
-                bgcolor=legend_bg, bordercolor="#444444", borderwidth=1,
-                font=dict(color=legend_text, size=11)
-            )
-        )
-        map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
-        station_rows = "".join(f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>" for d in active_drones)
-
-        all_bldgs_rows = ""
-        _type_colors = {
-            "Police":          ("rgba(0,210,255,0.1)",    "#0066aa"),
-            "Fire":            ("rgba(220,53,69,0.1)",    "#aa0022"),
-            "EMS":             ("rgba(255,100,50,0.1)",   "#b33000"),
-            "School":          ("rgba(255,215,0,0.12)",   "#7a6000"),
-            "Hospital":        ("rgba(34,197,94,0.1)",    "#006622"),
-            "University":      ("rgba(59,130,246,0.1)",   "#1d4ed8"),
-            "Transit":         ("rgba(16,185,129,0.1)",   "#065f46"),
-            "Community":       ("rgba(245,158,11,0.1)",   "#92400e"),
-            "Courthouse":      ("rgba(139,92,246,0.12)",  "#5b21b6"),
-            "Social Services": ("rgba(236,72,153,0.1)",   "#9d174d"),
-            "Government":      ("rgba(139,92,246,0.1)",   "#4b0082"),
-            "Library":         ("rgba(249,115,22,0.1)",   "#8a3300"),
-            "Power Station":   ("rgba(255,165,0,0.1)",    "#cc6600"),
-            "Water Treatment": ("rgba(100,200,255,0.1)",  "#0066cc"),
-            "Place of Worship": ("rgba(200,100,200,0.1)", "#663366"),
-        }
-        # ── Facility type counts (for summary grid + community impact dashboard) ──
-        _fac_counts = {}
-        for _, _frow in df_stations_all.iterrows():
-            _ft = str(_frow.get('type', 'Other'))
-            _fac_counts[_ft] = _fac_counts.get(_ft, 0) + 1
-
-        # ── Facility type summary HTML (icons + counts) ──────────────────────
-        _FAC_ICONS = {
-            "Police": "🚔", "Fire": "🚒", "EMS": "🚑", "School": "🏫",
-            "Hospital": "🏥", "University": "🎓", "Transit": "🚌",
-            "Community": "🏛️", "Courthouse": "⚖️", "Social Services": "🤝",
-            "Government": "🏛️", "Library": "📚",
-            "Power Station": "⚡", "Water Treatment": "💧", "Place of Worship": "✝️",
-        }
-        _FAC_SOURCES = {
-            "Police":          "DHS HIFLD Law Enforcement Locations · OpenStreetMap (amenity=police) · ODbL license",
-            "Fire":            "DHS HIFLD Fire Stations dataset (public domain) · OpenStreetMap (amenity=fire_station)",
-            "EMS":             "OpenStreetMap (amenity=ambulance_station) · NEMSIS National EMS Database (nemsis.org)",
-            "School":          "OpenStreetMap (amenity=school) · NCES Common Core of Data (nces.ed.gov)",
-            "Hospital":        "OpenStreetMap (amenity=hospital) · CMS Hospital Compare (cms.gov)",
-            "University":      "OpenStreetMap (amenity=university / college) · IPEDS (nces.ed.gov/ipeds)",
-            "Transit":         "OpenStreetMap (amenity=bus_station · railway=station) · NTD National Transit Database (transit.dot.gov)",
-            "Community":       "OpenStreetMap (amenity=community_centre) · IMLS Public Libraries Survey",
-            "Courthouse":      "OpenStreetMap (amenity=courthouse) · PACER / US Courts (uscourts.gov)",
-            "Social Services": "OpenStreetMap (amenity=social_facility) · HUD Location Affordability Index",
-            "Government":      "OpenStreetMap (building=government) · TIGER/Line Shapefiles (census.gov)",
-            "Library":         "OpenStreetMap (amenity=library) · IMLS Public Libraries Survey (imls.gov)",
-            "Power Station":   "OpenStreetMap (power=station) · US Energy Information Administration (eia.gov)",
-            "Water Treatment": "OpenStreetMap (man_made=water_treatment) · EPA Enviromapper · US Water Infrastructure Database",
-            "Place of Worship": "OpenStreetMap (amenity=place_of_worship) · Faith-based facility directory",
-        }
-        _fac_summary_cells = ""
-        for _ft, _fcnt in sorted(_fac_counts.items(), key=lambda x: -x[1]):
-            _tc2 = _type_colors.get(_ft, ("rgba(0,0,0,0.04)", "#555"))
-            _icon = _FAC_ICONS.get(_ft, "🏢")
-            _src  = _FAC_SOURCES.get(_ft, "OpenStreetMap contributors (ODbL)")
-            _fac_summary_cells += (
-                f'<div style="background:{_tc2[0]};border:1px solid {_tc2[1]}33;border-radius:8px;'
-                f'padding:10px 14px;display:flex;align-items:center;gap:10px;">'
-                f'<span style="font-size:20px">{_icon}</span>'
-                f'<div><div style="font-size:11px;font-weight:700;color:{_tc2[1]};text-transform:uppercase;'
-                f'letter-spacing:0.5px;">{_ft}</div>'
-                f'<div style="font-size:18px;font-weight:900;color:#111;font-family:\'IBM Plex Mono\',monospace;">{_fcnt}</div>'
-                f'<div style="font-size:9px;color:#777;margin-top:1px;">facilities</div></div>'
-                f'<abbr title="Source: {_src}" style="margin-left:auto;font-size:10px;color:#aaa;'
-                f'text-decoration:none;cursor:help;">ⓘ</abbr>'
-                f'</div>'
-            )
-
-        for _, row in df_stations_all.iterrows():
-            gmaps_link = f"https://www.google.com/maps/search/?api=1&query={row['lat']},{row['lon']}"
-            _rtype = str(row.get('type', 'Facility'))
-            _tc = _type_colors.get(_rtype, ("rgba(0,0,0,0.04)","#555"))
-            _short_name = str(row['name'])[:45] + ("…" if len(str(row['name']))>45 else "")
-            _src_tip = _FAC_SOURCES.get(_rtype, "OpenStreetMap contributors (ODbL)")
-            all_bldgs_rows += (
-                f'''<div class="infra-item">
-                  <span class="i-name" title="{row['name']}">{_short_name}</span>
-                  <span class="i-type" style="background:{_tc[0]};color:{_tc[1]}">{_rtype}</span>
-                  <abbr title="Source: {_src_tip}" style="font-size:10px;color:#aaa;text-decoration:none;cursor:help;margin-left:auto;">ⓘ</abbr>
-                  <a class="i-link" href="{gmaps_link}" target="_blank">↗</a>
-                </div>'''
-            )
-
-        logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
-        logo_html_str = f'<img src="data:image/png;base64,{logo_b64}" style="height:40px;">' if logo_b64 else '<div style="font-size:24px;font-weight:900;letter-spacing:3px;color:#fff;">BRINC</div>'
-
-        jurisdiction_list = ", ".join(selected_names) if selected_names else prop_city
-        all_station_types = df_stations_all['type'].dropna().unique().tolist() if 'type' in df_stations_all.columns else []
-        police_dept_names = [d['name'] for d in active_drones if '[Police]' in d['name']]
-        fire_dept_names   = [d['name'] for d in active_drones if '[Fire]' in d['name']]
-        ems_dept_names    = [d['name'] for d in active_drones if '[EMS]' in d['name']]
-
-        police_stations = [d['name'] for d in active_drones if 'Police' in d.get('name','') or (
-            'type' in df_stations_all.columns and
-            'Police' in str(df_stations_all[df_stations_all['name'].str.contains(
-                d['name'].split(']')[-1].strip(), na=False, regex=False
-            )]['type'].values[:1])
-        )]
-
-        dept_summary_parts = []
-        if police_dept_names: dept_summary_parts.append(f"{len(police_dept_names)} Police station{'s' if len(police_dept_names)>1 else ''}")
-        if fire_dept_names:   dept_summary_parts.append(f"{len(fire_dept_names)} Fire station{'s' if len(fire_dept_names)>1 else ''}")
-        if ems_dept_names:    dept_summary_parts.append(f"{len(ems_dept_names)} EMS station{'s' if len(ems_dept_names)>1 else ''}")
-        dept_summary = ", ".join(dept_summary_parts) if dept_summary_parts else f"{len(active_drones)} municipal stations"
-        police_names_str = (", ".join([n.replace('[Police] ','') for n in police_dept_names[:6]]) + ("..." if len(police_dept_names)>6 else "")) if police_dept_names else "municipal facilities"
-        total_fleet = actual_k_responder + actual_k_guardian
-        analytics_html_export = html_reports.generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls), export_mode=True)
-        cad_charts_html_export = html_reports._build_cad_charts_html(df_calls_full if df_calls_full is not None else df_calls)
-        staffing_pressure_html_export = ""
-
-        prepared_for_city = st.session_state.get('active_city', prop_city) or prop_city
-        prepared_by_name = prop_name
-
-        # ── School safety export variables ────────────────────────────────────────
-        _exp_dfr_amortized = int(fleet_capex / 7) if fleet_capex > 0 else 0
-        _dfr_amort_str     = f"${_exp_dfr_amortized:,}/yr" if _exp_dfr_amortized > 0 else "~$11K–22K/yr"
-
-        # ── Build custom-content HTML blocks from AE editable fields ────────────
-        _doc_intro   = st.session_state.get('doc_custom_intro',   '').strip()
-        _doc_pt1     = st.session_state.get('doc_talking_pt_1',  '').strip()
-        _doc_pt2     = st.session_state.get('doc_talking_pt_2',  '').strip()
-        _doc_pt3     = st.session_state.get('doc_talking_pt_3',  '').strip()
-        _doc_closing = st.session_state.get('doc_custom_closing', '').strip()
-        _doc_phone   = st.session_state.get('doc_ae_phone',       '').strip()
-
-        _custom_intro_html = (
-            f'<div style="margin-top:20px;padding:16px 20px;background:#f0f8ff;border-left:4px solid #00D2FF;'
-            f'border-radius:0 6px 6px 0;font-size:15px;color:#1a2a3a;line-height:1.8;">'
-            f'{_doc_intro}</div>'
-        ) if _doc_intro else ''
-
-        _pts = [p for p in [_doc_pt1, _doc_pt2, _doc_pt3] if p]
-        _custom_pts_html = (
-            '<ul style="margin-top:16px;padding-left:20px;font-size:14px;color:#374151;line-height:2;">'
-            + ''.join(f'<li>{p}</li>' for p in _pts)
-            + '</ul>'
-        ) if _pts else ''
-
-        _custom_closing_html = (
-            f'<div style="margin-top:24px;padding:16px 20px;background:#f9fafb;border:1px solid #e4e6ea;'
-            f'border-radius:6px;font-size:14px;color:#374151;line-height:1.8;">'
-            f'{_doc_closing}</div>'
-        ) if _doc_closing else ''
-
-        _ae_phone_html = (
-            f'<div style="margin-top:4px;font-size:13px;color:#555;">📞 {_doc_phone}</div>'
-        ) if _doc_phone else ''
-        # ── Export personalization: extract call-type and priority stats ────────
-        _exp_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
-        _exp_top_calls, _exp_pri_str, _exp_date_range = [], "mixed priorities", "recent period"
-        try:
-            for _cc in ['call_type_desc','agencyeventtypecodedesc','calldesc','description']:
-                if _cc in _exp_df.columns:
-                    _tc = _exp_df[_cc].dropna().str.strip().value_counts().head(5)
-                    if not _tc.empty:
-                        _exp_top_calls = list(zip(_tc.index.tolist(), _tc.values.tolist()))
-                    break
-            if 'priority' in _exp_df.columns:
-                _pc = _exp_df['priority'].dropna().value_counts().sort_index()
-                _pri_parts = [f"Priority {k}: {v:,} ({v/max(len(_exp_df),1)*100:.0f}%)" for k,v in _pc.items() if str(k).strip().isdigit()]
-                _exp_pri_str = " · ".join(_pri_parts[:4]) if _pri_parts else "mixed priorities"
-            if 'date' in _exp_df.columns:
-                _dd = pd.to_datetime(_exp_df['date'], errors='coerce').dropna()
-                if not _dd.empty:
-                    _exp_date_range = f"{_dd.min().strftime('%b %Y')} – {_dd.max().strftime('%b %Y')}"
-        except Exception:
-            pass
-        _top5_html = ""
-        for _cname, _ccnt in (_exp_top_calls or []):
-            _cpct = f"{_ccnt/max(len(_exp_df),1)*100:.1f}%"
-            _is_prop = any(w in str(_cname).upper() for w in ['THEFT','BURGLAR','VANDAL','ROBBERY','TRESPASS','LARCEN','AUTO','VEHICLE','BREAK','SHOPLI'])
-            _cflag = ' <span style="color:#f59e0b;font-size:10px">property-related</span>' if _is_prop else ''
-            _top5_html += f'<tr><td><strong>{_cname}</strong>{_cflag}</td><td style="font-family:monospace;color:#374151">{_ccnt:,}</td><td style="color:#6b7280">{_cpct}</td></tr>'
-        _guardian_img_b64 = get_transparent_product_base64("gigs.png") or ""
-        logo_b64_dark = get_themed_logo_base64("logo.png", theme="dark")
-        logo_b64_light = get_themed_logo_base64("logo.png", theme="light")
-
-        # ── FCC 4G LTE Coverage Map URL for export ────────────────────────────
-        _fcc_zoom_export = round(min(13, max(9, dynamic_zoom + 1)), 2)
-        _fcc_url = (f"https://broadbandmap.fcc.gov/home?version=dec2023"
-                    f"&zoom={_fcc_zoom_export}&vlon={center_lon:.6f}&vlat={center_lat:.6f}"
-                    f"&speed=25&tech=300&br=4")
-
-        # ── Re-establish tier badge variables for export ────────────────────────
-        _exp_pricing_tier = st.session_state.get('pricing_tier', 'Safe Guard')
-        if _exp_pricing_tier == "Safe Guard":
+        # ── Re-establish tier badge variables for display ──────────────────────────
+        _pricing_tier = st.session_state.get('pricing_tier', 'Safe Guard')
+        if _pricing_tier == "Safe Guard":
             _tier_badge = "🛡️ Safe Guard"
             _tier_desc = "Advanced Custom Features"
         else:
             _tier_badge = "🛡️ Safe Guard Lite"
             _tier_desc = "Core Functionality"
 
-        export_html = f"""<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BRINC DFR Proposal — {prop_city}, {prop_state}</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
-<style>
-*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
-:root{{
-  --black:#000000;--white:#ffffff;--cyan:#00D2FF;--gold:#FFD700;
-  --ink:#0a0a0f;--surface:#f7f8fa;--border:#e4e6ea;
-  --text:#111118;--muted:#6b7280;--light:#f0f2f6;
-  --resp:#00D2FF;--guard:#FFD700;--green:#22c55e;--amber:#f59e0b;
-}}
-html{{scroll-behavior:smooth}}
-body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text);line-height:1.6;display:flex;min-height:100vh}}
+        # 1. THE SINGLE-LINE EXECUTIVE HEADER
+        logo_b64 = get_transparent_product_base64("gigs.png")
+        main_logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:32px; vertical-align:middle; margin-right:15px;">' if logo_b64 else f'<span style="font-size:1.5rem; font-weight:900; letter-spacing:2px; color:#ffffff; margin-right:15px;">BRINC</span>'
 
-/* ── LEFT SIDEBAR INDEX ──────────────────────────────────────── */
-.doc-sidebar{{
-  position:fixed;top:0;left:0;width:220px;height:100vh;
-  background:var(--ink);overflow-y:auto;z-index:100;
-  display:flex;flex-direction:column;
-  border-right:1px solid #1a1a2a;
-}}
-.sidebar-logo{{
-  padding:28px 24px 20px;
-  border-bottom:1px solid #1a1a2a;
-}}
-.sidebar-logo img{{height:40px;display:block}}
-.sidebar-logo .brand{{font-size:22px;font-weight:900;letter-spacing:3px;color:#fff}}
-.sidebar-city{{
-  padding:16px 24px;
-  border-bottom:1px solid #1a1a2a;
-}}
-.sidebar-city .city-name{{font-size:13px;font-weight:700;color:#fff;letter-spacing:0.3px}}
-.sidebar-city .city-sub{{font-size:11px;color:#666;margin-top:2px}}
-.sidebar-nav{{padding:20px 0;flex:1}}
-.sidebar-nav a{{
-  display:flex;align-items:center;gap:10px;
-  padding:9px 24px;font-size:12px;font-weight:500;
-  color:#888;text-decoration:none;
-  border-left:2px solid transparent;
-  transition:all 0.15s;
-}}
-.sidebar-nav a:hover,.sidebar-nav a.active{{
-  color:#fff;background:rgba(0,210,255,0.06);
-  border-left-color:var(--cyan);
-}}
-.sidebar-nav .nav-num{{
-  font-size:10px;font-weight:700;color:#333;
-  width:18px;text-align:center;flex-shrink:0;
-}}
-.sidebar-nav a:hover .nav-num,.sidebar-nav a.active .nav-num{{color:var(--cyan)}}
-.sidebar-footer{{
-  padding:20px 24px;border-top:1px solid #1a1a2a;
-  font-size:10px;color:#444;line-height:1.6;
-}}
-.sidebar-footer a{{color:#555;text-decoration:none}}
-
-/* ── MAIN CONTENT ────────────────────────────────────────────── */
-.doc-main{{margin-left:220px;flex:1;min-width:0}}
-
-/* ── PAGE SECTIONS (each prints as independent page) ─────────── */
-.doc-section{{
-  background:#fff;
-  border-bottom:6px solid var(--surface);
-  padding:52px 60px;
-  position:relative;
-}}
-.doc-section:first-child{{padding-top:64px}}
-
-/* Section header bar */
-.section-eyebrow{{
-  display:flex;align-items:center;gap:10px;
-  margin-bottom:32px;
-}}
-
-/* ── SOURCE BADGE ──────────────────────────────────────────────── */
-.src{{
-  display:inline-flex;align-items:center;justify-content:center;
-  width:14px;height:14px;border-radius:50%;
-  background:rgba(100,116,139,0.1);color:#94a3b8;
-  border:1px solid rgba(100,116,139,0.28);
-  font-size:8px;font-weight:700;cursor:default;
-  margin-left:4px;vertical-align:middle;position:relative;
-  font-style:normal;text-decoration:none;flex-shrink:0;
-}}
-.src:hover::after{{
-  content:attr(data-src);
-  position:absolute;bottom:130%;left:50%;
-  transform:translateX(-50%);
-  background:#1e293b;color:#e2e8f0;
-  font-size:10.5px;font-weight:400;padding:7px 11px;
-  border-radius:6px;white-space:normal;width:270px;
-  line-height:1.55;z-index:9999;
-  border:1px solid #334155;
-  box-shadow:0 6px 20px rgba(0,0,0,0.4);
-  pointer-events:none;text-transform:none;letter-spacing:normal;
-}}
-.copy-section-btn{{
-  margin-left:auto;
-  display:inline-flex;align-items:center;gap:6px;
-  font-size:10px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
-  color:var(--cyan);border:1px solid rgba(0,210,255,0.35);
-  background:rgba(0,210,255,0.06);
-  padding:4px 12px;border-radius:100px;cursor:pointer;
-  font-family:'IBM Plex Mono',monospace;
-  transition:background 0.15s,border-color 0.15s;
-  user-select:none;
-}}
-.copy-section-btn:hover{{background:rgba(0,210,255,0.14);border-color:rgba(0,210,255,0.6);}}
-.copy-section-btn.copied{{color:#39FF14;border-color:rgba(57,255,20,0.5);background:rgba(57,255,20,0.07);}}
-.copy-section-btn.grant-law{{color:#3b82f6;border-color:rgba(59,130,246,0.35);background:rgba(59,130,246,0.06);}}
-.copy-section-btn.grant-law:hover{{background:rgba(59,130,246,0.14);border-color:rgba(59,130,246,0.6);}}
-.copy-section-btn.grant-fire{{color:#f97316;border-color:rgba(249,115,22,0.35);background:rgba(249,115,22,0.06);}}
-.copy-section-btn.grant-fire:hover{{background:rgba(249,115,22,0.14);border-color:rgba(249,115,22,0.6);}}
-.copy-section-btn.community{{color:#22c55e;border-color:rgba(34,197,94,0.35);background:rgba(34,197,94,0.06);}}
-.copy-section-btn.community:hover{{background:rgba(34,197,94,0.14);border-color:rgba(34,197,94,0.6);}}
-.section-eyebrow .pg-num{{
-  font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;
-  color:var(--cyan);border:1px solid rgba(0,210,255,0.3);
-  padding:3px 10px;border-radius:100px;font-family:'IBM Plex Mono',monospace;
-}}
-.section-eyebrow .pg-title{{
-  font-size:10px;font-weight:600;letter-spacing:2px;text-transform:uppercase;
-  color:var(--muted);
-}}
-
-/* ── COVER PAGE ──────────────────────────────────────────────── */
-.cover-page{{
-  background:var(--ink);color:#fff;min-height:100vh;
-  display:flex;flex-direction:column;justify-content:space-between;
-  padding:60px;position:relative;overflow:hidden;
-}}
-.cover-page::before{{
-  content:'';position:absolute;inset:0;
-  background:radial-gradient(ellipse 80% 60% at 70% 30%,rgba(0,210,255,0.08) 0%,transparent 70%);
-  pointer-events:none;
-}}
-.cover-logo{{margin-bottom:auto}}
-.cover-logo img{{height:52px}}
-.cover-logo .brand{{font-size:28px;font-weight:900;letter-spacing:4px;color:#fff}}
-.cover-headline{{margin:60px 0 40px}}
-.cover-tag{{
-  font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;
-  color:var(--cyan);margin-bottom:20px;
-}}
-.cover-headline h1{{
-  font-size:52px;font-weight:900;line-height:1.05;letter-spacing:-1px;
-  color:#fff;margin-bottom:16px;
-}}
-.cover-headline h1 span{{color:var(--cyan)}}
-.cover-population{{
-  font-size:13px;color:#aaa;margin-bottom:14px;letter-spacing:0.2px;
-  border-left:3px solid var(--cyan);padding-left:10px;
-}}
-.cover-population strong{{color:#fff;font-weight:700}}
-.cover-headline p{{font-size:15px;color:#888;max-width:520px;line-height:1.7}}
-.cover-meta{{
-  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
-  background:#1a1a2a;border:1px solid #1a1a2a;border-radius:10px;overflow:hidden;
-  margin-top:4px;
-}}
-.cover-meta-cell{{
-  background:var(--ink);padding:16px 14px;
-}}
-.cover-meta-cell .label{{font-size:9px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#555;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-.cover-meta-cell .value{{font-size:clamp(11px,1vw,14px);font-weight:800;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'IBM Plex Mono',monospace;letter-spacing:-0.3px}}
-.cover-meta-cell .value.accent{{color:var(--cyan)}}
-.cover-meta-cell .value.gold{{color:var(--gold)}}
-.cover-bottom{{margin-top:40px;font-size:12px;color:#444;border-top:1px solid #1a1a2a;padding-top:24px;display:flex;justify-content:space-between}}
-
-/* ── METRICS SECTION ─────────────────────────────────────────── */
-.metrics-hero{{
-  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
-  background:var(--border);border-radius:12px;overflow:hidden;
-  margin-bottom:40px;box-shadow:0 1px 3px rgba(0,0,0,0.04);
-}}
-.metric-cell{{
-  background:#fff;padding:24px 16px;text-align:center;min-width:0;
-}}
-.metric-cell .m-label{{font-size:9px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-.metric-cell .m-value{{font-size:clamp(16px,1.8vw,28px);font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1.1;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-.metric-cell .m-value.cyan{{color:var(--cyan)}}
-.metric-cell .m-value.gold{{color:var(--gold)}}
-.metric-cell .m-value.green{{color:var(--green)}}
-.metric-cell .m-sub{{font-size:11px;color:var(--muted);margin-top:6px}}
-
-/* Fleet split row */
-.fleet-split{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:32px}}
-.fleet-card{{border-radius:10px;padding:24px;position:relative;overflow:hidden}}
-.fleet-card.guardian{{background:#0a0800;border:1px solid #2a2400;color:#fff}}
-.fleet-card.responder{{background:#00111a;border:1px solid #002a3a;color:#fff}}
-.fleet-card .fc-icon{{font-size:28px;margin-bottom:12px}}
-.fleet-card .fc-type{{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px}}
-.fleet-card.guardian .fc-type{{color:var(--gold)}}
-.fleet-card.responder .fc-type{{color:var(--resp)}}
-.fleet-card .fc-val{{font-size:32px;font-weight:900;font-family:'IBM Plex Mono',monospace;color:#fff}}
-.fleet-card .fc-sub{{font-size:12px;color:#888;margin-top:4px}}
-.fleet-card .fc-row{{display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)}}
-.fleet-card .fc-row:last-child{{border-bottom:none}}
-.fleet-card .fc-row .k{{color:#666}}.fleet-card .fc-row .v{{font-weight:600;color:#ccc}}
-
-/* ── SECTION HEADINGS ────────────────────────────────────────── */
-.sh{{
-  font-size:22px;font-weight:800;color:var(--text);
-  margin-bottom:20px;padding-bottom:12px;
-  border-bottom:2px solid var(--border);
-  display:flex;align-items:center;gap:10px;
-}}
-.sh .sh-accent{{color:var(--cyan)}}
-
-/* ── TABLES ──────────────────────────────────────────────────── */
-table{{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:28px}}
-thead tr{{background:var(--ink);color:#fff}}
-thead th{{padding:12px 16px;text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase}}
-tbody tr:nth-child(even){{background:#fafbfc}}
-tbody tr:hover{{background:#f0f8ff}}
-td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
-.tag-resp{{background:rgba(0,210,255,0.1);color:#0066aa;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}}
-.tag-guard{{background:rgba(255,215,0,0.15);color:#8a6a00;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}}
-
-/* ── MAP ─────────────────────────────────────────────────────── */
-.map-wrap{{border-radius:12px;overflow:hidden;border:1px solid var(--border);box-shadow:0 4px 20px rgba(0,0,0,0.06);margin-bottom:32px}}
-
-/* ── DISCLAIMER ──────────────────────────────────────────────── */
-.disc{{background:#fffbeb;border-left:4px solid var(--amber);padding:16px 20px;border-radius:0 8px 8px 0;font-size:12px;color:#7a5a00;margin-bottom:24px}}
-
-/* ── FOOTER ──────────────────────────────────────────────────── */
-.doc-footer{{background:var(--ink);color:#555;padding:36px 60px;font-size:11px;display:flex;justify-content:space-between;align-items:center;gap:20px}}
-.doc-footer a{{color:#666;text-decoration:none}}
-.doc-footer .brand-mark{{font-size:16px;font-weight:900;letter-spacing:3px;color:#fff;flex-shrink:0}}
-.doc-version{{margin:28px 0 0;padding-top:12px;border-top:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.12em;color:rgba(107,114,128,0.9);text-align:right;}}
-
-/* ── PRODUCT IMAGE ───────────────────────────────────────────── */
-.cover-body{{
-  display:flex;align-items:flex-start;gap:40px;flex:1;margin:40px 0;
-}}
-.cover-left{{flex:1;min-width:0}}
-.cover-right{{
-  flex-shrink:0;width:420px;display:flex;align-items:center;
-  justify-content:flex-end;
-}}
-.product-img{{
-  width:100%;max-width:420px;
-  filter:drop-shadow(0 20px 60px rgba(0,210,255,0.18));
-  pointer-events:none;
-}}
-@media (max-width:900px){{.cover-right{{display:none}}}}
-
-/* ── TWO-COL INFRA TABLE ─────────────────────────────────────── */
-.infra-grid{{
-  display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:28px;
-}}
-.infra-item{{
-  background:#fafbfc;border:1px solid var(--border);border-radius:6px;
-  padding:10px 12px;font-size:11px;display:flex;justify-content:space-between;
-  align-items:center;gap:8px;
-}}
-.infra-item .i-name{{font-weight:600;color:var(--text);flex:1;min-width:0;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
-.infra-item .i-type{{font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;flex-shrink:0}}
-.infra-item .i-link{{color:var(--cyan);text-decoration:none;font-weight:700;font-size:11px;flex-shrink:0}}
-
-/* ── GRANT STATS SIDEBAR ─────────────────────────────────────── */
-.grant-layout{{display:grid;grid-template-columns:1fr 280px;gap:40px;align-items:start}}
-.grant-sidebar{{display:flex;flex-direction:column;gap:12px}}
-.grant-stat{{
-  background:#fafbfc;border:1px solid var(--border);border-radius:8px;
-  padding:16px;text-align:center;
-}}
-.grant-stat .gs-label{{font-size:10px;font-weight:600;letter-spacing:1px;
-  text-transform:uppercase;color:var(--muted);margin-bottom:6px}}
-.grant-stat .gs-val{{font-size:24px;font-weight:900;font-family:'IBM Plex Mono',monospace;color:var(--cyan)}}
-.grant-stat .gs-sub{{font-size:11px;color:var(--muted);margin-top:4px}}
-.grant-stat.gold .gs-val{{color:var(--gold)}}
-.grant-stat.green .gs-val{{color:var(--green)}}
-
-/* ── CRIME STATS BOX ─────────────────────────────────────────── */
-.crime-box{{
-  background:linear-gradient(135deg,#0a0800 0%,#120e00 100%);
-  border:1px solid #2a2000;border-radius:10px;
-  padding:24px;margin-bottom:24px;
-}}
-.crime-box h4{{color:var(--gold);font-size:12px;font-weight:700;
-  letter-spacing:1.5px;text-transform:uppercase;margin-bottom:16px}}
-.crime-stat-row{{
-  display:flex;justify-content:space-between;align-items:baseline;
-  padding:8px 0;border-bottom:1px solid #1a1600;font-size:13px;
-}}
-.crime-stat-row:last-child{{border-bottom:none}}
-.crime-stat-row .csk{{color:#888}}
-.crime-stat-row .csv{{font-weight:700;color:#fff;font-family:'IBM Plex Mono',monospace}}
-.crime-stat-row .csv.accent{{color:var(--gold)}}
-
-/* ── PRINT ───────────────────────────────────────────────────── */
-@media print{{
-  @page{{size:auto;margin:0.45in 0.5in}}
-  html,body{{background:#fff !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-  .doc-sidebar{{display:none !important}}
-  .doc-main{{margin-left:0 !important}}
-  .doc-section,.cover-page{{
-    page-break-after:always;
-    page-break-inside:avoid;
-    break-after:page;
-    border-bottom:none;
-    min-height:0;
-    box-shadow:none !important;
-  }}
-  .doc-section{{padding:30px 34px !important}}
-  .cover-page{{padding:38px 40px !important;min-height:auto !important}}
-  .doc-footer{{padding:20px 34px !important}}
-  .doc-section:last-child,.cover-page:last-child{{page-break-after:auto;break-after:auto}}
-  .section-eyebrow,.cover-headline,h1,h2,h3,h4{{break-after:avoid-page;page-break-after:avoid}}
-  .metrics-hero,.roi-strip,.grant-layout,.infra-grid,.map-wrap,table,img,svg,canvas{{
-    break-inside:avoid-page;
-    page-break-inside:avoid;
-  }}
-  a{{color:inherit !important;text-decoration:none !important}}
-  .doc-version{{margin-top:18px;padding-top:10px;border-top:1px solid #e5e7eb;color:#6b7280 !important;}}
-}}
-</style>
-</head>
-<body>
-
-<!-- ── TOP-RIGHT CORNER LOGO ─────────────────────────────────── -->
-
-
-<!-- ── SIDEBAR INDEX ─────────────────────────────────────────── -->
-<nav class="doc-sidebar">
-  <div class="sidebar-logo">
-    {"<img src='data:image/png;base64," + logo_b64_dark + "' style='height:40px;display:block'>" if logo_b64_dark else '<div class="brand">BRINC</div>'}
-  </div>
-  <div class="sidebar-city">
-    <div class="city-name">{prop_city}, {prop_state}</div>
-    <div class="city-sub">DFR Deployment Proposal</div>
-  </div>
-  <nav class="sidebar-nav">
-    <a href="#cover"><span class="nav-num">00</span>Cover</a>
-    <a href="#executive"><span class="nav-num">01</span>Executive Summary</a>
-    <a href="#fleet"><span class="nav-num">02</span>Fleet &amp; Coverage</a>
-    <a href="#map"><span class="nav-num">03</span>Coverage Map</a>
-    <a href="#incident-data"><span class="nav-num">04</span>Incident Analysis</a>
-    <a href="#deployment"><span class="nav-num">05</span>Deployment Locations</a>
-    <a href="#grant"><span class="nav-num">06</span>Grant Narrative</a>
-    <a href="#infrastructure"><span class="nav-num">07</span>Infrastructure Directory</a>
-    <a href="#community"><span class="nav-num">08</span>Community Partnership</a>
-    [ANALYTICS_NAV]
-    [COMMUNITY_IMPACT_NAV]
-    <a href="#school-safety"><span class="nav-num">11</span>School Safety</a>
-  </nav>
-  <div class="sidebar-footer">
-    Prepared {datetime.datetime.now().strftime("%b %d, %Y")}<br>
-    {prop_name}<br>
-    <a href="mailto:{prop_email}">{prop_email}</a>
-    {_ae_phone_html}
-  </div>
-</nav>
-
-<main class="doc-main">
-
-<!-- ── 00: COVER ─────────────────────────────────────────────── -->
-<section class="cover-page" id="cover">
-  <div class="cover-logo">
-    {"<img src='data:image/png;base64," + logo_b64_dark + "' style='height:48px;display:block'>" if logo_b64_dark else '<div class="brand">BRINC</div>'}
-  </div>
-  <div class="cover-body">
-    <div class="cover-left">
-      <div class="cover-headline">
-        <div class="cover-tag">Drone as a First Responder · Deployment Proposal</div>
-        <h1>Protecting <span>{prop_city}</span>,<br>{prop_state}</h1>
-        <div class="cover-population">
-          Serving <strong>{int(pop_metric):,}</strong> residents of {prop_city}, {prop_state}
-          <abbr title="Source: US Census Bureau American Community Survey (ACS) 5-Year Estimates · census.gov/programs-surveys/acs" style="font-size:11px;color:#666;margin-left:4px;text-decoration:none;cursor:help;">ⓘ</abbr>
+        header_html = f"""
+        <div style="margin-top: 5px; margin-bottom: 15px; padding-bottom: 12px; border-bottom: 1px solid {card_border}; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; align-items: center; flex-wrap: wrap; font-size: 0.9rem;">
+                <span style="color: {accent_color}; font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; letter-spacing: 1px; text-transform: uppercase; margin-right: 12px;">Strategic Deployment Plan</span>
+                <span style="font-weight: 800; color: {text_main}; font-size: 1.1rem; margin-right: 12px;">{st.session_state.get('active_city', 'Unknown City')}, {st.session_state.get('active_state', 'US')}</span>
+                <span style="color: {text_muted}; margin-right: 12px;">• Serving {st.session_state.get('estimated_pop', 0):,} residents across ~{int(area_sq_mi):,} sq miles</span>
+            </div>
+            <div style="display: flex; align-items: center; font-size: 0.85rem; color: {text_muted}; gap: 15px;">
+                <span>Data Period: <span style="color:#fff;">{date_range_str}</span></span>
+                <span style="color:{card_border};">|</span>
+                <span style="font-weight: 800; color: {text_main}; font-size: 0.95rem;">{actual_k_responder} <span style="color:#888; font-weight:normal;">Resp</span> · {actual_k_guardian} <span style="color:#888; font-weight:normal;">Guard</span></span>
+                <span style="background:#0066aa;border:1px solid #00D2FF;border-radius:4px;padding:3px 8px;font-size:0.75rem;font-weight:700;color:#00D2FF;letter-spacing:0.5px;text-transform:uppercase;">{_tier_badge}</span>
+                {main_logo_html}
+            </div>
         </div>
-        <p>A data-driven deployment plan for <strong>{actual_k_responder + actual_k_guardian} BRINC aerial units</strong> covering {calls_covered_perc:.1f}% of {st.session_state.get('total_original_calls', total_calls):,} annual incidents · {len(df_stations_all):,} public facilities protected across {area_sq_mi_est:,} sq mi.</p>
-      </div>
-      <div class="cover-meta">
-        <div class="cover-meta-cell"><div class="label">Fleet CapEx</div><div class="value accent">${fleet_capex:,.0f}</div></div>
-        <div class="cover-meta-cell"><div class="label">Annual Savings</div><div class="value gold">${annual_savings:,.0f}</div></div>
-        <div class="cover-meta-cell"><div class="label">Add'l Thermal + K-9</div><div class="value accent">${possible_additional_savings:,.0f}</div></div>
-        <div class="cover-meta-cell"><div class="label">Break-Even</div><div class="value">{break_even_text}</div></div>
-        <div class="cover-meta-cell"><div class="label">Call Coverage</div><div class="value accent">{calls_covered_perc:.1f}%</div></div>
-        <div class="cover-meta-cell"><div class="label">Avg Response</div><div class="value">{avg_resp_time:.1f} min</div></div>
-        <div class="cover-meta-cell"><div class="label">Time Saved</div><div class="value gold">{avg_time_saved:.1f} min</div></div>
-        <div class="cover-meta-cell" style="background:rgba(0,210,255,0.04)"><div class="label" style="color:#1a4a5a">Fleet Size</div><div class="value" style="color:#00a0bf">{actual_k_responder + actual_k_guardian} Units</div></div>
-      </div>
-    </div>
-    <div class="cover-right">
-      <img class="product-img" src="data:image/jpeg;base64,{_guardian_img_b64}" alt="BRINC Guardian Station">
-    </div>
-  </div>
-  <div class="cover-bottom">
-    <span>Prepared for <strong style="color:#fff">{prepared_for_city}</strong> by <strong style="color:#fff">{prepared_by_name}</strong></span>
-    <span>{datetime.datetime.now().strftime("%B %d, %Y")}</span>
-  </div>
-</section>
-
-<!-- ── 01: EXECUTIVE SUMMARY ──────────────────────────────────── -->
-<section class="doc-section" id="executive">
-  <div class="section-eyebrow"><span class="pg-num">01</span><span class="pg-title">Executive Summary</span><span class="src" data-src="Sources: Incident coverage &amp; response time computed from uploaded CAD data via BRINC geospatial optimizer. Hardware pricing: BRINC Responder $80K · Guardian $160K (MSRP). Officer dispatch cost benchmark: $76–$120/call (IACP/DOJ). Population: US Census Bureau ACS.">ⓘ</span></div>
-  <div class="metrics-hero">
-    <div class="metric-cell"><div class="m-label">Fleet Capital Expenditure</div><div class="m-value cyan">${fleet_capex:,.0f}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
-    <div class="metric-cell"><div class="m-label">Annual Savings Capacity</div><div class="m-value gold">${annual_savings:,.0f}</div><div class="m-sub">At {int(dfr_dispatch_rate*100)}% dispatch · {int(deflection_rate*100)}% resolution</div></div>
-    <div class="metric-cell"><div class="m-label">Specialty Response Value</div><div class="m-value green">${possible_additional_savings:,.0f}</div><div class="m-sub">Thermal ${thermal_savings:,.0f} · K-9 ${k9_savings:,.0f} · Fire ${fire_savings:,.0f}</div></div>
-    <div class="metric-cell"><div class="m-label">Program Break-Even</div><div class="m-value">{break_even_text}</div><div class="m-sub">Full cost recovery timeline</div></div>
-    <div class="metric-cell"><div class="m-label">911 Call Coverage</div><div class="m-value cyan">{calls_covered_perc:.1f}%</div><div class="m-sub">of {st.session_state.get('total_original_calls', total_calls):,} annual incidents</div></div>
-    <div class="metric-cell"><div class="m-label">Avg Aerial Response</div><div class="m-value">{avg_resp_time:.1f} min</div><div class="m-sub">vs. ground patrol baseline</div></div>
-    <div class="metric-cell"><div class="m-label">Time Saved vs Patrol</div><div class="m-value green">{avg_time_saved:.1f} min</div><div class="m-sub">per incident, on average</div></div>
-    <div class="metric-cell" style="background:#fafbfc"><div class="m-label">Total Fleet Units</div><div class="m-value" style="color:#374151">{actual_k_responder + actual_k_guardian}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
-  </div>
-
-  <!-- Pricing Tier Badge -->
-  <div style="background:linear-gradient(135deg,#0066aa 0%,#0088dd 100%);border-radius:10px;padding:16px 20px;margin:20px 0;border:2px solid #00D2FF;">
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-      <div style="background:rgba(0,210,255,0.2);border-radius:6px;padding:8px 12px;">
-        <div style="font-size:11px;color:#00D2FF;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Pricing Tier</div>
-        <div style="font-size:16px;color:#ffffff;font-weight:800;margin-top:4px;">{_tier_badge}</div>
-      </div>
-      <div>
-        <div style="font-size:13px;color:#ffffff;margin-bottom:8px;"><strong>{_tier_desc}</strong></div>
-        <div style="font-size:12px;color:#aabbdd;">Responder: <strong>${CONFIG['RESPONDER_COST']:,}</strong> · Guardian: <strong>${CONFIG['GUARDIAN_COST']:,}</strong></div>
-      </div>
-    </div>
-  </div>
-
-  <p style="font-size:15px;color:#444;line-height:1.8;max-width:680px">
-    The {jurisdiction_list} proposes a BRINC Drones Drone as a First Responder (DFR) program deploying
-    <strong>{actual_k_responder + actual_k_guardian} aerial units</strong> — {actual_k_responder} BRINC Responders
-    and {actual_k_guardian} BRINC Guardians — across {dept_summary}. The system is projected to cover
-    <strong>{calls_covered_perc:.1f}% of historical incidents</strong>, reach scenes
-    <strong>{avg_time_saved:.1f} minutes faster</strong> than ground patrol, and deliver
-    <strong>${annual_savings:,.0f} in annual operational savings</strong> with a break-even horizon of {break_even_text.lower()}.
-  </p>
-  {_custom_intro_html}
-  {_custom_pts_html}
-</section>
-
-<!-- ── 02: FLEET & COVERAGE ───────────────────────────────────── -->
-<section class="doc-section" id="fleet">
-  <div class="section-eyebrow"><span class="pg-num">02</span><span class="pg-title">Fleet &amp; Coverage</span><span class="src" data-src="Source: BRINC Drones technical specifications. Responder: 60 mph, 1-mile radius, ~2-min avg response. Guardian: 45 mph, up to 8-mile Starlink-connected radius, 25-min flight cycles with auto-recharge. Coverage % derived from geospatial analysis of uploaded incident locations.">ⓘ</span></div>
-  <div class="fleet-split">
-    <div class="fleet-card guardian">
-      <div class="fc-icon">🦅</div>
-      <div class="fc-type">BRINC Guardian</div>
-      <div class="fc-val">{actual_k_guardian} Unit{"s" if actual_k_guardian != 1 else ""}</div>
-      <div class="fc-sub">{guard_radius_mi}-mile operational radius · {guard_strategy_raw}</div>
-      <div style="margin-top:16px">
-        <div class="fc-row"><span class="k">Unit CapEx</span><span class="v">${CONFIG['GUARDIAN_COST']:,}</span></div>
-        <div class="fc-row"><span class="k">Call Coverage</span><span class="v">{guard_calls_perc:.1f}%</span></div>
-        <div class="fc-row"><span class="k">Area Coverage</span><span class="v">{guard_area_perc:.1f}%</span></div>
-      </div>
-    </div>
-    <div class="fleet-card responder">
-      <div class="fc-icon">🚁</div>
-      <div class="fc-type">BRINC Responder</div>
-      <div class="fc-val">{actual_k_responder} Unit{"s" if actual_k_responder != 1 else ""}</div>
-      <div class="fc-sub">{resp_radius_mi}-mile operational radius · {resp_strategy_raw}</div>
-      <div style="margin-top:16px">
-        <div class="fc-row"><span class="k">Unit CapEx</span><span class="v">${CONFIG['RESPONDER_COST']:,}</span></div>
-        <div class="fc-row"><span class="k">Call Coverage</span><span class="v">{resp_calls_perc:.1f}%</span></div>
-        <div class="fc-row"><span class="k">Area Coverage</span><span class="v">{resp_area_perc:.1f}%</span></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ── 03: COVERAGE MAP ───────────────────────────────────────── -->
-<section class="doc-section" id="map">
-  <div class="section-eyebrow"><span class="pg-num">03</span><span class="pg-title">Coverage Map</span><span class="src" data-src="Map tiles: © OpenStreetMap contributors (ODbL license). FAA airspace data: Federal Aviation Administration LAANC UAS Facility Maps. Incident dots: uploaded CAD data (up to 40K sampled). Coverage rings are operational radius estimates; actual deployment requires FAA LAANC authorization or Part 107 waiver.">ⓘ</span></div>
-  <div class="map-wrap">{map_html_str}</div>
-</section>
-
-<!-- ── 03b: 4G LTE CELL COVERAGE ─────────────────────────────── -->
-<section class="doc-section" id="cell-coverage">
-  <div class="section-eyebrow"><span class="pg-num">03b</span><span class="pg-title">4G LTE Cell Coverage</span><span class="src" data-src="Source: FCC National Broadband Map (broadbandmap.fcc.gov). Coverage reflects carrier-reported FCC BDC data for 4G LTE (tech code 300) at ≥25 Mbps download. Displayed carriers include AT&T, T-Mobile, Verizon, and US Cellular. Coverage data may not reflect actual field conditions.">ⓘ</span></div>
-  <p style="font-size:0.78rem;color:#8899aa;margin:0 0 16px;">FCC-reported 4G LTE availability centered on the deployment area. Click the link below to open the interactive map and toggle individual carriers for drone data-link connectivity assessment.</p>
-  <a href="{_fcc_url}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
-    <div style="display:flex;align-items:center;justify-content:space-between;background:#0d1b2e;border:1px solid #1e3a5f;border-radius:10px;padding:20px 28px;">
-      <div>
-        <div style="color:#00b4d8;font-size:1rem;font-weight:600;margin-bottom:4px;">📶 Open FCC 4G LTE Coverage Map</div>
-        <div style="color:#6b7f99;font-size:0.78rem;">FCC National Broadband Map · AT&amp;T, T-Mobile, Verizon, US Cellular · Centered on {center_lat:.4f}, {center_lon:.4f}</div>
-      </div>
-      <div style="color:#00b4d8;font-size:1.6rem;margin-left:20px;">↗</div>
-    </div>
-  </a>
-  <p style="font-size:0.65rem;color:#556;margin:10px 0 0;">Opens broadbandmap.fcc.gov in a new tab. Data: FCC Broadband Data Collection © Federal Communications Commission.</p>
-</section>
-
-<!-- ── 04: INCIDENT ANALYSIS ─────────────────────────────────── -->
-<section class="doc-section" id="incident-data">
-  <div class="section-eyebrow"><span class="pg-num">04</span><span class="pg-title">Incident Data Analysis</span><span class="src" data-src="Source: Uploaded CAD export data. Call type classification, priority distribution, and temporal patterns are derived from the incident records provided. BRINC applies no external normalization — charts reflect your jurisdiction's raw CAD data.">ⓘ</span></div>
-  {cad_charts_html_export}
-  {staffing_pressure_html_export}
-</section>
-
-<!-- ── 05: DEPLOYMENT LOCATIONS ──────────────────────────────── -->
-<section class="doc-section" id="deployment">
-  <div class="section-eyebrow"><span class="pg-num">05</span><span class="pg-title">Deployment Locations</span><span class="src" data-src="Station candidates: OpenStreetMap (ODbL), DHS HIFLD Open Data public safety infrastructure, and user-defined pin-drop locations. FAA ceiling data: FAA LAANC UAS Facility Maps API. Optimizer selects stations to maximize coverage of uploaded CAD incidents.">ⓘ</span></div>
-  <table>
-    <thead><tr><th>Station</th><th>Type</th><th>Avg Response</th><th>FAA Ceiling</th><th>CapEx</th></tr></thead>
-    <tbody>{station_rows}</tbody>
-  </table>
-</section>
-
-<!-- ── 06: GRANT NARRATIVE ───────────────────────────────────── -->
-<section class="doc-section" id="grant">
-  <div class="section-eyebrow">
-    <span class="pg-num">06</span>
-    <span class="pg-title">Grant Narrative</span>
-    <span class="src" data-src="Grant programs referenced: DOJ Byrne JAG · FEMA HSGP · DOJ COPS Office · DOT RAISE · DOJ Smart Policing Initiative. Financial figures are BRINC model estimates. Narrative is AI-generated — must be reviewed, localized, and fact-checked by your grants administrator before submission.">ⓘ</span>
-    <button class="copy-section-btn grant-law" onclick="copyGrantText('grant-body-law', this)">
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
-      Copy Grant Text
-    </button>
-  </div>
-  <div class="disc"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission.</div>
-
-  <script>
-  function copyGrantText(id, btn) {{
-    var el = document.getElementById(id);
-    var text = el.innerText;
-    var origLabel = btn.innerHTML;
-    function confirm() {{
-      btn.innerHTML = '&#10003; Copied!';
-      btn.style.background = '#22c55e';
-      btn.style.color = '#fff';
-      setTimeout(function() {{ btn.innerHTML = origLabel; btn.style.background = ''; btn.style.color = ''; }}, 2200);
-    }}
-    if (navigator.clipboard && window.isSecureContext) {{
-      navigator.clipboard.writeText(text).then(confirm).catch(function() {{ fallback(text, confirm); }});
-    }} else {{ fallback(text, confirm); }}
-  }}
-  function fallback(text, cb) {{
-    var ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
-    document.body.appendChild(ta);
-    ta.focus(); ta.select();
-    try {{ document.execCommand('copy'); cb(); }} catch(e) {{ alert('Press Ctrl+C / Cmd+C to copy.'); }}
-    document.body.removeChild(ta);
-  }}
-  </script>
-
-  <div class="grant-layout">
-  <div class="grant-body" id="grant-body-law">
-    <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — {prepared_for_city}, {prop_state}</p>
-
-    <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully requests funding to establish a Drone as a First Responder (DFR) program deploying {actual_k_responder + actual_k_guardian} purpose-built BRINC aerial units — {actual_k_responder} BRINC Responder and {actual_k_guardian} BRINC Guardian — across {dept_summary} serving {pop_metric:,} residents. Modeled against {st.session_state.get('total_original_calls', total_calls):,} historical incidents from {_exp_date_range}, the program is projected to cover <strong>{calls_covered_perc:.1f}%</strong> of calls for service, arrive an average of <strong>{avg_time_saved:.1f} minutes faster</strong> than ground patrol, and generate <strong>${annual_savings:,.0f} in annual operational savings</strong>, with an additional modeled specialty-response upside of <strong>${possible_additional_savings:,.0f}</strong> from thermal-supported searches and avoided K-9 deployments, reaching full cost recovery in <strong>{break_even_text.lower()}</strong>.</p>
-
-    <p><strong>Statement of Need:</strong> {jurisdiction_list} currently responds to an estimated {st.session_state.get('total_original_calls', total_calls):,} calls for service annually — approximately {max(1,int(st.session_state.get('total_original_calls',total_calls)/365)):,} calls per day. Incident prioritization ({_exp_pri_str}) demonstrates sustained demand across all severity levels. Ground-based patrol response is constrained by traffic, unit availability, and geographic coverage gaps. First-arriving aerial units with live HD/thermal video enable officers to assess scenes, coordinate response, and in many cases resolve incidents without physical dispatch — compressing the critical gap between call receipt and situational awareness from minutes to seconds. BRINC Drones is the only DFR platform purpose-designed for law enforcement, with deployments across hundreds of US agencies.</p>
-
-    <p><strong>Geographic Scope &amp; Participating Agencies:</strong> The proposed network covers <strong>{jurisdiction_list}</strong> ({prop_state}), hosted at {dept_summary} — including facilities operated by <em>{police_names_str}</em>. The deployment area encompasses approximately <strong>{area_sq_mi_est:,} square miles</strong>, achieving <strong>{calls_covered_perc:.1f}%</strong> historical incident coverage and <strong>{area_covered_perc:.1f}%</strong> geographic area coverage. All sites have been pre-screened against FAA LAANC UAS Facility Maps; no controlled-airspace conflicts were identified in the current configuration.</p>
-
-    <p><strong>Fleet Architecture &amp; Program Design:</strong> The fleet consists of <strong>{actual_k_responder} BRINC Responder</strong> units ({resp_radius_mi}-mile operational radius, {CONFIG["RESPONDER_SPEED"]:.0f} mph, 2-minute average response, optimized for <em>{resp_strategy_raw.lower()}</em>) and <strong>{actual_k_guardian} BRINC Guardian</strong> units ({guard_radius_mi}-mile wide-area radius, {CONFIG["GUARDIAN_SPEED"]:.0f} mph, optimized for <em>{guard_strategy_raw.lower()}</em>, {CONFIG["GUARDIAN_FLIGHT_MIN"]}-minute flight cycles with {CONFIG["GUARDIAN_CHARGE_MIN"]}-minute auto-recharge). Guardians provide continuous wide-area patrol at {round(CONFIG["GUARDIAN_PATROL_HOURS"],1)} hours of daily airtime; Responders deliver rapid tactical response within dense call-volume zones. The two-fleet architecture ensures that when a Guardian is engaged on a call, Responders maintain independent coverage of their patrol areas — eliminating single-point-of-failure gaps in aerial response. Deployment mode: <strong>{deployment_mode}</strong>.</p>
-
-    <p><strong>Technology Platform:</strong> BRINC Drones provides fully automated launch-on-dispatch, live-streaming HD and thermal video to dispatch and responding officers, FAA-compliant Beyond Visual Line of Sight (BVLOS) operations, chain-of-custody flight logging, and integrated data analytics. All hardware is manufactured in the United States. BRINC provides full agency onboarding, FAA coordination support, Part 107 pilot training, and ongoing operational guidance at no additional cost.</p>
-
-    <p><strong>Fiscal Impact &amp; Return on Investment:</strong> Total program capital expenditure is <strong>${fleet_capex:,.0f}</strong> ({actual_k_responder} Responder × ${CONFIG["RESPONDER_COST"]:,} + {actual_k_guardian} Guardian × ${CONFIG["GUARDIAN_COST"]:,}). At a <strong>{int(dfr_dispatch_rate*100)}% DFR dispatch rate</strong> and <strong>{int(deflection_rate*100)}% call resolution rate</strong> (no officer dispatch required), the program is projected to generate <strong>${annual_savings:,.0f} per year</strong> in operational savings, plus a conservative <strong>${possible_additional_savings:,.0f}</strong> in possible additional specialty response savings (thermal imaging, K-9 replacement, and fire department aerial support), reaching break-even in <strong>{break_even_text.lower()}</strong>. Cost per drone response is ${CONFIG["DRONE_COST_PER_CALL"]} versus ${CONFIG["OFFICER_COST_PER_CALL"]} for a ground patrol dispatch — a <strong>{int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}% cost reduction</strong> per incident. The program also reduces officer exposure to unknown-risk calls, decreasing liability and improving officer retention outcomes.</p>
-
-    <p><strong>Evaluation Plan:</strong> Program outcomes will be tracked quarterly across four dimensions: (1) response time comparison vs. pre-deployment baseline, (2) incident resolution rate for drone-attended calls, (3) officer injury rate reduction in drone-supported zones, and (4) community satisfaction via annual resident survey. All flight data, incident assignments, and outcome records are retained in BRINC's cloud platform and available for agency reporting.</p>
-
-    <p><strong>10-Year Program Value Model:</strong> The following projections assume consistent call volume and constant dispatch/resolution rates. Actual results may vary.</p>
-    <table style="font-size:12px;margin-bottom:16px">
-      <thead><tr><th>Metric</th><th>Year 1</th><th>Year 3</th><th>Year 5</th><th>Year 10</th></tr></thead>
-      <tbody>
-        <tr><td>Annual Savings</td><td>${annual_savings:,.0f}</td><td>${annual_savings*1.05:,.0f}</td><td>${annual_savings*1.1:,.0f}</td><td>${annual_savings*1.22:,.0f}</td></tr>
-        <tr><td>Cumulative Savings</td><td>${annual_savings:,.0f}</td><td>${annual_savings*3.15:,.0f}</td><td>${annual_savings*5.53:,.0f}</td><td>${annual_savings*12.58:,.0f}</td></tr>
-        <tr><td>Drone-Attended Calls</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365*1.03):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365*1.06):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365*1.13):,}</td></tr>
-        <tr><td>Calls Resolved w/o Dispatch</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365*1.03):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365*1.06):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365*1.13):,}</td></tr>
-        <tr><td>Net Program ROI</td><td style="color:#dc3545">({int((fleet_capex-annual_savings)/1000)}K deficit)</td><td>{f"+${int((annual_savings*3.15-fleet_capex)/1000)}K" if annual_savings*3.15>fleet_capex else f"({int((fleet_capex-annual_savings*3.15)/1000)}K)"}</td><td style="color:#22c55e">+${int((annual_savings*5.53-fleet_capex)/1000):,}K</td><td style="color:#22c55e">+${int((annual_savings*12.58-fleet_capex)/1000):,}K</td></tr>
-      </tbody>
-    </table>
-
-    <p><strong>Officer Safety &amp; Liability Reduction:</strong> Beyond direct operational savings, DFR programs measurably reduce officer exposure to unknown-risk call scenarios. First-arriving drones perform scene reconnaissance before ground units arrive, enabling officers to approach with full situational awareness. Documented outcomes across peer agencies include: reduced officer injuries in drone-supported zones (avg. 18% reduction, per DOJ data), faster suspect identification improving apprehension rates, and reduced use-of-force incidents through earlier de-escalation intelligence. These outcomes reduce agency liability costs and workers' compensation claims — benefits not captured in the direct cost model above.</p>
-
-    <p><strong>Community &amp; Economic Impact:</strong> Response time improvements of <strong>{avg_time_saved:.1f} minutes</strong> translate directly to better outcomes in time-sensitive incidents: cardiac events, structure fires, crimes in progress, and missing persons cases. Studies by the International Association of Chiefs of Police (IACP) document measurable improvements in case clearance rates, property crime deterrence (15–30% reduction in areas with visible DFR patrols), and community trust metrics in agencies with active drone programs. For {prop_city}'s business community, faster emergency response reduces property damage, shortens insurance claim cycles, and improves the commercial district safety perception that drives foot traffic and investment.</p>
-
-    <p style="background:#f8f9fa;padding:15px;border-radius:8px;border:1px solid #eee;font-size:13px">
-      <strong>Applicable Grant Funding Sources:</strong><br>
-      <a href="https://bja.ojp.gov/program/jag/overview">DOJ Byrne JAG</a> — Technology and equipment procurement<br>
-      <a href="https://www.fema.gov/grants/preparedness/homeland-security">FEMA HSGP</a> — Homeland security CapEx offset<br>
-      <a href="https://cops.usdoj.gov/grants">DOJ COPS Office</a> — Law enforcement technology<br>
-      <a href="https://www.transportation.gov/grants">DOT RAISE</a> — Regional infrastructure and safety<br>
-      <a href="https://bja.ojp.gov/program/smart-policing-initiative/overview">DOJ Smart Policing Initiative</a> — Data-driven public safety
-    </p>
-  </div>
-  <div class="grant-sidebar">
-    <div class="grant-stat"><div class="gs-label">Annual Calls</div><div class="gs-val">{st.session_state.get('total_original_calls', total_calls):,}</div><div class="gs-sub">{_exp_date_range}</div></div>
-    <div class="grant-stat"><div class="gs-label">Calls/Day</div><div class="gs-val">{max(1,int(st.session_state.get('total_original_calls',total_calls)/365)):,}</div><div class="gs-sub">citywide avg</div></div>
-    <div class="grant-stat gold"><div class="gs-label">Call Coverage</div><div class="gs-val">{calls_covered_perc:.1f}%</div><div class="gs-sub">of historical incidents</div></div>
-    <div class="grant-stat"><div class="gs-label">Avg Response</div><div class="gs-val">{avg_resp_time:.1f}m</div><div class="gs-sub">{avg_time_saved:.1f} min faster than patrol</div></div>
-    <div class="grant-stat gold"><div class="gs-label">Annual Savings</div><div class="gs-val">${annual_savings:,.0f}</div><div class="gs-sub">break-even {break_even_text.lower()}</div></div>
-    <div class="grant-stat green"><div class="gs-label">Cost Reduction</div><div class="gs-val">{int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}%</div><div class="gs-sub">per incident vs. patrol dispatch</div></div>
-  </div>
-  </div>
-</section>
-
-<!-- ── 06B: FIRE DEPARTMENT VALUE ─────────────────────────────── -->
-<section class="doc-section" id="fire-value">
-  <div class="section-eyebrow"><span class="pg-num">06B</span><span class="pg-title">Fire Department Value</span><span class="src" data-src="Sources: NFPA Fire Loss Research (aerial ladder deployment costs $3K–$8K/deploy); USFA Firefighter Fatality Statistics; FEMA AFG program eligibility. Savings model: 15% of attended fire calls avoid aerial ladder deployment + thermal overhaul guidance (45 min/4-person crew saved at $200/hr, NFPA labor benchmarks).">ⓘ</span></div>
-
-  <div class="metrics-hero">
-    <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
-      <div class="m-label">Fire Calls Assisted</div>
-      <div class="m-value" style="color:#fb7121">{fire_calls_annual:,.0f}</div>
-      <div class="m-sub">Est. {int(CONFIG["FIRE_DEFAULT_APPLICABLE_RATE"]*100)}% of covered incidents</div>
-    </div>
-    <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
-      <div class="m-label">Scene Size-Up Savings</div>
-      <div class="m-value" style="color:#fb7121">${fire_savings * 0.8:,.0f}/yr</div>
-      <div class="m-sub">Avoided premature aerial ladder deployment</div>
-    </div>
-    <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
-      <div class="m-label">Overhaul Hotspot Savings</div>
-      <div class="m-value" style="color:#fb7121">${fire_savings * 0.2:,.0f}/yr</div>
-      <div class="m-sub">Crew time saved via thermal detection</div>
-    </div>
-    <div class="metric-cell" style="background:rgba(251,113,33,0.12);border:1px solid rgba(251,113,33,0.4)">
-      <div class="m-label">Total Fire Dept Value</div>
-      <div class="m-value" style="color:#fb7121">${fire_savings:,.0f}/yr</div>
-      <div class="m-sub">${CONFIG["FIRE_SAVINGS_PER_CALL"]} blended savings per fire call</div>
-    </div>
-  </div>
-
-  <h3 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:#1e293b">How Drones Deliver Fire Department Value</h3>
-  <table style="font-size:12px;margin-bottom:20px">
-    <thead><tr><th>Value Driver</th><th>Mechanism</th><th>Est. Savings</th><th>Source Basis</th></tr></thead>
-    <tbody>
-      <tr>
-        <td><strong>Aerial Scene Size-Up</strong></td>
-        <td>Drone arrives before engine company, streams live roof and exterior view. Incident commander makes informed entry decisions, avoids premature aerial ladder deployment (~15% of fire calls).</td>
-        <td style="color:#fb7121;font-weight:700">${fire_savings * 0.8:,.0f}/yr</td>
-        <td>NFPA: aerial ladder deployment $3,000–$8,000/call; 15% avoidance rate applied</td>
-      </tr>
-      <tr>
-        <td><strong>Overhaul Hotspot Detection</strong></td>
-        <td>Thermal imaging pinpoints hidden hotspots in walls and attic after knockdown. Reduces overhaul crew time by ~45 min (4-person crew) per fire call.</td>
-        <td style="color:#fb7121;font-weight:700">${fire_savings * 0.2:,.0f}/yr</td>
-        <td>IAFC: avg. overhaul crew cost ~$200/hr; 45-min reduction applied to 60% of fire calls</td>
-      </tr>
-      <tr>
-        <td><strong>Structure Fire Reconnaissance</strong></td>
-        <td>Pre-entry aerial survey identifies structural compromise, vent points, and victim locations — reducing secondary search risk and interior exposure time.</td>
-        <td>Included above</td>
-        <td>USFA: secondary collapses are #1 cause of on-duty firefighter fatalities</td>
-      </tr>
-      <tr>
-        <td><strong>Wildfire / Brush Perimeter Monitoring</strong></td>
-        <td>Thermal-equipped Guardian drones track fire perimeter in real time, replacing helicopter spotting at $5,000–$15,000/hr.</td>
-        <td>Situational; not modeled</td>
-        <td>CAL FIRE, NWCG: helicopter spotting costs $8,000–$15,000/flight hour</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <div class="section-eyebrow" style="margin-top:28px;">
-    <span class="pg-num" style="color:#f97316;border-color:rgba(249,115,22,0.3);">🚒</span>
-    <span class="pg-title">Fire Department Grant Narrative</span>
-    <span class="src" data-src="Applicable grant programs: FEMA Assistance to Firefighters Grant (AFG) · FEMA Fire Prevention &amp; Safety (FP&amp;S) · FEMA BRIC · USDA Community Facilities · DHS UASI · State Homeland Security Program (SHSP). Narrative is AI-generated and must be reviewed by a certified grants professional.">ⓘ</span>
-    <button class="copy-section-btn grant-fire" onclick="copyGrantText('grant-body-fire', this)">
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
-      Copy Fire Grant
-    </button>
-  </div>
-  <div class="disc"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission.</div>
-
-  <div class="grant-layout">
-  <div class="grant-body" id="grant-body-fire">
-    <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — Fire Department Aerial Operations Enhancement — {prepared_for_city}, {prop_state}</p>
-
-    <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully requests funding to extend its Drone as a First Responder (DFR) program to support fire department operations in {prepared_for_city}, {prop_state}. Deploying {actual_k_responder + actual_k_guardian} BRINC aerial units across {dept_summary}, the program is projected to assist an estimated <strong>{fire_calls_annual:,.0f} fire-related calls annually</strong> — delivering <strong>${fire_savings:,.0f} per year</strong> in fire department operational value through aerial scene size-up, avoided aerial ladder deployments, and thermal-guided overhaul support. The program reaches full capital cost recovery in <strong>{break_even_text.lower()}</strong> when combined with law enforcement operational savings.</p>
-
-    <p><strong>Statement of Need — Fire Operations:</strong> {jurisdiction_list} fire personnel respond to an estimated {fire_calls_annual:,.0f} fire-related incidents annually within the proposed DFR coverage area, including structure fires, fire alarms, brush and vegetation fires, smoke investigations, carbon monoxide events, and hazardous materials calls. Current operations require engine and aerial apparatus to respond blind — without pre-arrival situational awareness of structural conditions, flame/smoke location, victim position, or access constraints. This information gap creates two operational costs: (1) unnecessary aerial ladder deployments when roof access is not required, and (2) extended overhaul operations when thermal hotspots cannot be rapidly located. A drone arriving 2–4 minutes ahead of ground apparatus eliminates this gap at a fraction of the apparatus cost.</p>
-
-    <p><strong>Operational Application:</strong> Upon dispatch of a fire call within the coverage zone, the nearest BRINC drone auto-launches and arrives on scene in an average of <strong>{avg_resp_time:.1f} minutes</strong> — typically before the first engine company. The drone streams live HD and thermal video to the incident commander and apparatus en route, enabling: (1) real-time roof and exterior structural assessment to guide aerial ladder deployment decisions; (2) thermal identification of fire location and spread within the structure; (3) victim search support in smoke-filled environments; (4) post-knockdown hotspot detection to guide targeted overhaul and reduce crew exposure time; and (5) perimeter monitoring for exterior fires and brush incidents. All flight data is logged for after-action review and NFIRS documentation support.</p>
-
-    <p><strong>Fiscal Impact — Fire Department:</strong> The modeled fire department value of <strong>${fire_savings:,.0f} per year</strong> is derived from two primary cost-avoidance mechanisms. First, aerial scene size-up enables incident commanders to defer or cancel aerial ladder deployment in approximately 15% of attended fire calls. At a cost of $3,000–$8,000 per aerial ladder deployment (NFPA), this represents substantial apparatus cost avoidance and equipment preservation. Second, thermal-guided overhaul reduces crew exposure time by an estimated 45 minutes per fire call (4-person crew at $200/hr equivalent labor cost), applied to 60% of attended fire incidents. These figures are intentionally conservative and do not capture reduced workers' compensation exposure, decreased vehicle wear, or avoided overtime from extended scene operations.</p>
-
-    <p><strong>Officer and Firefighter Safety:</strong> The U.S. Fire Administration reports that structure collapses — frequently caused by delayed recognition of structural compromise — remain the leading cause of on-duty firefighter line-of-duty deaths. Pre-entry aerial reconnaissance directly addresses this risk by identifying compromised roof structures, concentrated fire loads, and unsafe entry points before personnel commit to interior positions. Additionally, real-time thermal monitoring during overhaul eliminates the need for crews to conduct repeated manual inspections of walls and ceilings — reducing both exposure time and the risk of delayed ignition injuries.</p>
-
-    <p><strong>Applicable Fire Department Grant Sources:</strong><br>
-    <strong>FEMA Assistance to Firefighters Grant (AFG)</strong> — Equipment and technology procurement for fire departments; drones qualify under the Operations &amp; Safety category.<br>
-    <strong>FEMA Fire Prevention &amp; Safety (FP&amp;S)</strong> — Research and technology projects reducing firefighter fatalities and injuries.<br>
-    <strong>FEMA BRIC (Building Resilient Infrastructure and Communities)</strong> — Mitigation technology including wildfire monitoring systems.<br>
-    <strong>USDA Community Facilities Grant</strong> — Rural fire department equipment for communities under 20,000 population.<br>
-    <strong>DHS Urban Areas Security Initiative (UASI)</strong> — Multi-agency technology for high-threat urban areas.<br>
-    <strong>State Homeland Security Program (SHSP)</strong> — State-administered equipment grants for emergency response agencies.</p>
-
-    <p><strong>10-Year Fire Department Value Projection:</strong></p>
-    <table style="font-size:12px;margin-bottom:16px">
-      <thead><tr><th>Metric</th><th>Year 1</th><th>Year 3</th><th>Year 5</th><th>Year 10</th></tr></thead>
-      <tbody>
-        <tr><td>Fire Calls Assisted</td><td>{fire_calls_annual:,.0f}</td><td>{fire_calls_annual*1.03:,.0f}</td><td>{fire_calls_annual*1.06:,.0f}</td><td>{fire_calls_annual*1.13:,.0f}</td></tr>
-        <tr><td>Annual Fire Dept Value</td><td>${fire_savings:,.0f}</td><td>${fire_savings*1.05:,.0f}</td><td>${fire_savings*1.10:,.0f}</td><td>${fire_savings*1.22:,.0f}</td></tr>
-        <tr><td>Cumulative Fire Value</td><td>${fire_savings:,.0f}</td><td>${fire_savings*3.15:,.0f}</td><td>${fire_savings*5.53:,.0f}</td><td>${fire_savings*12.58:,.0f}</td></tr>
-        <tr><td>Scene Size-Up Savings</td><td>${fire_savings*0.8:,.0f}</td><td>${fire_savings*0.8*1.05:,.0f}</td><td>${fire_savings*0.8*1.10:,.0f}</td><td>${fire_savings*0.8*1.22:,.0f}</td></tr>
-        <tr><td>Overhaul Crew Savings</td><td>${fire_savings*0.2:,.0f}</td><td>${fire_savings*0.2*1.05:,.0f}</td><td>${fire_savings*0.2*1.10:,.0f}</td><td>${fire_savings*0.2*1.22:,.0f}</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <div class="grant-sidebar">
-    <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Fire Calls/Year</div><div class="gs-val" style="color:#fb7121">{fire_calls_annual:,.0f}</div><div class="gs-sub">within coverage zone</div></div>
-    <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Scene Size-Up Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*0.8:,.0f}</div><div class="gs-sub">aerial ladder cost avoidance</div></div>
-    <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Overhaul Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*0.2:,.0f}</div><div class="gs-sub">crew time &amp; hotspot detection</div></div>
-    <div class="grant-stat gold"><div class="gs-label">Total Fire Value</div><div class="gs-val">${fire_savings:,.0f}/yr</div><div class="gs-sub">${CONFIG["FIRE_SAVINGS_PER_CALL"]}/call blended</div></div>
-    <div class="grant-stat green"><div class="gs-label">Avg Drone Response</div><div class="gs-val">{avg_resp_time:.1f} min</div><div class="gs-sub">{avg_time_saved:.1f} min faster than apparatus</div></div>
-    <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">10-Year Fire Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*12.58:,.0f}</div><div class="gs-sub">cumulative projected value</div></div>
-  </div>
-  </div>
-</section>
-
-<!-- ── 07: COMMUNITY INFRASTRUCTURE & ASSET PROTECTION ──────────────────────────── -->
-<section class="doc-section" id="infrastructure">
-  <div class="section-eyebrow"><span class="pg-num">07</span><span class="pg-title">Community Infrastructure &amp; Asset Protection</span><span class="src" data-src="Sources: OpenStreetMap (© contributors, ODbL license) · DHS HIFLD Open Data (public domain) · NCES Common Core of Data · CMS Hospital Compare · NEMSIS National EMS Database · NTD National Transit Database · IMLS Public Libraries Survey · US Courts PACER · EPA Infrastructure Maps · US Energy Information Administration · FAA LAANC UAS Facility Maps · User-verified locations.">ⓘ</span></div>
-
-  <p style="color:var(--text);font-size:14px;line-height:1.6;margin-bottom:20px;">
-    This deployment protects <strong>{len(df_stations_all):,} indexed public facilities</strong> across {prop_city}, {prop_state} — from emergency response centers and critical infrastructure to schools, hospitals, places of worship, and community services. The BRINC DFR network provides 24/7 aerial first-response coverage prioritizing assets most critical to public safety, economic continuity, and community resilience. All facility coordinates have been verified against FAA LAANC facility maps and current data sources.
-  </p>
-
-  <!-- FACILITY TYPE SUMMARY -->
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:28px;">
-    {_fac_summary_cells}
-  </div>
-
-  <p style="font-size:12px;color:var(--muted);margin-bottom:18px;padding:12px;background:var(--light);border-radius:6px;">
-    <strong>Coverage Impact:</strong> <span style="color:var(--cyan);font-weight:600;">{calls_covered_perc:.1f}% of annual incidents</span> occur within drone response zones, enabling rapid aerial assessment and coordinated ground response. <strong>Data Sources:</strong> OpenStreetMap · DHS HIFLD · NCES · CMS · NEMSIS · NTD · IMLS · EPA · US EIA · User data
-  </p>
-
-  <div class="infra-grid">{all_bldgs_rows}</div>
-</section>
-
-<!-- ── 08: COMMUNITY PARTNERSHIP ─────────────────────────────── -->
-<section class="doc-section" id="community">
-  <div class="section-eyebrow">
-    <span class="pg-num">08</span>
-    <span class="pg-title">Community Business Partnership</span>
-    <span class="src" data-src="Crime cost benchmarks: National Retail Federation 2023 Retail Security Survey ($559 avg shoplifting loss) · DOJ/NIJ commercial burglary cost estimates ($3K–$8.5K) · FBI UCR property crime data. Peer DFR outcomes: Chula Vista PD · El Cajon PD · Westerville OH PD (15–30% property crime reduction in covered zones).">ⓘ</span>
-    <button class="copy-section-btn community" id="copyPartnershipBtn" onclick="copyCommunitySection()">
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
-      Copy Letter
-    </button>
-  </div>
-
-  <!-- Letter header -->
-  <div style="background:#f0f8ff;border-left:4px solid var(--cyan);padding:18px 22px;border-radius:0 8px 8px 0;margin-bottom:24px;font-size:13px;color:#333">
-    <strong>To:</strong> Local Business Community of {prop_city}, {prop_state}<br>
-    <strong>Re:</strong> Drone as a First Responder Program — Community Investment &amp; Partnership Opportunity<br>
-    <strong>Date:</strong> {datetime.datetime.now().strftime("%B %d, %Y")}
-  </div>
-
-  <p>Dear {prop_city} Business Owner,</p>
-
-  <p>The {prop_city} Police Department is proposing a transformational public safety initiative that will directly protect your business, your employees, and your customers. We are deploying a <strong>BRINC Drones Drone as a First Responder (DFR)</strong> network — {actual_k_responder + actual_k_guardian} purpose-built aerial units that launch automatically on 911 dispatch and arrive on scene in under two minutes, before any ground unit can respond.</p>
-
-  <p>This is not a surveillance program. It is a rapid-response tool. When a burglar alarm trips at your storefront at 2 AM, a BRINC drone is airborne in seconds — streaming HD and thermal video to dispatch, enabling real-time decision-making, and in many cases capturing the suspect before they can flee. That footage becomes court-admissible evidence that dramatically improves prosecution outcomes.</p>
-
-  <!-- Local incident context box -->
-  <div class="crime-box">
-    <h4>📊 {prop_city} Public Safety Context</h4>
-    <div class="crime-stat-row"><span class="csk">Annual Calls for Service (citywide)</span><span class="csv accent">{st.session_state.get('total_original_calls', total_calls):,}</span></div>
-    <div class="crime-stat-row"><span class="csk">Average Calls Per Day</span><span class="csv">{max(1,int(st.session_state.get('total_original_calls',total_calls)/365)):,}</span></div>
-    <div class="crime-stat-row"><span class="csk">Incidents Covered by DFR Network</span><span class="csv accent">{calls_covered_perc:.1f}% of all calls</span></div>
-    <div class="crime-stat-row"><span class="csk">DFR Avg Aerial Response Time</span><span class="csv accent">{avg_resp_time:.1f} minutes</span></div>
-    <div class="crime-stat-row"><span class="csk">Time Saved vs. Ground Patrol</span><span class="csv accent">~{avg_time_saved:.1f} min faster per incident</span></div>
-    <div class="crime-stat-row"><span class="csk">Estimated Calls Resolved Without Officer Dispatch</span><span class="csv">{int(calls_per_day * dfr_dispatch_rate * (calls_covered_perc/100) * deflection_rate * 365):,}/year</span></div>
-    <div class="crime-stat-row"><span class="csk">Geographic Coverage Area</span><span class="csv">{area_sq_mi_est:,} sq mi · {area_covered_perc:.1f}% of city</span></div>
-  </div>
-
-  <h3 style="color:var(--text);font-size:16px;margin:24px 0 12px">Why This Matters to Your Business</h3>
-
-  <p>Property crimes cost American businesses over <strong>$50 billion annually</strong> in direct losses — before accounting for insurance premium increases, business interruption, and the intangible cost of a less safe commercial environment. The businesses of {prop_city} are not immune. Consider what faster response means in practice:</p>
-
-  <table style="margin-bottom:20px;font-size:13px">
-    <thead><tr><th>Crime Type</th><th>Avg Cost per Incident</th><th>DFR Impact</th></tr></thead>
-    <tbody>
-      <tr><td><strong>Retail Theft / Shoplifting</strong></td><td>$559 per incident <em>(NRF 2023)</em></td><td>Real-time apprehension · evidence capture · deterrence</td></tr>
-      <tr><td><strong>Commercial Burglary</strong></td><td>$3,000–$8,500 per incident</td><td>Scene arrival before suspect can exit · HD identification footage</td></tr>
-      <tr><td><strong>Vandalism / Property Damage</strong></td><td>$1,000–$5,000 per incident</td><td>Suspect identification · reduced repeat incidents in monitored zones</td></tr>
-      <tr><td><strong>Robbery / Armed Incidents</strong></td><td>$8,000+ in costs &amp; liability</td><td>Officer-safety pre-arrival intel · coordinated ground response</td></tr>
-      <tr><td><strong>Trespass / Loitering</strong></td><td>$200–$1,500 in staff/facility cost</td><td>Non-confrontational aerial deterrence</td></tr>
-    </tbody>
-  </table>
-
-  <p>Peer agencies with active DFR programs — including Chula Vista, CA; El Cajon, CA; and Westerville, OH — have documented <strong>15–30% reductions in property crime rates</strong> within covered zones, and average response times of under 90 seconds from dispatch. {prop_city}'s proposed deployment covers <strong>{calls_covered_perc:.1f}% of incidents</strong> and arrives an average of <strong>{avg_time_saved:.1f} minutes faster</strong> than current patrol response.</p>
-
-  <h3 style="color:var(--text);font-size:16px;margin:24px 0 12px">The Investment We're Requesting</h3>
-
-  <p>Total program CapEx is <strong>${fleet_capex:,.0f}</strong>. The {prop_city} Police Department is seeking community partnership contributions to offset a portion of this cost and accelerate deployment. Every dollar contributed directly funds equipment that protects your street, your block, your customers.</p>
-
-  <table style="margin-bottom:20px">
-    <thead><tr><th>Sponsorship Tier</th><th>Contribution</th><th>Recognition &amp; Benefits</th></tr></thead>
-    <tbody>
-      <tr style="background:rgba(255,215,0,0.04)"><td><strong>🥇 Founding Sponsor</strong></td><td><strong>$25,000+</strong></td><td>Named drone unit bearing your business name · press release · plaque at station · annual program briefing with command staff · tax-deductible receipt</td></tr>
-      <tr><td><strong>🥈 Community Champion</strong></td><td><strong>$10,000–$24,999</strong></td><td>Logo on all program materials &amp; vehicle decals · certificate of recognition · annual impact report · public acknowledgment at City Council</td></tr>
-      <tr><td><strong>🥉 Neighborhood Partner</strong></td><td><strong>$2,500–$9,999</strong></td><td>Listed on program website and department newsletter · certificate · public acknowledgment</td></tr>
-      <tr><td><strong>🤝 Business Supporter</strong></td><td><strong>$500–$2,499</strong></td><td>Donor roll listing · formal thank-you letter on department letterhead</td></tr>
-      <tr><td><strong>💙 Community Contributor</strong></td><td><strong>Any amount</strong></td><td>Recognized in annual program transparency report</td></tr>
-    </tbody>
-  </table>
-
-  <p>For every <strong>$10,000</strong> contributed, the program is projected to generate approximately <strong>${int(annual_savings/max(fleet_capex,1)*10000):,}</strong> in annual operational savings and property crime cost avoidance for the {prop_city} business community — a {round(annual_savings/max(fleet_capex,1),1):.1f}x return on community investment.</p>
-
-  <p>Together, we can make {prop_city} safer, faster, and more resilient. Thank you for your commitment to this community.</p>
-</section>
-
-[ANALYTICS_SECTION]
-[COMMUNITY_IMPACT_SECTION]
-
-<!-- ── 11: SCHOOL SAFETY IMPACT ───────────���───────────────────── -->
-<section class="doc-section" id="school-safety">
-  <div class="section-eyebrow"><span class="pg-num">11</span><span class="pg-title">School Safety Impact</span><span class="src" data-src="Sources: FBI Crime in Schools 2020–2024 · NCES Indicators of School Crime &amp; Safety 2023 · FBI Active Shooter Study · RAND Corp. 'Role and Impact of SROs' (2023) · NIJ Effects of SROs on School Crime · K-12 School Shooting Database (k12ssdb.org) · BJS School Crime 2024 · ZipRecruiter/Volt.ai SRO salary data · BRINC technical specifications. See full source list at bottom of this section.">ⓘ</span></div>
-
-  <p style="font-size:14px;color:var(--muted);max-width:700px;line-height:1.7;margin-bottom:28px;">
-    BRINC DFR delivers 24/7 aerial first-response to school campuses — faster and at lower total lifecycle cost
-    than traditional School Resource Officers, with no coverage blind spots, no off-hours gaps, and full HD + thermal
-    scene intelligence before any officer enters a building.
-  </p>
-
-  <!-- NATIONAL STATS HERO -->
-  <div class="metrics-hero" style="margin-bottom:28px;">
-    <div class="metric-cell" style="border-top:3px solid #ef4444;">
-      <div class="m-label">School Crimes 2020–24 <abbr title="Source: FBI Crime in Schools Special Report 2020–2024. Over 1.3M criminal incidents at K-12 locations across the US over 5 years, with ~1.5M victims.">ⓘ</abbr></div>
-      <div class="m-value" style="color:#ef4444;">1.3M</div>
-      <div class="m-sub">criminal incidents on campus</div>
-    </div>
-    <div class="metric-cell" style="border-top:3px solid var(--amber);">
-      <div class="m-label">Student Victimization <abbr title="Source: NCES Indicators of School Crime &amp; Safety 2023 (NCES 2024-145). 22 nonfatal criminal victimizations per 1,000 students ages 12-18 in 2022 — includes theft, violent crime, and serious threats.">ⓘ</abbr></div>
-      <div class="m-value gold">22</div>
-      <div class="m-sub">per 1,000 students annually</div>
-    </div>
-    <div class="metric-cell" style="border-top:3px solid #8b5cf6;">
-      <div class="m-label">Incidents End ≤5 min <abbr title="Source: FBI Active Shooter Study (64 incidents analyzed). 69% of active shooter events conclude within 5 minutes — 23 ended in under 2 min. Avg duration at educational facilities: 3 min 18 sec.">ⓘ</abbr></div>
-      <div class="m-value" style="color:#8b5cf6;">69%</div>
-      <div class="m-sub">end before ground units arrive</div>
-    </div>
-    <div class="metric-cell" style="border-top:3px solid var(--resp);">
-      <div class="m-label">BRINC On-Scene Time <abbr title="Source: BRINC technical specs; Chula Vista PD DFR Program outcomes. Launches in &lt;20 sec, on-scene in &lt;90 sec — vs. 14-15 min national ground average.">ⓘ</abbr></div>
-      <div class="m-value cyan">&lt;90s</div>
-      <div class="m-sub">airborne &amp; streaming live video</div>
-    </div>
-    <div class="metric-cell">
-      <div class="m-label">K-12 Shootings 2024 <abbr title="Source: K-12 School Shooting Database (k12ssdb.org). 336 shooting incidents on K-12 campuses in 2024. FBI active-shooter defined incidents down 50% from 48 (2023) to 24 (2024).">ⓘ</abbr></div>
-      <div class="m-value" style="color:#ef4444;">336</div>
-      <div class="m-sub">K-12 shooting incidents in 2024</div>
-    </div>
-    <div class="metric-cell">
-      <div class="m-label">SRO Annual Cost <abbr title="Source: ZipRecruiter SRO Salary Data 2025; DeSoto County SRO cost breakdown ($94,147/yr blended); Volt.ai SRO Cost Analysis. Includes salary + benefits + equipment per officer.">ⓘ</abbr></div>
-      <div class="m-value gold">$94K+</div>
-      <div class="m-sub">per officer · school hours only</div>
-    </div>
-    <div class="metric-cell">
-      <div class="m-label">SRO Coverage Hours <abbr title="Source: Standard school calendar. 7 hours/day × 180 school days = 1,260 operational hours per year — 14.4% of annual hours. Nights, weekends, summers: unprotected.">ⓘ</abbr></div>
-      <div class="m-value">14.4%</div>
-      <div class="m-sub">of annual hours covered</div>
-    </div>
-    <div class="metric-cell" style="background:rgba(0,210,255,0.04);">
-      <div class="m-label">DFR Coverage Hours <abbr title="BRINC DFR operates 24 hours/day, 365 days/year = 8,760 hours/year. Full coverage including nights, weekends, summer, and after-school hours when SROs are absent.">ⓘ</abbr></div>
-      <div class="m-value cyan">100%</div>
-      <div class="m-sub">24/7/365 aerial coverage</div>
-    </div>
-  </div>
-
-  <!-- CRITICAL WINDOW CALLOUT -->
-  <div style="background:#fff8f8;border-left:4px solid #ef4444;padding:16px 22px;border-radius:0 8px 8px 0;margin-bottom:28px;">
-    <h4 style="color:#ef4444;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;">
-      ⚠️ The Critical Response Window
-      <abbr title="Sources: FBI Law Enforcement Bulletin 'Those Terrible First Few Minutes'; FBI Active Shooter Study (51-case median analysis); ALICE Training Institute; K-12 School Shooting Database.">ⓘ</abbr>
-    </h4>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;">
-      <div style="text-align:center;background:#fff;border:1px solid #f5c6c6;border-radius:6px;padding:12px;">
-        <div style="font-size:24px;font-weight:900;color:#ef4444;font-family:'IBM Plex Mono',monospace;">14–15 min</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Avg police arrival to<br>active shooter nationally</div>
-      </div>
-      <div style="text-align:center;background:#fff;border:1px solid #fde68a;border-radius:6px;padding:12px;">
-        <div style="font-size:24px;font-weight:900;color:var(--amber);font-family:'IBM Plex Mono',monospace;">3m 18s</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Avg incident duration<br>at schools (FBI)</div>
-      </div>
-      <div style="text-align:center;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:12px;">
-        <div style="font-size:24px;font-weight:900;color:var(--resp);font-family:'IBM Plex Mono',monospace;">&lt;90 sec</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px;">BRINC airborne with<br>live HD + thermal</div>
-      </div>
-    </div>
-    <p style="font-size:12px;color:#7a3a3a;font-style:italic;line-height:1.6;margin:0;">
-      "Most active shooter incidents in schools are over before a responding officer reaches the building entrance.
-      DFR doesn't replace the officer — it gives command staff eyes on every hallway, stairwell, and exit
-      before they open the first door." — FBI Law Enforcement Bulletin
-    </p>
-  </div>
-
-  <!-- DFR vs SRO COMPARISON TABLE -->
-  <h3 class="sh"><span class="sh-accent">DFR</span> vs. School Resource Officer — Capability Matrix
-    <abbr style="font-size:11px;font-weight:400;color:var(--muted);margin-left:8px;" title="SRO data: RAND 'The Role and Impact of School Resource Officers' (2023); NIJ Effects of SROs on School Crime (OJP); ZipRecruiter SRO Salary 2025. DFR data: BRINC technical specifications; Chula Vista PD DFR outcomes.">ⓘ Sources</abbr>
-  </h3>
-  <table style="margin-bottom:28px;">
-    <thead>
-      <tr>
-        <th style="width:30%;">Capability</th>
-        <th style="color:#b45309;text-align:center;">School Resource Officer</th>
-        <th style="color:var(--resp);text-align:center;">BRINC DFR</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr><td><strong>Annual Cost / Campus</strong></td>
-          <td style="text-align:center;color:#b45309;">$75,000 – $120,000 per officer</td>
-          <td style="text-align:center;color:#0369a1;">${int(fleet_capex/7):,}/yr amortized (7-yr) · {actual_k_responder + actual_k_guardian} units</td></tr>
-      <tr><td><strong>Coverage Hours / Year</strong></td>
-          <td style="text-align:center;color:#b45309;">~1,260 hrs (school hours only)</td>
-          <td style="text-align:center;color:var(--green);">8,760 hrs — 24/7/365</td></tr>
-      <tr><td><strong>Campuses Covered</strong></td>
-          <td style="text-align:center;color:#b45309;">1 building per officer</td>
-          <td style="text-align:center;color:var(--green);">Multi-campus from 1 hub station</td></tr>
-      <tr><td><strong>On-Campus Response Time</strong></td>
-          <td style="text-align:center;color:#b45309;">2–5 min (foot/vehicle)</td>
-          <td style="text-align:center;color:var(--green);">&lt;90 sec airborne · {avg_resp_time:.1f} min avg aerial</td></tr>
-      <tr><td><strong>After-Hours / Weekend</strong></td>
-          <td style="text-align:center;color:#b45309;">❌ No coverage</td>
-          <td style="text-align:center;color:var(--green);">✅ Full thermal surveillance</td></tr>
-      <tr><td><strong>Thermal / Night Vision</strong></td>
-          <td style="text-align:center;color:#b45309;">❌ Flashlight only</td>
-          <td style="text-align:center;color:var(--green);">✅ 640px FLIR thermal</td></tr>
-      <tr><td><strong>Perimeter Monitoring</strong></td>
-          <td style="text-align:center;color:#b45309;">❌ Not feasible at scale</td>
-          <td style="text-align:center;color:var(--green);">✅ Automated aerial patrol</td></tr>
-      <tr><td><strong>Active Threat Intel</strong></td>
-          <td style="text-align:center;color:#b45309;">Single officer, blind entry</td>
-          <td style="text-align:center;color:var(--green);">✅ Live HD + thermal to dispatch</td></tr>
-      <tr><td><strong>Indoor Operations</strong></td>
-          <td style="text-align:center;">✅ On foot</td>
-          <td style="text-align:center;color:var(--green);">✅ LEMUR 2 — glass-breaker, perch, 2-way comms</td></tr>
-      <tr><td><strong>Court-Admissible Evidence</strong></td>
-          <td style="text-align:center;color:#b45309;">Body cam (ground-level)</td>
-          <td style="text-align:center;color:var(--green);">✅ HD aerial video + flight log</td></tr>
-      <tr><td><strong>Mass Shooting Prevention</strong>
-              <abbr title="Source: RAND Corporation 'The Role and Impact of School Resource Officers' (2023). Quote: 'There is no evidence about whether SROs prevent the types of mass shootings that often lead to the placement of SROs in school.'">ⓘ</abbr></td>
-          <td style="text-align:center;color:#b45309;">❌ No proven effect (RAND, 2023)</td>
-          <td style="text-align:center;color:var(--green);">✅ Pre-entry intel, faster coordination</td></tr>
-      <tr><td><strong>Disciplinary Side Effects</strong>
-              <abbr title="Source: RAND 'The Role and Impact of School Resource Officers' (2023). Schools with SROs saw 35-80% more out-of-school suspensions and 25-90% more expulsions than schools without SROs.">ⓘ</abbr></td>
-          <td style="text-align:center;color:#b45309;">⚠️ +35–80% suspensions, +25–90% expulsions</td>
-          <td style="text-align:center;color:var(--green);">✅ Zero school-discipline impact</td></tr>
-    </tbody>
-  </table>
-
-  <!-- COST COMPARISON -->
-  <div class="fleet-split" style="margin-bottom:24px;">
-    <div class="fleet-card guardian" style="border-top:3px solid var(--amber);">
-      <div class="fc-icon">📋</div>
-      <div class="fc-type" style="color:var(--amber);">10-School District — SRO Model</div>
-      <div class="fc-val">$940K – $1.2M/yr</div>
-      <div class="fc-sub">10 officers · school hours only</div>
-      <div style="margin-top:16px;">
-        <div class="fc-row"><span class="k">Annual hours covered</span><span class="v">1,260 hrs/campus (14.4%)</span></div>
-        <div class="fc-row"><span class="k">Nights / weekends / summer</span><span class="v" style="color:#ef4444;">❌ Unprotected</span></div>
-        <div class="fc-row"><span class="k">Multi-campus coverage</span><span class="v" style="color:#ef4444;">❌ One building/officer</span></div>
-        <div class="fc-row"><span class="k">Proven mass-shooting prevention</span><span class="v" style="color:#ef4444;">❌ No evidence</span></div>
-      </div>
-    </div>
-    <div class="fleet-card responder" style="border-top:3px solid var(--resp);">
-      <div class="fc-icon">🚁</div>
-      <div class="fc-type">BRINC DFR — Multi-Campus</div>
-      <div class="fc-val">${fleet_capex:,.0f} CapEx</div>
-      <div class="fc-sub">{_dfr_amort_str} amortized · {actual_k_responder + actual_k_guardian} units</div>
-      <div style="margin-top:16px;">
-        <div class="fc-row"><span class="k">Annual hours covered</span><span class="v" style="color:var(--resp);">8,760 hrs (24/7/365)</span></div>
-        <div class="fc-row"><span class="k">Nights / weekends / summer</span><span class="v" style="color:var(--green);">✅ Full thermal patrol</span></div>
-        <div class="fc-row"><span class="k">Multi-campus coverage</span><span class="v" style="color:var(--green);">✅ {actual_k_responder + actual_k_guardian} simultaneous zones</span></div>
-        <div class="fc-row"><span class="k">Response time advantage</span><span class="v" style="color:var(--green);">+{avg_time_saved:.1f} min faster per incident</span></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- SOURCES -->
-  <div class="disc" style="font-size:11px;line-height:1.8;">
-    <strong>Data Sources:</strong>
-    <a href="https://www.fbi.gov/news/press-releases/fbi-releases-crime-in-schools-2020-2024-special-report" target="_blank">FBI Crime in Schools 2020–2024</a> ·
-    <a href="https://nces.ed.gov/pubs2024/2024145.pdf" target="_blank">NCES Indicators of School Crime &amp; Safety 2023</a> ·
-    <a href="https://leb.fbi.gov/articles/featured-articles/those-terrible-first-few-minutes-revisiting-active-shooter-protocols-for-schools" target="_blank">FBI LEB "Those Terrible First Few Minutes"</a> ·
-    <a href="https://www.rand.org/research/gun-policy/analysis/essays/school-resource-officers.html" target="_blank">RAND "The Role and Impact of School Resource Officers" (2023)</a> ·
-    <a href="https://nij.ojp.gov/library/publications/effects-school-resource-officers-school-crime-and-responses-school-crime" target="_blank">NIJ Effects of SROs on School Crime</a> ·
-    <a href="https://k12ssdb.org/" target="_blank">K-12 School Shooting Database</a> ·
-    <a href="https://www.fbi.gov/news/press-releases/fbi-releases-2024-active-shooter-incidents-in-the-united-states-report" target="_blank">FBI Active Shooter Report 2024</a> ·
-    <a href="https://brincdrones.com/responder/" target="_blank">BRINC Responder Technical Specs</a>
-  </div>
-
-</section>
-
-<!-- ── CUSTOM CLOSING (AE-authored, optional) ──────────────────── -->
-{_custom_closing_html}
-
-<!-- ── DISCLAIMER ─────────────────────────────────────────────── -->
-<div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:20px 60px;margin:0;font-size:11px;color:#7a5a00;line-height:1.7">
-  <strong>&#9888; SIMULATION TOOL DISCLAIMER</strong> — All figures are model estimates based on user inputs and publicly available data. Not a legal recommendation, binding proposal, contract, or guarantee. Deployments require FAA authorization and formal procurement.
-</div>
-
-<!-- ── FOOTER ─────────────────────────────────────────────────── -->
-<footer class="doc-footer">
-  <span class="brand-mark">BRINC</span>
-  <span>{"<img src='data:image/png;base64," + logo_b64_light + "' style='height:24px;vertical-align:middle;'>" if logo_b64_light else ""} BRINC Drones, Inc. · <a href="https://brincdrones.com">brincdrones.com</a> · <a href="mailto:sales@brincdrones.com">sales@brincdrones.com</a> · +1 (855) 950-0226</span>
-  <span>Prepared by {prop_name} · <a href="mailto:{prop_email}">{prop_email}</a>{" · " + _doc_phone if _doc_phone else ""}</span>
-</footer>
-
-</main>
-<script>
-// Highlight active nav link on scroll
-const sections=document.querySelectorAll('section[id],div[id="analytics"]');
-const links=document.querySelectorAll('.sidebar-nav a');
-const obs=new IntersectionObserver(entries=>{{
-  entries.forEach(e=>{{
-    if(e.isIntersecting){{
-      links.forEach(l=>l.classList.remove('active'));
-      const a=document.querySelector('.sidebar-nav a[href="#'+e.target.id+'"]');
-      if(a)a.classList.add('active');
-    }}
-  }})
-}},{{threshold:0.3}});
-sections.forEach(s=>obs.observe(s));
-
-// ── Copy Community Business Partnership letter ──────────────────────────────
-function copyCommunitySection() {{
-  const section = document.getElementById('community');
-  const btn = document.getElementById('copyPartnershipBtn');
-  if (!section || !btn) return;
-
-  // Build clean plain-text version by walking the section's text nodes
-  // but skipping the button itself
-  function getTextContent(node) {{
-    if (node === btn) return '';
-    if (node.nodeType === Node.TEXT_NODE) return node.textContent;
-    if (node.nodeType !== Node.ELEMENT_NODE) return '';
-    const tag = node.tagName.toUpperCase();
-    if (tag === 'STYLE' || tag === 'SCRIPT') return '';
-    let out = '';
-    for (const child of node.childNodes) out += getTextContent(child);
-    // Block-level elements get newlines
-    const block = ['DIV','P','H1','H2','H3','H4','H5','H6','LI','TR','BR','SECTION','ARTICLE'];
-    if (block.includes(tag)) out = '\n' + out.trimEnd() + '\n';
-    if (tag === 'TH' || tag === 'TD') out = out.trim() + '\t';
-    return out;
-  }}
-
-  const rawText = getTextContent(section)
-    .replace(/\n{{3,}}/g, '\n\n')   // collapse excess blank lines
-    .trim();
-
-  navigator.clipboard.writeText(rawText).then(() => {{
-    const orig = btn.innerHTML;
-    btn.classList.add('copied');
-    btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg> Copied!';
-    setTimeout(() => {{ btn.classList.remove('copied'); btn.innerHTML = orig; }}, 2000);
-  }}).catch(() => {{
-    // Fallback for non-https / older browsers
-    const ta = document.createElement('textarea');
-    ta.value = rawText;
-    ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0;';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    const orig = btn.innerHTML;
-    btn.classList.add('copied');
-    btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg> Copied!';
-    setTimeout(() => {{ btn.classList.remove('copied'); btn.innerHTML = orig; }}, 2000);
-  }});
-}}
-</script>
-</body></html>"""
-
-        # ── Analytics section — use the light-themed export charts, not the dark command center ──
-        # cad_charts_html_export uses light backgrounds (#111 text, white/gray),
-        # while analytics_html_export (generate_command_center_html) uses background:#000 which
-        # creates a large black gap in the white export document.
-        if cad_charts_html_export:
-            _analytics_section_html = (
-                '\n<!-- \u2500\u2500 09: ANALYTICS DASHBOARD \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->\n'
-                '<section class="doc-section" id="analytics">\n'
-                '  <div class="section-eyebrow"><span class="pg-num">09</span><span class="pg-title">Analytics Dashboard</span>'
-                '<span class="src" data-src="Source: Uploaded CAD export data. All charts \u2014 call type distribution, priority breakdown, hourly heat map, and month-over-month trends \u2014 are derived directly from incident records provided. No external data normalization is applied.">\u24d8</span></div>\n'
-                f'  {cad_charts_html_export}\n'
-                '</section>'
+        """
+        st.markdown(header_html, unsafe_allow_html=True)
+
+        # Cleanly evaluate dynamic CSS to avoid f-string syntax errors
+        border_css = 'border-right: 1px solid #222; padding-right: 10px;' if gain_val is not None else ''
+
+        # If traffic simulation is on, nest the time saved right inside the Avg Response box!
+        if gain_val is not None:
+            resp_content = (
+                f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace; line-height: 1.1;">{avg_resp_time:.1f}m</div>'
+                f'<div style="font-size: 0.7rem; color: #39FF14; font-weight: 800; text-transform: uppercase; margin-top: 4px;">▼ Saves {gain_val}</div>'
             )
-            _analytics_nav = '<a href="#analytics"><span class="nav-num">09</span>Analytics Dashboard</a>'
         else:
-            _analytics_section_html = ''
-            _analytics_nav = ''
-        export_html = export_html.replace("[ANALYTICS_SECTION]", _analytics_section_html)
-        export_html = export_html.replace("[ANALYTICS_NAV]", _analytics_nav)
+            resp_content = f'<div style="font-size: 2.2rem; font-weight: 800; color: {accent_color}; font-family: \'IBM Plex Mono\', monospace;">{avg_resp_time:.1f}m</div>'
 
-        # ── Community Impact section (light theme for print/export) ─────────
-        _cid_export_html = html_reports.generate_community_impact_dashboard_html(
-            city=prop_city,
-            state=prop_state,
-            population=int(pop_metric or 65000),
-            total_calls=int(st.session_state.get('total_original_calls', 0) or 0),
+        # ── Pre-compute Fleet Summary impact sub-values ───────────────────────
+        _annual_resolved = int(daily_drone_only_calls * 365) if daily_drone_only_calls > 0 else 0
+        _covered_calls_abs = int(calls_covered_perc / 100.0 * total_calls) if total_calls else 0
+        _land_sqmi = int(area_covered_perc / 100.0 * area_sq_mi) if area_sq_mi else 0
+
+        _impact_incidents  = f"~{_annual_resolved:,} resolved/yr" if _annual_resolved > 0 else None
+        _impact_coverage   = f"{_covered_calls_abs:,} calls" if _covered_calls_abs > 0 else None
+        _impact_land       = f"~{_land_sqmi:,} sq mi" if _land_sqmi > 0 else None
+        _impact_overlap    = f"{len(active_drones)} drone{'s' if len(active_drones) != 1 else ''}" if active_drones else None
+
+        if simulate_traffic and gain_val and gain_val != "N/A":
+            _t_label = "Light" if traffic_level < 35 else "Moderate" if traffic_level < 75 else "Heavy"
+            _impact_resp = f"saves {gain_val} w/ {_t_label} traffic"
+        elif avg_time_saved > 0:
+            _impact_resp = f"saves {avg_time_saved:.1f}m vs gnd"
+        else:
+            _impact_resp = None
+
+        # 2. SPLIT KPI BAR — Guardian row + Responder row + combined summary
+        def _kpi_cell(label, value, color=accent_color, border=True, impact=None):
+            br = f"border-right: 1px solid #222; padding-right: 10px;" if border else ""
+            _imp = (f'<div style="font-size:0.65rem; color:#39FF14; font-weight:700; margin-top:2px;">({impact})</div>'
+                    if impact else '')
+            return (
+                f'<div style="{br} text-align: center;">'
+                f'<div style="font-size: 0.68rem; color: {text_muted}; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom:2px;">{label}</div>'
+                f'<div style="font-size: 1.9rem; font-weight: 800; color: {color}; font-family: \'IBM Plex Mono\', monospace;">{value}</div>'
+                f'{_imp}'
+                f'</div>'
+            )
+
+        _GUARD_COL = "#FFD700"   # gold for Guardian
+        _RESP_COL  = "#00D2FF"   # cyan for Responder
+        _COMB_COL  = "#39FF14"   # green for combined
+
+        kpi_html = (
+            # ── Row 1: summary totals ──────────────────────────────────────────
+            f'<div style="background:{card_bg}; border:1px solid {card_border}; border-radius:8px; padding:16px 20px; margin-bottom:8px;">'
+            f'<div style="font-size:0.65rem; color:{text_muted}; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Fleet Summary <span class="tip" data-tip="Sources: Coverage % and response time computed from uploaded CAD incident data using BRINC geospatial optimizer. Hardware specs: BRINC Drones (brincdrones.com). Response time uses drone speed with 1.4× routing factor to approximate real-world travel paths.">?</span></div>'
+            f'<div style="display:grid; grid-template-columns:repeat(5,1fr); gap:8px;">'
+            + _kpi_cell("Total Incidents", call_str, impact=_impact_incidents)
+            + _kpi_cell("Combined Coverage", f"{calls_covered_perc:.1f}%", _COMB_COL, impact=_impact_coverage)
+            + _kpi_cell("Land Covered", f"{area_covered_perc:.1f}%", _COMB_COL, impact=_impact_land)
+            + _kpi_cell("Zone Overlap", f"{overlap_perc:.1f}%", text_muted, impact=_impact_overlap)
+            + _kpi_cell("Avg Response", f"{avg_resp_time:.1f}m", accent_color, border=False, impact=_impact_resp)
+            + f'</div></div>'
+
+            # ── Row 2: Guardian-specific metrics ──────────────────────────────
+            + f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">'
+
+            + f'<div style="background:{card_bg}; border:1px solid #3a3000; border-top:3px solid {_GUARD_COL}; border-radius:8px; padding:14px 16px;">'
+            + f'<div style="font-size:0.65rem; color:{_GUARD_COL}; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; font-weight:700;">🦅 Guardian Fleet — {actual_k_guardian} unit{"s" if actual_k_guardian!=1 else ""} · {guard_strategy_raw}</div>'
+            + f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">'
+            + _kpi_cell("Call Coverage", f"{guard_calls_perc:.1f}%", _GUARD_COL)
+            + _kpi_cell("Area Coverage", f"{guard_area_perc:.1f}%", _GUARD_COL, border=False)
+            + f'</div></div>'
+
+            # ── Row 3: Responder-specific metrics ─────────────────────────────
+            + f'<div style="background:{card_bg}; border:1px solid #003a3a; border-top:3px solid {_RESP_COL}; border-radius:8px; padding:14px 16px;">'
+            + f'<div style="font-size:0.65rem; color:{_RESP_COL}; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; font-weight:700;">🚁 Responder Fleet — {actual_k_responder} unit{"s" if actual_k_responder!=1 else ""} · {resp_strategy_raw}</div>'
+            + f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">'
+            + _kpi_cell("Call Coverage", f"{resp_calls_perc:.1f}%", _RESP_COL)
+            + _kpi_cell("Area Coverage", f"{resp_area_perc:.1f}%", _RESP_COL, border=False)
+            + f'</div></div>'
+
+            + f'</div>'
+        )
+    
+        st.markdown(kpi_html, unsafe_allow_html=True)
+        if orig_calls != modeled_calls:
+            model_note = f"Optimization modeled via {modeled_calls:,} representative CAD samples from {orig_calls:,} total incidents."
+        else:
+            model_note = f"Optimization modeled via all {modeled_calls:,} available incidents."
+        if displayed_points and displayed_points < orig_calls:
+            map_note = f"Map renders {displayed_points:,} incident points using Plotly's WebGL-backed map layer for dense full-call visualization."
+        elif displayed_points:
+            map_note = f"Map renders all {displayed_points:,} incident points."
+        else:
+            map_note = ""
+        full_daily_note = f"Citywide daily-call estimates are based on the full uploaded CAD total of {orig_calls:,} incidents." if orig_calls else ""
+        note_bits = [model_note]
+        if map_note:
+            note_bits.append(map_note)
+        if full_daily_note:
+            note_bits.append(full_daily_note)
+        st.markdown(f"<div style='font-size:0.65rem;color:gray;margin-top:-10px;margin-bottom:12px;text-align:right;'>{' '.join(note_bits)}</div>", unsafe_allow_html=True)
+
+        overtime_stats = html_reports.estimate_high_activity_overtime(
+            df_calls_full if df_calls_full is not None else df_calls,
+            st.session_state.get('active_state', 'TX'),
+            calls_covered_perc,
+            dfr_dispatch_rate,
+            deflection_rate,
+        )
+        cards_below_map = bool(show_cards)
+        map_col = st.container()
+
+        with map_col:
+            fig = go.Figure()
+
+            if show_boundaries and city_boundary_geom is not None and not city_boundary_geom.is_empty:
+                geoms_to_draw = [city_boundary_geom] if isinstance(city_boundary_geom, Polygon) else list(city_boundary_geom.geoms)
+                for gi, geom in enumerate(geoms_to_draw):
+                    bx, by = geom.exterior.coords.xy
+                    fig.add_trace(go.Scattermap(mode="lines", lon=list(bx), lat=list(by),
+                        line=dict(color=map_boundary_color, width=2), name="Jurisdiction Boundary",
+                        hoverinfo='skip', showlegend=(gi==0)))
+
+            if show_boundaries and boundary_overlay_gdf is not None and not boundary_overlay_gdf.empty:
+                _overlay_parts = []
+                for _overlay_geom in boundary_overlay_gdf.geometry:
+                    if _overlay_geom is None or _overlay_geom.is_empty:
+                        continue
+                    if isinstance(_overlay_geom, Polygon):
+                        _overlay_parts.append(_overlay_geom)
+                    elif isinstance(_overlay_geom, MultiPolygon):
+                        _overlay_parts.extend(list(_overlay_geom.geoms))
+                for oi, geom in enumerate(_overlay_parts):
+                    bx, by = geom.exterior.coords.xy
+                    fig.add_trace(go.Scattermap(mode="lines", lon=list(bx), lat=list(by),
+                        line=dict(color="#00D2FF", width=2), name="Uploaded Boundary Overlay",
+                        hoverinfo='skip', showlegend=(oi==0)))
+
+            if show_heatmap and not display_calls.empty:
+                fig.add_trace(go.Densitymap(lat=display_calls.geometry.y, lon=display_calls.geometry.x,
+                    z=np.ones(len(display_calls)), radius=12, colorscale='Inferno', opacity=0.6,
+                    showscale=False, name="Heatmap", hoverinfo='skip'))
+
+            if show_dots and not display_calls.empty:
+                point_size = 1 if len(display_calls) > 150000 else 2 if len(display_calls) > 50000 else 3 if len(display_calls) > 20000 else 4
+                point_opacity = 0.06 if len(display_calls) > 150000 else 0.10 if len(display_calls) > 50000 else 0.18 if len(display_calls) > 20000 else 0.28 if len(display_calls) > 10000 else 0.4
+                # Split by agency so fire calls render red and police calls use the theme colour
+                _has_agency = 'agency' in display_calls.columns
+                _fire_calls   = display_calls[display_calls['agency'].str.lower() == 'fire'] if _has_agency else display_calls.iloc[0:0]
+                _police_calls = display_calls[display_calls['agency'].str.lower() != 'fire'] if _has_agency else display_calls
+                if not _police_calls.empty:
+                    fig.add_trace(go.Scattermap(lat=_police_calls.geometry.y, lon=_police_calls.geometry.x,
+                        mode='markers', marker=dict(size=point_size, color=map_incident_color, opacity=point_opacity),
+                        name="Police Incidents", hoverinfo='skip'))
+                if not _fire_calls.empty:
+                    fig.add_trace(go.Scattermap(lat=_fire_calls.geometry.y, lon=_fire_calls.geometry.x,
+                        mode='markers', marker=dict(size=point_size, color='#ff3b3b', opacity=point_opacity),
+                        name="Fire Incidents", hoverinfo='skip'))
+
+            if show_faa and faa_geojson and faa_geojson.get("features"):
+                try:
+                    add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=not show_satellite)
+                except Exception as e:
+                    st.sidebar.error(f"🔴 FAA render error: {str(e)[:100]}")
+
+            if show_obstacles:
+                add_faa_obstacles_layer_to_plotly(fig, minx, miny, maxx, maxy)
+
+            if show_cell_towers:
+                add_cell_towers_layer_to_plotly(fig, st.session_state.get('active_state', 'CA'), minx, miny, maxx, maxy)
+
+            if show_no_fly:
+                add_no_fly_zones_layer_to_plotly(fig, minx, miny, maxx, maxy)
+
+            if show_coverage:
+                _cov_state = st.session_state.get('active_state', '')
+                if _cov_state:
+                    add_coverage_traces(fig, _cov_state, visible=True)
+
+            for d in active_drones:
+                clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
+                lbl = f"{d['name'].split(',')[0]} ({'Resp' if d['type']=='RESPONDER' else 'Guard'})"
+            
+                # Determine if this is an extended Guardian (so we can relax the outer ring)
+                is_extended_guardian = (d['type'] == 'GUARDIAN' and d['radius_m']/1609.34 > 5.0)
+            
+                # The outer ring becomes relaxed (thinner, more transparent) if > 5 miles
+                outer_width = 1.5 if is_extended_guardian else 4.5
+                outer_opac = 0.4 if is_extended_guardian else 1.0
+            
+                fig.add_trace(go.Scattermap(
+                    lat=list(clats)+[None,d['lat']], lon=list(clons)+[None,d['lon']],
+                    mode='lines+markers',
+                    opacity=outer_opac,
+                    marker=dict(size=[0]*len(clats)+[0,20], color=d['color']),
+                    line=dict(color=d['color'], width=outer_width),
+                    fill='toself', fillcolor='rgba(0,0,0,0)', name=lbl, hoverinfo='name'))
+
+                # The 5-mile Rapid Response ring gets the "Important" styling (thick, solid, heavier fill)
+                if is_extended_guardian:
+                    f_lats, f_lons = get_circle_coords(d['lat'], d['lon'], r_mi=5.0)
+                    fig.add_trace(go.Scattermap(
+                        lat=list(f_lats), lon=list(f_lons),
+                        mode='lines',
+                        line=dict(color=d['color'], width=4.5),
+                        opacity=1.0,
+                        fill='toself',
+                        fillcolor=f"rgba({int(d['color'][1:3],16)},{int(d['color'][3:5],16)},{int(d['color'][5:7],16)},0.12)",
+                        name=f"Rapid Response 5mi · {d['name'].split(',')[0]}",
+                        hoverinfo='text',
+                        text=f"⚡ Rapid Response Focus Zone — 5mi<br>{d['name'].split(',')[0]}",
+                        showlegend=False
+                    ))
+
+                # Star marker for manually pinned stations
+                if d.get('pinned'):
+                    fig.add_trace(go.Scattermap(
+                        lat=[d['lat']], lon=[d['lon']], mode='markers',
+                        marker=dict(size=18, color=d['color'], symbol='star'),
+                        name=f"📍 {d['name'].split(',')[0]} (Pinned)",
+                        hovertemplate=f"<b>🔒 PINNED</b><br>{d['name']}<br>{d['type']}<extra></extra>",
+                        showlegend=False
+                    ))
+                if simulate_traffic:
+                    t_color = "#28a745" if traffic_level<35 else "#ffc107" if traffic_level<75 else "#dc3545"
+                    t_fill  = f"rgba({'40,167,69' if traffic_level<35 else '255,193,7' if traffic_level<75 else '220,53,69'}, 0.15)"
+                    t_label = "Light" if traffic_level<35 else "Moderate" if traffic_level<75 else "Heavy"
+                    gs = CONFIG["DEFAULT_TRAFFIC_SPEED"]*(1-traffic_level/100)
+                    if gs > 0:
+                        gr_mi = (gs/60) * (d['radius_m']/1609.34/d['speed_mph'])*60
+                        ga = np.linspace(0,2*np.pi,9)
+                        fig.add_trace(go.Scattermap(
+                            lat=list(d['lat']+(gr_mi/69.172)*np.sin(ga)),
+                            lon=list(d['lon']+(gr_mi/(69.172*np.cos(np.radians(d['lat']))))*np.cos(ga)),
+                            mode='lines', line=dict(color=t_color, width=2.5),
+                            fill='toself', fillcolor=t_fill,
+                            name=f"Ground ({t_label})", hoverinfo='skip'))
+
+            map_cfg = dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style=map_style)
+            if show_satellite:
+                map_cfg["style"] = "carto-positron"
+                map_cfg["layers"] = [{"below":"traces","sourcetype":"raster",
+                    "sourceattribution":"Esri, Maxar, Earthstar Geographics",
+                    "source":["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"]}]
+
+            _pin_drop_active = st.session_state.get('pin_drop_mode', False)
+
+            # In pin-drop mode, switch Plotly to 'select' dragmode so a click-drag
+            # draws a selection box instead of panning.  The center of that box
+            # becomes the pin coordinate — no need to hit an invisible point precisely.
+            _layout_extra = dict(dragmode='select') if _pin_drop_active else {}
+
+            fig.update_layout(uirevision="LOCKED_MAP", map=map_cfg,
+                margin=dict(l=0,r=0,t=0,b=0), height=800, font=dict(size=18),
+                showlegend=True,
+                legend=dict(yanchor="top", y=0.98, xanchor="left", x=0.02,
+                            bgcolor=legend_bg, bordercolor=accent_color, borderwidth=1,
+                            font=dict(size=12, color=legend_text), itemclick="toggle"),
+                **_layout_extra)
+
+            if _pin_drop_active:
+                # Dense grid of subtle markers so box-select always captures at least
+                # one point to confirm the lat/lon.  Size=40 ensures full overlap at
+                # typical city zoom levels (no gaps between adjacent markers).
+                _grid_n = 80
+                _grid_lats = np.linspace(miny, maxy, _grid_n)
+                _grid_lons = np.linspace(minx, maxx, _grid_n)
+                _gla, _glo = np.meshgrid(_grid_lats, _grid_lons)
+                fig.add_trace(go.Scattermap(
+                    lat=_gla.ravel().tolist(),
+                    lon=_glo.ravel().tolist(),
+                    mode='markers',
+                    marker=dict(size=40, color='rgba(0,210,255,0.04)'),
+                    hoverinfo='skip',
+                    showlegend=False,
+                    name='__pin_grid__',
+                ))
+                fig.add_annotation(
+                    text="📍 Pin Drop Mode — click and drag a small box on your target location",
+                    xref="paper", yref="paper", x=0.5, y=0.98,
+                    showarrow=False, font=dict(size=13, color="#00D2FF"),
+                    bgcolor="rgba(0,0,0,0.72)", bordercolor="#00D2FF", borderwidth=1,
+                    borderpad=6, xanchor="center",
+                )
+
+            _map_event = st.plotly_chart(
+                fig, use_container_width=True,
+                config={"scrollZoom": not _pin_drop_active, "displayModeBar": _pin_drop_active},
+                on_select="rerun" if _pin_drop_active else "ignore",
+                key="main_map_chart",
+            )
+
+            # Resolve pin location from whichever signal arrives first:
+            #   1. Selection box center  (most reliable — works even on empty map)
+            #   2. First selected point  (fallback)
+            if _pin_drop_active and _map_event and hasattr(_map_event, 'selection') \
+                    and st.session_state.get('pending_pin') is None:
+                _sel = _map_event.selection
+                _clicked_lat = _clicked_lon = None
+
+                # Priority 1: bounding box of the drawn selection rectangle
+                _box_list = getattr(_sel, 'box', None) or []
+                if _box_list:
+                    _b = _box_list[0]
+                    _lats = _b.get('y') or _b.get('lat') or []
+                    _lons = _b.get('x') or _b.get('lon') or []
+                    if len(_lats) >= 2 and len(_lons) >= 2:
+                        _clicked_lat = (min(_lats) + max(_lats)) / 2.0
+                        _clicked_lon = (min(_lons) + max(_lons)) / 2.0
+
+                # Priority 2: nearest grid point that was selected
+                if _clicked_lat is None:
+                    _sel_pts = getattr(_sel, 'points', []) or []
+                    if _sel_pts:
+                        _pt = _sel_pts[0]
+                        _clicked_lat = _pt.get('lat') or _pt.get('y')
+                        _clicked_lon = _pt.get('lon') or _pt.get('x')
+
+                if _clicked_lat is not None and _clicked_lon is not None:
+                    # Dedup: ignore if this is the same selection that was already processed
+                    _sel_hash = hash(f"{_clicked_lat:.4f},{_clicked_lon:.4f}")
+                    if _sel_hash != st.session_state.get('_pin_sel_hash'):
+                        st.session_state['_pin_sel_hash'] = _sel_hash
+                        st.session_state['pending_pin'] = {
+                            'lat': round(float(_clicked_lat), 6),
+                            'lon': round(float(_clicked_lon), 6),
+                        }
+                        st.rerun()
+
+        # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────
+        st.markdown("---")
+        st.markdown(f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Unit Economics <span class='tip' data-tip='Per-drone financial breakdown — annual capacity value, specialty response savings, utilization, break-even, and response time for each deployed unit. Hover each ? badge for metric definitions.'>?</span> <span class='tip' data-tip='Sources: Annual savings formula — DFR dispatch rate × deflection rate × $76 officer dispatch cost × annual zone calls (IACP/DOJ benchmarks). Hardware CapEx — BRINC Drones MSRP. Specialty values — NFPA (fire), BLS (K-9), internal BRINC benchmarks. All figures are model estimates.'>src</span></h4>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div style='font-size:0.6rem; color:#666; background:rgba(240,180,41,0.07); border-left:3px solid #F0B429; padding:5px 8px; border-radius:0 3px 3px 0; margin-bottom:10px;'>{SIMULATOR_DISCLAIMER_SHORT}</div>",
+            unsafe_allow_html=True
+        )
+        st.markdown(
+            """<style>
+            .unit-card-grid { position: relative; }
+            .unit-card {
+                transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
+                            box-shadow 0.25s ease-out,
+                            z-index 0s;
+                position: relative;
+                z-index: 1;
+            }
+            .unit-card:hover {
+                transform: scale(1.2);
+                box-shadow: 0 16px 48px rgba(0,210,255,0.28), 0 4px 16px rgba(0,0,0,0.45);
+                z-index: 999;
+            }
+            </style>""",
+            unsafe_allow_html=True
+        )
+        if active_drones:
+            st.markdown(
+                html_reports._build_unit_cards_html(
+                    active_drones, text_main, text_muted, card_bg, card_border,
+                    card_title, accent_color, columns_per_row=4,
+                    simple=simple_cards, deflection_rate=deflection_rate
+                ),
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                f"""
+                <div style="background:{card_bg}; border:1px dashed {card_border}; border-radius:6px; padding:22px; text-align:center; margin-top:8px;">
+                    <div style="font-size:2rem; margin-bottom:8px;">🚁</div>
+                    <div style="font-weight:700; color:{text_main}; margin-bottom:6px;">No drones deployed yet</div>
+                    <div style="font-size:0.8rem; color:{text_muted};">
+                        Use the <b>Responder / Guardian Count</b> sliders in the sidebar to deploy drones and see per-unit economics here.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+        # ── COVERAGE CURVE + STATION RING CHART (side by side, directly below cards) ──
+        st.markdown("---")
+        st.markdown(f"<h4 style='border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Coverage Curve <span class='tip' data-tip='Shows marginal call and area coverage as you add more Responder or Guardian drones. The curve flattens as overlap increases — use this to find the point of diminishing returns for your fleet size.'>?</span> <span class='tip' data-tip='Sources: Coverage % derived from geospatial analysis of uploaded CAD incident locations. Optimizer tests each candidate station and measures incremental coverage gain. Map tiles: © OpenStreetMap contributors (ODbL). Station candidates: OSM + DHS HIFLD Open Data.'>src</span></h4>", unsafe_allow_html=True)
+        st.markdown(f"<div style='font-size:0.8rem; color:{text_muted}; margin-bottom:8px;'>How added drones improve coverage — and where returns flatten.</div>", unsafe_allow_html=True)
+
+        _curve_col, _ring_col = st.columns([3, 2], gap="medium")
+
+        with _curve_col:
+            if not df_curve.empty:
+                fig_curve = go.Figure()
+                for col, color, dash in [('Responder (Calls)',accent_color,'solid'),('Guardian (Calls)','#FFD700','solid'),
+                                          ('Responder (Area)',accent_color,'dash'),('Guardian (Area)','#FFD700','dash')]:
+                    y_data = df_curve[col].dropna()
+                    x_data = df_curve.loc[y_data.index,'Drones']
+                    if not y_data.empty:
+                        fig_curve.add_trace(go.Scatter(x=x_data, y=y_data, mode='lines+markers', name=col,
+                            line=dict(color=color,width=2,dash=dash), marker=dict(size=4),
+                            hovertemplate=f"<b>{col}</b><br>Drones: %{{x}}<br>Coverage: %{{y:.1f}}%<extra></extra>"))
+                        if 'Calls' in col:
+                            idx_90 = y_data[y_data >= 90.0].first_valid_index()
+                            if idx_90 is not None:
+                                fig_curve.add_trace(go.Scatter(x=[int(x_data.loc[idx_90])], y=[y_data.loc[idx_90]],
+                                    mode='markers', marker=dict(color=color,size=12,symbol='star',line=dict(color='white',width=1)),
+                                    showlegend=False, hoverinfo='skip'))
+                fig_curve.update_layout(
+                    xaxis_title="Drones", yaxis_title="Coverage %",
+                    xaxis=dict(showgrid=True, gridcolor=card_border, tickfont=dict(color=text_muted)),
+                    yaxis=dict(showgrid=True, gridcolor=card_border, tickfont=dict(color=text_muted),
+                               tickvals=[0,20,40,60,80,90,100], range=[0,105]),
+                    legend=dict(orientation="h",yanchor="bottom",y=1.02,xanchor="right",x=1,
+                                font=dict(size=9,color=text_muted)),
+                    margin=dict(l=10,r=10,t=20,b=10), height=320,
+                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    hoverlabel=dict(bgcolor=card_bg, font_size=13, font_color=text_main, bordercolor=accent_color)
+                )
+                st.plotly_chart(fig_curve, use_container_width=True, config={'displayModeBar':False})
+            else:
+                st.info("Run optimization to generate coverage curve.")
+
+        with _ring_col:
+            st.markdown(
+                f"<div style='font-size:0.7rem; color:{text_muted}; margin-bottom:4px;'>"
+                f"Call coverage by station <span class='tip' data-tip='Donut chart showing how historical 911 calls are distributed across deployed stations. Each slice is one station&apos;s marginal (non-overlapping) call count. The center % is combined fleet coverage. Hover slices for exact counts.'>?</span></div>",
+                unsafe_allow_html=True
+            )
+            # Split ring: outer ring = Guardians (gold), inner ring = Responders (cyan)
+            if active_drones and total_calls > 0:
+                _g_drones = [d for d in active_drones if d['type'] == 'GUARDIAN']
+                _r_drones = [d for d in active_drones if d['type'] == 'RESPONDER']
+
+                def _build_ring_data(drones, fleet_cov_mask):
+                    """Build labels/values/colors for one fleet's ring slices."""
+                    labels, values, colors = [], [], []
+                    remaining = int(fleet_cov_mask.sum()) if fleet_cov_mask is not None else 0
+                    for d in drones:
+                        _m = int(d.get('marginal_perc', 0) * total_calls)
+                        if _m > 0:
+                            labels.append(d['name'].split(',')[0][:18])
+                            values.append(_m)
+                            colors.append(d['color'])
+                            remaining = max(0, remaining - _m)
+                    return labels, values, colors
+
+                _g_labels, _g_vals, _g_cols = _build_ring_data(_g_drones, cov_g)
+                _r_labels, _r_vals, _r_cols = _build_ring_data(_r_drones, cov_r)
+
+                # Uncovered slice for combined view
+                _combined_covered = int(np.logical_or(cov_r, cov_g).sum()) if total_calls > 0 else 0
+                _uncovered = max(0, total_calls - _combined_covered)
+
+                # Build a single donut: Guardian slices (gold ring) + Responder slices (cyan ring)
+                # separated by a small "uncovered" gap
+                all_labels = _g_labels + _r_labels + (["Uncovered"] if _uncovered > 0 else [])
+                all_values = _g_vals   + _r_vals   + ([_uncovered] if _uncovered > 0 else [])
+                all_colors = _g_cols   + _r_cols   + (["#1a1a1a"] if _uncovered > 0 else [])
+
+                if all_values:
+                    fig_ring = go.Figure(go.Pie(
+                        labels=all_labels,
+                        values=all_values,
+                        hole=0.58,
+                        marker=dict(colors=all_colors, line=dict(color='#000', width=1.5)),
+                        textinfo='none',
+                        hovertemplate='<b>%{label}</b><br>%{value:,} calls (%{percent})<extra></extra>',
+                        sort=False,
+                    ))
+                    _cov_pct = round(_combined_covered / total_calls * 100, 1)
+                    _mode_short = "▶◀" if complement_mode else "↔" if shared_mode else "⊕"
+                    fig_ring.update_layout(
+                        annotations=[dict(
+                            text=f"<b>{_cov_pct}%</b><br><span style='font-size:9px'>{_mode_short} combined</span>",
+                            x=0.5, y=0.5, font_size=15, showarrow=False,
+                            font=dict(color=text_main)
+                        )],
+                        showlegend=True,
+                        legend=dict(
+                            orientation='v', x=1.02, y=0.5,
+                            font=dict(size=9, color=text_muted),
+                            bgcolor='rgba(0,0,0,0)',
+                            groupclick='toggleitem',
+                        ),
+                        margin=dict(l=0, r=0, t=10, b=10),
+                        height=320,
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        hoverlabel=dict(bgcolor=card_bg, font_size=12, font_color=text_main),
+                    )
+                    st.plotly_chart(fig_ring, use_container_width=True, config={'displayModeBar':False})
+
+                    # Mode legend below the ring
+                    _mode_label = {
+                        "Complement — push apart": "▶◀ Complement — Responders fill Guardian gaps",
+                        "Independent — each maximises own area": "⊕ Independent — each fleet optimised separately",
+                        "Shared — allow full overlap": "↔ Shared — both fleets maximise same call set",
+                    }.get(deployment_mode, "")
+                    st.markdown(
+                        f"<div style='font-size:0.65rem; color:{text_muted}; text-align:center; margin-top:-8px;'>{_mode_label}</div>",
+                        unsafe_allow_html=True
+                    )
+            else:
+                st.markdown(
+                    f"<div style='color:{text_muted}; font-size:0.8rem; padding:40px 0; text-align:center;'>Deploy drones to see call distribution ring.</div>",
+                    unsafe_allow_html=True
+                )
+
+
+        # Resolve real incident datetime coverage for labels on the stations page
+        _label_dt_series = html_reports._detect_datetime_series_for_labels(df_calls_full if df_calls_full is not None else df_calls)
+        _label_has_real_dates = _label_dt_series is not None and getattr(_label_dt_series, "notna", lambda: pd.Series([], dtype=bool))().sum() > 0
+
+        # ── CAD DATA CHARTS (moved into CAD Ingestion Analytics below) ───────────
+        _cad_src = st.session_state.get('data_source', '')
+        _has_real_calls = _cad_src in ('cad_upload', 'brinc_file') or (
+            'df_calls' in st.session_state and st.session_state['df_calls'] is not None
+            and len(st.session_state['df_calls']) > 100
+        )
+
+        # ── 3D SWARM SIMULATION ───────────────────────────────────────────
+        if fleet_capex > 0:
+            st.markdown("---")
+            st.markdown(f"<h3 style='color:{text_main};'>🚁 3D Swarm Simulation <span class='tip' data-tip='Deck.gl-powered 3D animation of all DFR flights compressed into a single 24-hour day. Each arc represents a dispatch flight from station to incident. Use the speed slider to control playback. Best viewed fullscreen for council presentations.'>?</span></h3>", unsafe_allow_html=True)
+            st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Animated deck.gl simulation of all DFR flights over a compressed 24-hour day. Use the speed slider to accelerate or slow the simulation. Great for council presentations.</div>", unsafe_allow_html=True)
+
+            show_sim = st.toggle("🎬 Enable 3D Simulation", value=False)
+            if show_sim:
+                calls_lonlat = calls_in_city.to_crs(epsg=4326)
+                calls_coords = np.column_stack((calls_lonlat.geometry.x, calls_lonlat.geometry.y))
+
+                sim_assignments = {i:[] for i in range(len(active_drones))}
+                for c_idx, cc in enumerate(calls_coords):
+                    best_d, best_dist = -1, float('inf')
+                    for d_idx, d in enumerate(active_drones):
+                        if d['cov_array'][c_idx] if c_idx < len(d['cov_array']) else False:
+                            dist = (cc[0]-d['lon'])**2 + (cc[1]-d['lat'])**2
+                            if dist < best_dist:
+                                best_dist, best_d = dist, d_idx
+                    if best_d != -1:
+                        sim_assignments[best_d].append(c_idx)
+
+                stations_json, flights_json, legend_html_sim = [], [], ""
+                total_sim_flights = 0
+                for d_idx, d in enumerate(active_drones):
+                    hex_c = d['color'].lstrip('#')
+                    rgb = [int(hex_c[j:j+2],16) for j in (0,2,4)]
+                    stations_json.append({"name":d['name'].split(',')[0][:30],"lon":d['lon'],"lat":d['lat'],"color":rgb,"radius":d['radius_m']})
+                    legend_html_sim += f'<div style="margin-bottom:3px;"><span style="display:inline-block;width:9px;height:9px;background:{d["color"]};margin-right:7px;border-radius:50%;"></span>{d["name"].split(",")[0][:28]} ({d["type"][:3]})</div>'
+                    frac = len(sim_assignments[d_idx])/len(calls_coords) if calls_coords.shape[0]>0 else 0
+                    monthly_for_drone = int(frac * calls_per_day * 30 * dfr_dispatch_rate)
+                    pool = sim_assignments[d_idx]
+
+                    if not pool: sim_calls = []
+                    elif monthly_for_drone > len(pool): sim_calls = random.choices(pool, k=monthly_for_drone)
+                    else: sim_calls = random.sample(pool, monthly_for_drone)
+
+                    total_sim_flights += len(sim_calls)
+                    for ci in sim_calls:
+                        lon1,lat1 = calls_coords[ci]
+                        lon0,lat0 = d['lon'],d['lat']
+                        dist_mi = math.sqrt((lon1-lon0)**2+(lat1-lat0)**2)*69.172
+                        vis_time = max((dist_mi/d['speed_mph'])*3600*8, 240)
+                        launch = random.randint(0, 2592000)
+                        arc_h = min(max(dist_mi*90, 80), 400)
+                        t0 = launch
+                        t1 = launch + vis_time * 0.15
+                        t2 = launch + vis_time * 0.40
+                        t3 = launch + vis_time * 0.75
+                        t4 = launch + vis_time * 0.90
+                        t5 = launch + vis_time
+                        mx1 = lon0 + 0.15*(lon1-lon0);  my1 = lat0 + 0.15*(lat1-lat0)
+                        mx2 = lon0 + 0.35*(lon1-lon0);  my2 = lat0 + 0.35*(lat1-lat0)
+                        mx3 = lon0 + 0.65*(lon1-lon0);  my3 = lat0 + 0.65*(lat1-lat0)
+                        mx4 = lon0 + 0.85*(lon1-lon0);  my4 = lat0 + 0.85*(lat1-lat0)
+                        flights_json.append({
+                            "path": [[lon0, lat0, 0], [mx1, my1, arc_h*0.75], [mx2, my2, arc_h], [mx3, my3, arc_h], [mx4, my4, arc_h*0.75], [lon1, lat1, 0]],
+                            "timestamps": [t0, t1, t2, t3, t4, t5],
+                            "color": rgb
+                        })
+
+                warn_html_sim = ""
+                if len(flights_json) > 3000:
+                    flights_json = random.sample(flights_json, 3000)
+                    warn_html_sim = f'<div style="background:#440000;border:1px solid #ff4b4b;color:#ffbbbb;padding:5px;font-size:10px;border-radius:4px;margin-bottom:8px;">⚠️ Capped at 3,000 flights for performance (actual: {total_sim_flights:,})</div>'
+
+                drone_svg = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M18 6a2 2 0 100-4 2 2 0 000 4zm-12 0a2 2 0 100-4 2 2 0 000 4zm12 12a2 2 0 100-4 2 2 0 000 4zm-12 0a2 2 0 100-4 2 2 0 000 4z'/%3E%3Cpath stroke='white' stroke-width='2' stroke-linecap='round' d='M8.5 8.5l7 7m0-7l-7 7'/%3E%3Ccircle cx='12' cy='12' r='2' fill='white'/%3E%3C/svg%3E"
+
+                sim_html = f"""<!DOCTYPE html><html><head>
+                <script src="https://unpkg.com/deck.gl@8.9.35/dist.min.js"></script>
+                <script src="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.js"></script>
+                <link href="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.css" rel="stylesheet"/>
+                <style>
+                  body{{margin:0;padding:0;overflow:hidden;background:#000;font-family:Manrope,sans-serif;}}
+                  #map{{width:100vw;height:100vh;position:absolute;}}
+                  #ui{{position:absolute;top:16px;left:16px;background:rgba(17,17,17,0.92);padding:16px;border-radius:8px;
+                       color:white;border:1px solid #333;z-index:10;box-shadow:0 4px 10px rgba(0,0,0,0.5);width:260px;}}
+                  button{{background:#00D2FF;color:black;border:none;padding:10px;cursor:pointer;font-weight:bold;
+                          border-radius:4px;width:100%;font-size:13px;text-transform:uppercase;margin-bottom:8px;}}
+                  button:disabled{{background:#444;color:#888;cursor:not-allowed;}}
+                  #timeDisplay{{font-family:monospace;font-size:16px;color:#00ffcc;font-weight:bold;text-align:center;margin-bottom:8px;}}
+                </style></head><body>
+                <div id="ui">
+                  <h3 style="margin:0 0 8px;color:#00D2FF;font-size:14px;">DFR SWARM SIMULATION</h3>
+                  {warn_html_sim}
+                  <div style="font-size:11px;color:#aaa;margin-bottom:10px;">
+                    {total_sim_flights:,} flights over 30 days at {int(dfr_dispatch_rate*100)}% dispatch rate
+                  </div>
+                  <div style="margin-bottom:10px;">
+                    <label style="font-size:11px;color:#ccc;">Speed: <span id="speedLabel">1</span>x</label>
+                    <input type="range" id="speedSlider" min="1" max="100" value="1" style="width:100%;margin-top:4px;">
+                  </div>
+                  <button id="runBtn">▶ LAUNCH SWARM</button>
+                  <div id="timeDisplay">00:00</div>
+                  <div style="margin-top:10px;border-top:1px solid #333;padding-top:8px;">
+                    <div style="font-size:10px;color:#888;text-transform:uppercase;margin-bottom:5px;">Stations</div>
+                    <div style="font-size:10px;color:#ddd;max-height:100px;overflow-y:auto;">{legend_html_sim}</div>
+                  </div>
+                </div>
+                <div id="map"></div>
+                <script>
+                  const stations={json.dumps(stations_json)};
+                  const flights={json.dumps(flights_json)};
+                  const speedSlider=document.getElementById('speedSlider');
+                  const speedLabel=document.getElementById('speedLabel');
+                  speedSlider.oninput=()=>speedLabel.innerText=speedSlider.value;
+                  const map=new deck.DeckGL({{
+                    container:'map',
+                    mapStyle:'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+                    initialViewState:{{longitude:{center_lon},latitude:{center_lat},zoom:{dynamic_zoom},pitch:50,bearing:0}},
+                    controller:true
+                  }});
+                  let time=0,timer=null,lastTime=0;
+                  function render(){{
+                    map.setProps({{layers:[
+                      new deck.ScatterplotLayer({{id:'rings',data:stations,getPosition:d=>[d.lon,d.lat],
+                        getFillColor:d=>[d.color[0],d.color[1],d.color[2],25],
+                        getLineColor:d=>[d.color[0],d.color[1],d.color[2],220],
+                        lineWidthMinPixels:2,stroked:true,filled:true,getRadius:d=>d.radius}}),
+                      new deck.ScatterplotLayer({{id:'pads',data:stations,getPosition:d=>[d.lon,d.lat],
+                        getFillColor:d=>[d.color[0],d.color[1],d.color[2],120],getRadius:180}}),
+                      new deck.IconLayer({{id:'icons',data:stations,
+                        getIcon:d=>({{url:"{drone_svg}",width:24,height:24,anchorY:12}}),
+                        getPosition:d=>[d.lon,d.lat],getSize:36,sizeScale:1}}),
+                      new deck.TripsLayer({{id:'flights',data:flights,getPath:d=>d.path,
+                        getTimestamps:d=>d.timestamps,getColor:d=>d.color,
+                        opacity:0.85,widthMinPixels:5,trailLength:13500,currentTime:time,rounded:true}}),
+                      new deck.ScatterplotLayer({{id:'landed',data:flights,getPosition:d=>d.path[5],
+                        getFillColor:d=>time>=d.timestamps[5]?[d.color[0],d.color[1],d.color[2],255]:[0,0,0,0],
+                        getRadius:25,radiusMinPixels:3,updateTriggers:{{getFillColor:time}}}})
+                    ]}});
+                    let day=Math.floor(time/86400)+1;
+                    let h=Math.floor((time%86400)/3600).toString().padStart(2,'0');
+                    let m=Math.floor((time%3600)/60).toString().padStart(2,'0');
+                    document.getElementById('timeDisplay').innerText=`Day ${{day}} · ${{h}}:${{m}}`;
+                  }}
+                  const animate=()=>{{
+                    let now=performance.now();
+                    let dt=Math.min(now-lastTime,100);
+                    lastTime=now;
+                    time+=dt/1000*43200*parseFloat(speedSlider.value);
+                    render();
+                    if(time<2592000){{timer=requestAnimationFrame(animate);}}
+                    else{{
+                      document.getElementById('runBtn').disabled=false;
+                      document.getElementById('runBtn').innerText='↺ RESTART';
+                      time=0;
+                    }}
+                  }};
+                  document.getElementById('runBtn').onclick=()=>{{
+                    document.getElementById('runBtn').disabled=true;
+                    document.getElementById('runBtn').innerText='SIMULATING…';
+                    time=0;lastTime=performance.now();
+                    if(timer)cancelAnimationFrame(timer);
+                    animate();
+                  }};
+                  render();
+                </script></body></html>"""
+
+                components.html(sim_html, height=700)
+
+        # ── COMMAND CENTER ANALYTICS DASHBOARD ──
+        st.markdown("---")
+        st.markdown(f"<h3 style='color:{text_main};'>📊 CAD Ingestion Analytics <span class='tip' data-tip='Temporal analysis of your uploaded CAD (Computer-Aided Dispatch) data. Shows when calls are most frequent by hour and day, identifies optimal DFR shift windows, and renders a call-volume calendar heatmap.'>?</span></h3>", unsafe_allow_html=True)
+        st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Temporal patterns derived from your uploaded CAD data — hourly volumes, day-of-week distribution, optimal DFR shift windows, and a higher-contrast 5-band call-volume calendar.</div>", unsafe_allow_html=True)
+
+        _analytics_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
+        analytics_html_block = html_reports.generate_command_center_html(
+            _analytics_df,
+            total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls)
+        )
+        _analytics_unavailable = (
+            "Analytics unavailable." in analytics_html_block
+            or "No valid dates found in data." in analytics_html_block
+        )
+        if _analytics_unavailable:
+            _analytics_height = 180
+        else:
+            # Compute height from actual data so the iframe fits exactly with no dead space.
+            # Calendar grid is auto-fill / minmax(250px, 1fr). At typical Streamlit content
+            # width (~900px with sidebar open) that yields 3 columns.
+            import math as _math
+            try:
+                _n_months = int(_analytics_df['date'].astype(str).str[:7].nunique()) if (
+                    _analytics_df is not None and not _analytics_df.empty and 'date' in _analytics_df.columns
+                ) else 6
+            except Exception:
+                _n_months = 6
+            _n_months = max(1, min(_n_months, 12))
+            _cal_cols = 3                        # columns at typical sidebar-open viewport
+            _cal_rows = _math.ceil(_n_months / _cal_cols)
+            _cal_px   = _cal_rows * 260          # ~260px per calendar row (tightened)
+            # Fixed chrome above the calendar:
+            #   section header 60 + controls bar 70 + KPI cards 110 + shift/dow panel 210 + legend+label 55
+            _fixed_px = 460
+            _analytics_height = _fixed_px + _cal_px
+        components.html(analytics_html_block, height=_analytics_height, scrolling=False)
+
+        if _analytics_unavailable:
+            # Remove the dead gap when the analytics component only contains a short fallback message.
+            st.markdown("<div style='margin-top:-6px;'></div>", unsafe_allow_html=True)
+        elif _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
+            # Collapse gap between components.html block and the plotly charts below
+            st.markdown("<div style='margin-top:-80px;'></div>", unsafe_allow_html=True)
+            html_reports._build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
+
+        # ── COMMUNITY IMPACT DASHBOARD ────────────────────────────────────────────
+        st.markdown("---")
+        st.markdown(
+            f"<h3 style='color:{text_main};'>🏛️ Community Impact Dashboard <span class='tip' data-tip='Public-facing transparency report for city council presentations and community portals. Hover the ? badges inside each section for detailed explanations of every metric.'>?</span> <span class='tip' data-tip='Sources: Population — US Census Bureau ACS. Officer wages — Bureau of Labor Statistics (BLS) OES. Flight hour projections — BRINC hardware specs. Financial figures — BRINC COS optimization model. Fourth Amendment framework — DOJ/ACLU DFR policy guidelines.'>src</span></h3>",
+            unsafe_allow_html=True
+        )
+        st.markdown(
+            f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>"
+            "Public-facing transparency report — flight hours &amp; uptime, response time advantage, "
+            "Fourth Amendment safeguards, community outcomes, call type distribution, equity commitments, "
+            "and taxpayer ROI. Designed for city council presentations and citizen engagement portals."
+            "</div>",
+            unsafe_allow_html=True
+        )
+        _cid_fac_counts = {}
+        if 'type' in df_stations_all.columns:
+            for _t in df_stations_all['type'].dropna().astype(str):
+                _cid_fac_counts[_t] = _cid_fac_counts.get(_t, 0) + 1
+        _cid_html = html_reports.generate_community_impact_dashboard_html(
+            city=st.session_state.get('active_city', 'City'),
+            state=st.session_state.get('active_state', 'TX'),
+            population=int(st.session_state.get('estimated_pop', 65000) or 65000),
+            total_calls=int(st.session_state.get('total_original_calls', full_total_calls or total_calls) or 0),
             calls_covered_perc=float(calls_covered_perc or 0),
             area_covered_perc=float(area_covered_perc or 0),
             avg_resp_time_min=float(avg_resp_time or 0),
@@ -8342,125 +6078,2392 @@ function copyCommunitySection() {{
             daily_drone_only_calls=float(daily_drone_only_calls or 0),
             active_drones=active_drones or [],
             df_calls_full=df_calls_full,
-            theme='light',
-            facility_counts=_fac_counts or None,
+            facility_counts=_cid_fac_counts or None,
         )
-        # Extract <style> block and body content separately, then scope the styles
-        # with a .cid-wrap prefix so they don't collide with the export document's CSS.
-        import re as _re
-        _style_match = _re.search(r'<style>(.*?)</style>', _cid_export_html, _re.DOTALL)
-        _cid_style = _style_match.group(1) if _style_match else ''
-        # Scope every CSS rule inside the style block by prefixing with .cid-wrap
-        # Simple approach: wrap rules that start at column 0 (non-nested)
-        def _scope_css(raw_css):
-            # Replace :root { with .cid-wrap { so vars apply within scope
-            raw_css = raw_css.replace(':root {', '.cid-wrap {')
-            # Prepend .cid-wrap to each rule selector (lines that end with {)
-            lines = raw_css.split('\n')
-            scoped = []
-            for line in lines:
-                stripped = line.strip()
-                # Skip empty, @-rules, closing braces, and already-scoped lines
-                if (stripped.startswith('@') or stripped == '}' or stripped == ''
-                        or stripped.startswith('/*') or stripped.startswith('*')
-                        or stripped.startswith('.cid-wrap {')):
-                    scoped.append(line)
-                elif stripped.endswith('{') and not stripped.startswith('.cid-wrap'):
-                    # It's a selector line — prefix it
-                    selector = stripped[:-1].strip()
-                    # Don't double-scope :root replacement or @keyframes internals
-                    if selector and not selector.startswith('.cid-wrap') and not selector.startswith('from') and not selector.startswith('to') and not selector.startswith('0%') and not selector.startswith('50%') and not selector.startswith('100%'):
-                        scoped.append(f'  .cid-wrap {selector} {{')
+        components.html(_cid_html, height=3600, scrolling=False)
+
+        # ── SCHOOL SAFETY IMPACT MATRIX ──────────────────────────────────────────
+        st.markdown("---")
+        _sro_cost_low   = 75_000
+        _sro_cost_high  = 120_000
+        _dfr_amortized  = int(fleet_capex / 7) if fleet_capex > 0 else 0
+        _dfr_amort_str  = f"${_dfr_amortized:,}/yr" if _dfr_amortized > 0 else "~$11K–22K/yr"
+
+        def _ss_row(label, sro_val, dfr_val, alt, cb, cbrd, tm, tmain, acc, last=False):
+            bg = f"background:rgba(255,255,255,0.02);" if alt else ""
+            brd = "" if last else f"border-bottom:1px solid {cbrd};"
+            sro_color = "#f59e0b"
+            dfr_color = acc
+            return (
+                f'<tr style="{bg}{brd}">'
+                f'<td style="padding:8px 12px;color:{tmain};font-weight:600;font-size:0.72rem;">{label}</td>'
+                f'<td style="padding:8px 12px;text-align:center;color:{sro_color};font-size:0.71rem;">{sro_val}</td>'
+                f'<td style="padding:8px 12px;text-align:center;color:{dfr_color};font-size:0.71rem;">{dfr_val}</td>'
+                f'</tr>'
+            )
+
+        _school_rows = (
+            _ss_row("Annual Cost / Campus",
+                    f"${_sro_cost_low:,}–${_sro_cost_high:,} per officer",
+                    f"{_dfr_amort_str} amortized (7-yr) · {actual_k_responder + actual_k_guardian} units",
+                    False, card_bg, card_border, text_muted, text_main, accent_color) +
+            _ss_row("Coverage Hours / Year",
+                    "~1,260 hrs/yr (school hours only)",
+                    "8,760 hrs/yr — 24 / 7 / 365",
+                    True, card_bg, card_border, text_muted, text_main, accent_color) +
+            _ss_row("Campuses Covered",
+                    "1 building per officer",
+                    f"Multi-campus — {actual_k_responder + actual_k_guardian} simultaneous coverage zones",
+                    False, card_bg, card_border, text_muted, text_main, accent_color) +
+            _ss_row("On-Campus Response Time",
+                    "2–5 min (foot/vehicle across campus)",
+                    f"&lt;90 sec airborne · {avg_resp_time:.1f} min avg aerial",
+                    True, card_bg, card_border, text_muted, text_main, accent_color) +
+            _ss_row("After-Hours / Weekend Coverage",
+                    "❌ None",
+                    "✅ Full thermal surveillance 24/7",
+                    False, card_bg, card_border, text_muted, text_main, accent_color) +
+            _ss_row("Thermal / Night Vision",
+                    "❌ Flashlight only",
+                    "✅ 640px FLIR thermal (BRINC Responder)",
+                    True, card_bg, card_border, text_muted, text_main, accent_color) +
+            _ss_row("Perimeter Monitoring",
+                    "❌ Not feasible at scale",
+                    "✅ Automated aerial patrol",
+                    False, card_bg, card_border, text_muted, text_main, accent_color) +
+            _ss_row("Active Threat Intel",
+                    "Single officer — blind hallway entry",
+                    "✅ Live HD + thermal to dispatch before officer entry",
+                    True, card_bg, card_border, text_muted, text_main, accent_color) +
+            _ss_row("Indoor Operations",
+                    "✅ On foot",
+                    "✅ BRINC LEMUR 2 — glass-breaker, perch mode, 2-way comms",
+                    False, card_bg, card_border, text_muted, text_main, accent_color) +
+            _ss_row("Court-Admissible Evidence",
+                    "Body cam (ground-level only)",
+                    "✅ Aerial HD video + chain-of-custody flight log",
+                    True, card_bg, card_border, text_muted, text_main, accent_color) +
+            _ss_row("Mass Shooting Prevention Evidence",
+                    "❌ No proven effect (RAND, 2023)",
+                    "✅ Pre-entry intel enables faster tactical coordination",
+                    False, card_bg, card_border, text_muted, text_main, accent_color) +
+            _ss_row("Disciplinary Side Effects",
+                    "⚠️ +35–80% suspensions · +25–90% expulsions (RAND)",
+                    "✅ Zero school-discipline impact",
+                    True, card_bg, card_border, text_muted, text_main, accent_color, last=True)
+        )
+
+        _school_html = f"""
+        <style>
+        .ss-tip {{
+          display:inline-flex;align-items:center;justify-content:center;
+          width:13px;height:13px;border-radius:50%;
+          background:rgba(255,255,255,0.12);color:#888;font-size:9px;font-weight:700;
+          cursor:default;margin-left:3px;vertical-align:middle;position:relative;flex-shrink:0;
+        }}
+        .ss-tip:hover::after {{
+          content:attr(data-tip);position:absolute;bottom:130%;left:50%;
+          transform:translateX(-50%);background:#1a1a2e;color:#e0e0e0;
+          font-size:10.5px;font-weight:400;padding:6px 10px;border-radius:5px;
+          white-space:normal;width:260px;line-height:1.5;z-index:9999;
+          border:1px solid #333;box-shadow:0 4px 12px rgba(0,0,0,0.5);
+          pointer-events:none;text-transform:none;letter-spacing:normal;
+        }}
+        </style>
+
+        <div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;">
+            <h3 style="color:{text_main};margin:0;">🏫 School Safety Impact <span class='tip' data-tip='Sources: FBI Crime in Schools 2020–2024 · NCES Indicators of School Crime &amp; Safety 2023 · FBI Active Shooter Study · RAND Corp. SRO Research (2023) · NIJ Effects of SROs on School Crime · K-12 School Shooting Database · BJS School Crime Statistics 2024 · ZipRecruiter/Volt.ai SRO salary data · BRINC technical specifications · Chula Vista PD DFR Program outcomes.'>src</span></h3>
+            <span style="font-size:0.7rem;color:{text_muted};">National statistics · DFR vs SRO analysis · cited sources</span>
+          </div>
+          <div style="font-size:0.78rem;color:{text_muted};margin-bottom:16px;max-width:740px;line-height:1.6;">
+            BRINC DFR delivers 24/7 aerial first-response to school campuses — faster and at lower total lifecycle cost than
+            traditional School Resource Officers, with no coverage blind spots, no off-hours gaps, and full HD + thermal
+            scene intelligence before any ground unit enters a building.
+          </div>
+
+          <!-- NATIONAL STATS HERO ROW -->
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;">
+
+            <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid #ef4444;border-radius:8px;padding:14px 12px;text-align:center;">
+              <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
+                School Crimes 2020–24
+                <span class="ss-tip" data-tip="Source: FBI Crime in Schools Special Report 2020–2024. Over 1.3 million criminal incidents recorded at K-12 school locations across the US over the five-year period, with approximately 1.5 million victims.">?</span>
+              </div>
+              <div style="font-size:1.75rem;font-weight:900;color:#ef4444;font-family:'IBM Plex Mono',monospace;">1.3M</div>
+              <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">criminal incidents on campus</div>
+            </div>
+
+            <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid #f59e0b;border-radius:8px;padding:14px 12px;text-align:center;">
+              <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
+                Student Victimization
+                <span class="ss-tip" data-tip="Source: NCES Indicators of School Crime &amp; Safety 2023 (NCES 2024-145). 22 nonfatal criminal victimizations per 1,000 students ages 12-18 in 2022 — includes theft, violent crime, and serious threats. Down from 52/1,000 in 2012 but remains elevated.">?</span>
+              </div>
+              <div style="font-size:1.75rem;font-weight:900;color:#f59e0b;font-family:'IBM Plex Mono',monospace;">22</div>
+              <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">per 1,000 students annually</div>
+            </div>
+
+            <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid #8b5cf6;border-radius:8px;padding:14px 12px;text-align:center;">
+              <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
+                Incidents End ≤5 min
+                <span class="ss-tip" data-tip="Source: FBI Active Shooter Study (64 incidents analyzed). 69% of active shooter events conclude within 5 minutes — 23 ended in under 2 minutes. Average incident duration at educational facilities: 3 min 18 sec. Most incidents end before police arrive.">?</span>
+              </div>
+              <div style="font-size:1.75rem;font-weight:900;color:#8b5cf6;font-family:'IBM Plex Mono',monospace;">69%</div>
+              <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">active shooter events ≤5 min</div>
+            </div>
+
+            <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid {accent_color};border-radius:8px;padding:14px 12px;text-align:center;">
+              <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
+                BRINC On-Scene
+                <span class="ss-tip" data-tip="Source: BRINC technical specifications; Chula Vista PD DFR Program outcomes. BRINC launches in &lt;20 sec and is on-scene in &lt;90 sec. Chula Vista documented average DFR response under 2 minutes citywide — vs. 14-15 min national ground average.">?</span>
+              </div>
+              <div style="font-size:1.75rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">&lt;90s</div>
+              <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">airborne &amp; streaming live video</div>
+            </div>
+
+          </div>
+
+          <!-- CRITICAL RESPONSE WINDOW -->
+          <div style="background:rgba(239,68,68,0.06);border-left:3px solid #ef4444;border-radius:0 6px 6px 0;padding:12px 16px;margin-bottom:16px;">
+            <div style="font-size:0.7rem;font-weight:700;color:#ef4444;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">
+              ⚠️ The Critical Response Window
+              <span class="ss-tip" data-tip="Sources: FBI Law Enforcement Bulletin 'Those Terrible First Few Minutes'; FBI Active Shooter Study (51-case median analysis); ALICE Training Institute; K-12 School Shooting Database (k12ssdb.org). Education-setting data: FBI subset of 51 incidents in schools.">?</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
+              <div style="text-align:center;background:rgba(0,0,0,0.25);border-radius:6px;padding:10px 8px;">
+                <div style="font-size:1.25rem;font-weight:900;color:#ef4444;font-family:'IBM Plex Mono',monospace;">14–15 min</div>
+                <div style="font-size:0.63rem;color:{text_muted};margin-top:3px;">National avg ground police<br>arrival to active shooter</div>
+              </div>
+              <div style="text-align:center;background:rgba(0,0,0,0.25);border-radius:6px;padding:10px 8px;">
+                <div style="font-size:1.25rem;font-weight:900;color:#f59e0b;font-family:'IBM Plex Mono',monospace;">3m 18s</div>
+                <div style="font-size:0.63rem;color:{text_muted};margin-top:3px;">Avg incident duration<br>at schools (FBI education subset)</div>
+              </div>
+              <div style="text-align:center;background:rgba(0,0,0,0.25);border-radius:6px;padding:10px 8px;">
+                <div style="font-size:1.25rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">&lt;90 sec</div>
+                <div style="font-size:0.63rem;color:{text_muted};margin-top:3px;">BRINC on-scene with live<br>HD + thermal to dispatch</div>
+              </div>
+            </div>
+            <div style="font-size:0.69rem;color:{text_muted};font-style:italic;line-height:1.55;">
+              "Most active shooter incidents in schools are over before a responding officer reaches the building entrance.
+              DFR doesn't replace the officer — it gives the officer eyes on every hallway, stairwell, and exit
+              before they open the first door." — FBI Law Enforcement Bulletin, 'Those Terrible First Few Minutes'
+            </div>
+          </div>
+
+          <!-- DFR vs SRO COMPARISON TABLE -->
+          <div style="font-size:0.7rem;font-weight:700;color:{text_main};text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
+            DFR vs. School Resource Officer (SRO) — Capability Matrix
+            <span class="ss-tip" data-tip="SRO data: RAND 'The Role and Impact of School Resource Officers' (2023); NIJ Effects of SROs on School Crime (OJP); ZipRecruiter SRO Salary 2025; Volt.ai SRO Cost Analysis. DFR data: BRINC technical specifications; Chula Vista PD DFR outcomes; Skydio Campus DFR documentation.">?</span>
+          </div>
+          <div style="overflow-x:auto;border-radius:8px;border:1px solid {card_border};">
+            <table style="width:100%;border-collapse:collapse;font-size:0.72rem;">
+              <thead>
+                <tr style="background:rgba(0,0,0,0.45);">
+                  <th style="padding:10px 14px;text-align:left;font-size:0.61rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:{text_muted};">Capability</th>
+                  <th style="padding:10px 14px;text-align:center;font-size:0.61rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#f59e0b;">School Resource Officer</th>
+                  <th style="padding:10px 14px;text-align:center;font-size:0.61rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:{accent_color};">BRINC DFR</th>
+                </tr>
+              </thead>
+              <tbody>
+                {_school_rows}
+              </tbody>
+            </table>
+          </div>
+
+          <!-- COST COMPARISON CARDS -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;margin-bottom:12px;">
+
+            <div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:16px;">
+              <div style="font-size:0.63rem;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
+                📋 10-School District — Traditional SRO Model
+                <span class="ss-tip" data-tip="Source: ZipRecruiter SRO Salary Data 2025; DeSoto County SRO detailed cost breakdown ($94,147/yr blended total); Volt.ai SRO Cost Analysis. 1 officer per campus at $75K–$120K total annual cost. School-hours coverage only: 7hr/day × 180 school days = 1,260 hrs/yr per campus.">?</span>
+              </div>
+              <div style="font-size:1.6rem;font-weight:900;color:#f59e0b;font-family:'IBM Plex Mono',monospace;">${940_000:,} – ${1_200_000:,}</div>
+              <div style="font-size:0.67rem;color:{text_muted};margin-top:3px;">per year · 10 officers · school hours only</div>
+              <div style="margin-top:10px;display:flex;flex-direction:column;gap:3px;font-size:0.65rem;color:{text_muted};">
+                <div>Coverage: ~1,260 hrs/campus/yr (14.4% of annual hours)</div>
+                <div>Nights, weekends, summer: ❌ no coverage</div>
+                <div>Perimeter / multi-campus: ❌ single building only</div>
+                <div>Proven mass-shooting impact: ❌ no evidence (RAND)</div>
+              </div>
+            </div>
+
+            <div style="background:rgba(0,210,255,0.06);border:1px solid rgba(0,210,255,0.2);border-radius:8px;padding:16px;">
+              <div style="font-size:0.63rem;font-weight:700;color:{accent_color};text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
+                🚁 BRINC DFR — Multi-Campus Deployment
+                <span class="ss-tip" data-tip="BRINC fleet CapEx amortized over 7 years. One hub station covers multiple campuses within patrol radius 24/7. Includes hardware and BRINC support onboarding. Does not include cellular/network costs.">?</span>
+              </div>
+              <div style="font-size:1.6rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">${fleet_capex:,.0f} CapEx</div>
+              <div style="font-size:0.67rem;color:{text_muted};margin-top:3px;">{_dfr_amort_str} amortized · {actual_k_responder + actual_k_guardian} units deployed</div>
+              <div style="margin-top:10px;display:flex;flex-direction:column;gap:3px;font-size:0.65rem;color:{text_muted};">
+                <div>Coverage: 8,760 hrs/yr — 24/7/365 per hub</div>
+                <div>Nights, weekends, summer: ✅ full thermal patrol</div>
+                <div>Multi-campus zones: ✅ {actual_k_responder + actual_k_guardian} simultaneous coverage areas</div>
+                <div>Response time advantage vs ground: +{avg_time_saved:.1f} min saved per incident</div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- SOURCES FOOTER -->
+          <div style="font-size:0.6rem;color:{text_muted};border-top:1px solid {card_border};padding-top:8px;line-height:1.8;">
+            <strong style="color:{text_main};">Data Sources:</strong>
+            FBI Crime in Schools 2020–2024 Special Report ·
+            NCES Indicators of School Crime &amp; Safety 2023 (NCES 2024-145) ·
+            FBI Active Shooter Study (51-case &amp; 64-incident analyses) ·
+            RAND Corp. "The Role and Impact of School Resource Officers" (2023) ·
+            NIJ Effects of SROs on School Crime (OJP) ·
+            BJS School Crime Statistics 2024 ·
+            Chula Vista PD DFR Program outcomes ·
+            BRINC Drones technical specifications ·
+            K-12 School Shooting Database (k12ssdb.org) ·
+            ZipRecruiter / Volt.ai SRO Salary &amp; Cost Data 2025
+          </div>
+        </div>
+        """
+        _school_full_html = (
+            "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
+            "<meta name='viewport' content='width=device-width,initial-scale=1.0'>"
+            "</head>"
+            f"<body style='margin:0;padding:12px 4px 16px;background:#000000;"
+            "font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;'>"
+            f"{_school_html}</body></html>"
+        )
+        components.html(_school_full_html, height=1300, scrolling=False)
+
+        # ── 4G LTE CELL COVERAGE — 3 carrier maps with % coverage ────────────────
+        st.markdown("---")
+        st.markdown(f"<h3 style='color:{text_main};'>📶 4G LTE Cell Coverage</h3>", unsafe_allow_html=True)
+
+        _cov_state    = st.session_state.get('active_state', '')
+        _cov_boundary = city_boundary_geom  # may be None if no boundary loaded
+
+        _carrier_results = _carrier_coverage_analysis(_cov_state, _cov_boundary)
+
+        if _carrier_results:
+            # ── 3 small maps in a row, sorted highest → lowest coverage ──────────
+            _cov_cols = st.columns(3)
+            for _ci, _cr in enumerate(_carrier_results[:3]):
+                with _cov_cols[_ci]:
+                    _pct_display = f"{_cr['pct']:.1f}%" if _cr['pct'] > 0 else "No data"
+                    _badge_color = "#22c55e" if _cr['pct'] >= 90 else "#f59e0b" if _cr['pct'] >= 70 else "#ef4444"
+                    st.markdown(
+                        f"<div style='text-align:center;padding:6px 0 4px;'>"
+                        f"<span style='font-size:1.1rem;font-weight:800;color:{_cr['color']};'>{_cr['carrier']}</span>"
+                        f"<br><span style='font-size:1.9rem;font-weight:900;color:{_badge_color};font-family:monospace;'>{_pct_display}</span>"
+                        f"<br><span style='font-size:0.62rem;color:#667;text-transform:uppercase;letter-spacing:1px;'>of jurisdiction covered</span>"
+                        f"</div>",
+                        unsafe_allow_html=True
+                    )
+                    _mini_fig = _build_carrier_mini_map(
+                        _cr, _cov_boundary, center_lat, center_lon,
+                        dynamic_zoom, map_style
+                    )
+                    st.plotly_chart(_mini_fig, use_container_width=True, config={"displayModeBar": False})
+
+            # Rank line
+            if len(_carrier_results) > 1:
+                _rank_txt = " → ".join(
+                    f"<span style='color:{r['color']};font-weight:700;'>{r['carrier']} {r['pct']:.1f}%</span>"
+                    for r in _carrier_results[:3]
+                )
+                st.markdown(
+                    f"<div style='font-size:0.75rem;color:#556;margin-top:4px;text-align:center;'>"
+                    f"Coverage rank: {_rank_txt}</div>",
+                    unsafe_allow_html=True
+                )
+        else:
+            # Fallback: FCC link card if parquet not available for this state
+            _fcc_zoom_lte = round(min(13, max(9, dynamic_zoom + 1)), 2)
+            _fcc_url_lte  = (f"https://broadbandmap.fcc.gov/home?version=dec2023"
+                             f"&zoom={_fcc_zoom_lte}&vlon={center_lon:.6f}&vlat={center_lat:.6f}"
+                             f"&speed=25&tech=300&br=4")
+            st.markdown(f"""
+            <a href="{_fcc_url_lte}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+              <div style="display:flex;align-items:center;justify-content:space-between;
+                background:#0d1b2e;border:1px solid #1e3a5f;border-radius:10px;padding:20px 28px;cursor:pointer;">
+                <div>
+                  <div style="color:#00b4d8;font-size:1rem;font-weight:600;margin-bottom:4px;">📶 Open FCC 4G LTE Coverage Map</div>
+                  <div style="color:#6b7f99;font-size:0.78rem;">FCC National Broadband Map · AT&amp;T, T-Mobile, Verizon</div>
+                </div>
+                <div style="color:#00b4d8;font-size:1.4rem;">↗</div>
+              </div>
+            </a>""", unsafe_allow_html=True)
+
+        # ── RF LINK COVERAGE — GEOGRAPHY-AWARE ADVANCED MODEL ──────────────────────────
+        st.markdown("---")
+        st.markdown(f"<h3 style='color:{text_main};'>📡 RF Link Coverage — 3390 MHz</h3>", unsafe_allow_html=True)
+
+        # Mode selector
+        _rf_mode = st.radio(
+            "RF Model Mode",
+            ["Advanced (Grid-Based Coverage Probability)", "Quick Estimate (Free-Space Rings)"],
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+
+        if _rf_mode == "Advanced (Grid-Based Coverage Probability)":
+            # ── ADVANCED RF COVERAGE MODE ──────────────────────────────────────
+            st.markdown(
+                f"<div style='font-size:0.82rem;color:{text_muted};margin-bottom:12px;'>"
+                "<b>Advanced Coverage Probability Model</b> — Geographic terrain, clutter, and building loss. "
+                "Separate uplink (drone→infra) and downlink (infra→drone) paths. "
+                "Combined coverage is the intersection of both links."
+                "</div>",
+                unsafe_allow_html=True
+            )
+
+            # Control panel
+            _adv_col1, _adv_col2, _adv_col3, _adv_col4 = st.columns(4)
+            with _adv_col1:
+                _adv_freq_mhz = st.number_input("Frequency (MHz)", value=3390, min_value=800, max_value=6000, step=100, key='adv_freq')
+            with _adv_col2:
+                _adv_tx_dbm = st.number_input("TX Power (dBm)", value=33, min_value=0, max_value=47, step=1, key='adv_tx_pwr')
+            with _adv_col3:
+                _adv_tx_gain = st.number_input("TX/RX Gain (dBi)", value=3, min_value=0, max_value=12, step=1, key='adv_gain')
+            with _adv_col4:
+                _adv_bw_mhz = st.number_input("Bandwidth (MHz)", value=20, min_value=5, max_value=160, step=5, key='adv_bw')
+
+            _adv_col5, _adv_col6, _adv_col7, _adv_col8 = st.columns(4)
+            with _adv_col5:
+                _adv_drone_alt = st.number_input("Drone Alt (ft AGL)", value=200, min_value=50, max_value=400, step=50, key='adv_drone_alt')
+            with _adv_col6:
+                _adv_infra_ht = st.number_input("Antenna Ht (ft above ground)", value=30, min_value=5, max_value=150, step=5, key='adv_infra_ht')
+            with _adv_col7:
+                _adv_nf_db = st.number_input("Noise Figure (dB)", value=7.0, min_value=2.0, max_value=15.0, step=0.5, key='adv_nf')
+            with _adv_col8:
+                _adv_land_use = st.selectbox("Environment", ["Urban", "Suburban", "Rural", "Water"], index=1, key='adv_landuse')
+
+            _adv_col9, _adv_col10, _adv_col11 = st.columns(3)
+            with _adv_col9:
+                _adv_layer = st.selectbox("Layer", ["Coverage Probability", "SNR (dB)", "Received Power (dBm)"], index=0, key='adv_layer')
+            with _adv_col10:
+                _adv_link = st.selectbox("Link", ["Combined", "Uplink", "Downlink"], index=0, key='adv_link')
+            with _adv_col11:
+                _adv_grid_res = st.selectbox("Grid Resolution", ["Coarse (500m)", "Medium (250m)", "Fine (100m)"], index=1, key='adv_grid')
+
+            _adv_grid_res_map = {"Coarse (500m)": 500, "Medium (250m)": 250, "Fine (100m)": 100}
+            _adv_grid_m = _adv_grid_res_map.get(_adv_grid_res, 250)
+
+            # Compute coverage
+            if active_drones:
+                st.write("Computing coverage grid...")
+                _adv_progress = st.progress(0)
+
+                # Compute grids for all active stations, combine
+                _adv_all_grids = []
+                for _adv_idx, _adv_stn in enumerate(active_drones):
+                    _adv_progress.progress(int(100 * _adv_idx / len(active_drones)))
+
+                    _adv_grid = _compute_rf_grid_coverage(
+                        tx_lat=_adv_stn['lat'],
+                        tx_lon=_adv_stn['lon'],
+                        tx_alt_m=_adv_infra_ht * 0.3048,
+                        boundary_geom=city_boundary_geom,
+                        freq_mhz=_adv_freq_mhz,
+                        tx_power_dbm=_adv_tx_dbm,
+                        tx_gain_dbi=_adv_tx_gain,
+                        rx_gain_dbi=_adv_tx_gain,
+                        noise_figure_db=_adv_nf_db,
+                        bandwidth_mhz=_adv_bw_mhz,
+                        land_use=_adv_land_use.lower(),
+                        grid_resolution_m=_adv_grid_m,
+                    )
+                    _adv_all_grids.append((_adv_stn['name'], _adv_grid))
+
+                _adv_progress.progress(100)
+
+                # Layer mapping
+                _adv_layer_map = {
+                    "Coverage Probability": "coverage_prob",
+                    "SNR (dB)": "snr_db",
+                    "Received Power (dBm)": "rx_power_dbm",
+                }
+                _adv_link_map = {
+                    "Combined": "combined",
+                    "Uplink": "uplink",
+                    "Downlink": "downlink",
+                }
+
+                # Display combined heatmap or individual station maps
+                for _stn_name, _stn_grid in _adv_all_grids:
+                    st.markdown(f"**{_stn_name}** — {_adv_layer} ({_adv_link})")
+                    _adv_fig = _plot_rf_coverage_heatmap(
+                        _stn_grid,
+                        _stn_name,
+                        center_lat=_adv_stn['lat'],
+                        center_lon=_adv_stn['lon'],
+                        zoom=dynamic_zoom,
+                        layer_type=_adv_layer_map.get(_adv_layer, "coverage_prob"),
+                        link_type=_adv_link_map.get(_adv_link, "combined"),
+                    )
+                    st.plotly_chart(_adv_fig, use_container_width=True, config={"displayModeBar": False})
+
+                # Disclaimer
+                st.markdown(
+                    f"<div style='font-size:0.65rem;color:#445;margin-top:12px;padding:8px;background:rgba(0,210,255,0.05);border-left:3px solid #00D2FF;'>"
+                    f"<b>Model Notes:</b> "
+                    f"Coverage Probability estimates link viability based on SNR thresholds. "
+                    f"Terrain blockage uses simplified Fresnel zone calculations. "
+                    f"Clutter loss estimated from land-use classification (not surveyed). "
+                    f"Path loss includes free-space, clutter, terrain, and fade margin. "
+                    f"Results are planning estimates — field measurement recommended for final site survey."
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+
+        else:
+            # ── QUICK ESTIMATE MODE (Original Free-Space Model) ────────────────
+            st.markdown(
+                f"<div style='font-size:0.82rem;color:{text_muted};margin-bottom:12px;'>"
+                "<b>Quick Estimate</b> — Simplified Friis free-space model. "
+                "Circular range rings based on SNR tiers. Fast, suitable for initial planning only. "
+                "Use Advanced mode for geography-aware coverage."
+                "</div>",
+                unsafe_allow_html=True
+            )
+
+            _rf_col1, _rf_col2, _rf_col3 = st.columns([2, 1, 1])
+            with _rf_col2:
+                _rf_clutter_label = st.selectbox(
+                    "Environment", ["Urban (+15 dB)", "Suburban (+10 dB)", "Rural (+5 dB)"],
+                    index=0, key='rf_clutter_sel',
+                    help="Clutter correction added to path loss for terrain/building obstruction."
+                )
+            with _rf_col3:
+                _rf_drone_alt = st.number_input("Drone Alt (ft)", value=200, min_value=50, max_value=400, step=50, key='rf_drone_alt')
+            with _rf_col1:
+                _rf_infra_ht  = st.number_input("Tower Ht above station (ft)", value=30, min_value=5, max_value=100, step=5, key='rf_tower_ht')
+
+            _rf_clutter_map = {"Urban (+15 dB)": 15.0, "Suburban (+10 dB)": 10.0, "Rural (+5 dB)": 5.0}
+            _rf_clutter_db  = _rf_clutter_map.get(_rf_clutter_label, 15.0)
+            _rf_infra_m     = _rf_infra_ht * 0.3048      # ft → m
+            _rf_drone_m     = _rf_drone_alt * 0.3048
+
+            _rf_rings = _rf_range_rings_3390(
+                infra_height_m=_rf_infra_m,
+                drone_alt_m=_rf_drone_m,
+                clutter_db=_rf_clutter_db,
+            )
+
+            # Build RF coverage figure
+            _rf_fig = go.Figure()
+
+            # Jurisdiction boundary
+            if city_boundary_geom is not None and not city_boundary_geom.is_empty:
+                _bgeoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
+                           else list(city_boundary_geom.geoms))
+                for _bgi, _bg in enumerate(_bgeoms):
+                    _bx, _by = _bg.exterior.coords.xy
+                    _rf_fig.add_trace(go.Scattermap(
+                        mode='lines', lon=list(_bx), lat=list(_by),
+                        line=dict(color='#ffffff', width=1.5),
+                        name='Jurisdiction', showlegend=(_bgi == 0), hoverinfo='skip'
+                    ))
+
+            # RF rings per station
+            for _rfd in active_drones:
+                for _rf_label, _rf_color, _rf_r_mi in _rf_rings:
+                    if _rf_r_mi <= 0:
+                        continue
+                    _rf_clats, _rf_clons = get_circle_coords(_rfd['lat'], _rfd['lon'], r_mi=_rf_r_mi)
+                    _rf_fig.add_trace(go.Scattermap(
+                        lat=list(_rf_clats), lon=list(_rf_clons),
+                        mode='lines', fill='toself',
+                        line=dict(color=_rf_color, width=1.5),
+                        fillcolor=f"rgba({int(_rf_color[1:3],16)},{int(_rf_color[3:5],16)},{int(_rf_color[5:7],16)},0.08)",
+                        name=f"{_rfd['name'].split(',')[0]} · {_rf_label}",
+                        hovertext=f"<b>{_rfd['name'].split(',')[0]}</b><br>{_rf_label}<br>Radius: {_rf_r_mi:.1f} mi",
+                        hoverinfo='text',
+                        showlegend=True,
+                    ))
+
+            # Station dots
+            if active_drones:
+                _rf_fig.add_trace(go.Scattermap(
+                    lat=[d['lat'] for d in active_drones],
+                    lon=[d['lon'] for d in active_drones],
+                    mode='markers+text',
+                    marker=dict(size=10, color=[d['color'] for d in active_drones]),
+                    text=[d['name'].split(',')[0] for d in active_drones],
+                    textposition='top right',
+                    textfont=dict(size=10, color='#ffffff'),
+                    name='Stations', hoverinfo='text',
+                    showlegend=True,
+                ))
+
+            _rf_fig.update_layout(
+                map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style=map_style),
+                margin=dict(l=0, r=0, t=0, b=0), height=520,
+                showlegend=True,
+                legend=dict(yanchor='top', y=0.98, xanchor='left', x=0.02,
+                            bgcolor=legend_bg, bordercolor='#444', borderwidth=1,
+                            font=dict(size=11, color=legend_text)),
+            )
+            st.plotly_chart(_rf_fig, use_container_width=True, config={"displayModeBar": False})
+
+            # Link budget table
+            _rf_budget_rows = ""
+            for _lb, _lc, _lr in _rf_rings:
+                _rf_budget_rows += (
+                    f"<tr><td style='padding:5px 10px;color:{_lc};font-weight:600;'>{_lb}</td>"
+                    f"<td style='padding:5px 10px;color:#aabbcc;font-family:monospace;'>{_lr:.2f} mi ({_lr*1609.34/1000:.1f} km)</td></tr>"
+                )
+            st.markdown(
+                f"<table style='width:100%;border-collapse:collapse;font-size:0.78rem;margin-top:8px;'>"
+                f"<thead><tr style='border-bottom:1px solid #1e2535;'>"
+                f"<th style='padding:5px 10px;color:#556;text-align:left;'>SNR Tier</th>"
+                f"<th style='padding:5px 10px;color:#556;text-align:left;'>Max Horizontal Range</th>"
+                f"</tr></thead><tbody>{_rf_budget_rows}</tbody></table>"
+                f"<div style='font-size:0.65rem;color:#445;margin-top:6px;'>Model assumptions: 3390 MHz, TX 2W (+33 dBm), gains 3+3 dBi, 20 MHz BW, 7 dB noise figure, {_rf_clutter_label}, drone at {_rf_drone_alt} ft AGL, RF tower {_rf_infra_ht} ft above roofline. <b>Free-space path loss (Friis)</b>. Does not account for terrain, buildings, or multipath — planning estimate only.</div>",
+                unsafe_allow_html=True
+            )
+
+        # ── MOBILE QR CODE ────────────────────────────────────────────────────────
+        st.markdown("---")
+        try:
+            import qrcode as _qrcode
+            from PIL import Image as _PILImage
+            import io as _io_qr, urllib.parse as _up, socket as _sock
+
+            # Build base URL from Streamlit context headers
+            try:
+                _qr_host = st.context.headers.get("host", "") or st.context.headers.get("Host", "")
+                _qr_proto = "https" if (_qr_host and ("streamlit.app" in _qr_host or "share" in _qr_host)) else "http"
+                if not _qr_host:
+                    _qr_host = f"{_sock.gethostbyname(_sock.gethostname())}:8501"
+                _qr_base = f"{_qr_proto}://{_qr_host}"
+            except Exception:
+                try:
+                    _qr_base = f"http://{_sock.gethostbyname(_sock.gethostname())}:8501"
+                except Exception:
+                    _qr_base = "http://localhost:8501"
+
+            # Compute area inline (may not yet be in scope)
+            try:
+                _qr_df_c = df_calls_full if df_calls_full is not None else df_calls
+                _qr_lons = _qr_df_c["lon"].dropna(); _qr_lats = _qr_df_c["lat"].dropna()
+                _qr_area = max(1, int((float(_qr_lons.max()) - float(_qr_lons.min())) *
+                                       (float(_qr_lats.max()) - float(_qr_lats.min())) * 3280))
+            except Exception:
+                _qr_area = 0
+
+            # Encode active station positions compactly for mobile map
+            # Format: "lat1,lon1;lat2,lon2" (4 decimal places, ≈10m accuracy)
+            try:
+                _stn_parts = [f"{d['lat']:.4f},{d['lon']:.4f}" for d in active_drones[:12]]
+                _stn_str   = ";".join(_stn_parts)
+            except Exception:
+                _stn_str = ""
+
+            # Encode incident data compactly for mobile map (minimal sample to keep URL under QR version 40)
+            # Format: "lat1,lon1;lat2,lon2;..." (1 decimal place for ~10km accuracy)
+            _calls_str = ""
+            try:
+                _qr_df_calls = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
+                if _qr_df_calls is not None and not _qr_df_calls.empty and 'lat' in _qr_df_calls.columns and 'lon' in _qr_df_calls.columns:
+                    # Sample up to 20 calls to keep URL under QR version 40 limit
+                    _call_sample = _qr_df_calls.sample(min(20, len(_qr_df_calls)), random_state=42)
+                    _call_parts = [f"{row['lat']:.1f},{row['lon']:.1f}" for _, row in _call_sample.iterrows()
+                                   if pd.notna(row.get('lat')) and pd.notna(row.get('lon'))]
+                    _calls_str = ";".join(_call_parts[:20])
+            except Exception:
+                pass
+
+            # Note: Boundary/shapefile outline removed from QR mobile map to avoid misleading simplified versions
+            # The main program renders the full detailed boundary; mobile map focuses on station locations and calls
+
+            _qr_params = _up.urlencode({
+                "city":  str(st.session_state.get("active_city", "")).title(),
+                "state": st.session_state.get("active_state", ""),
+                "pop":   int(st.session_state.get("estimated_pop", 0) or 0),
+                "cov":   round(float(calls_covered_perc or 0), 1),
+                "resp":  round(float(avg_resp_time or 0), 2),
+                "saves": int(annual_savings or 0),
+                "capex": int(fleet_capex or 0),
+                "r":     int(actual_k_responder or 0),
+                "g":     int(actual_k_guardian or 0),
+                "calls": int(total_calls or 0),
+                "area":  _qr_area,
+                "tsav":  round(float(avg_time_saved or 0), 2),
+                "clat":  round(center_lat, 4),
+                "clon":  round(center_lon, 4),
+                "zoom":  round(dynamic_zoom, 1),
+                "s":     _stn_str,
+                "m_calls": _calls_str,
+            })
+            _qr_url = f"{_qr_base}/?view=mobile&{_qr_params}"
+
+            # ── QR code image — high readability with BRINC logo overlay ──────────
+            # Use highest error correction (H) for better phone scanning reliability
+            _qr = _qrcode.QRCode(version=None, error_correction=_qrcode.constants.ERROR_CORRECT_H,
+                                  box_size=28, border=8)
+            _qr.add_data(_qr_url)
+            _qr.make(fit=True)
+            _qr_img = _qr.make_image(fill_color="#000000", back_color="#FFFFFF").convert('RGB')
+
+            # Overlay BRINC logo in center
+            try:
+                _logo_path = "logo.png"
+                if Path(_logo_path).exists():
+                    _logo = _PILImage.open(_logo_path).convert('RGBA')
+                    # Logo should be ~20% of QR code size for good scannability with error correction H
+                    _logo_size = int(_qr_img.size[0] * 0.20)
+                    _logo = _logo.resize((_logo_size, _logo_size), _PILImage.Resampling.LANCZOS)
+
+                    # Create white background square for logo
+                    _bg_size = int(_logo_size * 1.15)
+                    _white_bg = _PILImage.new('RGB', (_bg_size, _bg_size), 'white')
+                    _bg_pos = (((_bg_size - _logo_size) // 2), ((_bg_size - _logo_size) // 2))
+                    _white_bg.paste(_logo, _bg_pos, _logo)
+
+                    # Paste white background (with logo) centered on QR code
+                    _qr_pos = ((_qr_img.size[0] - _bg_size) // 2, (_qr_img.size[1] - _bg_size) // 2)
+                    _qr_img.paste(_white_bg, _qr_pos)
+            except Exception:
+                pass
+
+            _qr_buf = _io_qr.BytesIO()
+            _qr_img.save(_qr_buf, format="PNG")
+            import base64 as _b64
+            _qr_b64 = _b64.b64encode(_qr_buf.getvalue()).decode()
+
+            # ── Salesman info from session state ───────────────────────────────────
+            _qr_user  = str(st.session_state.get("brinc_user", "steven.beltran")).strip() or "steven.beltran"
+            _qr_name  = " ".join(w.capitalize() for w in _qr_user.split("."))
+            _qr_email = f"{_qr_user}@brincdrones.com"
+            _qr_city  = st.session_state.get("active_city", "")
+            _qr_state = st.session_state.get("active_state", "")
+            _qr_loc   = f"{_qr_city}, {_qr_state}" if _qr_city else "your city"
+
+            # Get department/jurisdiction name for personalization
+            _qr_dept = st.session_state.get('active_dept_name', '') or _qr_city or 'Jurisdiction'
+            _qr_dept = str(_qr_dept).strip().title()
+
+
+            # ── Render full-width banner ───────────────────────────────────────────
+            # Build as a variable (no leading indentation) to avoid Markdown treating
+            # 4+ leading spaces as a code block, which renders HTML as raw text.
+            _qr_banner = (
+                '<div style="background:linear-gradient(135deg,#0a1220 0%,#0d1630 50%,#080d18 100%);'
+                'border:2px solid #00D2FF;border-radius:20px;padding:40px;margin-top:12px;overflow:hidden;">'
+
+                # Header with department name and info
+                '<div style="margin-bottom:28px;">'
+                '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap;">'
+
+                # Left side: Department info
+                '<div style="flex:1;min-width:280px;">'
+                f'<div style="font-size:2.2rem;font-weight:900;color:#ffffff;line-height:1.2;margin-bottom:8px;">{_qr_dept}</div>'
+                f'<div style="font-size:0.95rem;color:#00D2FF;font-weight:600;letter-spacing:0.5px;margin-bottom:4px;">DFR Deployment Proposal</div>'
+                f'<div style="font-size:0.85rem;color:#889aaa;">{_qr_city}, {_qr_state}</div>'
+                '</div>'
+
+                # Right side: BRINC contact and socials
+                '<div style="flex:0 0 auto;text-align:right;">'
+                '<div style="font-size:0.75rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-bottom:8px;">BRINC Drones</div>'
+                '<div style="font-size:0.85rem;color:#aabbcc;margin-bottom:8px;">'
+                '<div>🌐 <a href="https://brincdrones.com" target="_blank" style="color:#00D2FF;text-decoration:none;font-weight:600;">brincdrones.com</a></div>'
+                '<div>✉ <a href="mailto:info@brincdrones.com" style="color:#00D2FF;text-decoration:none;">info@brincdrones.com</a></div>'
+                '</div>'
+                '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">'
+                '<a href="https://linkedin.com/company/brinc" target="_blank" style="font-size:0.7rem;color:#0a66c2;background:rgba(10,102,194,0.15);border:1px solid rgba(10,102,194,0.4);border-radius:6px;padding:4px 10px;text-decoration:none;font-weight:600;transition:all 0.2s;">LinkedIn</a>'
+                '<a href="https://instagram.com/brincdrones" target="_blank" style="font-size:0.7rem;color:#e1306c;background:rgba(225,48,108,0.12);border:1px solid rgba(225,48,108,0.4);border-radius:6px;padding:4px 10px;text-decoration:none;font-weight:600;transition:all 0.2s;">Instagram</a>'
+                '<a href="https://x.com/BRINCDrones" target="_blank" style="font-size:0.7rem;color:#d0d0d0;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.25);border-radius:6px;padding:4px 10px;text-decoration:none;font-weight:600;transition:all 0.2s;">X/Twitter</a>'
+                '<a href="https://youtube.com/@BRINCDrones" target="_blank" style="font-size:0.7rem;color:#ff0000;background:rgba(255,0,0,0.12);border:1px solid rgba(255,0,0,0.35);border-radius:6px;padding:4px 10px;text-decoration:none;font-weight:600;transition:all 0.2s;">YouTube</a>'
+                '</div>'
+                '</div>'
+
+                '</div>'  # end flex row
+                '</div>'  # end header
+
+                # QR code section — large and centered with white background for readability
+                '<div style="display:flex;flex-direction:column;align-items:center;gap:16px;margin:24px 0 28px;">'
+                f'<div style="background:#ffffff;border-radius:18px;padding:18px;display:inline-block;box-shadow:0 12px 32px rgba(0,210,255,0.25);">'
+                f'<img src="data:image/png;base64,{_qr_b64}" style="width:380px;height:380px;display:block;border-radius:14px;" alt="BRINC Mobile Summary QR"/>'
+                '</div>'
+                '<div style="text-align:center;">'
+                '<div style="font-size:1.05rem;font-weight:800;color:#00D2FF;letter-spacing:0.3px;margin-bottom:6px;">📱 Scan with any smartphone</div>'
+                '<div style="font-size:0.8rem;color:#889aaa;">No login required • Works on iOS & Android • Landscape viewing recommended</div>'
+                '</div>'
+                '</div>'
+
+                # Footer: Rep info
+                '<div style="border-top:1px solid rgba(0,210,255,0.15);padding-top:20px;">'
+                '<div style="font-size:0.7rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-bottom:6px;">Your BRINC Representative</div>'
+                f'<div style="font-size:1.15rem;font-weight:800;color:#ffffff;margin-bottom:4px;">{_qr_name}</div>'
+                f'<div style="font-size:0.85rem;color:#00D2FF;">✉ <a href="mailto:{_qr_email}" style="color:#00D2FF;text-decoration:none;">{_qr_email}</a></div>'
+                '</div>'
+
+                '</div>'  # end banner
+            )
+            st.markdown(_qr_banner, unsafe_allow_html=True)
+        except Exception as _qr_err:
+            st.caption(f"📱 QR code unavailable — install `qrcode` package. ({_qr_err})")
+
+        # ── EXPORT BUTTONS — always visible in sidebar ──
+        st.sidebar.markdown("---")
+
+        # Display authenticated user info (read-only, from Google OAuth)
+        _google_email = st.session_state.get('google_user_email', 'user@brincdrones.com')
+        _google_name_raw = st.session_state.get('google_user_name', 'User')
+
+        st.sidebar.markdown(
+            f"<div style='font-size:0.75rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin-bottom:6px;'>BRINC Representative</div>",
+            unsafe_allow_html=True
+        )
+        st.sidebar.markdown(
+            f"<div style='font-size:1rem;font-weight:700;color:#ffffff;margin-bottom:3px;'>{_google_name_raw.replace('.', ' ').title()}</div>",
+            unsafe_allow_html=True
+        )
+        st.sidebar.markdown(
+            f"<div style='font-size:0.8rem;color:#aabbcc;margin-bottom:8px;'>{_google_email}</div>",
+            unsafe_allow_html=True
+        )
+        st.sidebar.caption("*(Authenticated via Google OAuth)*")
+
+        # Use Google auth data for exports
+        user_clean = _google_name_raw.replace('.', ' ').title()
+        prop_email = _google_email
+        prop_name = user_clean
+
+        # Always define these so download buttons work regardless of fleet_capex
+        prop_city  = st.session_state.get('active_city', 'City')
+        prop_state = st.session_state.get('active_state', 'FL')
+        _safe_city_base = prop_city.replace(" ", "_").replace("/", "_")
+
+        if fleet_capex > 0:
+
+            prop_city  = st.session_state.get('active_city', 'City')
+            prop_state = st.session_state.get('active_state', 'FL')
+
+            pop_metric = st.session_state.get('estimated_pop', 250000)
+            current_time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            safe_city = prop_city.replace(" ","_").replace("/","_")
+
+            _session_start = st.session_state.get('session_start', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            try:
+                _start_dt = datetime.datetime.strptime(_session_start, '%Y-%m-%d %H:%M:%S')
+                _dur_min  = round((datetime.datetime.now() - _start_dt).total_seconds() / 60, 1)
+            except Exception:
+                _dur_min = ''
+
+            avg_resp_time    = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
+            _exp_base_gs     = float(CONFIG["DEFAULT_TRAFFIC_SPEED"])
+            _exp_eff_gs      = _exp_base_gs * (1.0 - float(traffic_level) / 100.0) if simulate_traffic else _exp_base_gs
+            avg_time_saved   = (max(0.0, (sum(d['avg_time_min'] * d['speed_mph'] * 1.4 / _exp_eff_gs for d in active_drones) / len(active_drones)) - avg_resp_time)) if active_drones and _exp_eff_gs > 0 else 0.0
+            _calls_lons = (df_calls_full if df_calls_full is not None else df_calls)['lon'].dropna()
+            _calls_lats = (df_calls_full if df_calls_full is not None else df_calls)['lat'].dropna()
+            minx = float(_calls_lons.min()) if len(_calls_lons) else 0
+            maxx = float(_calls_lons.max()) if len(_calls_lons) else 0
+            miny = float(_calls_lats.min()) if len(_calls_lats) else 0
+            maxy = float(_calls_lats.max()) if len(_calls_lats) else 0
+            area_sq_mi_est   = max(1, int((maxx - minx) * (maxy - miny) * 3280))
+            export_details = {
+                # Session
+                "session_id":            st.session_state.get('session_id', ''),
+                "session_start":         _session_start,
+                "session_duration_min":  _dur_min,
+                "data_source":           st.session_state.get('data_source', 'unknown'),
+                # Jurisdiction (user-selected)
+                "population":            pop_metric,
+                "total_calls":           st.session_state.get('total_original_calls', 0),
+                "daily_calls":           max(1, int(st.session_state.get('total_original_calls', 0) / 365)),
+                "area_sq_mi":            area_sq_mi_est,
+                # City/state enrichment
+                "city_confirmed_match":  (
+                    st.session_state.get('file_meta', {}).get('file_inferred_city', '').lower().strip() ==
+                    prop_city.lower().strip()
+                    if st.session_state.get('file_meta', {}).get('file_inferred_city', '') else ''
+                ),
+                "multi_city_targets":    json.dumps(st.session_state.get('target_cities', [])),
+                "num_cities_targeted":   len(st.session_state.get('target_cities', [])),
+                # Financials
+                "opt_strategy":          opt_strategy,
+                "incremental_build":     incremental_build,
+                "allow_redundancy":      allow_redundancy,
+                "dfr_rate":              int(dfr_dispatch_rate*100),
+                "deflect_rate":          int(deflection_rate*100),
+                "fleet_capex":           fleet_capex,
+                "annual_savings":        annual_savings,
+                "thermal_savings":       thermal_savings,
+                "k9_savings":            k9_savings,
+                "possible_additional_savings": possible_additional_savings,
+                "break_even":            break_even_text,
+                # Operational
+                "avg_response_min":      round(avg_resp_time, 2),
+                "avg_time_saved_min":    round(avg_time_saved, 2),
+                "area_covered_pct":      round(area_covered_perc, 1),
+                "calls_per_capita":      round(st.session_state.get('total_original_calls', 0) / max(pop_metric, 1), 4),
+                # Engagement / depth signals
+                "r_resp_radius":         st.session_state.get('r_resp', ''),
+                "r_guard_radius":        st.session_state.get('r_guard', ''),
+                "estimated_pop_input":   pop_metric,
+                "boundary_kind":         st.session_state.get('boundary_kind', ''),
+                "boundary_source_path":  st.session_state.get('boundary_source_path', ''),
+                "sim_or_upload":         st.session_state.get('data_source', 'unknown'),
+                "onboarding_completed":  st.session_state.get('onboarding_done', False),
+                "demo_mode_used":        st.session_state.get('demo_mode_used', False),
+                "map_viewed":            st.session_state.get('map_build_logged', False),
+                "export_type_sequence":  json.dumps(st.session_state.get('export_event_log', [])),
+                "total_exports_in_session": st.session_state.get('export_count', 0),
+                # File data matrix (populated by aggressive_parse_calls → _extract_file_meta)
+                "file_meta":             st.session_state.get('file_meta', {}),
+                # Drones
+                "active_drones": [{
+                    "name": d['name'], "type": d['type'],
+                    "lat": d['lat'],   "lon": d['lon'],
+                    "avg_time_min":    d.get('avg_time_min', 0),
+                    "faa_ceiling":     d.get('faa_ceiling', ''),
+                    "annual_savings":  d.get('annual_savings', 0),
+                } for d in active_drones],
+            }
+
+            _mgdf_export = st.session_state.get('master_gdf_override')
+            _boundary_geojson_export = None
+            if _mgdf_export is not None and not _mgdf_export.empty:
+                try:
+                    _boundary_geojson_export = _mgdf_export.to_crs(epsg=4326).to_json()
+                except Exception:
+                    _boundary_geojson_export = None
+
+            export_dict = {
+                "city": prop_city, "state": prop_state,
+                "_disclaimer": (
+                    "SIMULATION TOOL: All figures in this file are model estimates based on user-provided inputs. "
+                    "Real-world results will vary. This is not a legal recommendation, binding proposal, contract, "
+                    "or guarantee of any product, service, or financial outcome."
+                ),
+                # Fleet counts and ranges
+                "k_resp": k_responder, "k_guard": k_guardian,
+                "r_resp": resp_radius_mi, "r_guard": guard_radius_mi,
+                # Rates
+                "dfr_rate": int(dfr_dispatch_rate*100), "deflect_rate": int(deflection_rate*100),
+                # Optimization strategies
+                "resp_strategy": resp_strategy_raw,
+                "guard_strategy": guard_strategy_raw,
+                "deployment_mode_idx": st.session_state.get('deployment_mode_idx', 1),
+                "incremental_build": st.session_state.get('incremental_build', True),
+                "auto_cap_dfr": st.session_state.get('auto_cap_dfr', True),
+                # Boundary selection
+                "use_county_boundary": st.session_state.get('use_county_boundary', False),
+                # Locked stations (must restore before auto-minimums runs)
+                "pinned_guard_names": list(pinned_guard_names),
+                "pinned_resp_names":  list(pinned_resp_names),
+                # Custom / pin-dropped stations (bypass OSM on reimport)
+                "custom_stations": html_reports._safe_df_to_records(st.session_state.get('custom_stations')),
+                # Whether fleet was manually built via pin-drop
+                "pin_drop_used": st.session_state.get('pin_drop_used', False),
+                # Call and station data
+                "calls_data": html_reports._safe_df_to_records(
+                    st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None
+                    else st.session_state.get('df_calls')
+                ),
+                "stations_data": html_reports._safe_df_to_records(st.session_state.get('df_stations')),
+                "faa_geojson": faa_geojson,
+                # Boundary / shapefile
+                "boundary_geojson": _boundary_geojson_export,
+                "boundary_kind": st.session_state.get('boundary_kind', 'place'),
+                "boundary_source_path": st.session_state.get('boundary_source_path', ''),
+                # Sidebar settings — BRINC rep info
+                "brinc_user": st.session_state.get('brinc_user', 'steven.beltran'),
+                # Pricing tier selection
+                "pricing_tier": st.session_state.get('pricing_tier', 'Safe Guard'),
+                "app_version": __version__,
+            }
+
+            fig_for_export = go.Figure()
+
+            # ── Boundary polygon ─────────────────────────────────────────────────
+            if city_boundary_geom is not None and not city_boundary_geom.is_empty:
+                _export_geoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
+                                 else list(city_boundary_geom.geoms))
+                for _gi, _geom in enumerate(_export_geoms):
+                    _bx, _by = _geom.exterior.coords.xy
+                    fig_for_export.add_trace(go.Scattermap(
+                        mode="lines", lon=list(_bx), lat=list(_by),
+                        line=dict(color=map_boundary_color, width=2),
+                        name="Jurisdiction Boundary", hoverinfo='skip',
+                        showlegend=(_gi == 0)
+                    ))
+
+            # ── Incident call dots ──────────────────────────────────────────��────
+            _export_calls = display_calls if (display_calls is not None and not display_calls.empty) else None
+            if _export_calls is not None:
+                # Cap at 40K for export file-size; sample deterministically
+                _EC_MAX = 40_000
+                if len(_export_calls) > _EC_MAX:
+                    _export_calls = _export_calls.sample(_EC_MAX, random_state=42)
+                _exp_pt_size = (2 if len(_export_calls) > 20_000 else
+                                3 if len(_export_calls) > 8_000 else 4)
+                _exp_opacity = (0.18 if len(_export_calls) > 20_000 else
+                                0.28 if len(_export_calls) > 8_000 else 0.40)
+                _has_agency = 'agency' in _export_calls.columns
+                _exp_fire   = _export_calls[_export_calls['agency'].str.lower() == 'fire'] if _has_agency else _export_calls.iloc[0:0]
+                _exp_police = _export_calls[_export_calls['agency'].str.lower() != 'fire'] if _has_agency else _export_calls
+                if not _exp_police.empty:
+                    fig_for_export.add_trace(go.Scattermap(
+                        lat=_exp_police.geometry.y, lon=_exp_police.geometry.x,
+                        mode='markers',
+                        marker=dict(size=_exp_pt_size, color=map_incident_color, opacity=_exp_opacity),
+                        name="Incidents", hoverinfo='skip'
+                    ))
+                if not _exp_fire.empty:
+                    fig_for_export.add_trace(go.Scattermap(
+                        lat=_exp_fire.geometry.y, lon=_exp_fire.geometry.x,
+                        mode='markers',
+                        marker=dict(size=_exp_pt_size, color='#ff3b3b', opacity=_exp_opacity),
+                        name="Fire Incidents", hoverinfo='skip'
+                    ))
+
+            # ── 4G LTE coverage polygons (legendonly, toggleable in export) ─────
+            _exp_cov_state = st.session_state.get('active_state', '')
+            if _exp_cov_state:
+                add_coverage_traces(fig_for_export, _exp_cov_state, visible='legendonly')
+
+            # ── Coverage circles + station pins ──────────────────────────────────
+            for d in active_drones:
+                clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
+                fig_for_export.add_trace(go.Scattermap(
+                    lat=list(clats)+[None,d['lat']], lon=list(clons)+[None,d['lon']],
+                    mode='lines+markers', line=dict(color=d['color'], width=3),
+                    marker=dict(size=[0]*len(clats)+[0,16], color=d['color']),
+                    fill='toself', fillcolor='rgba(0,0,0,0)', name=d['name'][:30]
+                ))
+
+            fig_for_export.update_layout(
+                map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
+                margin=dict(l=0,r=0,t=0,b=0), height=500, showlegend=True,
+                legend=dict(
+                    yanchor="top", y=0.98, xanchor="left", x=0.02,
+                    bgcolor=legend_bg, bordercolor="#444444", borderwidth=1,
+                    font=dict(color=legend_text, size=11)
+                )
+            )
+            map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
+            station_rows = "".join(f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>" for d in active_drones)
+
+            all_bldgs_rows = ""
+            _type_colors = {
+                "Police":          ("rgba(0,210,255,0.1)",    "#0066aa"),
+                "Fire":            ("rgba(220,53,69,0.1)",    "#aa0022"),
+                "EMS":             ("rgba(255,100,50,0.1)",   "#b33000"),
+                "School":          ("rgba(255,215,0,0.12)",   "#7a6000"),
+                "Hospital":        ("rgba(34,197,94,0.1)",    "#006622"),
+                "University":      ("rgba(59,130,246,0.1)",   "#1d4ed8"),
+                "Transit":         ("rgba(16,185,129,0.1)",   "#065f46"),
+                "Community":       ("rgba(245,158,11,0.1)",   "#92400e"),
+                "Courthouse":      ("rgba(139,92,246,0.12)",  "#5b21b6"),
+                "Social Services": ("rgba(236,72,153,0.1)",   "#9d174d"),
+                "Government":      ("rgba(139,92,246,0.1)",   "#4b0082"),
+                "Library":         ("rgba(249,115,22,0.1)",   "#8a3300"),
+                "Power Station":   ("rgba(255,165,0,0.1)",    "#cc6600"),
+                "Water Treatment": ("rgba(100,200,255,0.1)",  "#0066cc"),
+                "Place of Worship": ("rgba(200,100,200,0.1)", "#663366"),
+            }
+            # ── Facility type counts (for summary grid + community impact dashboard) ──
+            _fac_counts = {}
+            for _, _frow in df_stations_all.iterrows():
+                _ft = str(_frow.get('type', 'Other'))
+                _fac_counts[_ft] = _fac_counts.get(_ft, 0) + 1
+
+            # ── Facility type summary HTML (icons + counts) ──────────────────────
+            _FAC_ICONS = {
+                "Police": "🚔", "Fire": "🚒", "EMS": "🚑", "School": "🏫",
+                "Hospital": "🏥", "University": "🎓", "Transit": "🚌",
+                "Community": "🏛️", "Courthouse": "⚖️", "Social Services": "🤝",
+                "Government": "🏛️", "Library": "📚",
+                "Power Station": "⚡", "Water Treatment": "💧", "Place of Worship": "✝️",
+            }
+            _FAC_SOURCES = {
+                "Police":          "DHS HIFLD Law Enforcement Locations · OpenStreetMap (amenity=police) · ODbL license",
+                "Fire":            "DHS HIFLD Fire Stations dataset (public domain) · OpenStreetMap (amenity=fire_station)",
+                "EMS":             "OpenStreetMap (amenity=ambulance_station) · NEMSIS National EMS Database (nemsis.org)",
+                "School":          "OpenStreetMap (amenity=school) · NCES Common Core of Data (nces.ed.gov)",
+                "Hospital":        "OpenStreetMap (amenity=hospital) · CMS Hospital Compare (cms.gov)",
+                "University":      "OpenStreetMap (amenity=university / college) · IPEDS (nces.ed.gov/ipeds)",
+                "Transit":         "OpenStreetMap (amenity=bus_station · railway=station) · NTD National Transit Database (transit.dot.gov)",
+                "Community":       "OpenStreetMap (amenity=community_centre) · IMLS Public Libraries Survey",
+                "Courthouse":      "OpenStreetMap (amenity=courthouse) · PACER / US Courts (uscourts.gov)",
+                "Social Services": "OpenStreetMap (amenity=social_facility) · HUD Location Affordability Index",
+                "Government":      "OpenStreetMap (building=government) · TIGER/Line Shapefiles (census.gov)",
+                "Library":         "OpenStreetMap (amenity=library) · IMLS Public Libraries Survey (imls.gov)",
+                "Power Station":   "OpenStreetMap (power=station) · US Energy Information Administration (eia.gov)",
+                "Water Treatment": "OpenStreetMap (man_made=water_treatment) · EPA Enviromapper · US Water Infrastructure Database",
+                "Place of Worship": "OpenStreetMap (amenity=place_of_worship) · Faith-based facility directory",
+            }
+            _fac_summary_cells = ""
+            for _ft, _fcnt in sorted(_fac_counts.items(), key=lambda x: -x[1]):
+                _tc2 = _type_colors.get(_ft, ("rgba(0,0,0,0.04)", "#555"))
+                _icon = _FAC_ICONS.get(_ft, "🏢")
+                _src  = _FAC_SOURCES.get(_ft, "OpenStreetMap contributors (ODbL)")
+                _fac_summary_cells += (
+                    f'<div style="background:{_tc2[0]};border:1px solid {_tc2[1]}33;border-radius:8px;'
+                    f'padding:10px 14px;display:flex;align-items:center;gap:10px;">'
+                    f'<span style="font-size:20px">{_icon}</span>'
+                    f'<div><div style="font-size:11px;font-weight:700;color:{_tc2[1]};text-transform:uppercase;'
+                    f'letter-spacing:0.5px;">{_ft}</div>'
+                    f'<div style="font-size:18px;font-weight:900;color:#111;font-family:\'IBM Plex Mono\',monospace;">{_fcnt}</div>'
+                    f'<div style="font-size:9px;color:#777;margin-top:1px;">facilities</div></div>'
+                    f'<abbr title="Source: {_src}" style="margin-left:auto;font-size:10px;color:#aaa;'
+                    f'text-decoration:none;cursor:help;">ⓘ</abbr>'
+                    f'</div>'
+                )
+
+            for _, row in df_stations_all.iterrows():
+                gmaps_link = f"https://www.google.com/maps/search/?api=1&query={row['lat']},{row['lon']}"
+                _rtype = str(row.get('type', 'Facility'))
+                _tc = _type_colors.get(_rtype, ("rgba(0,0,0,0.04)","#555"))
+                _short_name = str(row['name'])[:45] + ("…" if len(str(row['name']))>45 else "")
+                _src_tip = _FAC_SOURCES.get(_rtype, "OpenStreetMap contributors (ODbL)")
+                all_bldgs_rows += (
+                    f'''<div class="infra-item">
+                      <span class="i-name" title="{row['name']}">{_short_name}</span>
+                      <span class="i-type" style="background:{_tc[0]};color:{_tc[1]}">{_rtype}</span>
+                      <abbr title="Source: {_src_tip}" style="font-size:10px;color:#aaa;text-decoration:none;cursor:help;margin-left:auto;">ⓘ</abbr>
+                      <a class="i-link" href="{gmaps_link}" target="_blank">↗</a>
+                    </div>'''
+                )
+
+            logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
+            logo_html_str = f'<img src="data:image/png;base64,{logo_b64}" style="height:40px;">' if logo_b64 else '<div style="font-size:24px;font-weight:900;letter-spacing:3px;color:#fff;">BRINC</div>'
+
+            jurisdiction_list = ", ".join(selected_names) if selected_names else prop_city
+            all_station_types = df_stations_all['type'].dropna().unique().tolist() if 'type' in df_stations_all.columns else []
+            police_dept_names = [d['name'] for d in active_drones if '[Police]' in d['name']]
+            fire_dept_names   = [d['name'] for d in active_drones if '[Fire]' in d['name']]
+            ems_dept_names    = [d['name'] for d in active_drones if '[EMS]' in d['name']]
+
+            police_stations = [d['name'] for d in active_drones if 'Police' in d.get('name','') or (
+                'type' in df_stations_all.columns and
+                'Police' in str(df_stations_all[df_stations_all['name'].str.contains(
+                    d['name'].split(']')[-1].strip(), na=False, regex=False
+                )]['type'].values[:1])
+            )]
+
+            dept_summary_parts = []
+            if police_dept_names: dept_summary_parts.append(f"{len(police_dept_names)} Police station{'s' if len(police_dept_names)>1 else ''}")
+            if fire_dept_names:   dept_summary_parts.append(f"{len(fire_dept_names)} Fire station{'s' if len(fire_dept_names)>1 else ''}")
+            if ems_dept_names:    dept_summary_parts.append(f"{len(ems_dept_names)} EMS station{'s' if len(ems_dept_names)>1 else ''}")
+            dept_summary = ", ".join(dept_summary_parts) if dept_summary_parts else f"{len(active_drones)} municipal stations"
+            police_names_str = (", ".join([n.replace('[Police] ','') for n in police_dept_names[:6]]) + ("..." if len(police_dept_names)>6 else "")) if police_dept_names else "municipal facilities"
+            total_fleet = actual_k_responder + actual_k_guardian
+            analytics_html_export = html_reports.generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls), export_mode=True)
+            cad_charts_html_export = html_reports._build_cad_charts_html(df_calls_full if df_calls_full is not None else df_calls)
+            staffing_pressure_html_export = ""
+
+            prepared_for_city = st.session_state.get('active_city', prop_city) or prop_city
+            prepared_by_name = prop_name
+
+            # ── School safety export variables ────────────────────────────────────────
+            _exp_dfr_amortized = int(fleet_capex / 7) if fleet_capex > 0 else 0
+            _dfr_amort_str     = f"${_exp_dfr_amortized:,}/yr" if _exp_dfr_amortized > 0 else "~$11K–22K/yr"
+
+            # ── Build custom-content HTML blocks from AE editable fields ────────────
+            _doc_intro   = st.session_state.get('doc_custom_intro',   '').strip()
+            _doc_pt1     = st.session_state.get('doc_talking_pt_1',  '').strip()
+            _doc_pt2     = st.session_state.get('doc_talking_pt_2',  '').strip()
+            _doc_pt3     = st.session_state.get('doc_talking_pt_3',  '').strip()
+            _doc_closing = st.session_state.get('doc_custom_closing', '').strip()
+            _doc_phone   = st.session_state.get('doc_ae_phone',       '').strip()
+
+            _custom_intro_html = (
+                f'<div style="margin-top:20px;padding:16px 20px;background:#f0f8ff;border-left:4px solid #00D2FF;'
+                f'border-radius:0 6px 6px 0;font-size:15px;color:#1a2a3a;line-height:1.8;">'
+                f'{_doc_intro}</div>'
+            ) if _doc_intro else ''
+
+            _pts = [p for p in [_doc_pt1, _doc_pt2, _doc_pt3] if p]
+            _custom_pts_html = (
+                '<ul style="margin-top:16px;padding-left:20px;font-size:14px;color:#374151;line-height:2;">'
+                + ''.join(f'<li>{p}</li>' for p in _pts)
+                + '</ul>'
+            ) if _pts else ''
+
+            _custom_closing_html = (
+                f'<div style="margin-top:24px;padding:16px 20px;background:#f9fafb;border:1px solid #e4e6ea;'
+                f'border-radius:6px;font-size:14px;color:#374151;line-height:1.8;">'
+                f'{_doc_closing}</div>'
+            ) if _doc_closing else ''
+
+            _ae_phone_html = (
+                f'<div style="margin-top:4px;font-size:13px;color:#555;">📞 {_doc_phone}</div>'
+            ) if _doc_phone else ''
+            # ── Export personalization: extract call-type and priority stats ────────
+            _exp_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
+            _exp_top_calls, _exp_pri_str, _exp_date_range = [], "mixed priorities", "recent period"
+            try:
+                for _cc in ['call_type_desc','agencyeventtypecodedesc','calldesc','description']:
+                    if _cc in _exp_df.columns:
+                        _tc = _exp_df[_cc].dropna().str.strip().value_counts().head(5)
+                        if not _tc.empty:
+                            _exp_top_calls = list(zip(_tc.index.tolist(), _tc.values.tolist()))
+                        break
+                if 'priority' in _exp_df.columns:
+                    _pc = _exp_df['priority'].dropna().value_counts().sort_index()
+                    _pri_parts = [f"Priority {k}: {v:,} ({v/max(len(_exp_df),1)*100:.0f}%)" for k,v in _pc.items() if str(k).strip().isdigit()]
+                    _exp_pri_str = " · ".join(_pri_parts[:4]) if _pri_parts else "mixed priorities"
+                if 'date' in _exp_df.columns:
+                    _dd = pd.to_datetime(_exp_df['date'], errors='coerce').dropna()
+                    if not _dd.empty:
+                        _exp_date_range = f"{_dd.min().strftime('%b %Y')} – {_dd.max().strftime('%b %Y')}"
+            except Exception:
+                pass
+            _top5_html = ""
+            for _cname, _ccnt in (_exp_top_calls or []):
+                _cpct = f"{_ccnt/max(len(_exp_df),1)*100:.1f}%"
+                _is_prop = any(w in str(_cname).upper() for w in ['THEFT','BURGLAR','VANDAL','ROBBERY','TRESPASS','LARCEN','AUTO','VEHICLE','BREAK','SHOPLI'])
+                _cflag = ' <span style="color:#f59e0b;font-size:10px">property-related</span>' if _is_prop else ''
+                _top5_html += f'<tr><td><strong>{_cname}</strong>{_cflag}</td><td style="font-family:monospace;color:#374151">{_ccnt:,}</td><td style="color:#6b7280">{_cpct}</td></tr>'
+            _guardian_img_b64 = get_transparent_product_base64("gigs.png") or ""
+            logo_b64_dark = get_themed_logo_base64("logo.png", theme="dark")
+            logo_b64_light = get_themed_logo_base64("logo.png", theme="light")
+
+            # ── FCC 4G LTE Coverage Map URL for export ────────────────────────────
+            _fcc_zoom_export = round(min(13, max(9, dynamic_zoom + 1)), 2)
+            _fcc_url = (f"https://broadbandmap.fcc.gov/home?version=dec2023"
+                        f"&zoom={_fcc_zoom_export}&vlon={center_lon:.6f}&vlat={center_lat:.6f}"
+                        f"&speed=25&tech=300&br=4")
+
+            # ── Re-establish tier badge variables for export ────────────────────────
+            _exp_pricing_tier = st.session_state.get('pricing_tier', 'Safe Guard')
+            if _exp_pricing_tier == "Safe Guard":
+                _tier_badge = "🛡️ Safe Guard"
+                _tier_desc = "Advanced Custom Features"
+            else:
+                _tier_badge = "🛡️ Safe Guard Lite"
+                _tier_desc = "Core Functionality"
+
+            export_html = f"""<!DOCTYPE html>
+    <html lang="en"><head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>BRINC DFR Proposal — {prop_city}, {prop_state}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+    *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
+    :root{{
+      --black:#000000;--white:#ffffff;--cyan:#00D2FF;--gold:#FFD700;
+      --ink:#0a0a0f;--surface:#f7f8fa;--border:#e4e6ea;
+      --text:#111118;--muted:#6b7280;--light:#f0f2f6;
+      --resp:#00D2FF;--guard:#FFD700;--green:#22c55e;--amber:#f59e0b;
+    }}
+    html{{scroll-behavior:smooth}}
+    body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text);line-height:1.6;display:flex;min-height:100vh}}
+
+    /* ── LEFT SIDEBAR INDEX ──────────────────────────────────────── */
+    .doc-sidebar{{
+      position:fixed;top:0;left:0;width:220px;height:100vh;
+      background:var(--ink);overflow-y:auto;z-index:100;
+      display:flex;flex-direction:column;
+      border-right:1px solid #1a1a2a;
+    }}
+    .sidebar-logo{{
+      padding:28px 24px 20px;
+      border-bottom:1px solid #1a1a2a;
+    }}
+    .sidebar-logo img{{height:40px;display:block}}
+    .sidebar-logo .brand{{font-size:22px;font-weight:900;letter-spacing:3px;color:#fff}}
+    .sidebar-city{{
+      padding:16px 24px;
+      border-bottom:1px solid #1a1a2a;
+    }}
+    .sidebar-city .city-name{{font-size:13px;font-weight:700;color:#fff;letter-spacing:0.3px}}
+    .sidebar-city .city-sub{{font-size:11px;color:#666;margin-top:2px}}
+    .sidebar-nav{{padding:20px 0;flex:1}}
+    .sidebar-nav a{{
+      display:flex;align-items:center;gap:10px;
+      padding:9px 24px;font-size:12px;font-weight:500;
+      color:#888;text-decoration:none;
+      border-left:2px solid transparent;
+      transition:all 0.15s;
+    }}
+    .sidebar-nav a:hover,.sidebar-nav a.active{{
+      color:#fff;background:rgba(0,210,255,0.06);
+      border-left-color:var(--cyan);
+    }}
+    .sidebar-nav .nav-num{{
+      font-size:10px;font-weight:700;color:#333;
+      width:18px;text-align:center;flex-shrink:0;
+    }}
+    .sidebar-nav a:hover .nav-num,.sidebar-nav a.active .nav-num{{color:var(--cyan)}}
+    .sidebar-footer{{
+      padding:20px 24px;border-top:1px solid #1a1a2a;
+      font-size:10px;color:#444;line-height:1.6;
+    }}
+    .sidebar-footer a{{color:#555;text-decoration:none}}
+
+    /* ── MAIN CONTENT ────────────────────────────────────────────── */
+    .doc-main{{margin-left:220px;flex:1;min-width:0}}
+
+    /* ── PAGE SECTIONS (each prints as independent page) ─────────── */
+    .doc-section{{
+      background:#fff;
+      border-bottom:6px solid var(--surface);
+      padding:52px 60px;
+      position:relative;
+    }}
+    .doc-section:first-child{{padding-top:64px}}
+
+    /* Section header bar */
+    .section-eyebrow{{
+      display:flex;align-items:center;gap:10px;
+      margin-bottom:32px;
+    }}
+
+    /* ── SOURCE BADGE ──────────────────────────────────────────────── */
+    .src{{
+      display:inline-flex;align-items:center;justify-content:center;
+      width:14px;height:14px;border-radius:50%;
+      background:rgba(100,116,139,0.1);color:#94a3b8;
+      border:1px solid rgba(100,116,139,0.28);
+      font-size:8px;font-weight:700;cursor:default;
+      margin-left:4px;vertical-align:middle;position:relative;
+      font-style:normal;text-decoration:none;flex-shrink:0;
+    }}
+    .src:hover::after{{
+      content:attr(data-src);
+      position:absolute;bottom:130%;left:50%;
+      transform:translateX(-50%);
+      background:#1e293b;color:#e2e8f0;
+      font-size:10.5px;font-weight:400;padding:7px 11px;
+      border-radius:6px;white-space:normal;width:270px;
+      line-height:1.55;z-index:9999;
+      border:1px solid #334155;
+      box-shadow:0 6px 20px rgba(0,0,0,0.4);
+      pointer-events:none;text-transform:none;letter-spacing:normal;
+    }}
+    .copy-section-btn{{
+      margin-left:auto;
+      display:inline-flex;align-items:center;gap:6px;
+      font-size:10px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
+      color:var(--cyan);border:1px solid rgba(0,210,255,0.35);
+      background:rgba(0,210,255,0.06);
+      padding:4px 12px;border-radius:100px;cursor:pointer;
+      font-family:'IBM Plex Mono',monospace;
+      transition:background 0.15s,border-color 0.15s;
+      user-select:none;
+    }}
+    .copy-section-btn:hover{{background:rgba(0,210,255,0.14);border-color:rgba(0,210,255,0.6);}}
+    .copy-section-btn.copied{{color:#39FF14;border-color:rgba(57,255,20,0.5);background:rgba(57,255,20,0.07);}}
+    .copy-section-btn.grant-law{{color:#3b82f6;border-color:rgba(59,130,246,0.35);background:rgba(59,130,246,0.06);}}
+    .copy-section-btn.grant-law:hover{{background:rgba(59,130,246,0.14);border-color:rgba(59,130,246,0.6);}}
+    .copy-section-btn.grant-fire{{color:#f97316;border-color:rgba(249,115,22,0.35);background:rgba(249,115,22,0.06);}}
+    .copy-section-btn.grant-fire:hover{{background:rgba(249,115,22,0.14);border-color:rgba(249,115,22,0.6);}}
+    .copy-section-btn.community{{color:#22c55e;border-color:rgba(34,197,94,0.35);background:rgba(34,197,94,0.06);}}
+    .copy-section-btn.community:hover{{background:rgba(34,197,94,0.14);border-color:rgba(34,197,94,0.6);}}
+    .section-eyebrow .pg-num{{
+      font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;
+      color:var(--cyan);border:1px solid rgba(0,210,255,0.3);
+      padding:3px 10px;border-radius:100px;font-family:'IBM Plex Mono',monospace;
+    }}
+    .section-eyebrow .pg-title{{
+      font-size:10px;font-weight:600;letter-spacing:2px;text-transform:uppercase;
+      color:var(--muted);
+    }}
+
+    /* ── COVER PAGE ──────────────────────────────────────────────── */
+    .cover-page{{
+      background:var(--ink);color:#fff;min-height:100vh;
+      display:flex;flex-direction:column;justify-content:space-between;
+      padding:60px;position:relative;overflow:hidden;
+    }}
+    .cover-page::before{{
+      content:'';position:absolute;inset:0;
+      background:radial-gradient(ellipse 80% 60% at 70% 30%,rgba(0,210,255,0.08) 0%,transparent 70%);
+      pointer-events:none;
+    }}
+    .cover-logo{{margin-bottom:auto}}
+    .cover-logo img{{height:52px}}
+    .cover-logo .brand{{font-size:28px;font-weight:900;letter-spacing:4px;color:#fff}}
+    .cover-headline{{margin:60px 0 40px}}
+    .cover-tag{{
+      font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;
+      color:var(--cyan);margin-bottom:20px;
+    }}
+    .cover-headline h1{{
+      font-size:52px;font-weight:900;line-height:1.05;letter-spacing:-1px;
+      color:#fff;margin-bottom:16px;
+    }}
+    .cover-headline h1 span{{color:var(--cyan)}}
+    .cover-population{{
+      font-size:13px;color:#aaa;margin-bottom:14px;letter-spacing:0.2px;
+      border-left:3px solid var(--cyan);padding-left:10px;
+    }}
+    .cover-population strong{{color:#fff;font-weight:700}}
+    .cover-headline p{{font-size:15px;color:#888;max-width:520px;line-height:1.7}}
+    .cover-meta{{
+      display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+      background:#1a1a2a;border:1px solid #1a1a2a;border-radius:10px;overflow:hidden;
+      margin-top:4px;
+    }}
+    .cover-meta-cell{{
+      background:var(--ink);padding:16px 14px;
+    }}
+    .cover-meta-cell .label{{font-size:9px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#555;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+    .cover-meta-cell .value{{font-size:clamp(11px,1vw,14px);font-weight:800;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'IBM Plex Mono',monospace;letter-spacing:-0.3px}}
+    .cover-meta-cell .value.accent{{color:var(--cyan)}}
+    .cover-meta-cell .value.gold{{color:var(--gold)}}
+    .cover-bottom{{margin-top:40px;font-size:12px;color:#444;border-top:1px solid #1a1a2a;padding-top:24px;display:flex;justify-content:space-between}}
+
+    /* ── METRICS SECTION ─────────────────────────────────────────── */
+    .metrics-hero{{
+      display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+      background:var(--border);border-radius:12px;overflow:hidden;
+      margin-bottom:40px;box-shadow:0 1px 3px rgba(0,0,0,0.04);
+    }}
+    .metric-cell{{
+      background:#fff;padding:24px 16px;text-align:center;min-width:0;
+    }}
+    .metric-cell .m-label{{font-size:9px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+    .metric-cell .m-value{{font-size:clamp(16px,1.8vw,28px);font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1.1;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+    .metric-cell .m-value.cyan{{color:var(--cyan)}}
+    .metric-cell .m-value.gold{{color:var(--gold)}}
+    .metric-cell .m-value.green{{color:var(--green)}}
+    .metric-cell .m-sub{{font-size:11px;color:var(--muted);margin-top:6px}}
+
+    /* Fleet split row */
+    .fleet-split{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:32px}}
+    .fleet-card{{border-radius:10px;padding:24px;position:relative;overflow:hidden}}
+    .fleet-card.guardian{{background:#0a0800;border:1px solid #2a2400;color:#fff}}
+    .fleet-card.responder{{background:#00111a;border:1px solid #002a3a;color:#fff}}
+    .fleet-card .fc-icon{{font-size:28px;margin-bottom:12px}}
+    .fleet-card .fc-type{{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px}}
+    .fleet-card.guardian .fc-type{{color:var(--gold)}}
+    .fleet-card.responder .fc-type{{color:var(--resp)}}
+    .fleet-card .fc-val{{font-size:32px;font-weight:900;font-family:'IBM Plex Mono',monospace;color:#fff}}
+    .fleet-card .fc-sub{{font-size:12px;color:#888;margin-top:4px}}
+    .fleet-card .fc-row{{display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)}}
+    .fleet-card .fc-row:last-child{{border-bottom:none}}
+    .fleet-card .fc-row .k{{color:#666}}.fleet-card .fc-row .v{{font-weight:600;color:#ccc}}
+
+    /* ── SECTION HEADINGS ────────────────────────────────────────── */
+    .sh{{
+      font-size:22px;font-weight:800;color:var(--text);
+      margin-bottom:20px;padding-bottom:12px;
+      border-bottom:2px solid var(--border);
+      display:flex;align-items:center;gap:10px;
+    }}
+    .sh .sh-accent{{color:var(--cyan)}}
+
+    /* ── TABLES ──────────────────────────────────────────────────── */
+    table{{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:28px}}
+    thead tr{{background:var(--ink);color:#fff}}
+    thead th{{padding:12px 16px;text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase}}
+    tbody tr:nth-child(even){{background:#fafbfc}}
+    tbody tr:hover{{background:#f0f8ff}}
+    td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
+    .tag-resp{{background:rgba(0,210,255,0.1);color:#0066aa;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}}
+    .tag-guard{{background:rgba(255,215,0,0.15);color:#8a6a00;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}}
+
+    /* ── MAP ─────────────────────────────────────────────────────── */
+    .map-wrap{{border-radius:12px;overflow:hidden;border:1px solid var(--border);box-shadow:0 4px 20px rgba(0,0,0,0.06);margin-bottom:32px}}
+
+    /* ── DISCLAIMER ──────────────────────────────────────────────── */
+    .disc{{background:#fffbeb;border-left:4px solid var(--amber);padding:16px 20px;border-radius:0 8px 8px 0;font-size:12px;color:#7a5a00;margin-bottom:24px}}
+
+    /* ── FOOTER ──────────────────────────────────────────────────── */
+    .doc-footer{{background:var(--ink);color:#555;padding:36px 60px;font-size:11px;display:flex;justify-content:space-between;align-items:center;gap:20px}}
+    .doc-footer a{{color:#666;text-decoration:none}}
+    .doc-footer .brand-mark{{font-size:16px;font-weight:900;letter-spacing:3px;color:#fff;flex-shrink:0}}
+    .doc-version{{margin:28px 0 0;padding-top:12px;border-top:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.12em;color:rgba(107,114,128,0.9);text-align:right;}}
+
+    /* ── PRODUCT IMAGE ───────────────────────────────────────────── */
+    .cover-body{{
+      display:flex;align-items:flex-start;gap:40px;flex:1;margin:40px 0;
+    }}
+    .cover-left{{flex:1;min-width:0}}
+    .cover-right{{
+      flex-shrink:0;width:420px;display:flex;align-items:center;
+      justify-content:flex-end;
+    }}
+    .product-img{{
+      width:100%;max-width:420px;
+      filter:drop-shadow(0 20px 60px rgba(0,210,255,0.18));
+      pointer-events:none;
+    }}
+    @media (max-width:900px){{.cover-right{{display:none}}}}
+
+    /* ── TWO-COL INFRA TABLE ─────────────────────────────────────── */
+    .infra-grid{{
+      display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:28px;
+    }}
+    .infra-item{{
+      background:#fafbfc;border:1px solid var(--border);border-radius:6px;
+      padding:10px 12px;font-size:11px;display:flex;justify-content:space-between;
+      align-items:center;gap:8px;
+    }}
+    .infra-item .i-name{{font-weight:600;color:var(--text);flex:1;min-width:0;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
+    .infra-item .i-type{{font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;flex-shrink:0}}
+    .infra-item .i-link{{color:var(--cyan);text-decoration:none;font-weight:700;font-size:11px;flex-shrink:0}}
+
+    /* ── GRANT STATS SIDEBAR ─────────────────────────────────────── */
+    .grant-layout{{display:grid;grid-template-columns:1fr 280px;gap:40px;align-items:start}}
+    .grant-sidebar{{display:flex;flex-direction:column;gap:12px}}
+    .grant-stat{{
+      background:#fafbfc;border:1px solid var(--border);border-radius:8px;
+      padding:16px;text-align:center;
+    }}
+    .grant-stat .gs-label{{font-size:10px;font-weight:600;letter-spacing:1px;
+      text-transform:uppercase;color:var(--muted);margin-bottom:6px}}
+    .grant-stat .gs-val{{font-size:24px;font-weight:900;font-family:'IBM Plex Mono',monospace;color:var(--cyan)}}
+    .grant-stat .gs-sub{{font-size:11px;color:var(--muted);margin-top:4px}}
+    .grant-stat.gold .gs-val{{color:var(--gold)}}
+    .grant-stat.green .gs-val{{color:var(--green)}}
+
+    /* ── CRIME STATS BOX ─────────────────────────────────────────── */
+    .crime-box{{
+      background:linear-gradient(135deg,#0a0800 0%,#120e00 100%);
+      border:1px solid #2a2000;border-radius:10px;
+      padding:24px;margin-bottom:24px;
+    }}
+    .crime-box h4{{color:var(--gold);font-size:12px;font-weight:700;
+      letter-spacing:1.5px;text-transform:uppercase;margin-bottom:16px}}
+    .crime-stat-row{{
+      display:flex;justify-content:space-between;align-items:baseline;
+      padding:8px 0;border-bottom:1px solid #1a1600;font-size:13px;
+    }}
+    .crime-stat-row:last-child{{border-bottom:none}}
+    .crime-stat-row .csk{{color:#888}}
+    .crime-stat-row .csv{{font-weight:700;color:#fff;font-family:'IBM Plex Mono',monospace}}
+    .crime-stat-row .csv.accent{{color:var(--gold)}}
+
+    /* ── PRINT ───────────────────────────────────────────────────── */
+    @media print{{
+      @page{{size:auto;margin:0.45in 0.5in}}
+      html,body{{background:#fff !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+      .doc-sidebar{{display:none !important}}
+      .doc-main{{margin-left:0 !important}}
+      .doc-section,.cover-page{{
+        page-break-after:always;
+        page-break-inside:avoid;
+        break-after:page;
+        border-bottom:none;
+        min-height:0;
+        box-shadow:none !important;
+      }}
+      .doc-section{{padding:30px 34px !important}}
+      .cover-page{{padding:38px 40px !important;min-height:auto !important}}
+      .doc-footer{{padding:20px 34px !important}}
+      .doc-section:last-child,.cover-page:last-child{{page-break-after:auto;break-after:auto}}
+      .section-eyebrow,.cover-headline,h1,h2,h3,h4{{break-after:avoid-page;page-break-after:avoid}}
+      .metrics-hero,.roi-strip,.grant-layout,.infra-grid,.map-wrap,table,img,svg,canvas{{
+        break-inside:avoid-page;
+        page-break-inside:avoid;
+      }}
+      a{{color:inherit !important;text-decoration:none !important}}
+      .doc-version{{margin-top:18px;padding-top:10px;border-top:1px solid #e5e7eb;color:#6b7280 !important;}}
+    }}
+    </style>
+    </head>
+    <body>
+
+    <!-- ── TOP-RIGHT CORNER LOGO ─────────────────────────────────── -->
+
+
+    <!-- ── SIDEBAR INDEX ─────────────────────────────────────────── -->
+    <nav class="doc-sidebar">
+      <div class="sidebar-logo">
+        {"<img src='data:image/png;base64," + logo_b64_dark + "' style='height:40px;display:block'>" if logo_b64_dark else '<div class="brand">BRINC</div>'}
+      </div>
+      <div class="sidebar-city">
+        <div class="city-name">{prop_city}, {prop_state}</div>
+        <div class="city-sub">DFR Deployment Proposal</div>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="#cover"><span class="nav-num">00</span>Cover</a>
+        <a href="#executive"><span class="nav-num">01</span>Executive Summary</a>
+        <a href="#fleet"><span class="nav-num">02</span>Fleet &amp; Coverage</a>
+        <a href="#map"><span class="nav-num">03</span>Coverage Map</a>
+        <a href="#incident-data"><span class="nav-num">04</span>Incident Analysis</a>
+        <a href="#deployment"><span class="nav-num">05</span>Deployment Locations</a>
+        <a href="#grant"><span class="nav-num">06</span>Grant Narrative</a>
+        <a href="#infrastructure"><span class="nav-num">07</span>Infrastructure Directory</a>
+        <a href="#community"><span class="nav-num">08</span>Community Partnership</a>
+        [ANALYTICS_NAV]
+        [COMMUNITY_IMPACT_NAV]
+        <a href="#school-safety"><span class="nav-num">11</span>School Safety</a>
+      </nav>
+      <div class="sidebar-footer">
+        Prepared {datetime.datetime.now().strftime("%b %d, %Y")}<br>
+        {prop_name}<br>
+        <a href="mailto:{prop_email}">{prop_email}</a>
+        {_ae_phone_html}
+      </div>
+    </nav>
+
+    <main class="doc-main">
+
+    <!-- ── 00: COVER ─────────────────────────────────────────────── -->
+    <section class="cover-page" id="cover">
+      <div class="cover-logo">
+        {"<img src='data:image/png;base64," + logo_b64_dark + "' style='height:48px;display:block'>" if logo_b64_dark else '<div class="brand">BRINC</div>'}
+      </div>
+      <div class="cover-body">
+        <div class="cover-left">
+          <div class="cover-headline">
+            <div class="cover-tag">Drone as a First Responder · Deployment Proposal</div>
+            <h1>Protecting <span>{prop_city}</span>,<br>{prop_state}</h1>
+            <div class="cover-population">
+              Serving <strong>{int(pop_metric):,}</strong> residents of {prop_city}, {prop_state}
+              <abbr title="Source: US Census Bureau American Community Survey (ACS) 5-Year Estimates · census.gov/programs-surveys/acs" style="font-size:11px;color:#666;margin-left:4px;text-decoration:none;cursor:help;">ⓘ</abbr>
+            </div>
+            <p>A data-driven deployment plan for <strong>{actual_k_responder + actual_k_guardian} BRINC aerial units</strong> covering {calls_covered_perc:.1f}% of {st.session_state.get('total_original_calls', total_calls):,} annual incidents · {len(df_stations_all):,} public facilities protected across {area_sq_mi_est:,} sq mi.</p>
+          </div>
+          <div class="cover-meta">
+            <div class="cover-meta-cell"><div class="label">Fleet CapEx</div><div class="value accent">${fleet_capex:,.0f}</div></div>
+            <div class="cover-meta-cell"><div class="label">Annual Savings</div><div class="value gold">${annual_savings:,.0f}</div></div>
+            <div class="cover-meta-cell"><div class="label">Add'l Thermal + K-9</div><div class="value accent">${possible_additional_savings:,.0f}</div></div>
+            <div class="cover-meta-cell"><div class="label">Break-Even</div><div class="value">{break_even_text}</div></div>
+            <div class="cover-meta-cell"><div class="label">Call Coverage</div><div class="value accent">{calls_covered_perc:.1f}%</div></div>
+            <div class="cover-meta-cell"><div class="label">Avg Response</div><div class="value">{avg_resp_time:.1f} min</div></div>
+            <div class="cover-meta-cell"><div class="label">Time Saved</div><div class="value gold">{avg_time_saved:.1f} min</div></div>
+            <div class="cover-meta-cell" style="background:rgba(0,210,255,0.04)"><div class="label" style="color:#1a4a5a">Fleet Size</div><div class="value" style="color:#00a0bf">{actual_k_responder + actual_k_guardian} Units</div></div>
+          </div>
+        </div>
+        <div class="cover-right">
+          <img class="product-img" src="data:image/jpeg;base64,{_guardian_img_b64}" alt="BRINC Guardian Station">
+        </div>
+      </div>
+      <div class="cover-bottom">
+        <span>Prepared for <strong style="color:#fff">{prepared_for_city}</strong> by <strong style="color:#fff">{prepared_by_name}</strong></span>
+        <span>{datetime.datetime.now().strftime("%B %d, %Y")}</span>
+      </div>
+    </section>
+
+    <!-- ── 01: EXECUTIVE SUMMARY ──────────────────────────────────── -->
+    <section class="doc-section" id="executive">
+      <div class="section-eyebrow"><span class="pg-num">01</span><span class="pg-title">Executive Summary</span><span class="src" data-src="Sources: Incident coverage &amp; response time computed from uploaded CAD data via BRINC geospatial optimizer. Hardware pricing: BRINC Responder $80K · Guardian $160K (MSRP). Officer dispatch cost benchmark: $76–$120/call (IACP/DOJ). Population: US Census Bureau ACS.">ⓘ</span></div>
+      <div class="metrics-hero">
+        <div class="metric-cell"><div class="m-label">Fleet Capital Expenditure</div><div class="m-value cyan">${fleet_capex:,.0f}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
+        <div class="metric-cell"><div class="m-label">Annual Savings Capacity</div><div class="m-value gold">${annual_savings:,.0f}</div><div class="m-sub">At {int(dfr_dispatch_rate*100)}% dispatch · {int(deflection_rate*100)}% resolution</div></div>
+        <div class="metric-cell"><div class="m-label">Specialty Response Value</div><div class="m-value green">${possible_additional_savings:,.0f}</div><div class="m-sub">Thermal ${thermal_savings:,.0f} · K-9 ${k9_savings:,.0f} · Fire ${fire_savings:,.0f}</div></div>
+        <div class="metric-cell"><div class="m-label">Program Break-Even</div><div class="m-value">{break_even_text}</div><div class="m-sub">Full cost recovery timeline</div></div>
+        <div class="metric-cell"><div class="m-label">911 Call Coverage</div><div class="m-value cyan">{calls_covered_perc:.1f}%</div><div class="m-sub">of {st.session_state.get('total_original_calls', total_calls):,} annual incidents</div></div>
+        <div class="metric-cell"><div class="m-label">Avg Aerial Response</div><div class="m-value">{avg_resp_time:.1f} min</div><div class="m-sub">vs. ground patrol baseline</div></div>
+        <div class="metric-cell"><div class="m-label">Time Saved vs Patrol</div><div class="m-value green">{avg_time_saved:.1f} min</div><div class="m-sub">per incident, on average</div></div>
+        <div class="metric-cell" style="background:#fafbfc"><div class="m-label">Total Fleet Units</div><div class="m-value" style="color:#374151">{actual_k_responder + actual_k_guardian}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
+      </div>
+
+      <!-- Pricing Tier Badge -->
+      <div style="background:linear-gradient(135deg,#0066aa 0%,#0088dd 100%);border-radius:10px;padding:16px 20px;margin:20px 0;border:2px solid #00D2FF;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div style="background:rgba(0,210,255,0.2);border-radius:6px;padding:8px 12px;">
+            <div style="font-size:11px;color:#00D2FF;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Pricing Tier</div>
+            <div style="font-size:16px;color:#ffffff;font-weight:800;margin-top:4px;">{_tier_badge}</div>
+          </div>
+          <div>
+            <div style="font-size:13px;color:#ffffff;margin-bottom:8px;"><strong>{_tier_desc}</strong></div>
+            <div style="font-size:12px;color:#aabbdd;">Responder: <strong>${CONFIG['RESPONDER_COST']:,}</strong> · Guardian: <strong>${CONFIG['GUARDIAN_COST']:,}</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <p style="font-size:15px;color:#444;line-height:1.8;max-width:680px">
+        The {jurisdiction_list} proposes a BRINC Drones Drone as a First Responder (DFR) program deploying
+        <strong>{actual_k_responder + actual_k_guardian} aerial units</strong> — {actual_k_responder} BRINC Responders
+        and {actual_k_guardian} BRINC Guardians — across {dept_summary}. The system is projected to cover
+        <strong>{calls_covered_perc:.1f}% of historical incidents</strong>, reach scenes
+        <strong>{avg_time_saved:.1f} minutes faster</strong> than ground patrol, and deliver
+        <strong>${annual_savings:,.0f} in annual operational savings</strong> with a break-even horizon of {break_even_text.lower()}.
+      </p>
+      {_custom_intro_html}
+      {_custom_pts_html}
+    </section>
+
+    <!-- ── 02: FLEET & COVERAGE ───────────────────────────────────── -->
+    <section class="doc-section" id="fleet">
+      <div class="section-eyebrow"><span class="pg-num">02</span><span class="pg-title">Fleet &amp; Coverage</span><span class="src" data-src="Source: BRINC Drones technical specifications. Responder: 60 mph, 1-mile radius, ~2-min avg response. Guardian: 45 mph, up to 8-mile Starlink-connected radius, 25-min flight cycles with auto-recharge. Coverage % derived from geospatial analysis of uploaded incident locations.">ⓘ</span></div>
+      <div class="fleet-split">
+        <div class="fleet-card guardian">
+          <div class="fc-icon">🦅</div>
+          <div class="fc-type">BRINC Guardian</div>
+          <div class="fc-val">{actual_k_guardian} Unit{"s" if actual_k_guardian != 1 else ""}</div>
+          <div class="fc-sub">{guard_radius_mi}-mile operational radius · {guard_strategy_raw}</div>
+          <div style="margin-top:16px">
+            <div class="fc-row"><span class="k">Unit CapEx</span><span class="v">${CONFIG['GUARDIAN_COST']:,}</span></div>
+            <div class="fc-row"><span class="k">Call Coverage</span><span class="v">{guard_calls_perc:.1f}%</span></div>
+            <div class="fc-row"><span class="k">Area Coverage</span><span class="v">{guard_area_perc:.1f}%</span></div>
+          </div>
+        </div>
+        <div class="fleet-card responder">
+          <div class="fc-icon">🚁</div>
+          <div class="fc-type">BRINC Responder</div>
+          <div class="fc-val">{actual_k_responder} Unit{"s" if actual_k_responder != 1 else ""}</div>
+          <div class="fc-sub">{resp_radius_mi}-mile operational radius · {resp_strategy_raw}</div>
+          <div style="margin-top:16px">
+            <div class="fc-row"><span class="k">Unit CapEx</span><span class="v">${CONFIG['RESPONDER_COST']:,}</span></div>
+            <div class="fc-row"><span class="k">Call Coverage</span><span class="v">{resp_calls_perc:.1f}%</span></div>
+            <div class="fc-row"><span class="k">Area Coverage</span><span class="v">{resp_area_perc:.1f}%</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── 03: COVERAGE MAP ───────────────────────────────────────── -->
+    <section class="doc-section" id="map">
+      <div class="section-eyebrow"><span class="pg-num">03</span><span class="pg-title">Coverage Map</span><span class="src" data-src="Map tiles: © OpenStreetMap contributors (ODbL license). FAA airspace data: Federal Aviation Administration LAANC UAS Facility Maps. Incident dots: uploaded CAD data (up to 40K sampled). Coverage rings are operational radius estimates; actual deployment requires FAA LAANC authorization or Part 107 waiver.">ⓘ</span></div>
+      <div class="map-wrap">{map_html_str}</div>
+    </section>
+
+    <!-- ── 03b: 4G LTE CELL COVERAGE ─────────────────────────────── -->
+    <section class="doc-section" id="cell-coverage">
+      <div class="section-eyebrow"><span class="pg-num">03b</span><span class="pg-title">4G LTE Cell Coverage</span><span class="src" data-src="Source: FCC National Broadband Map (broadbandmap.fcc.gov). Coverage reflects carrier-reported FCC BDC data for 4G LTE (tech code 300) at ≥25 Mbps download. Displayed carriers include AT&T, T-Mobile, Verizon, and US Cellular. Coverage data may not reflect actual field conditions.">ⓘ</span></div>
+      <p style="font-size:0.78rem;color:#8899aa;margin:0 0 16px;">FCC-reported 4G LTE availability centered on the deployment area. Click the link below to open the interactive map and toggle individual carriers for drone data-link connectivity assessment.</p>
+      <a href="{_fcc_url}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;background:#0d1b2e;border:1px solid #1e3a5f;border-radius:10px;padding:20px 28px;">
+          <div>
+            <div style="color:#00b4d8;font-size:1rem;font-weight:600;margin-bottom:4px;">📶 Open FCC 4G LTE Coverage Map</div>
+            <div style="color:#6b7f99;font-size:0.78rem;">FCC National Broadband Map · AT&amp;T, T-Mobile, Verizon, US Cellular · Centered on {center_lat:.4f}, {center_lon:.4f}</div>
+          </div>
+          <div style="color:#00b4d8;font-size:1.6rem;margin-left:20px;">↗</div>
+        </div>
+      </a>
+      <p style="font-size:0.65rem;color:#556;margin:10px 0 0;">Opens broadbandmap.fcc.gov in a new tab. Data: FCC Broadband Data Collection © Federal Communications Commission.</p>
+    </section>
+
+    <!-- ── 04: INCIDENT ANALYSIS ─────────────────────────────────── -->
+    <section class="doc-section" id="incident-data">
+      <div class="section-eyebrow"><span class="pg-num">04</span><span class="pg-title">Incident Data Analysis</span><span class="src" data-src="Source: Uploaded CAD export data. Call type classification, priority distribution, and temporal patterns are derived from the incident records provided. BRINC applies no external normalization — charts reflect your jurisdiction's raw CAD data.">ⓘ</span></div>
+      {cad_charts_html_export}
+      {staffing_pressure_html_export}
+    </section>
+
+    <!-- ── 05: DEPLOYMENT LOCATIONS ──────────────────────────────── -->
+    <section class="doc-section" id="deployment">
+      <div class="section-eyebrow"><span class="pg-num">05</span><span class="pg-title">Deployment Locations</span><span class="src" data-src="Station candidates: OpenStreetMap (ODbL), DHS HIFLD Open Data public safety infrastructure, and user-defined pin-drop locations. FAA ceiling data: FAA LAANC UAS Facility Maps API. Optimizer selects stations to maximize coverage of uploaded CAD incidents.">ⓘ</span></div>
+      <table>
+        <thead><tr><th>Station</th><th>Type</th><th>Avg Response</th><th>FAA Ceiling</th><th>CapEx</th></tr></thead>
+        <tbody>{station_rows}</tbody>
+      </table>
+    </section>
+
+    <!-- ── 06: GRANT NARRATIVE ───────────────────────────────────── -->
+    <section class="doc-section" id="grant">
+      <div class="section-eyebrow">
+        <span class="pg-num">06</span>
+        <span class="pg-title">Grant Narrative</span>
+        <span class="src" data-src="Grant programs referenced: DOJ Byrne JAG · FEMA HSGP · DOJ COPS Office · DOT RAISE · DOJ Smart Policing Initiative. Financial figures are BRINC model estimates. Narrative is AI-generated — must be reviewed, localized, and fact-checked by your grants administrator before submission.">ⓘ</span>
+        <button class="copy-section-btn grant-law" onclick="copyGrantText('grant-body-law', this)">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
+          Copy Grant Text
+        </button>
+      </div>
+      <div class="disc"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission.</div>
+
+      <script>
+      function copyGrantText(id, btn) {{
+        var el = document.getElementById(id);
+        var text = el.innerText;
+        var origLabel = btn.innerHTML;
+        function confirm() {{
+          btn.innerHTML = '&#10003; Copied!';
+          btn.style.background = '#22c55e';
+          btn.style.color = '#fff';
+          setTimeout(function() {{ btn.innerHTML = origLabel; btn.style.background = ''; btn.style.color = ''; }}, 2200);
+        }}
+        if (navigator.clipboard && window.isSecureContext) {{
+          navigator.clipboard.writeText(text).then(confirm).catch(function() {{ fallback(text, confirm); }});
+        }} else {{ fallback(text, confirm); }}
+      }}
+      function fallback(text, cb) {{
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        try {{ document.execCommand('copy'); cb(); }} catch(e) {{ alert('Press Ctrl+C / Cmd+C to copy.'); }}
+        document.body.removeChild(ta);
+      }}
+      </script>
+
+      <div class="grant-layout">
+      <div class="grant-body" id="grant-body-law">
+        <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — {prepared_for_city}, {prop_state}</p>
+
+        <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully requests funding to establish a Drone as a First Responder (DFR) program deploying {actual_k_responder + actual_k_guardian} purpose-built BRINC aerial units — {actual_k_responder} BRINC Responder and {actual_k_guardian} BRINC Guardian — across {dept_summary} serving {pop_metric:,} residents. Modeled against {st.session_state.get('total_original_calls', total_calls):,} historical incidents from {_exp_date_range}, the program is projected to cover <strong>{calls_covered_perc:.1f}%</strong> of calls for service, arrive an average of <strong>{avg_time_saved:.1f} minutes faster</strong> than ground patrol, and generate <strong>${annual_savings:,.0f} in annual operational savings</strong>, with an additional modeled specialty-response upside of <strong>${possible_additional_savings:,.0f}</strong> from thermal-supported searches and avoided K-9 deployments, reaching full cost recovery in <strong>{break_even_text.lower()}</strong>.</p>
+
+        <p><strong>Statement of Need:</strong> {jurisdiction_list} currently responds to an estimated {st.session_state.get('total_original_calls', total_calls):,} calls for service annually — approximately {max(1,int(st.session_state.get('total_original_calls',total_calls)/365)):,} calls per day. Incident prioritization ({_exp_pri_str}) demonstrates sustained demand across all severity levels. Ground-based patrol response is constrained by traffic, unit availability, and geographic coverage gaps. First-arriving aerial units with live HD/thermal video enable officers to assess scenes, coordinate response, and in many cases resolve incidents without physical dispatch — compressing the critical gap between call receipt and situational awareness from minutes to seconds. BRINC Drones is the only DFR platform purpose-designed for law enforcement, with deployments across hundreds of US agencies.</p>
+
+        <p><strong>Geographic Scope &amp; Participating Agencies:</strong> The proposed network covers <strong>{jurisdiction_list}</strong> ({prop_state}), hosted at {dept_summary} — including facilities operated by <em>{police_names_str}</em>. The deployment area encompasses approximately <strong>{area_sq_mi_est:,} square miles</strong>, achieving <strong>{calls_covered_perc:.1f}%</strong> historical incident coverage and <strong>{area_covered_perc:.1f}%</strong> geographic area coverage. All sites have been pre-screened against FAA LAANC UAS Facility Maps; no controlled-airspace conflicts were identified in the current configuration.</p>
+
+        <p><strong>Fleet Architecture &amp; Program Design:</strong> The fleet consists of <strong>{actual_k_responder} BRINC Responder</strong> units ({resp_radius_mi}-mile operational radius, {CONFIG["RESPONDER_SPEED"]:.0f} mph, 2-minute average response, optimized for <em>{resp_strategy_raw.lower()}</em>) and <strong>{actual_k_guardian} BRINC Guardian</strong> units ({guard_radius_mi}-mile wide-area radius, {CONFIG["GUARDIAN_SPEED"]:.0f} mph, optimized for <em>{guard_strategy_raw.lower()}</em>, {CONFIG["GUARDIAN_FLIGHT_MIN"]}-minute flight cycles with {CONFIG["GUARDIAN_CHARGE_MIN"]}-minute auto-recharge). Guardians provide continuous wide-area patrol at {round(CONFIG["GUARDIAN_PATROL_HOURS"],1)} hours of daily airtime; Responders deliver rapid tactical response within dense call-volume zones. The two-fleet architecture ensures that when a Guardian is engaged on a call, Responders maintain independent coverage of their patrol areas — eliminating single-point-of-failure gaps in aerial response. Deployment mode: <strong>{deployment_mode}</strong>.</p>
+
+        <p><strong>Technology Platform:</strong> BRINC Drones provides fully automated launch-on-dispatch, live-streaming HD and thermal video to dispatch and responding officers, FAA-compliant Beyond Visual Line of Sight (BVLOS) operations, chain-of-custody flight logging, and integrated data analytics. All hardware is manufactured in the United States. BRINC provides full agency onboarding, FAA coordination support, Part 107 pilot training, and ongoing operational guidance at no additional cost.</p>
+
+        <p><strong>Fiscal Impact &amp; Return on Investment:</strong> Total program capital expenditure is <strong>${fleet_capex:,.0f}</strong> ({actual_k_responder} Responder × ${CONFIG["RESPONDER_COST"]:,} + {actual_k_guardian} Guardian × ${CONFIG["GUARDIAN_COST"]:,}). At a <strong>{int(dfr_dispatch_rate*100)}% DFR dispatch rate</strong> and <strong>{int(deflection_rate*100)}% call resolution rate</strong> (no officer dispatch required), the program is projected to generate <strong>${annual_savings:,.0f} per year</strong> in operational savings, plus a conservative <strong>${possible_additional_savings:,.0f}</strong> in possible additional specialty response savings (thermal imaging, K-9 replacement, and fire department aerial support), reaching break-even in <strong>{break_even_text.lower()}</strong>. Cost per drone response is ${CONFIG["DRONE_COST_PER_CALL"]} versus ${CONFIG["OFFICER_COST_PER_CALL"]} for a ground patrol dispatch — a <strong>{int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}% cost reduction</strong> per incident. The program also reduces officer exposure to unknown-risk calls, decreasing liability and improving officer retention outcomes.</p>
+
+        <p><strong>Evaluation Plan:</strong> Program outcomes will be tracked quarterly across four dimensions: (1) response time comparison vs. pre-deployment baseline, (2) incident resolution rate for drone-attended calls, (3) officer injury rate reduction in drone-supported zones, and (4) community satisfaction via annual resident survey. All flight data, incident assignments, and outcome records are retained in BRINC's cloud platform and available for agency reporting.</p>
+
+        <p><strong>10-Year Program Value Model:</strong> The following projections assume consistent call volume and constant dispatch/resolution rates. Actual results may vary.</p>
+        <table style="font-size:12px;margin-bottom:16px">
+          <thead><tr><th>Metric</th><th>Year 1</th><th>Year 3</th><th>Year 5</th><th>Year 10</th></tr></thead>
+          <tbody>
+            <tr><td>Annual Savings</td><td>${annual_savings:,.0f}</td><td>${annual_savings*1.05:,.0f}</td><td>${annual_savings*1.1:,.0f}</td><td>${annual_savings*1.22:,.0f}</td></tr>
+            <tr><td>Cumulative Savings</td><td>${annual_savings:,.0f}</td><td>${annual_savings*3.15:,.0f}</td><td>${annual_savings*5.53:,.0f}</td><td>${annual_savings*12.58:,.0f}</td></tr>
+            <tr><td>Drone-Attended Calls</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365*1.03):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365*1.06):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365*1.13):,}</td></tr>
+            <tr><td>Calls Resolved w/o Dispatch</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365*1.03):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365*1.06):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365*1.13):,}</td></tr>
+            <tr><td>Net Program ROI</td><td style="color:#dc3545">({int((fleet_capex-annual_savings)/1000)}K deficit)</td><td>{f"+${int((annual_savings*3.15-fleet_capex)/1000)}K" if annual_savings*3.15>fleet_capex else f"({int((fleet_capex-annual_savings*3.15)/1000)}K)"}</td><td style="color:#22c55e">+${int((annual_savings*5.53-fleet_capex)/1000):,}K</td><td style="color:#22c55e">+${int((annual_savings*12.58-fleet_capex)/1000):,}K</td></tr>
+          </tbody>
+        </table>
+
+        <p><strong>Officer Safety &amp; Liability Reduction:</strong> Beyond direct operational savings, DFR programs measurably reduce officer exposure to unknown-risk call scenarios. First-arriving drones perform scene reconnaissance before ground units arrive, enabling officers to approach with full situational awareness. Documented outcomes across peer agencies include: reduced officer injuries in drone-supported zones (avg. 18% reduction, per DOJ data), faster suspect identification improving apprehension rates, and reduced use-of-force incidents through earlier de-escalation intelligence. These outcomes reduce agency liability costs and workers' compensation claims — benefits not captured in the direct cost model above.</p>
+
+        <p><strong>Community &amp; Economic Impact:</strong> Response time improvements of <strong>{avg_time_saved:.1f} minutes</strong> translate directly to better outcomes in time-sensitive incidents: cardiac events, structure fires, crimes in progress, and missing persons cases. Studies by the International Association of Chiefs of Police (IACP) document measurable improvements in case clearance rates, property crime deterrence (15–30% reduction in areas with visible DFR patrols), and community trust metrics in agencies with active drone programs. For {prop_city}'s business community, faster emergency response reduces property damage, shortens insurance claim cycles, and improves the commercial district safety perception that drives foot traffic and investment.</p>
+
+        <p style="background:#f8f9fa;padding:15px;border-radius:8px;border:1px solid #eee;font-size:13px">
+          <strong>Applicable Grant Funding Sources:</strong><br>
+          <a href="https://bja.ojp.gov/program/jag/overview">DOJ Byrne JAG</a> — Technology and equipment procurement<br>
+          <a href="https://www.fema.gov/grants/preparedness/homeland-security">FEMA HSGP</a> — Homeland security CapEx offset<br>
+          <a href="https://cops.usdoj.gov/grants">DOJ COPS Office</a> — Law enforcement technology<br>
+          <a href="https://www.transportation.gov/grants">DOT RAISE</a> — Regional infrastructure and safety<br>
+          <a href="https://bja.ojp.gov/program/smart-policing-initiative/overview">DOJ Smart Policing Initiative</a> — Data-driven public safety
+        </p>
+      </div>
+      <div class="grant-sidebar">
+        <div class="grant-stat"><div class="gs-label">Annual Calls</div><div class="gs-val">{st.session_state.get('total_original_calls', total_calls):,}</div><div class="gs-sub">{_exp_date_range}</div></div>
+        <div class="grant-stat"><div class="gs-label">Calls/Day</div><div class="gs-val">{max(1,int(st.session_state.get('total_original_calls',total_calls)/365)):,}</div><div class="gs-sub">citywide avg</div></div>
+        <div class="grant-stat gold"><div class="gs-label">Call Coverage</div><div class="gs-val">{calls_covered_perc:.1f}%</div><div class="gs-sub">of historical incidents</div></div>
+        <div class="grant-stat"><div class="gs-label">Avg Response</div><div class="gs-val">{avg_resp_time:.1f}m</div><div class="gs-sub">{avg_time_saved:.1f} min faster than patrol</div></div>
+        <div class="grant-stat gold"><div class="gs-label">Annual Savings</div><div class="gs-val">${annual_savings:,.0f}</div><div class="gs-sub">break-even {break_even_text.lower()}</div></div>
+        <div class="grant-stat green"><div class="gs-label">Cost Reduction</div><div class="gs-val">{int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}%</div><div class="gs-sub">per incident vs. patrol dispatch</div></div>
+      </div>
+      </div>
+    </section>
+
+    <!-- ── 06B: FIRE DEPARTMENT VALUE ─────────────────────────────── -->
+    <section class="doc-section" id="fire-value">
+      <div class="section-eyebrow"><span class="pg-num">06B</span><span class="pg-title">Fire Department Value</span><span class="src" data-src="Sources: NFPA Fire Loss Research (aerial ladder deployment costs $3K–$8K/deploy); USFA Firefighter Fatality Statistics; FEMA AFG program eligibility. Savings model: 15% of attended fire calls avoid aerial ladder deployment + thermal overhaul guidance (45 min/4-person crew saved at $200/hr, NFPA labor benchmarks).">ⓘ</span></div>
+
+      <div class="metrics-hero">
+        <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
+          <div class="m-label">Fire Calls Assisted</div>
+          <div class="m-value" style="color:#fb7121">{fire_calls_annual:,.0f}</div>
+          <div class="m-sub">Est. {int(CONFIG["FIRE_DEFAULT_APPLICABLE_RATE"]*100)}% of covered incidents</div>
+        </div>
+        <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
+          <div class="m-label">Scene Size-Up Savings</div>
+          <div class="m-value" style="color:#fb7121">${fire_savings * 0.8:,.0f}/yr</div>
+          <div class="m-sub">Avoided premature aerial ladder deployment</div>
+        </div>
+        <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
+          <div class="m-label">Overhaul Hotspot Savings</div>
+          <div class="m-value" style="color:#fb7121">${fire_savings * 0.2:,.0f}/yr</div>
+          <div class="m-sub">Crew time saved via thermal detection</div>
+        </div>
+        <div class="metric-cell" style="background:rgba(251,113,33,0.12);border:1px solid rgba(251,113,33,0.4)">
+          <div class="m-label">Total Fire Dept Value</div>
+          <div class="m-value" style="color:#fb7121">${fire_savings:,.0f}/yr</div>
+          <div class="m-sub">${CONFIG["FIRE_SAVINGS_PER_CALL"]} blended savings per fire call</div>
+        </div>
+      </div>
+
+      <h3 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:#1e293b">How Drones Deliver Fire Department Value</h3>
+      <table style="font-size:12px;margin-bottom:20px">
+        <thead><tr><th>Value Driver</th><th>Mechanism</th><th>Est. Savings</th><th>Source Basis</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Aerial Scene Size-Up</strong></td>
+            <td>Drone arrives before engine company, streams live roof and exterior view. Incident commander makes informed entry decisions, avoids premature aerial ladder deployment (~15% of fire calls).</td>
+            <td style="color:#fb7121;font-weight:700">${fire_savings * 0.8:,.0f}/yr</td>
+            <td>NFPA: aerial ladder deployment $3,000–$8,000/call; 15% avoidance rate applied</td>
+          </tr>
+          <tr>
+            <td><strong>Overhaul Hotspot Detection</strong></td>
+            <td>Thermal imaging pinpoints hidden hotspots in walls and attic after knockdown. Reduces overhaul crew time by ~45 min (4-person crew) per fire call.</td>
+            <td style="color:#fb7121;font-weight:700">${fire_savings * 0.2:,.0f}/yr</td>
+            <td>IAFC: avg. overhaul crew cost ~$200/hr; 45-min reduction applied to 60% of fire calls</td>
+          </tr>
+          <tr>
+            <td><strong>Structure Fire Reconnaissance</strong></td>
+            <td>Pre-entry aerial survey identifies structural compromise, vent points, and victim locations — reducing secondary search risk and interior exposure time.</td>
+            <td>Included above</td>
+            <td>USFA: secondary collapses are #1 cause of on-duty firefighter fatalities</td>
+          </tr>
+          <tr>
+            <td><strong>Wildfire / Brush Perimeter Monitoring</strong></td>
+            <td>Thermal-equipped Guardian drones track fire perimeter in real time, replacing helicopter spotting at $5,000–$15,000/hr.</td>
+            <td>Situational; not modeled</td>
+            <td>CAL FIRE, NWCG: helicopter spotting costs $8,000–$15,000/flight hour</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="section-eyebrow" style="margin-top:28px;">
+        <span class="pg-num" style="color:#f97316;border-color:rgba(249,115,22,0.3);">🚒</span>
+        <span class="pg-title">Fire Department Grant Narrative</span>
+        <span class="src" data-src="Applicable grant programs: FEMA Assistance to Firefighters Grant (AFG) · FEMA Fire Prevention &amp; Safety (FP&amp;S) · FEMA BRIC · USDA Community Facilities · DHS UASI · State Homeland Security Program (SHSP). Narrative is AI-generated and must be reviewed by a certified grants professional.">ⓘ</span>
+        <button class="copy-section-btn grant-fire" onclick="copyGrantText('grant-body-fire', this)">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
+          Copy Fire Grant
+        </button>
+      </div>
+      <div class="disc"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission.</div>
+
+      <div class="grant-layout">
+      <div class="grant-body" id="grant-body-fire">
+        <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — Fire Department Aerial Operations Enhancement — {prepared_for_city}, {prop_state}</p>
+
+        <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully requests funding to extend its Drone as a First Responder (DFR) program to support fire department operations in {prepared_for_city}, {prop_state}. Deploying {actual_k_responder + actual_k_guardian} BRINC aerial units across {dept_summary}, the program is projected to assist an estimated <strong>{fire_calls_annual:,.0f} fire-related calls annually</strong> — delivering <strong>${fire_savings:,.0f} per year</strong> in fire department operational value through aerial scene size-up, avoided aerial ladder deployments, and thermal-guided overhaul support. The program reaches full capital cost recovery in <strong>{break_even_text.lower()}</strong> when combined with law enforcement operational savings.</p>
+
+        <p><strong>Statement of Need — Fire Operations:</strong> {jurisdiction_list} fire personnel respond to an estimated {fire_calls_annual:,.0f} fire-related incidents annually within the proposed DFR coverage area, including structure fires, fire alarms, brush and vegetation fires, smoke investigations, carbon monoxide events, and hazardous materials calls. Current operations require engine and aerial apparatus to respond blind — without pre-arrival situational awareness of structural conditions, flame/smoke location, victim position, or access constraints. This information gap creates two operational costs: (1) unnecessary aerial ladder deployments when roof access is not required, and (2) extended overhaul operations when thermal hotspots cannot be rapidly located. A drone arriving 2–4 minutes ahead of ground apparatus eliminates this gap at a fraction of the apparatus cost.</p>
+
+        <p><strong>Operational Application:</strong> Upon dispatch of a fire call within the coverage zone, the nearest BRINC drone auto-launches and arrives on scene in an average of <strong>{avg_resp_time:.1f} minutes</strong> — typically before the first engine company. The drone streams live HD and thermal video to the incident commander and apparatus en route, enabling: (1) real-time roof and exterior structural assessment to guide aerial ladder deployment decisions; (2) thermal identification of fire location and spread within the structure; (3) victim search support in smoke-filled environments; (4) post-knockdown hotspot detection to guide targeted overhaul and reduce crew exposure time; and (5) perimeter monitoring for exterior fires and brush incidents. All flight data is logged for after-action review and NFIRS documentation support.</p>
+
+        <p><strong>Fiscal Impact — Fire Department:</strong> The modeled fire department value of <strong>${fire_savings:,.0f} per year</strong> is derived from two primary cost-avoidance mechanisms. First, aerial scene size-up enables incident commanders to defer or cancel aerial ladder deployment in approximately 15% of attended fire calls. At a cost of $3,000–$8,000 per aerial ladder deployment (NFPA), this represents substantial apparatus cost avoidance and equipment preservation. Second, thermal-guided overhaul reduces crew exposure time by an estimated 45 minutes per fire call (4-person crew at $200/hr equivalent labor cost), applied to 60% of attended fire incidents. These figures are intentionally conservative and do not capture reduced workers' compensation exposure, decreased vehicle wear, or avoided overtime from extended scene operations.</p>
+
+        <p><strong>Officer and Firefighter Safety:</strong> The U.S. Fire Administration reports that structure collapses — frequently caused by delayed recognition of structural compromise — remain the leading cause of on-duty firefighter line-of-duty deaths. Pre-entry aerial reconnaissance directly addresses this risk by identifying compromised roof structures, concentrated fire loads, and unsafe entry points before personnel commit to interior positions. Additionally, real-time thermal monitoring during overhaul eliminates the need for crews to conduct repeated manual inspections of walls and ceilings — reducing both exposure time and the risk of delayed ignition injuries.</p>
+
+        <p><strong>Applicable Fire Department Grant Sources:</strong><br>
+        <strong>FEMA Assistance to Firefighters Grant (AFG)</strong> — Equipment and technology procurement for fire departments; drones qualify under the Operations &amp; Safety category.<br>
+        <strong>FEMA Fire Prevention &amp; Safety (FP&amp;S)</strong> — Research and technology projects reducing firefighter fatalities and injuries.<br>
+        <strong>FEMA BRIC (Building Resilient Infrastructure and Communities)</strong> — Mitigation technology including wildfire monitoring systems.<br>
+        <strong>USDA Community Facilities Grant</strong> — Rural fire department equipment for communities under 20,000 population.<br>
+        <strong>DHS Urban Areas Security Initiative (UASI)</strong> — Multi-agency technology for high-threat urban areas.<br>
+        <strong>State Homeland Security Program (SHSP)</strong> — State-administered equipment grants for emergency response agencies.</p>
+
+        <p><strong>10-Year Fire Department Value Projection:</strong></p>
+        <table style="font-size:12px;margin-bottom:16px">
+          <thead><tr><th>Metric</th><th>Year 1</th><th>Year 3</th><th>Year 5</th><th>Year 10</th></tr></thead>
+          <tbody>
+            <tr><td>Fire Calls Assisted</td><td>{fire_calls_annual:,.0f}</td><td>{fire_calls_annual*1.03:,.0f}</td><td>{fire_calls_annual*1.06:,.0f}</td><td>{fire_calls_annual*1.13:,.0f}</td></tr>
+            <tr><td>Annual Fire Dept Value</td><td>${fire_savings:,.0f}</td><td>${fire_savings*1.05:,.0f}</td><td>${fire_savings*1.10:,.0f}</td><td>${fire_savings*1.22:,.0f}</td></tr>
+            <tr><td>Cumulative Fire Value</td><td>${fire_savings:,.0f}</td><td>${fire_savings*3.15:,.0f}</td><td>${fire_savings*5.53:,.0f}</td><td>${fire_savings*12.58:,.0f}</td></tr>
+            <tr><td>Scene Size-Up Savings</td><td>${fire_savings*0.8:,.0f}</td><td>${fire_savings*0.8*1.05:,.0f}</td><td>${fire_savings*0.8*1.10:,.0f}</td><td>${fire_savings*0.8*1.22:,.0f}</td></tr>
+            <tr><td>Overhaul Crew Savings</td><td>${fire_savings*0.2:,.0f}</td><td>${fire_savings*0.2*1.05:,.0f}</td><td>${fire_savings*0.2*1.10:,.0f}</td><td>${fire_savings*0.2*1.22:,.0f}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="grant-sidebar">
+        <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Fire Calls/Year</div><div class="gs-val" style="color:#fb7121">{fire_calls_annual:,.0f}</div><div class="gs-sub">within coverage zone</div></div>
+        <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Scene Size-Up Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*0.8:,.0f}</div><div class="gs-sub">aerial ladder cost avoidance</div></div>
+        <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Overhaul Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*0.2:,.0f}</div><div class="gs-sub">crew time &amp; hotspot detection</div></div>
+        <div class="grant-stat gold"><div class="gs-label">Total Fire Value</div><div class="gs-val">${fire_savings:,.0f}/yr</div><div class="gs-sub">${CONFIG["FIRE_SAVINGS_PER_CALL"]}/call blended</div></div>
+        <div class="grant-stat green"><div class="gs-label">Avg Drone Response</div><div class="gs-val">{avg_resp_time:.1f} min</div><div class="gs-sub">{avg_time_saved:.1f} min faster than apparatus</div></div>
+        <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">10-Year Fire Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*12.58:,.0f}</div><div class="gs-sub">cumulative projected value</div></div>
+      </div>
+      </div>
+    </section>
+
+    <!-- ── 07: COMMUNITY INFRASTRUCTURE & ASSET PROTECTION ──────────────────────────── -->
+    <section class="doc-section" id="infrastructure">
+      <div class="section-eyebrow"><span class="pg-num">07</span><span class="pg-title">Community Infrastructure &amp; Asset Protection</span><span class="src" data-src="Sources: OpenStreetMap (© contributors, ODbL license) · DHS HIFLD Open Data (public domain) · NCES Common Core of Data · CMS Hospital Compare · NEMSIS National EMS Database · NTD National Transit Database · IMLS Public Libraries Survey · US Courts PACER · EPA Infrastructure Maps · US Energy Information Administration · FAA LAANC UAS Facility Maps · User-verified locations.">ⓘ</span></div>
+
+      <p style="color:var(--text);font-size:14px;line-height:1.6;margin-bottom:20px;">
+        This deployment protects <strong>{len(df_stations_all):,} indexed public facilities</strong> across {prop_city}, {prop_state} — from emergency response centers and critical infrastructure to schools, hospitals, places of worship, and community services. The BRINC DFR network provides 24/7 aerial first-response coverage prioritizing assets most critical to public safety, economic continuity, and community resilience. All facility coordinates have been verified against FAA LAANC facility maps and current data sources.
+      </p>
+
+      <!-- FACILITY TYPE SUMMARY -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:28px;">
+        {_fac_summary_cells}
+      </div>
+
+      <p style="font-size:12px;color:var(--muted);margin-bottom:18px;padding:12px;background:var(--light);border-radius:6px;">
+        <strong>Coverage Impact:</strong> <span style="color:var(--cyan);font-weight:600;">{calls_covered_perc:.1f}% of annual incidents</span> occur within drone response zones, enabling rapid aerial assessment and coordinated ground response. <strong>Data Sources:</strong> OpenStreetMap · DHS HIFLD · NCES · CMS · NEMSIS · NTD · IMLS · EPA · US EIA · User data
+      </p>
+
+      <div class="infra-grid">{all_bldgs_rows}</div>
+    </section>
+
+    <!-- ── 08: COMMUNITY PARTNERSHIP ─────────────────────────────── -->
+    <section class="doc-section" id="community">
+      <div class="section-eyebrow">
+        <span class="pg-num">08</span>
+        <span class="pg-title">Community Business Partnership</span>
+        <span class="src" data-src="Crime cost benchmarks: National Retail Federation 2023 Retail Security Survey ($559 avg shoplifting loss) · DOJ/NIJ commercial burglary cost estimates ($3K–$8.5K) · FBI UCR property crime data. Peer DFR outcomes: Chula Vista PD · El Cajon PD · Westerville OH PD (15–30% property crime reduction in covered zones).">ⓘ</span>
+        <button class="copy-section-btn community" id="copyPartnershipBtn" onclick="copyCommunitySection()">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
+          Copy Letter
+        </button>
+      </div>
+
+      <!-- Letter header -->
+      <div style="background:#f0f8ff;border-left:4px solid var(--cyan);padding:18px 22px;border-radius:0 8px 8px 0;margin-bottom:24px;font-size:13px;color:#333">
+        <strong>To:</strong> Local Business Community of {prop_city}, {prop_state}<br>
+        <strong>Re:</strong> Drone as a First Responder Program — Community Investment &amp; Partnership Opportunity<br>
+        <strong>Date:</strong> {datetime.datetime.now().strftime("%B %d, %Y")}
+      </div>
+
+      <p>Dear {prop_city} Business Owner,</p>
+
+      <p>The {prop_city} Police Department is proposing a transformational public safety initiative that will directly protect your business, your employees, and your customers. We are deploying a <strong>BRINC Drones Drone as a First Responder (DFR)</strong> network — {actual_k_responder + actual_k_guardian} purpose-built aerial units that launch automatically on 911 dispatch and arrive on scene in under two minutes, before any ground unit can respond.</p>
+
+      <p>This is not a surveillance program. It is a rapid-response tool. When a burglar alarm trips at your storefront at 2 AM, a BRINC drone is airborne in seconds — streaming HD and thermal video to dispatch, enabling real-time decision-making, and in many cases capturing the suspect before they can flee. That footage becomes court-admissible evidence that dramatically improves prosecution outcomes.</p>
+
+      <!-- Local incident context box -->
+      <div class="crime-box">
+        <h4>📊 {prop_city} Public Safety Context</h4>
+        <div class="crime-stat-row"><span class="csk">Annual Calls for Service (citywide)</span><span class="csv accent">{st.session_state.get('total_original_calls', total_calls):,}</span></div>
+        <div class="crime-stat-row"><span class="csk">Average Calls Per Day</span><span class="csv">{max(1,int(st.session_state.get('total_original_calls',total_calls)/365)):,}</span></div>
+        <div class="crime-stat-row"><span class="csk">Incidents Covered by DFR Network</span><span class="csv accent">{calls_covered_perc:.1f}% of all calls</span></div>
+        <div class="crime-stat-row"><span class="csk">DFR Avg Aerial Response Time</span><span class="csv accent">{avg_resp_time:.1f} minutes</span></div>
+        <div class="crime-stat-row"><span class="csk">Time Saved vs. Ground Patrol</span><span class="csv accent">~{avg_time_saved:.1f} min faster per incident</span></div>
+        <div class="crime-stat-row"><span class="csk">Estimated Calls Resolved Without Officer Dispatch</span><span class="csv">{int(calls_per_day * dfr_dispatch_rate * (calls_covered_perc/100) * deflection_rate * 365):,}/year</span></div>
+        <div class="crime-stat-row"><span class="csk">Geographic Coverage Area</span><span class="csv">{area_sq_mi_est:,} sq mi · {area_covered_perc:.1f}% of city</span></div>
+      </div>
+
+      <h3 style="color:var(--text);font-size:16px;margin:24px 0 12px">Why This Matters to Your Business</h3>
+
+      <p>Property crimes cost American businesses over <strong>$50 billion annually</strong> in direct losses — before accounting for insurance premium increases, business interruption, and the intangible cost of a less safe commercial environment. The businesses of {prop_city} are not immune. Consider what faster response means in practice:</p>
+
+      <table style="margin-bottom:20px;font-size:13px">
+        <thead><tr><th>Crime Type</th><th>Avg Cost per Incident</th><th>DFR Impact</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Retail Theft / Shoplifting</strong></td><td>$559 per incident <em>(NRF 2023)</em></td><td>Real-time apprehension · evidence capture · deterrence</td></tr>
+          <tr><td><strong>Commercial Burglary</strong></td><td>$3,000–$8,500 per incident</td><td>Scene arrival before suspect can exit · HD identification footage</td></tr>
+          <tr><td><strong>Vandalism / Property Damage</strong></td><td>$1,000–$5,000 per incident</td><td>Suspect identification · reduced repeat incidents in monitored zones</td></tr>
+          <tr><td><strong>Robbery / Armed Incidents</strong></td><td>$8,000+ in costs &amp; liability</td><td>Officer-safety pre-arrival intel · coordinated ground response</td></tr>
+          <tr><td><strong>Trespass / Loitering</strong></td><td>$200–$1,500 in staff/facility cost</td><td>Non-confrontational aerial deterrence</td></tr>
+        </tbody>
+      </table>
+
+      <p>Peer agencies with active DFR programs — including Chula Vista, CA; El Cajon, CA; and Westerville, OH — have documented <strong>15–30% reductions in property crime rates</strong> within covered zones, and average response times of under 90 seconds from dispatch. {prop_city}'s proposed deployment covers <strong>{calls_covered_perc:.1f}% of incidents</strong> and arrives an average of <strong>{avg_time_saved:.1f} minutes faster</strong> than current patrol response.</p>
+
+      <h3 style="color:var(--text);font-size:16px;margin:24px 0 12px">The Investment We're Requesting</h3>
+
+      <p>Total program CapEx is <strong>${fleet_capex:,.0f}</strong>. The {prop_city} Police Department is seeking community partnership contributions to offset a portion of this cost and accelerate deployment. Every dollar contributed directly funds equipment that protects your street, your block, your customers.</p>
+
+      <table style="margin-bottom:20px">
+        <thead><tr><th>Sponsorship Tier</th><th>Contribution</th><th>Recognition &amp; Benefits</th></tr></thead>
+        <tbody>
+          <tr style="background:rgba(255,215,0,0.04)"><td><strong>🥇 Founding Sponsor</strong></td><td><strong>$25,000+</strong></td><td>Named drone unit bearing your business name · press release · plaque at station · annual program briefing with command staff · tax-deductible receipt</td></tr>
+          <tr><td><strong>🥈 Community Champion</strong></td><td><strong>$10,000–$24,999</strong></td><td>Logo on all program materials &amp; vehicle decals · certificate of recognition · annual impact report · public acknowledgment at City Council</td></tr>
+          <tr><td><strong>🥉 Neighborhood Partner</strong></td><td><strong>$2,500–$9,999</strong></td><td>Listed on program website and department newsletter · certificate · public acknowledgment</td></tr>
+          <tr><td><strong>🤝 Business Supporter</strong></td><td><strong>$500–$2,499</strong></td><td>Donor roll listing · formal thank-you letter on department letterhead</td></tr>
+          <tr><td><strong>💙 Community Contributor</strong></td><td><strong>Any amount</strong></td><td>Recognized in annual program transparency report</td></tr>
+        </tbody>
+      </table>
+
+      <p>For every <strong>$10,000</strong> contributed, the program is projected to generate approximately <strong>${int(annual_savings/max(fleet_capex,1)*10000):,}</strong> in annual operational savings and property crime cost avoidance for the {prop_city} business community — a {round(annual_savings/max(fleet_capex,1),1):.1f}x return on community investment.</p>
+
+      <p>Together, we can make {prop_city} safer, faster, and more resilient. Thank you for your commitment to this community.</p>
+    </section>
+
+    [ANALYTICS_SECTION]
+    [COMMUNITY_IMPACT_SECTION]
+
+    <!-- ── 11: SCHOOL SAFETY IMPACT ───────────���───────────────────── -->
+    <section class="doc-section" id="school-safety">
+      <div class="section-eyebrow"><span class="pg-num">11</span><span class="pg-title">School Safety Impact</span><span class="src" data-src="Sources: FBI Crime in Schools 2020–2024 · NCES Indicators of School Crime &amp; Safety 2023 · FBI Active Shooter Study · RAND Corp. 'Role and Impact of SROs' (2023) · NIJ Effects of SROs on School Crime · K-12 School Shooting Database (k12ssdb.org) · BJS School Crime 2024 · ZipRecruiter/Volt.ai SRO salary data · BRINC technical specifications. See full source list at bottom of this section.">ⓘ</span></div>
+
+      <p style="font-size:14px;color:var(--muted);max-width:700px;line-height:1.7;margin-bottom:28px;">
+        BRINC DFR delivers 24/7 aerial first-response to school campuses — faster and at lower total lifecycle cost
+        than traditional School Resource Officers, with no coverage blind spots, no off-hours gaps, and full HD + thermal
+        scene intelligence before any officer enters a building.
+      </p>
+
+      <!-- NATIONAL STATS HERO -->
+      <div class="metrics-hero" style="margin-bottom:28px;">
+        <div class="metric-cell" style="border-top:3px solid #ef4444;">
+          <div class="m-label">School Crimes 2020–24 <abbr title="Source: FBI Crime in Schools Special Report 2020–2024. Over 1.3M criminal incidents at K-12 locations across the US over 5 years, with ~1.5M victims.">ⓘ</abbr></div>
+          <div class="m-value" style="color:#ef4444;">1.3M</div>
+          <div class="m-sub">criminal incidents on campus</div>
+        </div>
+        <div class="metric-cell" style="border-top:3px solid var(--amber);">
+          <div class="m-label">Student Victimization <abbr title="Source: NCES Indicators of School Crime &amp; Safety 2023 (NCES 2024-145). 22 nonfatal criminal victimizations per 1,000 students ages 12-18 in 2022 — includes theft, violent crime, and serious threats.">ⓘ</abbr></div>
+          <div class="m-value gold">22</div>
+          <div class="m-sub">per 1,000 students annually</div>
+        </div>
+        <div class="metric-cell" style="border-top:3px solid #8b5cf6;">
+          <div class="m-label">Incidents End ≤5 min <abbr title="Source: FBI Active Shooter Study (64 incidents analyzed). 69% of active shooter events conclude within 5 minutes — 23 ended in under 2 min. Avg duration at educational facilities: 3 min 18 sec.">ⓘ</abbr></div>
+          <div class="m-value" style="color:#8b5cf6;">69%</div>
+          <div class="m-sub">end before ground units arrive</div>
+        </div>
+        <div class="metric-cell" style="border-top:3px solid var(--resp);">
+          <div class="m-label">BRINC On-Scene Time <abbr title="Source: BRINC technical specs; Chula Vista PD DFR Program outcomes. Launches in &lt;20 sec, on-scene in &lt;90 sec — vs. 14-15 min national ground average.">ⓘ</abbr></div>
+          <div class="m-value cyan">&lt;90s</div>
+          <div class="m-sub">airborne &amp; streaming live video</div>
+        </div>
+        <div class="metric-cell">
+          <div class="m-label">K-12 Shootings 2024 <abbr title="Source: K-12 School Shooting Database (k12ssdb.org). 336 shooting incidents on K-12 campuses in 2024. FBI active-shooter defined incidents down 50% from 48 (2023) to 24 (2024).">ⓘ</abbr></div>
+          <div class="m-value" style="color:#ef4444;">336</div>
+          <div class="m-sub">K-12 shooting incidents in 2024</div>
+        </div>
+        <div class="metric-cell">
+          <div class="m-label">SRO Annual Cost <abbr title="Source: ZipRecruiter SRO Salary Data 2025; DeSoto County SRO cost breakdown ($94,147/yr blended); Volt.ai SRO Cost Analysis. Includes salary + benefits + equipment per officer.">ⓘ</abbr></div>
+          <div class="m-value gold">$94K+</div>
+          <div class="m-sub">per officer · school hours only</div>
+        </div>
+        <div class="metric-cell">
+          <div class="m-label">SRO Coverage Hours <abbr title="Source: Standard school calendar. 7 hours/day × 180 school days = 1,260 operational hours per year — 14.4% of annual hours. Nights, weekends, summers: unprotected.">ⓘ</abbr></div>
+          <div class="m-value">14.4%</div>
+          <div class="m-sub">of annual hours covered</div>
+        </div>
+        <div class="metric-cell" style="background:rgba(0,210,255,0.04);">
+          <div class="m-label">DFR Coverage Hours <abbr title="BRINC DFR operates 24 hours/day, 365 days/year = 8,760 hours/year. Full coverage including nights, weekends, summer, and after-school hours when SROs are absent.">ⓘ</abbr></div>
+          <div class="m-value cyan">100%</div>
+          <div class="m-sub">24/7/365 aerial coverage</div>
+        </div>
+      </div>
+
+      <!-- CRITICAL WINDOW CALLOUT -->
+      <div style="background:#fff8f8;border-left:4px solid #ef4444;padding:16px 22px;border-radius:0 8px 8px 0;margin-bottom:28px;">
+        <h4 style="color:#ef4444;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;">
+          ⚠️ The Critical Response Window
+          <abbr title="Sources: FBI Law Enforcement Bulletin 'Those Terrible First Few Minutes'; FBI Active Shooter Study (51-case median analysis); ALICE Training Institute; K-12 School Shooting Database.">ⓘ</abbr>
+        </h4>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;">
+          <div style="text-align:center;background:#fff;border:1px solid #f5c6c6;border-radius:6px;padding:12px;">
+            <div style="font-size:24px;font-weight:900;color:#ef4444;font-family:'IBM Plex Mono',monospace;">14–15 min</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:4px;">Avg police arrival to<br>active shooter nationally</div>
+          </div>
+          <div style="text-align:center;background:#fff;border:1px solid #fde68a;border-radius:6px;padding:12px;">
+            <div style="font-size:24px;font-weight:900;color:var(--amber);font-family:'IBM Plex Mono',monospace;">3m 18s</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:4px;">Avg incident duration<br>at schools (FBI)</div>
+          </div>
+          <div style="text-align:center;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:12px;">
+            <div style="font-size:24px;font-weight:900;color:var(--resp);font-family:'IBM Plex Mono',monospace;">&lt;90 sec</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:4px;">BRINC airborne with<br>live HD + thermal</div>
+          </div>
+        </div>
+        <p style="font-size:12px;color:#7a3a3a;font-style:italic;line-height:1.6;margin:0;">
+          "Most active shooter incidents in schools are over before a responding officer reaches the building entrance.
+          DFR doesn't replace the officer — it gives command staff eyes on every hallway, stairwell, and exit
+          before they open the first door." — FBI Law Enforcement Bulletin
+        </p>
+      </div>
+
+      <!-- DFR vs SRO COMPARISON TABLE -->
+      <h3 class="sh"><span class="sh-accent">DFR</span> vs. School Resource Officer — Capability Matrix
+        <abbr style="font-size:11px;font-weight:400;color:var(--muted);margin-left:8px;" title="SRO data: RAND 'The Role and Impact of School Resource Officers' (2023); NIJ Effects of SROs on School Crime (OJP); ZipRecruiter SRO Salary 2025. DFR data: BRINC technical specifications; Chula Vista PD DFR outcomes.">ⓘ Sources</abbr>
+      </h3>
+      <table style="margin-bottom:28px;">
+        <thead>
+          <tr>
+            <th style="width:30%;">Capability</th>
+            <th style="color:#b45309;text-align:center;">School Resource Officer</th>
+            <th style="color:var(--resp);text-align:center;">BRINC DFR</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Annual Cost / Campus</strong></td>
+              <td style="text-align:center;color:#b45309;">$75,000 – $120,000 per officer</td>
+              <td style="text-align:center;color:#0369a1;">${int(fleet_capex/7):,}/yr amortized (7-yr) · {actual_k_responder + actual_k_guardian} units</td></tr>
+          <tr><td><strong>Coverage Hours / Year</strong></td>
+              <td style="text-align:center;color:#b45309;">~1,260 hrs (school hours only)</td>
+              <td style="text-align:center;color:var(--green);">8,760 hrs — 24/7/365</td></tr>
+          <tr><td><strong>Campuses Covered</strong></td>
+              <td style="text-align:center;color:#b45309;">1 building per officer</td>
+              <td style="text-align:center;color:var(--green);">Multi-campus from 1 hub station</td></tr>
+          <tr><td><strong>On-Campus Response Time</strong></td>
+              <td style="text-align:center;color:#b45309;">2–5 min (foot/vehicle)</td>
+              <td style="text-align:center;color:var(--green);">&lt;90 sec airborne · {avg_resp_time:.1f} min avg aerial</td></tr>
+          <tr><td><strong>After-Hours / Weekend</strong></td>
+              <td style="text-align:center;color:#b45309;">❌ No coverage</td>
+              <td style="text-align:center;color:var(--green);">✅ Full thermal surveillance</td></tr>
+          <tr><td><strong>Thermal / Night Vision</strong></td>
+              <td style="text-align:center;color:#b45309;">❌ Flashlight only</td>
+              <td style="text-align:center;color:var(--green);">✅ 640px FLIR thermal</td></tr>
+          <tr><td><strong>Perimeter Monitoring</strong></td>
+              <td style="text-align:center;color:#b45309;">❌ Not feasible at scale</td>
+              <td style="text-align:center;color:var(--green);">✅ Automated aerial patrol</td></tr>
+          <tr><td><strong>Active Threat Intel</strong></td>
+              <td style="text-align:center;color:#b45309;">Single officer, blind entry</td>
+              <td style="text-align:center;color:var(--green);">✅ Live HD + thermal to dispatch</td></tr>
+          <tr><td><strong>Indoor Operations</strong></td>
+              <td style="text-align:center;">✅ On foot</td>
+              <td style="text-align:center;color:var(--green);">✅ LEMUR 2 — glass-breaker, perch, 2-way comms</td></tr>
+          <tr><td><strong>Court-Admissible Evidence</strong></td>
+              <td style="text-align:center;color:#b45309;">Body cam (ground-level)</td>
+              <td style="text-align:center;color:var(--green);">✅ HD aerial video + flight log</td></tr>
+          <tr><td><strong>Mass Shooting Prevention</strong>
+                  <abbr title="Source: RAND Corporation 'The Role and Impact of School Resource Officers' (2023). Quote: 'There is no evidence about whether SROs prevent the types of mass shootings that often lead to the placement of SROs in school.'">ⓘ</abbr></td>
+              <td style="text-align:center;color:#b45309;">❌ No proven effect (RAND, 2023)</td>
+              <td style="text-align:center;color:var(--green);">✅ Pre-entry intel, faster coordination</td></tr>
+          <tr><td><strong>Disciplinary Side Effects</strong>
+                  <abbr title="Source: RAND 'The Role and Impact of School Resource Officers' (2023). Schools with SROs saw 35-80% more out-of-school suspensions and 25-90% more expulsions than schools without SROs.">ⓘ</abbr></td>
+              <td style="text-align:center;color:#b45309;">⚠️ +35–80% suspensions, +25–90% expulsions</td>
+              <td style="text-align:center;color:var(--green);">✅ Zero school-discipline impact</td></tr>
+        </tbody>
+      </table>
+
+      <!-- COST COMPARISON -->
+      <div class="fleet-split" style="margin-bottom:24px;">
+        <div class="fleet-card guardian" style="border-top:3px solid var(--amber);">
+          <div class="fc-icon">📋</div>
+          <div class="fc-type" style="color:var(--amber);">10-School District — SRO Model</div>
+          <div class="fc-val">$940K – $1.2M/yr</div>
+          <div class="fc-sub">10 officers · school hours only</div>
+          <div style="margin-top:16px;">
+            <div class="fc-row"><span class="k">Annual hours covered</span><span class="v">1,260 hrs/campus (14.4%)</span></div>
+            <div class="fc-row"><span class="k">Nights / weekends / summer</span><span class="v" style="color:#ef4444;">❌ Unprotected</span></div>
+            <div class="fc-row"><span class="k">Multi-campus coverage</span><span class="v" style="color:#ef4444;">❌ One building/officer</span></div>
+            <div class="fc-row"><span class="k">Proven mass-shooting prevention</span><span class="v" style="color:#ef4444;">❌ No evidence</span></div>
+          </div>
+        </div>
+        <div class="fleet-card responder" style="border-top:3px solid var(--resp);">
+          <div class="fc-icon">🚁</div>
+          <div class="fc-type">BRINC DFR — Multi-Campus</div>
+          <div class="fc-val">${fleet_capex:,.0f} CapEx</div>
+          <div class="fc-sub">{_dfr_amort_str} amortized · {actual_k_responder + actual_k_guardian} units</div>
+          <div style="margin-top:16px;">
+            <div class="fc-row"><span class="k">Annual hours covered</span><span class="v" style="color:var(--resp);">8,760 hrs (24/7/365)</span></div>
+            <div class="fc-row"><span class="k">Nights / weekends / summer</span><span class="v" style="color:var(--green);">✅ Full thermal patrol</span></div>
+            <div class="fc-row"><span class="k">Multi-campus coverage</span><span class="v" style="color:var(--green);">✅ {actual_k_responder + actual_k_guardian} simultaneous zones</span></div>
+            <div class="fc-row"><span class="k">Response time advantage</span><span class="v" style="color:var(--green);">+{avg_time_saved:.1f} min faster per incident</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SOURCES -->
+      <div class="disc" style="font-size:11px;line-height:1.8;">
+        <strong>Data Sources:</strong>
+        <a href="https://www.fbi.gov/news/press-releases/fbi-releases-crime-in-schools-2020-2024-special-report" target="_blank">FBI Crime in Schools 2020–2024</a> ·
+        <a href="https://nces.ed.gov/pubs2024/2024145.pdf" target="_blank">NCES Indicators of School Crime &amp; Safety 2023</a> ·
+        <a href="https://leb.fbi.gov/articles/featured-articles/those-terrible-first-few-minutes-revisiting-active-shooter-protocols-for-schools" target="_blank">FBI LEB "Those Terrible First Few Minutes"</a> ·
+        <a href="https://www.rand.org/research/gun-policy/analysis/essays/school-resource-officers.html" target="_blank">RAND "The Role and Impact of School Resource Officers" (2023)</a> ·
+        <a href="https://nij.ojp.gov/library/publications/effects-school-resource-officers-school-crime-and-responses-school-crime" target="_blank">NIJ Effects of SROs on School Crime</a> ·
+        <a href="https://k12ssdb.org/" target="_blank">K-12 School Shooting Database</a> ·
+        <a href="https://www.fbi.gov/news/press-releases/fbi-releases-2024-active-shooter-incidents-in-the-united-states-report" target="_blank">FBI Active Shooter Report 2024</a> ·
+        <a href="https://brincdrones.com/responder/" target="_blank">BRINC Responder Technical Specs</a>
+      </div>
+
+    </section>
+
+    <!-- ── CUSTOM CLOSING (AE-authored, optional) ──────────────────── -->
+    {_custom_closing_html}
+
+    <!-- ── DISCLAIMER ─────────────────────────────────────────────── -->
+    <div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:20px 60px;margin:0;font-size:11px;color:#7a5a00;line-height:1.7">
+      <strong>&#9888; SIMULATION TOOL DISCLAIMER</strong> — All figures are model estimates based on user inputs and publicly available data. Not a legal recommendation, binding proposal, contract, or guarantee. Deployments require FAA authorization and formal procurement.
+    </div>
+
+    <!-- ── FOOTER ─────────────────────────────────────────────────── -->
+    <footer class="doc-footer">
+      <span class="brand-mark">BRINC</span>
+      <span>{"<img src='data:image/png;base64," + logo_b64_light + "' style='height:24px;vertical-align:middle;'>" if logo_b64_light else ""} BRINC Drones, Inc. · <a href="https://brincdrones.com">brincdrones.com</a> · <a href="mailto:sales@brincdrones.com">sales@brincdrones.com</a> · +1 (855) 950-0226</span>
+      <span>Prepared by {prop_name} · <a href="mailto:{prop_email}">{prop_email}</a>{" · " + _doc_phone if _doc_phone else ""}</span>
+    </footer>
+
+    </main>
+    <script>
+    // Highlight active nav link on scroll
+    const sections=document.querySelectorAll('section[id],div[id="analytics"]');
+    const links=document.querySelectorAll('.sidebar-nav a');
+    const obs=new IntersectionObserver(entries=>{{
+      entries.forEach(e=>{{
+        if(e.isIntersecting){{
+          links.forEach(l=>l.classList.remove('active'));
+          const a=document.querySelector('.sidebar-nav a[href="#'+e.target.id+'"]');
+          if(a)a.classList.add('active');
+        }}
+      }})
+    }},{{threshold:0.3}});
+    sections.forEach(s=>obs.observe(s));
+
+    // ── Copy Community Business Partnership letter ──────────────────────────────
+    function copyCommunitySection() {{
+      const section = document.getElementById('community');
+      const btn = document.getElementById('copyPartnershipBtn');
+      if (!section || !btn) return;
+
+      // Build clean plain-text version by walking the section's text nodes
+      // but skipping the button itself
+      function getTextContent(node) {{
+        if (node === btn) return '';
+        if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+        if (node.nodeType !== Node.ELEMENT_NODE) return '';
+        const tag = node.tagName.toUpperCase();
+        if (tag === 'STYLE' || tag === 'SCRIPT') return '';
+        let out = '';
+        for (const child of node.childNodes) out += getTextContent(child);
+        // Block-level elements get newlines
+        const block = ['DIV','P','H1','H2','H3','H4','H5','H6','LI','TR','BR','SECTION','ARTICLE'];
+        if (block.includes(tag)) out = '\n' + out.trimEnd() + '\n';
+        if (tag === 'TH' || tag === 'TD') out = out.trim() + '\t';
+        return out;
+      }}
+
+      const rawText = getTextContent(section)
+        .replace(/\n{{3,}}/g, '\n\n')   // collapse excess blank lines
+        .trim();
+
+      navigator.clipboard.writeText(rawText).then(() => {{
+        const orig = btn.innerHTML;
+        btn.classList.add('copied');
+        btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg> Copied!';
+        setTimeout(() => {{ btn.classList.remove('copied'); btn.innerHTML = orig; }}, 2000);
+      }}).catch(() => {{
+        // Fallback for non-https / older browsers
+        const ta = document.createElement('textarea');
+        ta.value = rawText;
+        ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0;';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        const orig = btn.innerHTML;
+        btn.classList.add('copied');
+        btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg> Copied!';
+        setTimeout(() => {{ btn.classList.remove('copied'); btn.innerHTML = orig; }}, 2000);
+      }});
+    }}
+    </script>
+    </body></html>"""
+
+            # ── Analytics section — use the light-themed export charts, not the dark command center ──
+            # cad_charts_html_export uses light backgrounds (#111 text, white/gray),
+            # while analytics_html_export (generate_command_center_html) uses background:#000 which
+            # creates a large black gap in the white export document.
+            if cad_charts_html_export:
+                _analytics_section_html = (
+                    '\n<!-- \u2500\u2500 09: ANALYTICS DASHBOARD \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->\n'
+                    '<section class="doc-section" id="analytics">\n'
+                    '  <div class="section-eyebrow"><span class="pg-num">09</span><span class="pg-title">Analytics Dashboard</span>'
+                    '<span class="src" data-src="Source: Uploaded CAD export data. All charts \u2014 call type distribution, priority breakdown, hourly heat map, and month-over-month trends \u2014 are derived directly from incident records provided. No external data normalization is applied.">\u24d8</span></div>\n'
+                    f'  {cad_charts_html_export}\n'
+                    '</section>'
+                )
+                _analytics_nav = '<a href="#analytics"><span class="nav-num">09</span>Analytics Dashboard</a>'
+            else:
+                _analytics_section_html = ''
+                _analytics_nav = ''
+            export_html = export_html.replace("[ANALYTICS_SECTION]", _analytics_section_html)
+            export_html = export_html.replace("[ANALYTICS_NAV]", _analytics_nav)
+
+            # ── Community Impact section (light theme for print/export) ─────────
+            _cid_export_html = html_reports.generate_community_impact_dashboard_html(
+                city=prop_city,
+                state=prop_state,
+                population=int(pop_metric or 65000),
+                total_calls=int(st.session_state.get('total_original_calls', 0) or 0),
+                calls_covered_perc=float(calls_covered_perc or 0),
+                area_covered_perc=float(area_covered_perc or 0),
+                avg_resp_time_min=float(avg_resp_time or 0),
+                avg_time_saved_min=float(avg_time_saved or 0),
+                fleet_capex=float(fleet_capex or 0),
+                annual_savings=float(annual_savings or 0),
+                break_even_text=str(break_even_text or 'N/A'),
+                actual_k_responder=int(actual_k_responder or 0),
+                actual_k_guardian=int(actual_k_guardian or 0),
+                dfr_dispatch_rate=float(dfr_dispatch_rate or 0.25),
+                deflection_rate=float(deflection_rate or 0.30),
+                daily_dfr_responses=float(daily_dfr_responses or 0),
+                daily_drone_only_calls=float(daily_drone_only_calls or 0),
+                active_drones=active_drones or [],
+                df_calls_full=df_calls_full,
+                theme='light',
+                facility_counts=_fac_counts or None,
+            )
+            # Extract <style> block and body content separately, then scope the styles
+            # with a .cid-wrap prefix so they don't collide with the export document's CSS.
+            import re as _re
+            _style_match = _re.search(r'<style>(.*?)</style>', _cid_export_html, _re.DOTALL)
+            _cid_style = _style_match.group(1) if _style_match else ''
+            # Scope every CSS rule inside the style block by prefixing with .cid-wrap
+            # Simple approach: wrap rules that start at column 0 (non-nested)
+            def _scope_css(raw_css):
+                # Replace :root { with .cid-wrap { so vars apply within scope
+                raw_css = raw_css.replace(':root {', '.cid-wrap {')
+                # Prepend .cid-wrap to each rule selector (lines that end with {)
+                lines = raw_css.split('\n')
+                scoped = []
+                for line in lines:
+                    stripped = line.strip()
+                    # Skip empty, @-rules, closing braces, and already-scoped lines
+                    if (stripped.startswith('@') or stripped == '}' or stripped == ''
+                            or stripped.startswith('/*') or stripped.startswith('*')
+                            or stripped.startswith('.cid-wrap {')):
+                        scoped.append(line)
+                    elif stripped.endswith('{') and not stripped.startswith('.cid-wrap'):
+                        # It's a selector line — prefix it
+                        selector = stripped[:-1].strip()
+                        # Don't double-scope :root replacement or @keyframes internals
+                        if selector and not selector.startswith('.cid-wrap') and not selector.startswith('from') and not selector.startswith('to') and not selector.startswith('0%') and not selector.startswith('50%') and not selector.startswith('100%'):
+                            scoped.append(f'  .cid-wrap {selector} {{')
+                        else:
+                            scoped.append(line)
                     else:
                         scoped.append(line)
-                else:
-                    scoped.append(line)
-            return '\n'.join(scoped)
+                return '\n'.join(scoped)
 
-        _scoped_style = _scope_css(_cid_style)
-        # Extract body content (between <body> and </body>)
-        _body_match = _re.search(r'<body[^>]*>(.*?)</body>', _cid_export_html, _re.DOTALL)
-        _cid_body = _body_match.group(1).strip() if _body_match else _cid_export_html
-        # Build the scoped embed: scoped <style> + wrapper div
-        _cid_embed = f'<style>{_scoped_style}</style>\n<div class="cid-wrap" style="font-family:\'DM Sans\',sans-serif;background:#f8f7f4;border-radius:10px;overflow:hidden;">{_cid_body}</div>'
-        _community_impact_section_html = (
-            '\n<!-- \u2500\u2500 10: COMMUNITY IMPACT DASHBOARD \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->\n'
-            '<section class="doc-section" id="community-impact">\n'
-            '  <div class="section-eyebrow"><span class="pg-num">10</span><span class="pg-title">Community Impact &amp; Transparency</span>'
-            '<span class="src" data-src="Sources: Population \u2014 US Census Bureau American Community Survey (ACS). Officer wage benchmarks \u2014 Bureau of Labor Statistics (BLS) OES. Financial projections \u2014 BRINC COS optimization model. Flight hour estimates \u2014 BRINC hardware specifications. All figures are model estimates.">\u24d8</span></div>\n'
-            f'  {_cid_embed}\n'
-            '</section>'
-        )
-        export_html = export_html.replace("[COMMUNITY_IMPACT_SECTION]", _community_impact_section_html)
-        export_html = export_html.replace("[COMMUNITY_IMPACT_NAV]", '<a href="#community-impact"><span class="nav-num">10</span>Community Impact</a>')
+            _scoped_style = _scope_css(_cid_style)
+            # Extract body content (between <body> and </body>)
+            _body_match = _re.search(r'<body[^>]*>(.*?)</body>', _cid_export_html, _re.DOTALL)
+            _cid_body = _body_match.group(1).strip() if _body_match else _cid_export_html
+            # Build the scoped embed: scoped <style> + wrapper div
+            _cid_embed = f'<style>{_scoped_style}</style>\n<div class="cid-wrap" style="font-family:\'DM Sans\',sans-serif;background:#f8f7f4;border-radius:10px;overflow:hidden;">{_cid_body}</div>'
+            _community_impact_section_html = (
+                '\n<!-- \u2500\u2500 10: COMMUNITY IMPACT DASHBOARD \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->\n'
+                '<section class="doc-section" id="community-impact">\n'
+                '  <div class="section-eyebrow"><span class="pg-num">10</span><span class="pg-title">Community Impact &amp; Transparency</span>'
+                '<span class="src" data-src="Sources: Population \u2014 US Census Bureau American Community Survey (ACS). Officer wage benchmarks \u2014 Bureau of Labor Statistics (BLS) OES. Financial projections \u2014 BRINC COS optimization model. Flight hour estimates \u2014 BRINC hardware specifications. All figures are model estimates.">\u24d8</span></div>\n'
+                f'  {_cid_embed}\n'
+                '</section>'
+            )
+            export_html = export_html.replace("[COMMUNITY_IMPACT_SECTION]", _community_impact_section_html)
+            export_html = export_html.replace("[COMMUNITY_IMPACT_NAV]", '<a href="#community-impact"><span class="nav-num">10</span>Community Impact</a>')
 
-    # ── Download buttons — always rendered so they're visible in the sidebar ──
-    _safe_city   = _safe_city_base
-    _ts          = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    _version_slug = __version__.replace(":", "-").replace("/", "-").replace(" ", "_")
+        # ── Download buttons — always rendered so they're visible in the sidebar ──
+        _safe_city   = _safe_city_base
+        _ts          = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        _version_slug = __version__.replace(":", "-").replace("/", "-").replace(" ", "_")
 
-    # 1. Save Deployment Plan (.brinc) — always available
-    _brinc_data = json.dumps(export_dict) if fleet_capex > 0 else json.dumps({
-        **export_dict,
-        "k_resp": 0, "k_guard": 0,
-        "_disclaimer": "No drones deployed yet.",
-    })
-    # Include authenticated user's name in the .brinc filename for easy identification
-    _user_name_safe = user_clean.replace(" ", "_")
-    if st.sidebar.download_button("💾 Save Deployment Plan", data=_brinc_data,
-                                  file_name=f"{_user_name_safe}_BRINC_DFR_{_safe_city}_{_version_slug}_{_ts}.brinc",
-                                  mime="application/json", use_container_width=True):
-        # ── Track export event ───────────────────────────────────────────────
-        st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['BRINC']
-        st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
+        # 1. Save Deployment Plan (.brinc) — always available
+        _brinc_data = json.dumps(export_dict) if fleet_capex > 0 else json.dumps({
+            **export_dict,
+            "k_resp": 0, "k_guard": 0,
+            "_disclaimer": "No drones deployed yet.",
+        })
+        # Include authenticated user's name in the .brinc filename for easy identification
+        _user_name_safe = user_clean.replace(" ", "_")
+        if st.sidebar.download_button("💾 Save Deployment Plan", data=_brinc_data,
+                                      file_name=f"{_user_name_safe}_BRINC_DFR_{_safe_city}_{_version_slug}_{_ts}.brinc",
+                                      mime="application/json", use_container_width=True):
+            # ── Track export event ───────────────────────────────────────────────
+            st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['BRINC']
+            st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
+            if fleet_capex > 0:
+                _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                              "BRINC", k_responder, k_guardian, calls_covered_perc,
+                              prop_name, prop_email, details=export_details)
+                _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                               "BRINC", k_responder, k_guardian, calls_covered_perc,
+                               prop_name, prop_email, details=export_details)
+        # 2. Executive Summary / proposal HTML export
         if fleet_capex > 0:
-            _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                          "BRINC", k_responder, k_guardian, calls_covered_perc,
-                          prop_name, prop_email, details=export_details)
-            _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                           "BRINC", k_responder, k_guardian, calls_covered_perc,
-                           prop_name, prop_email, details=export_details)
-    # 2. Executive Summary / proposal HTML export
-    if fleet_capex > 0:
-        if st.sidebar.download_button(f"📄 {prop_city}, {prop_state} — Executive Summary",
-                                      data=export_html,
-                                      file_name=f"BRINC_Executive_Summary_{_safe_city}_{_version_slug}_{_ts}.html",
-                                      mime="text/html",
-                                      use_container_width=True):
-            # ── Track export event ───────────────────────────────────────────
-            st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['HTML']
-            st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
-            _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                          "HTML", k_responder, k_guardian, calls_covered_perc,
-                          prop_name, prop_email, details=export_details)
-            _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                           "HTML", k_responder, k_guardian, calls_covered_perc,
-                           prop_name, prop_email, details=export_details)
-        st.sidebar.caption("HTML export includes the latest executive summary, incident analysis, staffing pressure, and print-ready proposal sections.")
+            if st.sidebar.download_button(f"📄 {prop_city}, {prop_state} — Executive Summary",
+                                          data=export_html,
+                                          file_name=f"BRINC_Executive_Summary_{_safe_city}_{_version_slug}_{_ts}.html",
+                                          mime="text/html",
+                                          use_container_width=True):
+                # ── Track export event ───────────────────────────────────────────
+                st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['HTML']
+                st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
+                _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                              "HTML", k_responder, k_guardian, calls_covered_perc,
+                              prop_name, prop_email, details=export_details)
+                _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                               "HTML", k_responder, k_guardian, calls_covered_perc,
+                               prop_name, prop_email, details=export_details)
+            st.sidebar.caption("HTML export includes the latest executive summary, incident analysis, staffing pressure, and print-ready proposal sections.")
 
-    # 3. Google Earth KML — only when drones are placed
-    if active_drones:
-        if st.sidebar.download_button("🌏 Google Earth Briefing File",
-                                      data=html_reports.generate_kml(active_gdf, active_drones, calls_in_city),
-                                      file_name="drone_deployment.kml",
-                                      mime="application/vnd.google-earth.kml+xml",
-                                      use_container_width=True):
-            # ── Track export event ───────────────────────────────────────────
-            st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['KML']
-            st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
-            _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                          "KML", k_responder, k_guardian, calls_covered_perc,
-                          prop_name, prop_email, details=export_details)
-            _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                           "KML", k_responder, k_guardian, calls_covered_perc,
-                           prop_name, prop_email, details=export_details)
-    else:
-        st.sidebar.button("🌏 Google Earth Briefing File", disabled=True,
-                          use_container_width=True,
-                          help="Deploy at least one drone to generate the KML file.")
+        # 3. Google Earth KML — only when drones are placed
+        if active_drones:
+            if st.sidebar.download_button("🌏 Google Earth Briefing File",
+                                          data=html_reports.generate_kml(active_gdf, active_drones, calls_in_city),
+                                          file_name="drone_deployment.kml",
+                                          mime="application/vnd.google-earth.kml+xml",
+                                          use_container_width=True):
+                # ── Track export event ───────────────────────────────────────────
+                st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['KML']
+                st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
+                _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                              "KML", k_responder, k_guardian, calls_covered_perc,
+                              prop_name, prop_email, details=export_details)
+                _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                               "KML", k_responder, k_guardian, calls_covered_perc,
+                               prop_name, prop_email, details=export_details)
+        else:
+            st.sidebar.button("🌏 Google Earth Briefing File", disabled=True,
+                              use_container_width=True,
+                              help="Deploy at least one drone to generate the KML file.")
 
 
 
 
 
 
+
+main()

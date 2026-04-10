@@ -3097,9 +3097,10 @@ def main():
                     # just lock the sig so this block doesn't fire again on the next render.
                     pass
                 elif _pin_drop_used:
-                    # Pin-drop mode: fleet sizes driven entirely by pin counts — no auto-fill
-                    st.session_state['k_resp']  = _pin_r_count
-                    st.session_state['k_guard'] = _pin_g_count
+                    # Pin-drop mode: preserve what the user had on screen; only raise
+                    # if the locked-pin count now exceeds the current slider value.
+                    st.session_state['k_resp']  = max(st.session_state.get('k_resp',  _pin_r_count), _pin_r_count)
+                    st.session_state['k_guard'] = max(st.session_state.get('k_guard', _pin_g_count), _pin_g_count)
                 else:
                     _resp_default = 2
                     try:
@@ -3160,10 +3161,11 @@ def main():
         st.session_state['pinned_resp_names'] = list(_saved_r)
 
         _saved_r_excl = [s for s in _saved_r if s not in _saved_g]
-        _guard_ms = [s for s in st.session_state.get('lock_guard_ms', _saved_g) if s in _station_names]
-        _resp_ms = [s for s in st.session_state.get('lock_resp_ms', _saved_r_excl) if s in _station_names and s not in _guard_ms]
-        st.session_state['lock_guard_ms'] = _guard_ms
-        st.session_state['lock_resp_ms'] = _resp_ms
+        # Always derive the widget state from the canonical pinned lists so a
+        # stale lock_guard_ms / lock_resp_ms can never falsely trigger the
+        # multiselect change handler and wipe the pinned stations.
+        st.session_state['lock_guard_ms'] = _saved_g
+        st.session_state['lock_resp_ms']  = _saved_r_excl
 
         lock_expander = st.sidebar.expander("🔒 Lock Stations", expanded=bool(_saved_g or _saved_r))
         with lock_expander:
@@ -3265,8 +3267,8 @@ def main():
                         if not _cst.empty else _new_pin_row
                     )
                     # Lock into the chosen fleet.
-                    # Set BOTH k values to exactly the pin counts so the optimizer
-                    # doesn't fill extra open slots with auto-selected stations.
+                    # Increment the current slider value by 1 (user expectation) while
+                    # also ensuring it is at least the pin count.
                     if "Guardian" in _pp_role:
                         _pg = list(st.session_state.get('pinned_guard_names', []))
                         if _prefixed_label not in _pg:
@@ -3275,6 +3277,10 @@ def main():
                             x for x in st.session_state.get('pinned_resp_names', [])
                             if x != _prefixed_label]
                         st.session_state['pinned_guard_names'] = _pg
+                        _new_pin_g = len(_pg)
+                        _new_pin_r = len(st.session_state.get('pinned_resp_names', []))
+                        st.session_state['k_guard'] = max(st.session_state.get('k_guard', 0) + 1, _new_pin_g)
+                        st.session_state['k_resp']  = max(st.session_state.get('k_resp',  0),     _new_pin_r)
                     else:
                         _pr = list(st.session_state.get('pinned_resp_names', []))
                         if _prefixed_label not in _pr:
@@ -3283,12 +3289,12 @@ def main():
                             x for x in st.session_state.get('pinned_guard_names', [])
                             if x != _prefixed_label]
                         st.session_state['pinned_resp_names'] = _pr
-                    st.session_state['k_guard'] = len(st.session_state.get('pinned_guard_names', []))
-                    st.session_state['k_resp']  = len(st.session_state.get('pinned_resp_names',  []))
-                    # Sync multiselect widget keys so the lock-stations block doesn't
-                    # see a stale empty list and immediately wipe the new pin.
-                    st.session_state['lock_guard_ms'] = list(st.session_state.get('pinned_guard_names', []))
-                    st.session_state['lock_resp_ms']  = list(st.session_state.get('pinned_resp_names',  []))
+                        _new_pin_r = len(_pr)
+                        _new_pin_g = len(st.session_state.get('pinned_guard_names', []))
+                        st.session_state['k_resp']  = max(st.session_state.get('k_resp',  0) + 1, _new_pin_r)
+                        st.session_state['k_guard'] = max(st.session_state.get('k_guard', 0),     _new_pin_g)
+                    # lock_guard_ms / lock_resp_ms are synced from pinned_*_names
+                    # at the top of the lock-stations block on the next rerun.
                     st.session_state['pin_drop_used'] = True
                     # Bust the auto-minimums sig so the block re-evaluates with pin counts
                     st.session_state.pop('_auto_minimums_sig', None)
@@ -3443,10 +3449,8 @@ def main():
                                     st.session_state['k_resp'] = len(_pr)
                                 _pin_note = f"🚁 Pinned as Responder."
 
-                            # Sync multiselect widget keys so the lock-stations block
-                            # doesn't see a stale list and immediately wipe the new pin.
-                            st.session_state['lock_guard_ms'] = list(st.session_state.get('pinned_guard_names', []))
-                            st.session_state['lock_resp_ms']  = list(st.session_state.get('pinned_resp_names',  []))
+                            # lock_guard_ms / lock_resp_ms are synced from pinned_*_names
+                            # at the top of the lock-stations block on the next rerun.
                             st.success(f"Added & locked: **{_label}** ({_geo_lat:.4f}, {_geo_lon:.4f})\n{_pin_note}")
                             st.caption(f"Matched address: {_matched_addr} [{_match.get('source', 'lookup')}]")
                             # Clear buffers (role intentionally kept so user can add more of same type)

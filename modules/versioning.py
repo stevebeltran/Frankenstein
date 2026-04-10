@@ -51,7 +51,7 @@ print(f"\033[38;5;234m{__version__}\033[0m")
 
 def _render_version_badge(position="top-right"):
     """Render version badge in top-right or bottom-right corner."""
-    _placement = "top: 12px; right: 16px;" if position == "top-right" else "bottom: 12px; right: 16px;"
+    _placement = "top: 12px; right: 160px;" if position == "top-right" else "bottom: 12px; right: 16px;"
     st.markdown(
         f"""
         <div style="position:fixed; {_placement} z-index:9999; font-family:'IBM Plex Mono',monospace; font-size:0.62rem; letter-spacing:0.08em; color:rgba(160,175,190,0.72); background:rgba(7,10,18,0.72); border:1px solid rgba(120,140,160,0.18); border-radius:999px; padding:4px 10px; backdrop-filter: blur(6px); pointer-events:none;">

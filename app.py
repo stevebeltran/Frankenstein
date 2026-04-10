@@ -2842,33 +2842,38 @@ def main():
 
         disp_expander = st.sidebar.expander("👁️ Display Options", expanded=False)
         with disp_expander:
-            show_boundaries = st.toggle("Jurisdiction Boundaries", value=True)
+            show_satellite  = st.toggle("Satellite Imagery", value=False,
+                                        help="Switch the basemap from the default street view to satellite imagery.")
+            show_boundaries = st.toggle("Jurisdiction Boundaries", value=True,
+                                        help="Show the selected city or place boundary used for deployment analysis.")
             st.toggle("County Boundary", value=False, key='use_county_boundary',
                       help="Redraw the map using the county boundary instead of the city/place boundary.")
-            show_heatmap    = st.toggle("911 Call Heatmap", value=False)
-            show_health     = st.toggle("Health Score", value=False)
-            show_satellite  = st.toggle("Satellite Imagery", value=False)
-            show_cards      = True
-            simple_cards    = st.toggle("Simple Cards", value=False,
-                                        help="Show a compact card with just the key numbers — name, type, response time, annual savings, and CapEx.")
-            show_financials = st.toggle("Show Financials", value=True,
-                                        help="Show or hide all financial figures (CapEx, annual savings, ROI, break-even, specialty values) on the cards and in the sidebar.")
-            show_dots       = st.toggle("Incident Dots", value=True,
-                                        help="Show individual 911 call locations as dots on the map.")
 
             # Regulatory overlays (stacked vertically)
             show_faa        = st.toggle("FAA LAANC Airspace", value=False,
                                        help="Show FAA-authorized flight ceilings by area (LAANC). Lighter = higher altitude allowed.")
-            show_obstacles  = st.toggle("Flight Hazards", value=False,
-                                       help="FAA Digital Obstacle File — obstacles > 200 ft AGL. Diamond markers.")
-            show_cell_towers = st.toggle("Cell Towers", value=False,
-                                        help="OpenCelliD cell tower locations. Useful for data-link RF validation.")
             show_no_fly = st.toggle("No-Fly Zones", value=False,
                                    help="Parks, protected areas, and water. Reference for deployment planning.")
-
+            show_obstacles  = st.toggle("Flight Hazards", value=False,
+                                       help="FAA Digital Obstacle File ? obstacles > 200 ft AGL. Diamond markers.")
             show_coverage   = st.toggle("4G LTE Coverage", value=False,
                                         help="Show AT&T, T-Mobile, and Verizon 4G LTE coverage polygons. Toggle individual carriers in the map legend.")
-            simulate_traffic = st.toggle("Simulate Ground Traffic", value=False)
+            show_cell_towers = st.toggle("Cell Towers", value=False,
+                                        help="OpenCelliD cell tower locations. Useful for data-link RF validation.")
+
+            show_heatmap    = st.toggle("911 Call Heatmap", value=False,
+                                        help="Show a density heatmap of 911 call locations to highlight incident concentration.")
+            show_dots       = st.toggle("Incident Dots", value=True,
+                                        help="Show individual 911 call locations as dots on the map.")
+            simulate_traffic = st.toggle("Simulate Ground Traffic", value=False,
+                                         help="Apply traffic-based travel delays to ground response estimates and related metrics.")
+            show_health     = st.toggle("Health Score", value=False,
+                                        help="Show the department health score summary based on current deployment coverage and utilization.")
+            show_financials = st.toggle("Show Financials", value=True,
+                                        help="Show or hide all financial figures (CapEx, annual savings, ROI, break-even, specialty values) on the cards and in the sidebar.")
+            show_cards      = True
+            simple_cards    = st.toggle("Simple Cards", value=False,
+                                        help="Show a compact card with just the key numbers ? name, type, response time, annual savings, and CapEx.")
             traffic_level   = st.slider("Traffic Congestion", 0, 100, 40) if simulate_traffic else 40
 
         strat_expander = st.sidebar.expander("⚙️ Deployment Strategy", expanded=False)
@@ -3155,52 +3160,27 @@ def main():
             return f"{_label_with_coords} #{_n}"
 
         _station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
+
+        def _set_station_locks(new_guard_names, new_resp_names, ensure_capacity=True):
+            _guard = [s for s in list(dict.fromkeys(new_guard_names)) if s in _station_names]
+            _resp = [s for s in list(dict.fromkeys(new_resp_names)) if s in _station_names and s not in _guard]
+            st.session_state['pinned_guard_names'] = list(_guard)
+            st.session_state['pinned_resp_names'] = list(_resp)
+            st.session_state['lock_guard_ms'] = list(_guard)
+            st.session_state['lock_resp_ms'] = list(_resp)
+            if ensure_capacity:
+                st.session_state['k_guard'] = max(st.session_state.get('k_guard', 0), len(_guard))
+                st.session_state['k_resp'] = max(st.session_state.get('k_resp', 0), len(_resp))
+            st.session_state.pop('_auto_minimums_sig', None)
+            for _ck in ['_opt_cache_key', '_opt_best_combo', '_opt_chrono_r', '_opt_chrono_g']:
+                st.session_state.pop(_ck, None)
+
         _saved_g = [s for s in st.session_state.get('pinned_guard_names', []) if s in _station_names]
-        _saved_r = [s for s in st.session_state.get('pinned_resp_names',  []) if s in _station_names]
-        st.session_state['pinned_guard_names'] = list(_saved_g)
-        st.session_state['pinned_resp_names'] = list(_saved_r)
+        _saved_r = [s for s in st.session_state.get('pinned_resp_names', []) if s in _station_names and s not in _saved_g]
+        _set_station_locks(_saved_g, _saved_r, ensure_capacity=False)
 
-        _saved_r_excl = [s for s in _saved_r if s not in _saved_g]
-        # Always derive the widget state from the canonical pinned lists so a
-        # stale lock_guard_ms / lock_resp_ms can never falsely trigger the
-        # multiselect change handler and wipe the pinned stations.
-        st.session_state['lock_guard_ms'] = _saved_g
-        st.session_state['lock_resp_ms']  = _saved_r_excl
-
-        lock_expander = st.sidebar.expander("🔒 Lock Stations", expanded=bool(_saved_g or _saved_r))
-        with lock_expander:
-            st.caption("Force specific stations into the optimized solution.")
-            _new_g = st.multiselect(
-                "🦅 Lock as Guardian",
-                options=_station_names,
-                key="lock_guard_ms",
-                help="These stations will always be assigned a Guardian drone regardless of optimizer output."
-            )
-            _new_r = st.multiselect(
-                "🚁 Lock as Responder",
-                options=[s for s in _station_names if s not in _new_g],
-                key="lock_resp_ms",
-                help="These stations will always be assigned a Responder drone regardless of optimizer output."
-            )
-            if _new_g != _saved_g or _new_r != _saved_r_excl:
-                st.session_state['pinned_guard_names'] = list(_new_g)
-                st.session_state['pinned_resp_names']  = list(_new_r)
-                st.session_state.pop('pin_drop_used', None)
-                st.session_state.pop('_auto_minimums_sig', None)
-                if '_opt_cache_key' in st.session_state:
-                    del st.session_state['_opt_cache_key']
-                st.rerun()
-
-        # Use session state as the authoritative source; only update from widget if
-        # the user interacted with it (handled in the if-block above).
-        pinned_guard_names = _saved_g
-        pinned_resp_names  = _saved_r
-
-        # Warn if locked count exceeds slider
-        if len(pinned_guard_names) > k_guardian:
-            st.sidebar.warning(f"⚠️ Raise Guardian Count ≥ {len(pinned_guard_names)} to honour all Guardian locks.")
-        if len(pinned_resp_names) > k_responder:
-            st.sidebar.warning(f"⚠️ Raise Responder Count ≥ {len(pinned_resp_names)} to honour all Responder locks.")
+        pinned_guard_names = list(st.session_state.get('pinned_guard_names', []))
+        pinned_resp_names = list(st.session_state.get('pinned_resp_names', []))
 
         # ── MAP-CLICK PIN DROP ─────────────────────────────────────────────────────
         _pin_mode = bool(st.session_state.get('pin_drop_mode', False))
@@ -3228,47 +3208,67 @@ def main():
                 st.sidebar.markdown(
                     f"<div style='background:rgba(0,210,255,0.08);border:1px solid rgba(0,210,255,0.35);"
                     f"border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:0.72rem;color:#e0e0f0;'>"
-                    f"📍 <b>Pin dropped</b> — {_pending['lat']:.5f}, {_pending['lon']:.5f}</div>",
+                    f"Pin dropped: {_pending['lat']:.5f}, {_pending['lon']:.5f}</div>",
                     unsafe_allow_html=True
                 )
                 if 'pp_label_buf' not in st.session_state: st.session_state['pp_label_buf'] = ""
-                if 'pp_type_buf'  not in st.session_state: st.session_state['pp_type_buf']  = "Police"
-                if 'pp_role_buf'  not in st.session_state: st.session_state['pp_role_buf']  = "🦅 Lock as Guardian"
+                if 'pp_type_buf' not in st.session_state: st.session_state['pp_type_buf'] = "Police"
+                if 'pp_role_buf' not in st.session_state: st.session_state['pp_role_buf'] = "Lock as Guardian"
 
-                _pp_label = st.sidebar.text_input("Station name", value=st.session_state['pp_label_buf'],
-                                                   placeholder="Fire Station 4", key="pp_label_input")
-                _pp_type  = st.sidebar.selectbox("Type", ["Police","Fire","School","Government","Hospital","Library","Other"],
-                                                  index=["Police","Fire","School","Government","Hospital","Library","Other"].index(
-                                                      st.session_state['pp_type_buf']) if st.session_state['pp_type_buf'] in
-                                                      ["Police","Fire","School","Government","Hospital","Library","Other"] else 0,
-                                                  key="pp_type_select")
-                _pp_role  = st.sidebar.radio("Pin as", ["🦅 Lock as Guardian","🚁 Lock as Responder"],
-                                              index=0, horizontal=True, key="pp_role_radio")
+                st.sidebar.markdown(
+                    f"<div style='font-size:0.7rem; color:{text_muted}; margin:0 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>"
+                    "Add By Map</div>",
+                    unsafe_allow_html=True
+                )
+                _pp_label = st.sidebar.text_input(
+                    "Station Name",
+                    value=st.session_state['pp_label_buf'],
+                    placeholder="Fire Station 4",
+                    key="pp_label_input",
+                    help="Optional station label for the dropped pin. Leave blank to use an auto-generated name."
+                )
+                _pp_type = st.sidebar.selectbox(
+                    "Station Type",
+                    ["Police", "Fire", "School", "Government", "Hospital", "Library", "Other"],
+                    index=["Police", "Fire", "School", "Government", "Hospital", "Library", "Other"].index(
+                        st.session_state['pp_type_buf']) if st.session_state['pp_type_buf'] in
+                        ["Police", "Fire", "School", "Government", "Hospital", "Library", "Other"] else 0,
+                    key="pp_type_select",
+                    help="Category used to label the station and keep it grouped correctly in the model."
+                )
+                _pp_role = st.sidebar.radio(
+                    "Assign To Fleet",
+                    ["Lock as Guardian", "Lock as Responder"],
+                    index=0 if "Guardian" in st.session_state.get('pp_role_buf', "Lock as Guardian") else 1,
+                    horizontal=True,
+                    key="pp_role_radio",
+                    help="Choose which fleet this custom station is locked into after it is added."
+                )
                 st.session_state['pp_label_buf'] = _pp_label
-                st.session_state['pp_type_buf']  = _pp_type
-                st.session_state['pp_role_buf']  = _pp_role
+                st.session_state['pp_type_buf'] = _pp_type
+                st.session_state['pp_role_buf'] = _pp_role
 
                 _pin_cols = st.sidebar.columns(2)
-                if _pin_cols[0].button("✅ Add Station", use_container_width=True, key="pp_confirm_btn"):
+                if _pin_cols[0].button(
+                    "Add Station",
+                    use_container_width=True,
+                    key="pp_confirm_btn",
+                    help="Add the dropped pin as a custom station and lock it to the selected fleet."
+                ):
                     _label = _make_unique_station_label(_pp_label, _pp_type, _pending['lat'], _pending['lon'])
                     _prefixed_label = f"[{_pp_type}] {_label}"
                     _new_pin_row = pd.DataFrame([{
-                        "name":   _label,
-                        "lat":    _pending['lat'],
-                        "lon":    _pending['lon'],
-                        "type":   _pp_type,
+                        "name": _label,
+                        "lat": _pending['lat'],
+                        "lon": _pending['lon'],
+                        "type": _pp_type,
                         "custom": True,
                     }])
-                    # Store in custom_stations (same path as address geocoder) so the
-                    # boundary clip and station type filter never drop it
                     _cst = st.session_state.get('custom_stations', pd.DataFrame())
                     st.session_state['custom_stations'] = (
                         pd.concat([_cst, _new_pin_row], ignore_index=True)
                         if not _cst.empty else _new_pin_row
                     )
-                    # Lock into the chosen fleet.
-                    # Increment the current slider value by 1 (user expectation) while
-                    # also ensuring it is at least the pin count.
                     if "Guardian" in _pp_role:
                         _pg = list(st.session_state.get('pinned_guard_names', []))
                         if _prefixed_label not in _pg:
@@ -3280,7 +3280,7 @@ def main():
                         _new_pin_g = len(_pg)
                         _new_pin_r = len(st.session_state.get('pinned_resp_names', []))
                         st.session_state['k_guard'] = max(st.session_state.get('k_guard', 0) + 1, _new_pin_g)
-                        st.session_state['k_resp']  = max(st.session_state.get('k_resp',  0),     _new_pin_r)
+                        st.session_state['k_resp'] = max(st.session_state.get('k_resp', 0), _new_pin_r)
                     else:
                         _pr = list(st.session_state.get('pinned_resp_names', []))
                         if _prefixed_label not in _pr:
@@ -3291,61 +3291,78 @@ def main():
                         st.session_state['pinned_resp_names'] = _pr
                         _new_pin_r = len(_pr)
                         _new_pin_g = len(st.session_state.get('pinned_guard_names', []))
-                        st.session_state['k_resp']  = max(st.session_state.get('k_resp',  0) + 1, _new_pin_r)
-                        st.session_state['k_guard'] = max(st.session_state.get('k_guard', 0),     _new_pin_g)
-                    # lock_guard_ms / lock_resp_ms are synced from pinned_*_names
-                    # at the top of the lock-stations block on the next rerun.
+                        st.session_state['k_resp'] = max(st.session_state.get('k_resp', 0) + 1, _new_pin_r)
+                        st.session_state['k_guard'] = max(st.session_state.get('k_guard', 0), _new_pin_g)
                     st.session_state['pin_drop_used'] = True
-                    # Bust the auto-minimums sig so the block re-evaluates with pin counts
                     st.session_state.pop('_auto_minimums_sig', None)
-                    # Clear optimizer caches so the new station enters the LP solver
-                    for _ck in ['_opt_cache_key', '_opt_best_combo',
-                                '_opt_chrono_r', '_opt_chrono_g']:
+                    for _ck in ['_opt_cache_key', '_opt_best_combo', '_opt_chrono_r', '_opt_chrono_g']:
                         st.session_state.pop(_ck, None)
-                    st.session_state['pending_pin']         = None
-                    st.session_state['pp_label_buf']        = ""
-                    st.session_state['pin_drop_mode']       = False
+                    st.session_state['pending_pin'] = None
+                    st.session_state['pp_label_buf'] = ""
+                    st.session_state['pin_drop_mode'] = False
                     st.session_state.pop('_pin_sel_hash', None)
-                    st.toast(f"✅ {_label} pinned as {'Guardian' if 'Guardian' in _pp_role else 'Responder'}.")
+                    st.toast(f"{_label} pinned as {'Guardian' if 'Guardian' in _pp_role else 'Responder'}.")
                     st.rerun()
-                if _pin_cols[1].button("✕ Cancel", use_container_width=True, key="pp_cancel_btn"):
+                if _pin_cols[1].button(
+                    "Cancel",
+                    use_container_width=True,
+                    key="pp_cancel_btn",
+                    help="Discard the dropped pin and exit map-add mode."
+                ):
                     st.session_state['pending_pin'] = None
                     st.session_state['pin_drop_mode'] = False
                     st.session_state.pop('_pin_sel_hash', None)
                     st.rerun()
 
-        # ── ADD CUSTOM STATION BY ADDRESS ─────────────────────────────────────────
-        add_expander = st.sidebar.expander("➕ Add Custom Station", expanded=False)
+        # ADD CUSTOM STATION BY ADDRESS
+        add_expander = st.sidebar.expander("Add Custom Station", expanded=False)
         with add_expander:
             st.markdown(
                 f"<div style='font-size:0.7rem; color:{text_muted}; margin-bottom:8px;'>"
-                "Enter an address to add a custom deployment location. "
-                "Address suggestions use Census + OpenStreetMap lookup. Custom stations persist for this session.</div>",
+                "Add a deployment location by address or by dropping a pin on the map. "
+                "Address suggestions use Census + OpenStreetMap lookup. Custom stations persist for this session only.</div>",
                 unsafe_allow_html=True
             )
-            # Use value= (not key=) so we can clear via session_state buffer without
-            # triggering the "cannot modify after instantiation" error.
-            if 'cs_addr_buf'  not in st.session_state: st.session_state['cs_addr_buf']  = ""
+            if 'cs_addr_buf' not in st.session_state: st.session_state['cs_addr_buf'] = ""
             if 'cs_label_buf' not in st.session_state: st.session_state['cs_label_buf'] = ""
-            if 'cs_type_buf'  not in st.session_state: st.session_state['cs_type_buf']  = "Police"
+            if 'cs_type_buf' not in st.session_state: st.session_state['cs_type_buf'] = "Police"
 
-            _custom_addr  = st.text_input("Address", value=st.session_state['cs_addr_buf'],
-                                           placeholder="123 Main St, Mobile, AL",
-                                           key="custom_station_addr")
-            _custom_label = st.text_input("Label (optional)", value=st.session_state['cs_label_buf'],
-                                           placeholder="Fire Station 7",
-                                           key="custom_station_label")
-            _type_opts    = ["Police", "Fire", "School", "Government", "Hospital", "Library", "Other"]
-            _type_idx     = _type_opts.index(st.session_state['cs_type_buf']) if st.session_state['cs_type_buf'] in _type_opts else 0
-            _custom_type  = st.selectbox("Type", _type_opts, index=_type_idx,
-                                          key="custom_station_type")
+            st.markdown(
+                f"<div style='font-size:0.7rem; color:{text_muted}; margin:0 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>"
+                "Add By Address</div>",
+                unsafe_allow_html=True
+            )
+            _custom_addr = st.text_input(
+                "Address",
+                value=st.session_state['cs_addr_buf'],
+                placeholder="123 Main St, Mobile, AL",
+                key="custom_station_addr",
+                help="Street address to geocode into a custom station. Include city and state for the best match."
+            )
+            _meta_col1, _meta_col2 = st.columns([1.4, 1.0])
+            _custom_label = _meta_col1.text_input(
+                "Station Name",
+                value=st.session_state['cs_label_buf'],
+                placeholder="Fire Station 7",
+                key="custom_station_label",
+                help="Optional display name for the station. Leave blank to use the matched address."
+            )
+            _type_opts = ["Police", "Fire", "School", "Government", "Hospital", "Library", "Other"]
+            _type_idx = _type_opts.index(st.session_state['cs_type_buf']) if st.session_state['cs_type_buf'] in _type_opts else 0
+            _custom_type = _meta_col2.selectbox(
+                "Station Type",
+                _type_opts,
+                index=_type_idx,
+                key="custom_station_type",
+                help="Category used to label the station and keep it grouped correctly in the model."
+            )
 
             _addr_query = _custom_addr.strip()
             _addr_matches = search_address_candidates(_addr_query, limit=6) if len(_addr_query) >= 4 else []
             _addr_options = [f"{m['matched_address']} [{m['source']}]" for m in _addr_matches]
             if _addr_options:
                 _addr_pick = st.selectbox(
-                    "Suggested match",
+                    "Suggested Match",
                     options=_addr_options,
                     index=0,
                     key="custom_station_match",
@@ -3355,41 +3372,58 @@ def main():
                 st.caption(f"Using: {_selected_match['matched_address']} | {_selected_match['lat']:.5f}, {_selected_match['lon']:.5f}")
             elif len(_addr_query) >= 4:
                 _selected_match = None
-                st.caption("No live address suggestions found yet. You can still try the geocode button for fallback matching.")
+                st.caption("No live address suggestions found yet. You can still try the add button for fallback matching.")
             else:
                 _selected_match = None
 
-            # Explicit drone role selector — user decides, no auto-guessing
-            if 'cs_role_buf' not in st.session_state: st.session_state['cs_role_buf'] = "🦅 Lock as Guardian"
-            _role_opts = ["🦅 Lock as Guardian", "🚁 Lock as Responder"]
-            _role_idx  = _role_opts.index(st.session_state['cs_role_buf']) if st.session_state['cs_role_buf'] in _role_opts else 0
-            _custom_role = st.radio("Pin as", _role_opts, index=_role_idx,
-                                    horizontal=True, key="custom_station_role",
-                                    help="Choose which fleet this station will be locked into.")
+            if 'cs_role_buf' not in st.session_state: st.session_state['cs_role_buf'] = "Lock as Guardian"
+            _role_opts = ["Lock as Guardian", "Lock as Responder"]
+            _role_idx = _role_opts.index(st.session_state['cs_role_buf']) if st.session_state['cs_role_buf'] in _role_opts else 0
+            _custom_role = st.radio(
+                "Assign To Fleet",
+                _role_opts,
+                index=_role_idx,
+                horizontal=True,
+                key="custom_station_role",
+                help="Choose which fleet this custom station will be locked into after it is added."
+            )
 
-            # Sync buffer keys from live widget values each run
-            st.session_state['cs_addr_buf']  = _custom_addr
+            st.session_state['cs_addr_buf'] = _custom_addr
             st.session_state['cs_label_buf'] = _custom_label
-            st.session_state['cs_type_buf']  = _custom_type
-            st.session_state['cs_role_buf']  = _custom_role
+            st.session_state['cs_type_buf'] = _custom_type
+            st.session_state['cs_role_buf'] = _custom_role
 
-            # Buttons for drop pin and lock stations - PROMINENT
             st.markdown("---")
-            st.markdown("**Quick Actions:**")
-            col_pin, col_lock = st.columns(2)
-            if col_pin.button("📌 Drop Pin on Map", use_container_width=True, key="drop_pin_btn",
-                              help="Click on the map to add a custom station by location."):
+            st.markdown(
+                f"<div style='font-size:0.7rem; color:{text_muted}; margin:0 0 6px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>"
+                "Actions</div>",
+                unsafe_allow_html=True
+            )
+            _action_col1, _action_col2 = st.columns(2)
+            if _action_col1.button(
+                "Pin Drop",
+                use_container_width=True,
+                key="drop_pin_btn",
+                help="Click on the map to add a custom station by location instead of by address."
+            ):
                 st.session_state['pin_drop_mode'] = True
                 st.rerun()
-
-            if col_lock.button("🔒 Lock Stations", use_container_width=True, key="lock_stations_btn",
-                              help="Prevent custom stations from being removed or modified."):
-                st.session_state['stations_locked'] = not st.session_state.get('stations_locked', False)
+            if _action_col2.button(
+                "Lock Stations",
+                use_container_width=True,
+                key="lock_stations_btn",
+                help="Open the station lock manager to review or adjust Guardian and Responder assignments."
+            ):
+                st.session_state['show_lock_stations'] = True
                 st.rerun()
 
             st.markdown("---")
-            st.markdown("**Or use Address Geocoding:**")
-            if st.button("📍 Geocode & Add Station", use_container_width=True, key="geocode_btn"):
+            if st.button(
+                "Geocode And Add Station",
+                use_container_width=True,
+                key="geocode_btn",
+                help="Geocode the address, add the station, and lock it to the selected fleet."
+            ):
                 _addr_to_geocode = _custom_addr.strip()
                 if _addr_to_geocode:
                     try:
@@ -3407,36 +3441,30 @@ def main():
                                 _geo_lat,
                                 _geo_lon,
                             )
-                            # The type-prefix rename later produces "[Type] label"
-                            # Store both original and prefixed name so pin lookup works
                             _prefixed_label = f"[{_custom_type}] {_label}"
                             _new_row = pd.DataFrame([{
-                                "name":   _label,          # original, pre-prefix
-                                "lat":    _geo_lat,
-                                "lon":    _geo_lon,
-                                "type":   _custom_type,
+                                "name": _label,
+                                "lat": _geo_lat,
+                                "lon": _geo_lon,
+                                "type": _custom_type,
                                 "custom": True,
                             }])
-                            # Store in dedicated 'custom_stations' key so boundary clip
-                            # and type filter can't drop them
                             _cst = st.session_state.get('custom_stations', pd.DataFrame())
                             st.session_state['custom_stations'] = pd.concat(
                                 [_cst, _new_row], ignore_index=True
                             ) if not _cst.empty else _new_row
 
-                            # Pin using the user's explicit role choice
-                            if _custom_role == "🦅 Lock as Guardian":
+                            if _custom_role == "Lock as Guardian":
                                 _pg = list(st.session_state.get('pinned_guard_names', []))
                                 if _prefixed_label not in _pg:
                                     _pg.append(_prefixed_label)
-                                # Remove from responder list if it was there
                                 st.session_state['pinned_resp_names'] = [
                                     x for x in st.session_state.get('pinned_resp_names', [])
                                     if x != _prefixed_label]
                                 st.session_state['pinned_guard_names'] = _pg
                                 if st.session_state.get('k_guard', 0) < len(_pg):
                                     st.session_state['k_guard'] = len(_pg)
-                                _pin_note = f"🦅 Pinned as Guardian."
+                                _pin_note = "Pinned as Guardian."
                             else:
                                 _pr = list(st.session_state.get('pinned_resp_names', []))
                                 if _prefixed_label not in _pr:
@@ -3447,19 +3475,15 @@ def main():
                                 st.session_state['pinned_resp_names'] = _pr
                                 if st.session_state.get('k_resp', 0) < len(_pr):
                                     st.session_state['k_resp'] = len(_pr)
-                                _pin_note = f"🚁 Pinned as Responder."
+                                _pin_note = "Pinned as Responder."
 
-                            # lock_guard_ms / lock_resp_ms are synced from pinned_*_names
-                            # at the top of the lock-stations block on the next rerun.
-                            st.success(f"Added & locked: **{_label}** ({_geo_lat:.4f}, {_geo_lon:.4f})\n{_pin_note}")
+                            st.success(
+                                f"Added and locked: **{_label}** ({_geo_lat:.4f}, {_geo_lon:.4f})\n{_pin_note}"
+                            )
                             st.caption(f"Matched address: {_matched_addr} [{_match.get('source', 'lookup')}]")
-                            # Clear buffers (role intentionally kept so user can add more of same type)
-                            st.session_state['cs_addr_buf']  = ""
+                            st.session_state['cs_addr_buf'] = ""
                             st.session_state['cs_label_buf'] = ""
-                            # Clear ALL optimizer caches so the new station
-                            # enters both the spatial precompute AND the LP solver
-                            for _ck in ['_opt_cache_key', '_opt_best_combo',
-                                        '_opt_chrono_r', '_opt_chrono_g']:
+                            for _ck in ['_opt_cache_key', '_opt_best_combo', '_opt_chrono_r', '_opt_chrono_g']:
                                 st.session_state.pop(_ck, None)
                             st.rerun()
                         else:
@@ -3469,31 +3493,34 @@ def main():
                 else:
                     st.warning("Enter an address first.")
 
-            # Show custom stations added this session
             _cst_display = st.session_state.get('custom_stations', pd.DataFrame())
             if not _cst_display.empty:
                 _custom_added = _cst_display['name'].tolist()
             else:
                 _custom_added = []
             if _custom_added:
-                st.markdown(f"<div style='font-size:0.65rem; color:{text_muted}; margin-top:6px;'>"
-                            f"Pinned this session:</div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div style='font-size:0.65rem; color:{text_muted}; margin-top:8px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>"
+                    f"Custom Stations This Session ({len(_custom_added)})</div>",
+                    unsafe_allow_html=True
+                )
                 _pg_set = set(st.session_state.get('pinned_guard_names', []))
                 _pr_set = set(st.session_state.get('pinned_resp_names', []))
                 _cst_disp = st.session_state.get('custom_stations', pd.DataFrame())
                 for _cn in _custom_added[:8]:
-                    # Check both original and prefixed name
                     _cst_row = _cst_disp[_cst_disp['name'] == _cn].iloc[0] if not _cst_disp.empty and (_cst_disp['name'] == _cn).any() else None
                     _pfx = f"[{_cst_row['type']}] {_cn}" if _cst_row is not None else _cn
                     _is_g = _pfx in _pg_set or _cn in _pg_set
-                    _badge = "🦅" if _is_g else "🚁"
+                    _badge = "G" if _is_g else "R"
                     _color = "#FFD700" if _is_g else "#00D2FF"
-                    st.markdown(f"<div style='font-size:0.65rem; color:{_color}; padding:1px 0;'>{_badge} {_pfx}</div>",
-                                unsafe_allow_html=True)
-                if st.button("🗑 Remove all custom stations", key="remove_custom",
-                             use_container_width=True):
+                    st.markdown(f"<div style='font-size:0.65rem; color:{_color}; padding:1px 0;'>{_badge} {_pfx}</div>", unsafe_allow_html=True)
+                if st.button(
+                    "Remove all custom stations",
+                    key="remove_custom",
+                    use_container_width=True,
+                    help="Clear every custom station added in this session and remove their fleet locks."
+                ):
                     _cst_to_rm = st.session_state.get('custom_stations', pd.DataFrame())
-                    # Build set of both original and prefixed names to un-pin
                     _rm_names = set()
                     if not _cst_to_rm.empty:
                         for _, _row in _cst_to_rm.iterrows():
@@ -3502,14 +3529,48 @@ def main():
                     st.session_state['custom_stations'] = pd.DataFrame()
                     st.session_state['pinned_guard_names'] = [
                         x for x in st.session_state.get('pinned_guard_names', []) if x not in _rm_names]
-                    st.session_state['pinned_resp_names']  = [
-                        x for x in st.session_state.get('pinned_resp_names',  []) if x not in _rm_names]
+                    st.session_state['pinned_resp_names'] = [
+                        x for x in st.session_state.get('pinned_resp_names', []) if x not in _rm_names]
                     if not st.session_state.get('pinned_guard_names') and not st.session_state.get('pinned_resp_names'):
                         st.session_state['pin_drop_used'] = False
                     st.session_state.pop('_auto_minimums_sig', None)
                     if '_opt_cache_key' in st.session_state:
                         del st.session_state['_opt_cache_key']
                     st.rerun()
+
+        _lock_expanded = bool(
+            st.session_state.get('show_lock_stations', False) or pinned_guard_names or pinned_resp_names
+        )
+        st.session_state['lock_guard_ms_widget'] = list(pinned_guard_names)
+        st.session_state['lock_resp_ms_widget'] = list(pinned_resp_names)
+        lock_expander = st.sidebar.expander("Lock Stations", expanded=_lock_expanded)
+        with lock_expander:
+            st.caption("Assign specific stations to Guardian or Responder and force them into the deployed fleet.")
+            _new_g = st.multiselect(
+                "Lock as Guardian",
+                options=_station_names,
+                key="lock_guard_ms_widget",
+                help="These stations will always be assigned a Guardian drone and deployed into Unit Economics."
+            )
+            _new_r = st.multiselect(
+                "Lock as Responder",
+                options=[s for s in _station_names if s not in _new_g],
+                key="lock_resp_ms_widget",
+                help="These stations will always be assigned a Responder drone and deployed into Unit Economics."
+            )
+            if _new_g != pinned_guard_names or _new_r != pinned_resp_names:
+                _set_station_locks(_new_g, _new_r, ensure_capacity=True)
+                st.session_state['show_lock_stations'] = True
+                st.rerun()
+
+        pinned_guard_names = list(st.session_state.get('pinned_guard_names', []))
+        pinned_resp_names = list(st.session_state.get('pinned_resp_names', []))
+        st.session_state['show_lock_stations'] = False
+
+        if len(pinned_guard_names) > k_guardian:
+            st.sidebar.warning(f"Guardian Count was raised to honor {len(pinned_guard_names)} locked Guardian station(s).")
+        if len(pinned_resp_names) > k_responder:
+            st.sidebar.warning(f"Responder Count was raised to honor {len(pinned_resp_names)} locked Responder station(s).")
 
         # Convert pin names → station indices for the optimizer
         _name_to_idx = {row['name']: i for i, row in df_stations_all.iterrows()}
@@ -4578,6 +4639,44 @@ def main():
                             'lon': round(float(_clicked_lon), 6),
                         }
                         st.rerun()
+
+        locked_active_drones = [d for d in active_drones if d.get('pinned')]
+        if locked_active_drones:
+            st.markdown("---")
+            st.markdown(f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Locked Stations</h4>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div style='font-size:0.72rem; color:{text_muted}; margin-bottom:10px;'>These stations are forced into the active fleet. Use <b>X Unlock</b> to release them back to the optimizer.</div>",
+                unsafe_allow_html=True
+            )
+            for _start in range(0, len(locked_active_drones), 4):
+                _row = locked_active_drones[_start:_start + 4]
+                _cols = st.columns(len(_row))
+                for _col, _locked in zip(_cols, _row):
+                    with _col:
+                        _fleet_color = '#FFD700' if _locked['type'] == 'GUARDIAN' else accent_color
+                        _fleet_label = 'Guardian' if _locked['type'] == 'GUARDIAN' else 'Responder'
+                        st.markdown(
+                            f"""
+                            <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid {_fleet_color};border-radius:8px;padding:10px 12px;margin-bottom:6px;min-height:112px;">
+                                <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+                                    <div style="min-width:0;">
+                                        <div style="font-size:0.82rem;font-weight:700;color:{text_main};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">[LOCKED] {_locked['name']}</div>
+                                        <div style="font-size:0.66rem;color:{text_muted};margin-top:2px;">{_fleet_label} lock | Step {_locked['deploy_step']}</div>
+                                    </div>
+                                    <div style="font-size:0.62rem;color:{_fleet_color};font-weight:700;white-space:nowrap;">ACTIVE</div>
+                                </div>
+                                <div style="font-size:0.68rem;color:{text_muted};margin-top:8px;">Avg response {float(_locked.get('avg_time_min', 0) or 0):.1f} min</div>
+                                <div style="font-size:0.68rem;color:{text_muted};">FAA ceiling {_locked.get('faa_ceiling', 'N/A')}</div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                        if st.button("X Unlock", key=f"unlock_locked_station_{_locked['type']}_{_locked['name']}", use_container_width=True):
+                            if _locked['type'] == 'GUARDIAN':
+                                _set_station_locks([x for x in pinned_guard_names if x != _locked['name']], pinned_resp_names, ensure_capacity=False)
+                            else:
+                                _set_station_locks(pinned_guard_names, [x for x in pinned_resp_names if x != _locked['name']], ensure_capacity=False)
+                            st.rerun()
 
         # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────
         st.markdown("---")

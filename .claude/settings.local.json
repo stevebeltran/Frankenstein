@@ -44,7 +44,14 @@
       "Bash(awk -F: '$1 >= 6800 && $1 <= 12735')",
       "Bash(awk -F: '$1 >= 440 && $1 <= 700')",
       "Bash(awk -F: '$1 >= 6800')",
-      "Bash(wc -l app.py modules/*.py)"
+      "Bash(wc -l app.py modules/*.py)",
+      "Bash(sed -n '680,755p' app.py)",
+      "Bash(sed -n '1580,2405p' app.py)",
+      "Bash(sed -n '2407,2420p' app.py)",
+      "Bash(wc -l /tmp/*.txt)",
+      "Bash(echo \"\")",
+      "Bash(cat)",
+      "Bash(sed -n '1580,2253p' app.py)"
     ]
   }
 }

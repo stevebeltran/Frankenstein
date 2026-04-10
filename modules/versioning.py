@@ -3,50 +3,40 @@ Build version management for BRINC app.
 """
 
 import datetime
-import streamlit as st
 from pathlib import Path
+
+import streamlit as st
 
 _MONSTER_NAMES = ["prom", "behe", "quasi", "drac"]
 _BUILD_META_PATH = Path(".build_meta")
 
 
-def _compute_build_version():
-    """Compute and return a version string based on file mtime and iteration count."""
-    _app_path = Path(__file__).resolve().parent.parent / "app.py"
-    _mtime = _app_path.stat().st_mtime
-    _stored_ts = None
-    _iteration = 0
-
+def _read_iteration_hint():
+    """Best-effort read of the legacy build counter without mutating files."""
     try:
         if _BUILD_META_PATH.exists():
             _raw_meta = _BUILD_META_PATH.read_text(encoding="utf-8").strip()
             if _raw_meta:
-                _ts_str, _iter_str = _raw_meta.split("|", 1)
-                _stored_ts = float(_ts_str)
-                _iteration = int(_iter_str)
+                _parts = _raw_meta.split("|", 1)
+                if len(_parts) == 2:
+                    return max(1, int(_parts[1]))
     except (ValueError, OSError):
-        _stored_ts = None
-        _iteration = 0
-
-    if _stored_ts is None:
-        _iteration = 1
-    elif _mtime != _stored_ts:
-        _iteration += 1
-
-    try:
-        _BUILD_META_PATH.write_text(f"{_mtime}|{_iteration}", encoding="utf-8")
-    except OSError:
         pass
+    return 1
 
+
+def _compute_build_version():
+    """Compute a read-only version string from app.py mtime."""
+    _app_path = Path(__file__).resolve().parent.parent / "app.py"
+    _mtime = _app_path.stat().st_mtime
     _dt = datetime.datetime.fromtimestamp(_mtime)
-    _month_letter = chr(ord("A") + _dt.month - 1)
+    _iteration = _read_iteration_hint()
     _monster_idx = min(max(_iteration - 1, 0) // 50, len(_MONSTER_NAMES) - 1)
     _monster_name = _MONSTER_NAMES[_monster_idx]
-    return f"{_dt:%y}{_month_letter}{_dt:%d}-{_monster_name}-{_dt:%H%M}.{_iteration}"
+    return f"{_dt:%y}{chr(ord('A') + _dt.month - 1)}{_dt:%d}-{_monster_name}-{_dt:%H%M}.{_iteration}"
 
 
 __version__ = _compute_build_version()
-print(f"\033[38;5;234m{__version__}\033[0m")
 
 
 def _render_version_badge(position="top-right"):

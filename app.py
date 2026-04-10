@@ -2851,6 +2851,8 @@ def main():
             show_cards      = True
             simple_cards    = st.toggle("Simple Cards", value=False,
                                         help="Show a compact card with just the key numbers — name, type, response time, annual savings, and CapEx.")
+            show_financials = st.toggle("Show Financials", value=True,
+                                        help="Show or hide all financial figures (CapEx, annual savings, ROI, break-even, specialty values) on the cards and in the sidebar.")
             show_dots       = st.toggle("Incident Dots", value=True,
                                         help="Show individual 911 call locations as dots on the map.")
 
@@ -3179,8 +3181,6 @@ def main():
                 help="These stations will always be assigned a Responder drone regardless of optimizer output."
             )
             if _new_g != _saved_g or _new_r != _saved_r_excl:
-                st.session_state['lock_guard_ms'] = list(_new_g)
-                st.session_state['lock_resp_ms']  = list(_new_r)
                 st.session_state['pinned_guard_names'] = list(_new_g)
                 st.session_state['pinned_resp_names']  = list(_new_r)
                 st.session_state.pop('pin_drop_used', None)
@@ -3283,14 +3283,12 @@ def main():
                             x for x in st.session_state.get('pinned_guard_names', [])
                             if x != _prefixed_label]
                         st.session_state['pinned_resp_names'] = _pr
-                    st.session_state['lock_guard_ms'] = list(st.session_state.get('pinned_guard_names', []))
-                    st.session_state['lock_resp_ms'] = [
-                        x for x in st.session_state.get('pinned_resp_names', [])
-                        if x not in st.session_state.get('pinned_guard_names', [])
-                    ]
-
                     st.session_state['k_guard'] = len(st.session_state.get('pinned_guard_names', []))
                     st.session_state['k_resp']  = len(st.session_state.get('pinned_resp_names',  []))
+                    # Sync multiselect widget keys so the lock-stations block doesn't
+                    # see a stale empty list and immediately wipe the new pin.
+                    st.session_state['lock_guard_ms'] = list(st.session_state.get('pinned_guard_names', []))
+                    st.session_state['lock_resp_ms']  = list(st.session_state.get('pinned_resp_names',  []))
                     st.session_state['pin_drop_used'] = True
                     # Bust the auto-minimums sig so the block re-evaluates with pin counts
                     st.session_state.pop('_auto_minimums_sig', None)
@@ -3445,12 +3443,10 @@ def main():
                                     st.session_state['k_resp'] = len(_pr)
                                 _pin_note = f"🚁 Pinned as Responder."
 
+                            # Sync multiselect widget keys so the lock-stations block
+                            # doesn't see a stale list and immediately wipe the new pin.
                             st.session_state['lock_guard_ms'] = list(st.session_state.get('pinned_guard_names', []))
-                            st.session_state['lock_resp_ms'] = [
-                                x for x in st.session_state.get('pinned_resp_names', [])
-                                if x not in st.session_state.get('pinned_guard_names', [])
-                            ]
-
+                            st.session_state['lock_resp_ms']  = list(st.session_state.get('pinned_resp_names',  []))
                             st.success(f"Added & locked: **{_label}** ({_geo_lat:.4f}, {_geo_lon:.4f})\n{_pin_note}")
                             st.caption(f"Matched address: {_matched_addr} [{_match.get('source', 'lookup')}]")
                             # Clear buffers (role intentionally kept so user can add more of same type)
@@ -3504,12 +3500,6 @@ def main():
                         x for x in st.session_state.get('pinned_guard_names', []) if x not in _rm_names]
                     st.session_state['pinned_resp_names']  = [
                         x for x in st.session_state.get('pinned_resp_names',  []) if x not in _rm_names]
-                    st.session_state['lock_guard_ms'] = list(st.session_state.get('pinned_guard_names', []))
-                    st.session_state['lock_resp_ms'] = [
-                        x for x in st.session_state.get('pinned_resp_names', [])
-                        if x not in st.session_state.get('pinned_guard_names', [])
-                    ]
-
                     if not st.session_state.get('pinned_guard_names') and not st.session_state.get('pinned_resp_names'):
                         st.session_state['pin_drop_used'] = False
                     st.session_state.pop('_auto_minimums_sig', None)
@@ -3563,7 +3553,7 @@ def main():
         # We use the strat_expander we defined earlier in the sidebar to inject the sliders
         with strat_expander:
             st.markdown("---")
-            inferred_daily = st.session_state.get('inferred_daily_calls_override', full_daily_calls)
+            inferred_daily = st.session_state.get('inferred_daily_calls_override') or full_daily_calls or 1
             inferred_daily = max(1, int(inferred_daily))
             calls_per_day = st.slider("Total Daily Calls (citywide)", 1, max(100, inferred_daily*3), inferred_daily)
             st.caption(f"Derived from the full uploaded CAD total ({full_total_calls:,} incidents), not the optimization sample.")
@@ -3794,7 +3784,7 @@ def main():
                 annual_savings  = monthly_savings * 12
                 break_even_text = f"{fleet_capex / monthly_savings:.1f} MONTHS"
 
-        specialty_savings = html_reports.html_reports.estimate_specialty_response_savings(
+        specialty_savings = html_reports.estimate_specialty_response_savings(
             st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None else st.session_state.get('df_calls'),
             st.session_state.get('total_original_calls', total_calls),
             calls_covered_perc=calls_covered_perc
@@ -4085,7 +4075,7 @@ def main():
                     _lead['best_be_text'] = _lead['be_text']
 
         # ── SIDEBAR: fill Annual Capacity Value box with specialty values that match unit cards ──
-        if fleet_capex > 0:
+        if fleet_capex > 0 and show_financials:
             _s_THERMAL_RATE     = float(CONFIG.get("THERMAL_DEFAULT_APPLICABLE_RATE", 0.12) or 0)
             _s_THERMAL_PER_CALL = float(CONFIG.get("THERMAL_SAVINGS_PER_CALL", 38) or 0)
             _s_K9_RATE          = float(CONFIG.get("K9_DEFAULT_APPLICABLE_RATE", 0.03) or 0)
@@ -4154,18 +4144,19 @@ def main():
             </div>
             """, unsafe_allow_html=True)
 
-        pop_metric = st.session_state.get('estimated_pop', 250000)
-        grant_bracket = estimate_grants(pop_metric)
-        st.sidebar.markdown(f"""
-        <div style="margin-top:12px; background:{card_bg}; border:1px solid {budget_box_border}; padding:10px; border-radius:4px; margin-bottom:10px;">
-            <div style="font-size:0.68rem; color:{text_muted}; font-weight:bold; text-transform:uppercase;">Est. Grant Eligibility</div>
-            <div style="font-size:1.1rem; color:{budget_box_border}; font-weight:bold; font-family:monospace;">{grant_bracket}</div>
-        </div>
-        <div style="font-size:0.73rem; color:{text_muted}; line-height:1.5; margin-bottom:10px;">
-            <a href="https://bja.ojp.gov/program/jag/overview" target="_blank" style="color:{accent_color}; font-weight:bold;">DOJ Byrne JAG</a> — UAS procurement eligible<br>
-            <a href="https://www.fema.gov/grants/preparedness/homeland-security" target="_blank" style="color:{accent_color}; font-weight:bold;">FEMA HSGP</a> — CapEx offset for tactical deployments
-        </div>
-        """, unsafe_allow_html=True)
+        if show_financials:
+            pop_metric = st.session_state.get('estimated_pop', 250000)
+            grant_bracket = estimate_grants(pop_metric)
+            st.sidebar.markdown(f"""
+            <div style="margin-top:12px; background:{card_bg}; border:1px solid {budget_box_border}; padding:10px; border-radius:4px; margin-bottom:10px;">
+                <div style="font-size:0.68rem; color:{text_muted}; font-weight:bold; text-transform:uppercase;">Est. Grant Eligibility</div>
+                <div style="font-size:1.1rem; color:{budget_box_border}; font-weight:bold; font-family:monospace;">{grant_bracket}</div>
+            </div>
+            <div style="font-size:0.73rem; color:{text_muted}; line-height:1.5; margin-bottom:10px;">
+                <a href="https://bja.ojp.gov/program/jag/overview" target="_blank" style="color:{accent_color}; font-weight:bold;">DOJ Byrne JAG</a> — UAS procurement eligible<br>
+                <a href="https://www.fema.gov/grants/preparedness/homeland-security" target="_blank" style="color:{accent_color}; font-weight:bold;">FEMA HSGP</a> — CapEx offset for tactical deployments
+            </div>
+            """, unsafe_allow_html=True)
 
         st.markdown("---")
 
@@ -4188,7 +4179,7 @@ def main():
         # Calculate Date Range of CAD data (if available)
         date_range_str = "Simulated / Unknown"
         _date_src_df = df_calls_full if df_calls_full is not None else df_calls
-        _label_dt = html_reports.html_reports._detect_datetime_series_for_labels(_date_src_df)
+        _label_dt = html_reports._detect_datetime_series_for_labels(_date_src_df)
         if _label_dt is not None:
             try:
                 _label_dt = pd.to_datetime(_label_dt, errors='coerce').dropna()
@@ -4357,7 +4348,7 @@ def main():
             note_bits.append(full_daily_note)
         st.markdown(f"<div style='font-size:0.65rem;color:gray;margin-top:-10px;margin-bottom:12px;text-align:right;'>{' '.join(note_bits)}</div>", unsafe_allow_html=True)
 
-        overtime_stats = html_reports.html_reports.estimate_high_activity_overtime(
+        overtime_stats = html_reports.estimate_high_activity_overtime(
             df_calls_full if df_calls_full is not None else df_calls,
             st.session_state.get('active_state', 'TX'),
             calls_covered_perc,
@@ -4611,10 +4602,12 @@ def main():
         )
         if active_drones:
             st.markdown(
-                html_reports.html_reports._build_unit_cards_html(
+                html_reports._build_unit_cards_html(
                     active_drones, text_main, text_muted, card_bg, card_border,
                     card_title, accent_color, columns_per_row=4,
-                    simple=simple_cards, deflection_rate=deflection_rate
+                    simple=simple_cards, deflection_rate=deflection_rate,
+                    dfr_dispatch_rate=dfr_dispatch_rate,
+                    show_financials=show_financials
                 ),
                 unsafe_allow_html=True
             )
@@ -4758,7 +4751,7 @@ def main():
 
 
         # Resolve real incident datetime coverage for labels on the stations page
-        _label_dt_series = html_reports.html_reports._detect_datetime_series_for_labels(df_calls_full if df_calls_full is not None else df_calls)
+        _label_dt_series = html_reports._detect_datetime_series_for_labels(df_calls_full if df_calls_full is not None else df_calls)
         _label_has_real_dates = _label_dt_series is not None and getattr(_label_dt_series, "notna", lambda: pd.Series([], dtype=bool))().sum() > 0
 
         # ── CAD DATA CHARTS (moved into CAD Ingestion Analytics below) ───────────
@@ -4935,7 +4928,7 @@ def main():
         st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Temporal patterns derived from your uploaded CAD data — hourly volumes, day-of-week distribution, optimal DFR shift windows, and a higher-contrast 5-band call-volume calendar.</div>", unsafe_allow_html=True)
 
         _analytics_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
-        analytics_html_block = html_reports.html_reports.generate_command_center_html(
+        analytics_html_block = html_reports.generate_command_center_html(
             _analytics_df,
             total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls)
         )
@@ -4972,7 +4965,7 @@ def main():
         elif _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
             # Collapse gap between components.html block and the plotly charts below
             st.markdown("<div style='margin-top:-80px;'></div>", unsafe_allow_html=True)
-            html_reports.html_reports._build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
+            html_reports._build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
 
         # ── COMMUNITY IMPACT DASHBOARD ────────────────────────────────────────────
         st.markdown("---")
@@ -4992,7 +4985,7 @@ def main():
         if 'type' in df_stations_all.columns:
             for _t in df_stations_all['type'].dropna().astype(str):
                 _cid_fac_counts[_t] = _cid_fac_counts.get(_t, 0) + 1
-        _cid_html = html_reports.html_reports.generate_community_impact_dashboard_html(
+        _cid_html = html_reports.generate_community_impact_dashboard_html(
             city=st.session_state.get('active_city', 'City'),
             state=st.session_state.get('active_state', 'TX'),
             population=int(st.session_state.get('estimated_pop', 65000) or 65000),
@@ -5886,15 +5879,15 @@ def main():
                 "pinned_guard_names": list(pinned_guard_names),
                 "pinned_resp_names":  list(pinned_resp_names),
                 # Custom / pin-dropped stations (bypass OSM on reimport)
-                "custom_stations": html_reports.html_reports._safe_df_to_records(st.session_state.get('custom_stations')),
+                "custom_stations": html_reports._safe_df_to_records(st.session_state.get('custom_stations')),
                 # Whether fleet was manually built via pin-drop
                 "pin_drop_used": st.session_state.get('pin_drop_used', False),
                 # Call and station data
-                "calls_data": html_reports.html_reports._safe_df_to_records(
+                "calls_data": html_reports._safe_df_to_records(
                     st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None
                     else st.session_state.get('df_calls')
                 ),
-                "stations_data": html_reports.html_reports._safe_df_to_records(st.session_state.get('df_stations')),
+                "stations_data": html_reports._safe_df_to_records(st.session_state.get('df_stations')),
                 "faa_geojson": faa_geojson,
                 # Boundary / shapefile
                 "boundary_geojson": _boundary_geojson_export,
@@ -6083,8 +6076,8 @@ def main():
             dept_summary = ", ".join(dept_summary_parts) if dept_summary_parts else f"{len(active_drones)} municipal stations"
             police_names_str = (", ".join([n.replace('[Police] ','') for n in police_dept_names[:6]]) + ("..." if len(police_dept_names)>6 else "")) if police_dept_names else "municipal facilities"
             total_fleet = actual_k_responder + actual_k_guardian
-            analytics_html_export = html_reports.html_reports.generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls), export_mode=True)
-            cad_charts_html_export = html_reports.html_reports._build_cad_charts_html(df_calls_full if df_calls_full is not None else df_calls)
+            analytics_html_export = html_reports.generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls), export_mode=True)
+            cad_charts_html_export = html_reports._build_cad_charts_html(df_calls_full if df_calls_full is not None else df_calls)
             staffing_pressure_html_export = ""
 
             prepared_for_city = st.session_state.get('active_city', prop_city) or prop_city
@@ -7257,7 +7250,7 @@ def main():
             export_html = export_html.replace("[ANALYTICS_NAV]", _analytics_nav)
 
             # ── Community Impact section (light theme for print/export) ─────────
-            _cid_export_html = html_reports.html_reports.generate_community_impact_dashboard_html(
+            _cid_export_html = html_reports.generate_community_impact_dashboard_html(
                 city=prop_city,
                 state=prop_state,
                 population=int(pop_metric or 65000),
@@ -7376,7 +7369,7 @@ def main():
         # 3. Google Earth KML — only when drones are placed
         if active_drones:
             if st.sidebar.download_button("🌏 Google Earth Briefing File",
-                                          data=html_reports.html_reports.generate_kml(active_gdf, active_drones, calls_in_city),
+                                          data=html_reports.generate_kml(active_gdf, active_drones, calls_in_city),
                                           file_name="drone_deployment.kml",
                                           mime="application/vnd.google-earth.kml+xml",
                                           use_container_width=True):

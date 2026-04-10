@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-from shapely.geometry import Polygon
+from shapely.geometry import Point, Polygon
 import heapq
 from concurrent.futures import ThreadPoolExecutor
 import pulp

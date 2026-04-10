@@ -7,6 +7,8 @@ import simplekml
 from shapely.geometry import Polygon
 from modules.config import CONFIG, GUARDIAN_FLIGHT_HOURS_PER_DAY, STATION_COLORS, SIMULATOR_DISCLAIMER_SHORT
 from modules.geospatial import get_address_from_latlon
+from modules.cad_parser import _get_annualized_calls
+from modules.faa_rf import get_circle_coords
 
 def _detect_datetime_series_for_labels(df):
     """Return a best-effort parsed datetime series from common CAD field patterns."""
@@ -1066,7 +1068,7 @@ def format_3_lines(name_str):
 
 
 
-def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2, simple=False, deflection_rate=0.25):
+def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_border, card_title, accent_color, columns_per_row=2, simple=False, deflection_rate=0.25, dfr_dispatch_rate=0.12, show_financials=True):
     if not active_drones:
         return ""
     # Per-type daily airtime budgets derived from CONFIG duty cycles:
@@ -1208,6 +1210,108 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         _sc_fmt = f"${d_extra_same_capex:,}" if d_has_deficit else ""
         _ac_fmt = f"${d_extra_alt_capex:,}" if d_has_deficit else ""
 
+        # ── Pre-build financial HTML blocks (conditionally included) ─────────
+        _specialty_total = d_thermal + d_k9 + d_fire
+
+        # Simple card financial blocks
+        _sim_fin_hero = (
+            f'<!-- Annual Value hero -->'
+            f'<div style="background:rgba(0,210,255,0.07);border:1px solid rgba(0,210,255,0.25);border-radius:6px;padding:7px 10px;text-align:center;margin-bottom:6px;">'
+            f'<div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:1px;">Annual Value<span class="tip" data-tip="Best-case annual savings from calls this drone resolves without sending a ground unit. Includes both exclusive and concurrent zone coverage.">?</span></div>'
+            f'<div style="font-size:1.6rem;font-weight:900;color:{accent_color};line-height:1.1;">${d_best:,.0f}</div>'
+            f'</div>'
+        ) if show_financials else ''
+
+        _sim_fin_breakeven_cell = (
+            f'<div style="background:rgba(0,210,255,0.07);border:1px solid rgba(0,210,255,0.18);border-radius:5px;padding:6px 8px;text-align:center;">'
+            f'<div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Break-Even<span class="tip" data-tip="Months to recover the unit CapEx from annual capacity savings at current DFR and deflection rates.">?</span></div>'
+            f'<div style="font-size:0.95rem;font-weight:900;color:{accent_color};">{d_be}</div>'
+            f'</div>'
+        ) if show_financials else (
+            f'<div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">'
+            f'<div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Utilization</div>'
+            f'<div style="font-size:0.95rem;font-weight:900;color:{util_color};">{util_pct}</div>'
+            f'</div>'
+        )
+
+        _sim_fin_specialty = (
+            f'<div style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.18);border-radius:5px;padding:5px 10px;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'
+            f'<span style="font-size:0.60rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">🔥🐕🚒 Specialty Value<span class="tip" data-tip="Combined value from thermal imaging assists (12% of flights), K-9 replacement (3% of flights), and fire scene support (5% of flights). Separate from Annual Capacity Value.">?</span></span>'
+            f'<span style="font-size:0.85rem;font-weight:800;color:#fbbf24;">${_specialty_total:,.0f}/yr</span>'
+            f'</div>'
+        ) if show_financials else ''
+
+        _sim_fin_capex = (
+            f'<div style="display:flex;justify-content:space-between;align-items:center;padding-top:5px;border-top:1px solid {card_border};font-size:0.65rem;">'
+            f'<span style="color:{text_muted};">CapEx<span class="tip" data-tip="One-time hardware cost for this unit. Responder: $80,000. Guardian: $160,000.">?</span></span>'
+            f'<span style="font-weight:700;color:{card_title};">${d_cost:,.0f}</span>'
+            f'</div>'
+        ) if show_financials else ''
+
+        # Full card financial blocks
+        _full_fin_annual_cap = (
+            f'<div style="background:rgba(0,210,255,0.07); border:1px solid rgba(0,210,255,0.15); border-radius:6px; padding:8px 10px; margin-bottom:6px;"'
+            f'     title="Annual Capacity Value is based on calls handled without sending a squad.">'
+            f'  <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Annual Capacity Value<span class="tip" data-tip="Estimated annual savings from calls this drone resolves without sending a ground unit. Capped at physical flight capacity.">?</span>{"  ⚠️ capped at physical max" if d_has_deficit else ""}</div>'
+            f'  <div style="display:flex; align-items:baseline; justify-content:space-between; gap:6px;">'
+            f'    <div>'
+            f'      <div style="font-size:1.3rem; font-weight:900; color:{accent_color}; line-height:1.1;">${d_best:,.0f}</div>'
+            f'      <div style="font-size:0.60rem; color:{text_muted}; margin-top:2px;">calls handled without sending a squad</div>'
+            f'    </div>'
+            f'    {patrol_time_line}'
+            f'  </div>'
+            f'  <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:7px;">'
+            f'    <div title="Calls assisted by thermal are modeled from this station\'s own flights and calls for service in range." style="background:rgba(251,191,36,0.08); border:1px solid rgba(251,191,36,0.22); border-radius:6px; padding:6px 8px;">'
+            f'      <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:1px;">🔥 Thermal Response Value<span class="tip" data-tip="Flights where thermal imaging aided the response - est. 12% of serviceable flights. Capped to actual zone calls in range.">?</span></div>'
+            f'      <div style="font-size:0.72rem; font-weight:700; color:{card_title}; line-height:1.15;">{d_thermal_calls:,.0f} calls assisted</div>'
+            f'      <div style="font-size:0.85rem; font-weight:800; color:#fbbf24; line-height:1.1; margin-top:2px;">${d_thermal:,.0f}/yr</div>'
+            f'    </div>'
+            f'    <div title="K-9 calls assisted are modeled from this station\'s own flights and calls for service in range." style="background:rgba(57,255,20,0.06); border:1px solid rgba(57,255,20,0.18); border-radius:6px; padding:6px 8px;">'
+            f'      <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:1px;">🐕 K-9 Replacement Value<span class="tip" data-tip="Flights where drone thermal support replaced a K-9 deployment - est. 3% of serviceable flights. Capped to zone calls in range.">?</span></div>'
+            f'      <div style="font-size:0.72rem; font-weight:700; color:{card_title}; line-height:1.15;">{d_k9_calls:,.0f} calls assisted</div>'
+            f'      <div style="font-size:0.85rem; font-weight:800; color:#39FF14; line-height:1.1; margin-top:2px;">${d_k9:,.0f}/yr</div>'
+            f'    </div>'
+            f'  </div>'
+            f'  <div title="Fire response value is modeled from fire/smoke/alarm calls in this station\'s zone." style="background:rgba(251,113,33,0.07); border:1px solid rgba(251,113,33,0.25); border-radius:6px; padding:6px 10px; margin-top:6px;">'
+            f'    <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:3px;">🚒 Fire Department Value<span class="tip" data-tip="Est. 5% of serviceable flights assist fire calls.">?</span></div>'
+            f'    <div style="display:flex; justify-content:space-between; align-items:baseline; margin-top:2px;">'
+            f'      <div>'
+            f'        <div style="font-size:0.62rem; color:{text_muted};">Fire calls assisted</div>'
+            f'        <div style="font-size:0.78rem; font-weight:700; color:{card_title};">{d_fire_calls:,.0f}</div>'
+            f'      </div>'
+            f'      <div style="font-size:0.85rem; font-weight:800; color:#fb7121;">${d_fire:,.0f}/yr</div>'
+            f'    </div>'
+            f'  </div>'
+            f'</div>'
+        ) if show_financials else ''
+
+        _full_fin_value_breakdown = (
+            f'<div style="border:1px solid rgba(57,255,20,0.18); border-radius:6px; padding:6px 10px; margin-bottom:8px; background:rgba(57,255,20,0.04);">'
+            f'  <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px;">Value Breakdown<span class="tip" data-tip="EXCLUSIVE: savings from calls only this drone can reach. CONCURRENT: savings from shared-zone calls captured only when the partner drone is busy.">?</span></div>'
+            f'  <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:4px; align-items:center; margin-bottom:4px;">'
+            f'    <div style="text-align:center;">'
+            f'      <div style="color:{accent_color}; font-weight:700; font-size:0.78rem;">${d_base_annual:,.0f}</div>'
+            f'      <div style="color:{text_muted}; font-size:0.63rem;">exclusive</div>'
+            f'    </div>'
+            f'    <div style="color:{text_muted}; font-size:0.75rem; opacity:0.5; text-align:center;">+</div>'
+            f'    <div style="text-align:center;">'
+            f'      <div style="color:#39FF14; font-weight:700; font-size:0.78rem;">${d_conc_annual:,.0f}</div>'
+            f'      <div style="color:{text_muted}; font-size:0.63rem;">concurrent</div>'
+            f'    </div>'
+            f'  </div>'
+            f'  <div style="font-size:0.65rem; color:{text_muted}; opacity:0.8; border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px; text-align:center;">{util_pct} utilization{"  ·  ⚠️ over capacity" if d_has_deficit else ""} · ROI {d_best_be}</div>'
+            f'</div>'
+        ) if show_financials else ''
+
+        _full_fin_capex_roi = (
+            f'<div style="border-top:1px solid {card_border}; padding-top:6px; display:grid; grid-template-columns:1fr 1fr; gap:4px 8px; font-size:0.68rem; margin-bottom:8px;">'
+            f'  <div style="color:{text_muted};">CapEx<span class="tip" data-tip="One-time hardware cost for this unit. Responder: $80,000. Guardian: $160,000.">?</span></div>'
+            f'  <div style="text-align:right; font-weight:700; color:{card_title};">${d_cost:,.0f}</div>'
+            f'  <div style="color:{text_muted};">Base ROI<span class="tip" data-tip="Months to recover unit CapEx from exclusive-zone savings alone at current DFR and deflection rates.">?</span></div>'
+            f'  <div style="text-align:right; font-weight:800; color:{accent_color};">{d_be}</div>'
+            f'</div>'
+        ) if show_financials else ''
+
         # ── SIMPLE CARD (toggled from Display Options) ───────────────────────
         if simple:
             _pin_badge = (
@@ -1220,7 +1324,6 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
                 f'<div style="font-size:0.60rem;color:#dc3545;font-weight:700;margin-top:6px;padding-top:5px;border-top:1px solid rgba(220,53,69,0.3);">⚠️ Capacity deficit — {d_on_scene:.1f} min on-scene</div>'
                 if d_has_deficit else ""
             )
-            _specialty_total = d_thermal + d_k9 + d_fire
             _cap_strip = (
                 f'<div style="display:flex;align-items:center;gap:5px;margin-top:6px;padding-top:5px;border-top:1px solid rgba(220,53,69,0.3);">'
                 f'<span style="font-size:0.60rem;color:#dc3545;font-weight:700;">⚠️ Over capacity</span>'
@@ -1239,21 +1342,14 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   <div style="font-size:0.62rem;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
     <a href="{gmaps_url}" target="_blank" style="color:{accent_color};text-decoration:none;opacity:0.85;">📍 {d_address} ↗</a>
   </div>
-  <!-- Annual Value hero -->
-  <div style="background:rgba(0,210,255,0.07);border:1px solid rgba(0,210,255,0.25);border-radius:6px;padding:7px 10px;text-align:center;margin-bottom:6px;">
-    <div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:1px;">Annual Value<span class="tip" data-tip="Best-case annual savings from calls this drone resolves without sending a ground unit. Includes both exclusive and concurrent zone coverage.">?</span></div>
-    <div style="font-size:1.6rem;font-weight:900;color:{accent_color};line-height:1.1;">${d_best:,.0f}</div>
-  </div>
+  {_sim_fin_hero}
   <!-- 2x2 key metrics -->
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:6px;">
     <div style="background:rgba(255,255,255,0.05);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
       <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Aerial Response<span class="tip" data-tip="Average travel time from this station to incidents in its zone, based on drone speed and straight-line distance with a 1.4x routing factor.">?</span></div>
       <div style="font-size:0.95rem;font-weight:900;color:{card_title};">{d_time:.1f} min</div>
     </div>
-    <div style="background:rgba(0,210,255,0.07);border:1px solid rgba(0,210,255,0.18);border-radius:5px;padding:6px 8px;text-align:center;">
-      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Break-Even<span class="tip" data-tip="Months to recover the unit CapEx from annual capacity savings at current DFR and deflection rates.">?</span></div>
-      <div style="font-size:0.95rem;font-weight:900;color:{accent_color};">{d_be}</div>
-    </div>
+    {_sim_fin_breakeven_cell}
     <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
       <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Resolved/day<span class="tip" data-tip="Calls per day closed without dispatching an officer: total station flights/day (exclusive + shared zone) × deflection rate. Drone arrived, assessed, and dispatch stood down.">?</span></div>
       <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{d_deflected:.1f} calls</div>
@@ -1263,16 +1359,8 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
       <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{int(d_zone_calls):,}</div>
     </div>
   </div>
-  <!-- Specialty total -->
-  <div style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.18);border-radius:5px;padding:5px 10px;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-    <span style="font-size:0.60rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">🔥🐕🚒 Specialty Value<span class="tip" data-tip="Combined value from thermal imaging assists (12% of flights), K-9 replacement (3% of flights), and fire scene support (5% of flights). Separate from Annual Capacity Value.">?</span></span>
-    <span style="font-size:0.85rem;font-weight:800;color:#fbbf24;">${_specialty_total:,.0f}/yr</span>
-  </div>
-  <!-- CapEx footer -->
-  <div style="display:flex;justify-content:space-between;align-items:center;padding-top:5px;border-top:1px solid {card_border};font-size:0.65rem;">
-    <span style="color:{text_muted};">CapEx<span class="tip" data-tip="One-time hardware cost for this unit. Responder: $80,000. Guardian: $160,000.">?</span></span>
-    <span style="font-weight:700;color:{card_title};">${d_cost:,.0f}</span>
-  </div>
+  {_sim_fin_specialty}
+  {_sim_fin_capex}
   {_cap_strip}
 </div>''')
             continue
@@ -1289,57 +1377,8 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
       <a href="{gmaps_url}" target="_blank" style="color:{accent_color}; text-decoration:none; font-weight:500; opacity:0.85;">📍 {d_address} ↗</a>
     </div>
   </div>
-  <div style="background:rgba(0,210,255,0.07); border:1px solid rgba(0,210,255,0.15); border-radius:6px; padding:8px 10px; margin-bottom:6px;"
-       title="Annual Capacity Value is based on calls handled without sending a squad.">
-    <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Annual Capacity Value<span class="tip" data-tip="Estimated annual savings from calls this drone resolves without sending a ground unit. Capped at physical flight capacity.">?</span>{"  ⚠️ capped at physical max" if d_has_deficit else ""}</div>
-    <div style="display:flex; align-items:baseline; justify-content:space-between; gap:6px;">
-      <div>
-        <div style="font-size:1.3rem; font-weight:900; color:{accent_color}; line-height:1.1;">${d_best:,.0f}</div>
-        <div style="font-size:0.60rem; color:{text_muted}; margin-top:2px;">calls handled without sending a squad</div>
-      </div>
-      {patrol_time_line}
-    </div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:7px;">
-      <div title="Calls assisted by thermal are modeled from this station's own flights and calls for service in range." style="background:rgba(251,191,36,0.08); border:1px solid rgba(251,191,36,0.22); border-radius:6px; padding:6px 8px;">
-        <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:1px;">🔥 Thermal Response Value<span class="tip" data-tip="Flights where thermal imaging aided the response - est. 12% of serviceable flights. Capped to actual zone calls in range.">?</span></div>
-        <div style="font-size:0.72rem; font-weight:700; color:{card_title}; line-height:1.15;">{d_thermal_calls:,.0f} calls assisted</div>
-        <div style="font-size:0.85rem; font-weight:800; color:#fbbf24; line-height:1.1; margin-top:2px;">${d_thermal:,.0f}/yr</div>
-      </div>
-      <div title="K-9 calls assisted are modeled from this station's own flights and calls for service in range." style="background:rgba(57,255,20,0.06); border:1px solid rgba(57,255,20,0.18); border-radius:6px; padding:6px 8px;">
-        <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:1px;">🐕 K-9 Replacement Value<span class="tip" data-tip="Flights where drone thermal support replaced a K-9 deployment - est. 3% of serviceable flights. Capped to zone calls in range.">?</span></div>
-        <div style="font-size:0.72rem; font-weight:700; color:{card_title}; line-height:1.15;">{d_k9_calls:,.0f} calls assisted</div>
-        <div style="font-size:0.85rem; font-weight:800; color:#39FF14; line-height:1.1; margin-top:2px;">${d_k9:,.0f}/yr</div>
-      </div>
-    </div>
-    <div title="Fire response value is modeled from fire/smoke/alarm calls in this station's zone." style="background:rgba(251,113,33,0.07); border:1px solid rgba(251,113,33,0.25); border-radius:6px; padding:6px 10px; margin-top:6px;">
-      <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:3px;">🚒 Fire Department Value<span class="tip" data-tip="Est. 5% of serviceable flights assist fire calls. Value = aerial scene size-up (avoids premature aerial ladder deployment at ~$4,500/deploy) + overhaul hotspot detection (~$90/call crew time saved). Blended: $450/fire call assisted.">?</span></div>
-      <div style="display:flex; justify-content:space-between; align-items:baseline; margin-top:2px;">
-        <div>
-          <div style="font-size:0.62rem; color:{text_muted};">Fire calls assisted</div>
-          <div style="font-size:0.78rem; font-weight:700; color:{card_title};">{d_fire_calls:,.0f}</div>
-        </div>
-        <div style="font-size:0.85rem; font-weight:800; color:#fb7121;">${d_fire:,.0f}/yr</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Value breakdown box -->
-  <div style="border:1px solid rgba(57,255,20,0.18); border-radius:6px; padding:6px 10px; margin-bottom:8px; background:rgba(57,255,20,0.04);">
-    <div style="font-size:0.60rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px;">Value Breakdown<span class="tip" data-tip="EXCLUSIVE: savings from calls only this drone can reach. Formula: exclusive flights/day x deflection rate x $76/call x 365. Guaranteed regardless of other drones. CONCURRENT: savings from shared-zone calls captured only when the partner drone is already busy. Same formula but conditional — if partner is free it handles those calls instead. Combined = best-case Annual Capacity Value.">?</span></div>
-    <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:4px; align-items:center; margin-bottom:4px;">
-      <div style="text-align:center;">
-        <div style="color:{accent_color}; font-weight:700; font-size:0.78rem;">${d_base_annual:,.0f}</div>
-        <div style="color:{text_muted}; font-size:0.63rem;">exclusive</div>
-      </div>
-      <div style="color:{text_muted}; font-size:0.75rem; opacity:0.5; text-align:center;">+</div>
-      <div style="text-align:center;">
-        <div style="color:#39FF14; font-weight:700; font-size:0.78rem;">${d_conc_annual:,.0f}</div>
-        <div style="color:{text_muted}; font-size:0.63rem;">concurrent</div>
-      </div>
-    </div>
-    <div style="font-size:0.65rem; color:{text_muted}; opacity:0.8; border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px; text-align:center;">{util_pct} utilization{"  ·  ⚠️ over capacity" if d_has_deficit else ""} · ROI {d_best_be}</div>
-  </div>
-
+  {_full_fin_annual_cap}
+  {_full_fin_value_breakdown}
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.68rem; flex:1; margin-bottom:8px; align-content:start;">
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Zone Flights/day<span class="tip" data-tip="Flights demanded per day in this zone: zone_pct x daily_calls x DFR_rate. This is demand, not actual flights flown.">?</span></div>
@@ -1378,13 +1417,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
   </div>
 
-  <!-- CapEx + ROI footer -->
-  <div style="border-top:1px solid {card_border}; padding-top:6px; display:grid; grid-template-columns:1fr 1fr; gap:4px 8px; font-size:0.68rem; margin-bottom:8px;">
-    <div style="color:{text_muted};">CapEx<span class="tip" data-tip="One-time hardware cost for this unit. Responder: $80,000. Guardian: $160,000.">?</span></div>
-    <div style="text-align:right; font-weight:700; color:{card_title};">${d_cost:,.0f}</div>
-    <div style="color:{text_muted};">Base ROI<span class="tip" data-tip="Months to recover unit CapEx from exclusive-zone savings alone at current DFR and deflection rates.">?</span></div>
-    <div style="text-align:right; font-weight:800; color:{accent_color};">{d_be}</div>
-  </div>
+  {_full_fin_capex_roi}
 
   { (f'<div style="border-top:1px solid rgba(220,53,69,0.35);margin-top:4px;padding-top:5px;">'  
        f'<div style="font-size:0.62rem;font-weight:800;color:#dc3545;margin-bottom:3px;">⚠️ CAPACITY DEFICIT · {d_on_scene:.1f} min on-scene (min 10)</div>'  

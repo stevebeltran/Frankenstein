@@ -6284,6 +6284,50 @@ def main():
                         f"&zoom={_fcc_zoom_export}&vlon={center_lon:.6f}&vlat={center_lat:.6f}"
                         f"&speed=25&tech=300&br=4")
 
+            # ── 4G LTE carrier mini-maps for export section 03b ─────────────────
+            _exp_carrier_results = _carrier_coverage_analysis(
+                st.session_state.get('active_state', ''), city_boundary_geom
+            )
+            if _exp_carrier_results:
+                _exp_map_cols = []
+                for _eci, _ecr in enumerate(_exp_carrier_results[:3]):
+                    _epct = f"{_ecr['pct']:.1f}%" if _ecr['pct'] > 0 else "No data"
+                    _ebadge = "#22c55e" if _ecr['pct'] >= 90 else "#f59e0b" if _ecr['pct'] >= 70 else "#ef4444"
+                    _emfig = _build_carrier_mini_map(
+                        _ecr, city_boundary_geom, center_lat, center_lon,
+                        dynamic_zoom, 'carto-darkmatter'
+                    )
+                    _inc_plotlyjs = 'cdn' if _eci == 0 else False
+                    _emap_div = _emfig.to_html(
+                        full_html=False, include_plotlyjs=_inc_plotlyjs,
+                        default_height='240px', default_width='100%'
+                    )
+                    _exp_map_cols.append(
+                        f'<div style="flex:1;min-width:200px;">'
+                        f'<div style="text-align:center;padding:6px 0 4px;">'
+                        f'<span style="font-size:1rem;font-weight:800;color:{_ecr["color"]};">{_ecr["carrier"]}</span><br>'
+                        f'<span style="font-size:1.7rem;font-weight:900;color:{_ebadge};font-family:monospace;">{_epct}</span><br>'
+                        f'<span style="font-size:0.62rem;color:#8899aa;text-transform:uppercase;letter-spacing:1px;">of jurisdiction covered</span>'
+                        f'</div>{_emap_div}</div>'
+                    )
+                _exp_lte_content = (
+                    '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;">'
+                    + ''.join(_exp_map_cols)
+                    + '</div>'
+                    + '<p style="font-size:0.65rem;color:#556;margin:8px 0 0;">'
+                    + 'Source: FCC Broadband Data Collection · AT&amp;T, T-Mobile, Verizon 4G LTE coverage polygons.'
+                    + '</p>'
+                )
+            else:
+                _exp_lte_content = (
+                    f'<a href="{_fcc_url}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">'
+                    f'<div style="display:flex;align-items:center;justify-content:space-between;background:#0d1b2e;border:1px solid #1e3a5f;border-radius:10px;padding:20px 28px;">'
+                    f'<div><div style="color:#00b4d8;font-size:1rem;font-weight:600;margin-bottom:4px;">📶 Open FCC 4G LTE Coverage Map</div>'
+                    f'<div style="color:#6b7f99;font-size:0.78rem;">FCC National Broadband Map · AT&amp;T, T-Mobile, Verizon · Centered on {center_lat:.4f}, {center_lon:.4f}</div>'
+                    f'</div><div style="color:#00b4d8;font-size:1.6rem;margin-left:20px;">↗</div></div></a>'
+                    f'<p style="font-size:0.65rem;color:#556;margin:10px 0 0;">Opens broadbandmap.fcc.gov in a new tab.</p>'
+                )
+
             # ── Re-establish tier badge variables for export ────────────────────────
             _exp_pricing_tier = st.session_state.get('pricing_tier', 'Safe Guard')
             if _exp_pricing_tier == "Safe Guard":
@@ -6774,18 +6818,9 @@ def main():
 
     <!-- ── 03b: 4G LTE CELL COVERAGE ─────────────────────────────── -->
     <section class="doc-section" id="cell-coverage">
-      <div class="section-eyebrow"><span class="pg-num">03b</span><span class="pg-title">4G LTE Cell Coverage</span><span class="src" data-src="Source: FCC National Broadband Map (broadbandmap.fcc.gov). Coverage reflects carrier-reported FCC BDC data for 4G LTE (tech code 300) at ≥25 Mbps download. Displayed carriers include AT&T, T-Mobile, Verizon, and US Cellular. Coverage data may not reflect actual field conditions.">ⓘ</span></div>
-      <p style="font-size:0.78rem;color:#8899aa;margin:0 0 16px;">FCC-reported 4G LTE availability centered on the deployment area. Click the link below to open the interactive map and toggle individual carriers for drone data-link connectivity assessment.</p>
-      <a href="{_fcc_url}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
-        <div style="display:flex;align-items:center;justify-content:space-between;background:#0d1b2e;border:1px solid #1e3a5f;border-radius:10px;padding:20px 28px;">
-          <div>
-            <div style="color:#00b4d8;font-size:1rem;font-weight:600;margin-bottom:4px;">📶 Open FCC 4G LTE Coverage Map</div>
-            <div style="color:#6b7f99;font-size:0.78rem;">FCC National Broadband Map · AT&amp;T, T-Mobile, Verizon, US Cellular · Centered on {center_lat:.4f}, {center_lon:.4f}</div>
-          </div>
-          <div style="color:#00b4d8;font-size:1.6rem;margin-left:20px;">↗</div>
-        </div>
-      </a>
-      <p style="font-size:0.65rem;color:#556;margin:10px 0 0;">Opens broadbandmap.fcc.gov in a new tab. Data: FCC Broadband Data Collection © Federal Communications Commission.</p>
+      <div class="section-eyebrow"><span class="pg-num">03b</span><span class="pg-title">4G LTE Cell Coverage</span><span class="src" data-src="Source: FCC National Broadband Map (broadbandmap.fcc.gov). Coverage reflects carrier-reported FCC BDC data for 4G LTE (tech code 300) at ≥25 Mbps download. Displayed carriers include AT&T, T-Mobile, and Verizon. Coverage data may not reflect actual field conditions.">ⓘ</span></div>
+      <p style="font-size:0.78rem;color:#8899aa;margin:0 0 8px;">FCC-reported 4G LTE carrier availability across the deployment jurisdiction — critical for drone data-link connectivity planning. Coverage sorted highest to lowest.</p>
+      {_exp_lte_content}
     </section>
 
     <!-- ── 04: INCIDENT ANALYSIS ─────────────────────────────────── -->
@@ -7016,7 +7051,7 @@ def main():
       <div class="section-eyebrow"><span class="pg-num">07</span><span class="pg-title">Community Infrastructure &amp; Asset Protection</span><span class="src" data-src="Sources: OpenStreetMap (© contributors, ODbL license) · DHS HIFLD Open Data (public domain) · NCES Common Core of Data · CMS Hospital Compare · NEMSIS National EMS Database · NTD National Transit Database · IMLS Public Libraries Survey · US Courts PACER · EPA Infrastructure Maps · US Energy Information Administration · FAA LAANC UAS Facility Maps · User-verified locations.">ⓘ</span></div>
 
       <p style="color:var(--text);font-size:14px;line-height:1.6;margin-bottom:20px;">
-        This deployment protects <strong>{len(df_stations_all):,} indexed public facilities</strong> across {prop_city}, {prop_state} — from emergency response centers and critical infrastructure to schools, hospitals, places of worship, and community services. The BRINC DFR network provides 24/7 aerial first-response coverage prioritizing assets most critical to public safety, economic continuity, and community resilience. All facility coordinates have been verified against FAA LAANC facility maps and current data sources.
+        This deployment protects <strong>{len(df_stations_all):,} indexed public facilities</strong> across {prop_city}, {prop_state} — from emergency response centers and schools to hospitals, power plants, water treatment facilities, places of worship, and community services. The BRINC DFR network provides 24/7 aerial first-response coverage prioritizing assets most critical to public safety, economic continuity, and community resilience — including <strong>⚡ power stations</strong> and <strong>💧 water treatment facilities</strong> that serve as essential infrastructure for the entire region. All facility coordinates have been verified against FAA LAANC facility maps and current data sources.
       </p>
 
       <!-- FACILITY TYPE SUMMARY -->

@@ -1379,6 +1379,11 @@ def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, se
     return display_calls.to_crs(epsg=4326)
 
 # ============================================================
+# PAGE CONFIG — must be the first Streamlit command
+# ============================================================
+st.set_page_config(layout="wide", page_title="BRINC Drone-as-First-Responder")
+
+# ============================================================
 # SESSION STATE INITIALIZATION
 # ============================================================
 # This MUST run before any st.session_state checks to prevent KeyError
@@ -3521,12 +3526,12 @@ def main():
 
         prog2 = st.sidebar.empty()
         prog2.caption(get_spatial_message())
-        calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls = optimization.optimization.precompute_spatial_data(
+        calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls = optimization.precompute_spatial_data(
             df_calls, df_calls_full, df_stations_all, city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash
         )
         if total_calls == 0 and len(df_calls) > 0:
             st.warning("No uploaded calls fell inside the selected jurisdiction boundary. Coverage rings can still render, but call coverage will be 0%. Check city/state selection or clean outlier coordinates in the CAD file.")
-        df_curve = optimization.optimization.compute_all_elbow_curves(
+        df_curve = optimization.compute_all_elbow_curves(
             total_calls, resp_matrix, guard_matrix,
             [s['clipped_2m'] for s in station_metadata],
             [s['clipped_guard'] for s in station_metadata],
@@ -3626,7 +3631,7 @@ def main():
                     if guard_strategy == "Maximize Call Coverage":
                         # solve_mclp returns (r_best, g_best, chrono_r, chrono_g)
                         # Pass 1 runs Guardians only (num_resp=0) so r_best=[] and g_best has the result
-                        _, g_best, _, chrono_g = optimization.optimization.solve_mclp(
+                        _, g_best, _, chrono_g = optimization.solve_mclp(
                             resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g,
                             0, k_guardian, True, incremental=incremental_build,
                             forced_r=[], forced_g=locked_g_pins
@@ -3660,7 +3665,7 @@ def main():
                     _excl = set(g_best) if not allow_redundancy else set()
 
                     if resp_strategy == "Maximize Call Coverage":
-                        r_best, _, chrono_r, _ = optimization.optimization.solve_mclp(
+                        r_best, _, chrono_r, _ = optimization.solve_mclp(
                             resp_matrix_eff, guard_matrix, dist_matrix_r_eff, dist_matrix_g,
                             k_responder, 0, allow_redundancy, incremental=incremental_build,
                             forced_r=locked_r_pins, forced_g=[]

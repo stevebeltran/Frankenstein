@@ -6111,42 +6111,9 @@ def main():
                 "app_version": __version__,
             }
 
-            _html_export_cache_key = (
-                prop_city, prop_state,
-                int(st.session_state.get('total_original_calls', 0) or 0),
-                len(active_drones),
-                len(df_stations_all) if df_stations_all is not None else 0,
-                len(df_calls_full) if df_calls_full is not None else (len(df_calls) if df_calls is not None else 0),
-                round(float(fleet_capex or 0), 2),
-                round(float(calls_covered_perc or 0), 3),
-                round(float(area_covered_perc or 0), 3),
-                round(float(avg_resp_time or 0), 3),
-                round(float(avg_time_saved or 0), 3),
-                st.session_state.get('boundary_kind', ''),
-                st.session_state.get('boundary_source_path', ''),
-                bool(_show_analytics_section),
-                bool(_show_community_impact_section),
-                bool(_show_school_safety_section),
-                bool(_show_lte_section),
-                __version__,
-            )
-            if st.session_state.get('_html_export_cache_key') != _html_export_cache_key:
-                st.session_state['_html_export_cache'] = None
-            _cached_export_html = st.session_state.get('_html_export_cache')
-            _html_export_ready = (
-                st.session_state.get('_html_export_cache_key') == _html_export_cache_key
-                and isinstance(_cached_export_html, str)
-                and bool(_cached_export_html)
-            )
-            _prep_label = 'Refresh HTML Export' if _html_export_ready else 'Prepare HTML Export'
-            _build_html_export = st.sidebar.button(
-                _prep_label,
-                use_container_width=True,
-                help='Build the print-ready HTML report on demand. Rebuild after changing data, toggles, or deployment settings.'
-            )
-            export_html = _cached_export_html if _html_export_ready else None
+            export_html = None
 
-            if _build_html_export:
+            if True:
                 fig_for_export = go.Figure()
     
                 # ── Boundary polygon ─────────────────────────────────────────────────
@@ -7661,9 +7628,6 @@ def main():
                         flags=_re.DOTALL,
                     )
     
-                st.session_state['_html_export_cache'] = export_html
-                st.session_state['_html_export_cache_key'] = _html_export_cache_key
-                _html_export_ready = True
         # ── Download buttons — always rendered so they're visible in the sidebar ──
         _safe_city   = _safe_city_base
         _ts          = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -7692,28 +7656,21 @@ def main():
                                prop_name, prop_email, details=export_details)
         # 2. Executive Summary / proposal HTML export
         if fleet_capex > 0:
-            if export_html:
-                if st.sidebar.download_button(f"📄 {prop_city}, {prop_state} — Executive Summary",
-                                              data=export_html,
-                                              file_name=f"BRINC_Executive_Summary_{_safe_city}_{_version_slug}_{_ts}.html",
-                                              mime="text/html",
-                                              use_container_width=True):
-                    # ── Track export event ───────────────────────────────────────────
-                    st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['HTML']
-                    st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
-                    _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                                  "HTML", k_responder, k_guardian, calls_covered_perc,
-                                  prop_name, prop_email, details=export_details)
-                    _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                                   "HTML", k_responder, k_guardian, calls_covered_perc,
-                                   prop_name, prop_email, details=export_details)
-                st.sidebar.caption("HTML export is ready. Use Refresh HTML Export after changing data or settings.")
-            else:
-                st.sidebar.button(f"📄 {prop_city}, {prop_state} — Executive Summary",
-                                  disabled=True,
-                                  use_container_width=True,
-                                  help="Click 'Prepare HTML Export' to build the latest report.")
-                st.sidebar.caption("Click Prepare HTML Export to build the latest executive summary and print-ready proposal.")
+            if st.sidebar.download_button(f"📄 {prop_city}, {prop_state} — Executive Summary",
+                                          data=export_html,
+                                          file_name=f"BRINC_Executive_Summary_{_safe_city}_{_version_slug}_{_ts}.html",
+                                          mime="text/html",
+                                          use_container_width=True):
+                # ── Track export event ───────────────────────────────────────────
+                st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['HTML']
+                st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
+                _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                              "HTML", k_responder, k_guardian, calls_covered_perc,
+                              prop_name, prop_email, details=export_details)
+                _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                               "HTML", k_responder, k_guardian, calls_covered_perc,
+                               prop_name, prop_email, details=export_details)
+            st.sidebar.caption("HTML export reflects the current on-screen proposal and section toggles.")
 
         # 3. Google Earth KML — only when drones are placed
         if active_drones:

@@ -39,7 +39,11 @@
       "Bash(file cell_coverage/raw/*.gz)",
       "Bash(gunzip -c cell_coverage/raw/310.csv.gz)",
       "Bash(sed -i '5675,5710d' app.py)",
-      "Bash(sed -i '5674r /tmp/fix_download.txt' app.py)"
+      "Bash(sed -i '5674r /tmp/fix_download.txt' app.py)",
+      "Bash(awk -F: 'NR>120 && NR<=200')",
+      "Bash(awk -F: '$1 >= 6800 && $1 <= 12735')",
+      "Bash(awk -F: '$1 >= 440 && $1 <= 700')",
+      "Bash(awk -F: '$1 >= 6800')"
     ]
   }
 }

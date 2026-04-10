@@ -1458,6 +1458,139 @@ def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, se
 st.set_page_config(layout="wide", page_title="BRINC Drone-as-First-Responder")
 
 # ============================================================
+# GOOGLE OAUTH LOGIN GATE
+# ============================================================
+# Activates only when [auth] section is present in secrets.toml.
+# Falls through silently if auth is not configured (local dev without secrets).
+try:
+    if hasattr(st, 'user') and "auth" in st.secrets:
+        if not st.user.is_logged_in:
+            import base64 as _b64
+            try:
+                _logo_b64 = _b64.b64encode(open("logo.png", "rb").read()).decode()
+                _logo_tag = f'<img src="data:image/png;base64,{_logo_b64}" style="height:80px;object-fit:contain;" alt="BRINC">'
+            except Exception:
+                _logo_tag = '<div style="font-size:2rem;font-weight:900;color:#00D2FF;letter-spacing:4px;">BRINC DFR</div>'
+            st.markdown(f"""
+            <style>
+            section[data-testid="stSidebar"] {{ display: none !important; }}
+            [data-testid="collapsedControl"],
+            [data-testid="stSidebarCollapsedControl"] {{ display: none !important; }}
+            [data-testid="stAppViewContainer"] {{
+                background: radial-gradient(ellipse at 50% 30%, #0d1b2e 0%, #060a12 70%) !important;
+            }}
+            [data-testid="block-container"] {{
+                padding-top: 0 !important;
+                padding-bottom: 0 !important;
+                max-width: 100% !important;
+            }}
+            div[data-testid="stButton"] {{
+                display: flex !important;
+                justify-content: center !important;
+                margin-top: 0 !important;
+            }}
+            div[data-testid="stButton"] > button {{
+                background: linear-gradient(135deg, #0077b6, #00b4d8) !important;
+                color: #fff !important;
+                border: none !important;
+                border-radius: 10px !important;
+                padding: 13px 44px !important;
+                font-size: 0.95rem !important;
+                font-weight: 600 !important;
+                letter-spacing: 0.6px !important;
+                box-shadow: 0 4px 24px rgba(0,180,216,0.35) !important;
+            }}
+            div[data-testid="stButton"] > button:hover {{
+                background: linear-gradient(135deg, #005f8a, #009dbf) !important;
+                box-shadow: 0 6px 30px rgba(0,180,216,0.5) !important;
+            }}
+            </style>
+            <div style="
+                display:flex;flex-direction:column;align-items:center;justify-content:center;
+                min-height:85vh;gap:0;
+            ">
+              <div style="
+                background:rgba(255,255,255,0.03);
+                border:1px solid rgba(255,255,255,0.08);
+                border-radius:20px;
+                padding:52px 64px 44px;
+                display:flex;flex-direction:column;align-items:center;gap:18px;
+                box-shadow:0 20px 60px rgba(0,0,0,0.6);
+                backdrop-filter:blur(12px);
+                min-width:340px;
+              ">
+                {_logo_tag}
+                <div style="width:48px;height:2px;background:linear-gradient(90deg,transparent,#00b4d8,transparent);margin:2px 0;"></div>
+                <div style="color:#8a9bb5;font-size:0.78rem;letter-spacing:2.5px;text-transform:uppercase;font-weight:500;">
+                  Drone as First Responder &nbsp;·&nbsp; Optimizer
+                </div>
+                <div style="height:12px;"></div>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.button("Sign in with Google", on_click=st.login, args=("google",),
+                      type="primary", use_container_width=False)
+            st.html("""
+<script>
+(function() {
+    var sel = [
+        'header', '[data-testid="stHeader"]', '[data-testid="stToolbar"]',
+        '[data-testid="stDecoration"]', '[data-testid="stStatusWidget"]',
+        '#MainMenu', 'footer', '.stDeployButton'
+    ];
+    function hide() {
+        try {
+            var doc = window.parent.document;
+            sel.forEach(function(s) {
+                doc.querySelectorAll(s).forEach(function(el) {
+                    el.style.setProperty('display', 'none', 'important');
+                });
+            });
+        } catch(e) {}
+    }
+    hide();
+    try {
+        new MutationObserver(hide).observe(window.parent.document.body, {childList:true, subtree:true});
+    } catch(e) {}
+})();
+</script>
+""", unsafe_allow_javascript=True)
+            st.stop()
+
+        # ── Restrict to @brincdrones.com accounts ──────────────────────────
+        _user_email = getattr(st.user, "email", "") or ""
+        if not _user_email.lower().endswith("@brincdrones.com"):
+            st.markdown(
+                "<style>section[data-testid='stSidebar'] { display: none !important; }</style>",
+                unsafe_allow_html=True
+            )
+            st.error(
+                f"Access restricted to BRINC Drones employees.\n\n"
+                f"You are signed in as **{_user_email}**.\n\n"
+                "Please sign in with your @brincdrones.com account."
+            )
+            st.button("Sign out", on_click=st.logout)
+            st.stop()
+
+        # ── Populate session state from OAuth identity ──────────────────────
+        _authed_email = getattr(st.user, "email", "") or ""
+        _authed_name  = getattr(st.user, "name",  "") or _authed_email.split("@")[0]
+        if not st.session_state.get('_oauth_logged', False):
+            st.session_state['google_user_email'] = _authed_email
+            st.session_state['google_user_name']  = _authed_name
+            # Derive brinc_user (first.last prefix) from email for backwards compatibility
+            _prefix = _authed_email.split("@")[0]
+            st.session_state['brinc_user'] = _prefix
+            st.session_state['_oauth_logged'] = True
+            try:
+                _log_login_to_sheets(_authed_email, _authed_name)
+            except Exception:
+                pass
+
+except Exception:
+    pass  # Auth not configured — app runs without login gate
+
+# ============================================================
 # SESSION STATE INITIALIZATION
 # ============================================================
 # This MUST run before any st.session_state checks to prevent KeyError
@@ -3338,11 +3471,6 @@ def main():
                     if 'pp_type_buf' not in st.session_state: st.session_state['pp_type_buf'] = "Police"
                     if 'pp_role_buf' not in st.session_state: st.session_state['pp_role_buf'] = "Lock as Guardian"
 
-                    st.sidebar.markdown(
-                        f"<div style='font-size:0.7rem; color:{text_muted}; margin:0 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>"
-                        "Add By Map <span class='tip' data-tip='Use the dropped map pin to add a custom station without typing an address.'>?</span></div>",
-                        unsafe_allow_html=True
-                    )
                     _pp_label = st.sidebar.text_input(
                         "Station Name",
                         value=st.session_state['pp_label_buf'],
@@ -3359,18 +3487,11 @@ def main():
                         key="pp_type_select",
                         help="Category used to label the station and keep it grouped correctly in the model."
                     )
-                    _pp_role_row_label, _pp_role_row_picker = st.sidebar.columns([1.0, 2.2], gap="small")
-                    _pp_role_row_label.markdown(
-                        f"<div style='font-size:0.78rem; color:{text_main}; font-weight:600; margin-top:6px;'>"
-                        "Assign To Fleet <span class='tip' data-tip='Choose whether this custom station is locked into the Guardian or Responder fleet after it is added.'>?</span></div>",
-                        unsafe_allow_html=True
-                    )
-                    _pp_role = _pp_role_row_picker.radio(
+                    _pp_role = st.sidebar.radio(
                         "Assign To Fleet",
                         ["Lock as Guardian", "Lock as Responder"],
                         index=0 if "Guardian" in st.session_state.get('pp_role_buf', "Lock as Guardian") else 1,
                         horizontal=True,
-                        label_visibility="collapsed",
                         key="pp_role_radio",
                         help="Choose which fleet this custom station is locked into after it is added."
                     )
@@ -3447,22 +3568,12 @@ def main():
             # ADD CUSTOM STATION BY ADDRESS
             add_expander = st.sidebar.expander("Add Custom Station", expanded=False)
             with add_expander:
-                st.markdown(
-                    f"<div style='font-size:0.7rem; color:{text_muted}; margin-bottom:8px;'>"
-                    "Add a deployment location by address or by dropping a pin on the map. "
-                    "Address suggestions use Census + OpenStreetMap lookup. Custom stations persist for this session only. "
-                    "<span class='tip' data-tip='Custom stations are stored in session state for the current run only. They remain available until you refresh or clear them.'>?</span></div>",
-                    unsafe_allow_html=True
-                )
                 if 'cs_addr_buf' not in st.session_state: st.session_state['cs_addr_buf'] = ""
                 if 'cs_label_buf' not in st.session_state: st.session_state['cs_label_buf'] = ""
                 if 'cs_type_buf' not in st.session_state: st.session_state['cs_type_buf'] = "Police"
+                if 'cs_role_buf' not in st.session_state: st.session_state['cs_role_buf'] = "Lock as Guardian"
 
-                st.markdown(
-                    f"<div style='font-size:0.7rem; color:{text_muted}; margin:0 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>"
-                    "Add By Address <span class='tip' data-tip='Type an address, confirm the best suggested match, then add the station into the selected fleet.'>?</span></div>",
-                    unsafe_allow_html=True
-                )
+                # ── Address + details ────────────────────────────────────────
                 _custom_addr = st.text_input(
                     "Address",
                     value=st.session_state['cs_addr_buf'],
@@ -3470,17 +3581,16 @@ def main():
                     key="custom_station_addr",
                     help="Street address to geocode into a custom station. Include city and state for the best match."
                 )
-                _meta_col1, _meta_col2 = st.columns([1.4, 1.0])
-                _custom_label = _meta_col1.text_input(
+                _custom_label = st.text_input(
                     "Station Name",
                     value=st.session_state['cs_label_buf'],
                     placeholder="Fire Station 7",
                     key="custom_station_label",
-                    help="Optional display name for the station. Leave blank to use the matched address."
+                    help="Optional display name. Leave blank to use the matched address."
                 )
                 _type_opts = ["Police", "Fire", "School", "Government", "Hospital", "Library", "Other"]
                 _type_idx = _type_opts.index(st.session_state['cs_type_buf']) if st.session_state['cs_type_buf'] in _type_opts else 0
-                _custom_type = _meta_col2.selectbox(
+                _custom_type = st.selectbox(
                     "Station Type",
                     _type_opts,
                     index=_type_idx,
@@ -3488,6 +3598,7 @@ def main():
                     help="Category used to label the station and keep it grouped correctly in the model."
                 )
 
+                # ── Address suggestion picker ────────────────────────────────
                 _addr_query = _custom_addr.strip()
                 _addr_matches = search_address_candidates(_addr_query, limit=6) if len(_addr_query) >= 4 else []
                 _addr_options = [f"{m['matched_address']} [{m['source']}]" for m in _addr_matches]
@@ -3497,31 +3608,24 @@ def main():
                         options=_addr_options,
                         index=0,
                         key="custom_station_match",
-                        help="Suggestions refresh from Census and OpenStreetMap as you type. The selected match will be used when adding the station."
+                        help="Suggestions refresh from Census and OpenStreetMap as you type."
                     )
                     _selected_match = _addr_matches[_addr_options.index(_addr_pick)]
                     st.caption(f"Using: {_selected_match['matched_address']} | {_selected_match['lat']:.5f}, {_selected_match['lon']:.5f}")
                 elif len(_addr_query) >= 4:
                     _selected_match = None
-                    st.caption("No live address suggestions found yet. You can still try the add button for fallback matching.")
+                    st.caption("No suggestions yet — you can still try the add button for fallback matching.")
                 else:
                     _selected_match = None
 
-                if 'cs_role_buf' not in st.session_state: st.session_state['cs_role_buf'] = "Lock as Guardian"
+                # ── Fleet assignment ─────────────────────────────────────────
                 _role_opts = ["Lock as Guardian", "Lock as Responder"]
                 _role_idx = _role_opts.index(st.session_state['cs_role_buf']) if st.session_state['cs_role_buf'] in _role_opts else 0
-                _role_row_label, _role_row_picker = st.columns([1.0, 2.2], gap="small")
-                _role_row_label.markdown(
-                    f"<div style='font-size:0.78rem; color:{text_main}; font-weight:600; margin-top:6px;'>"
-                    "Assign To Fleet <span class='tip' data-tip='Choose whether this custom station is locked into the Guardian or Responder fleet after it is added.'>?</span></div>",
-                    unsafe_allow_html=True
-                )
-                _custom_role = _role_row_picker.radio(
+                _custom_role = st.radio(
                     "Assign To Fleet",
                     _role_opts,
                     index=_role_idx,
                     horizontal=True,
-                    label_visibility="collapsed",
                     key="custom_station_role",
                     help="Choose which fleet this custom station will be locked into after it is added."
                 )
@@ -3531,36 +3635,13 @@ def main():
                 st.session_state['cs_type_buf'] = _custom_type
                 st.session_state['cs_role_buf'] = _custom_role
 
-                st.markdown("---")
-                st.markdown(
-                    f"<div style='font-size:0.7rem; color:{text_muted}; margin:0 0 6px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>"
-                    "Actions <span class='tip' data-tip='Use Pin Drop to add from the map, Lock Stations to review forced assignments, or Geocode And Add Station to add the typed address.'>?</span></div>",
-                    unsafe_allow_html=True
-                )
-                _action_col1, _action_col2 = st.columns(2)
-                if _action_col1.button(
-                    "Pin Drop",
-                    use_container_width=True,
-                    key="drop_pin_btn",
-                    help="Click on the map to add a custom station by location instead of by address."
-                ):
-                    st.session_state['pin_drop_mode'] = True
-                    st.rerun()
-                if _action_col2.button(
-                    "Lock Stations",
-                    use_container_width=True,
-                    key="lock_stations_btn",
-                    help="Open the station lock manager to review or adjust Guardian and Responder assignments."
-                ):
-                    st.session_state['show_lock_stations'] = True
-                    st.rerun()
-
-                st.markdown("---")
+                # ── Primary action: geocode + add ────────────────────────────
                 if st.button(
                     "Geocode And Add Station",
                     use_container_width=True,
                     key="geocode_btn",
-                    help="Geocode the address, add the station, and lock it to the selected fleet."
+                    help="Geocode the address, add the station, and lock it to the selected fleet.",
+                    type="primary"
                 ):
                     _addr_to_geocode = _custom_addr.strip()
                     if _addr_to_geocode:
@@ -3631,19 +3712,33 @@ def main():
                     else:
                         st.warning("Enter an address first.")
 
+                # ── Secondary actions: pin drop + lock stations ──────────────
+                st.markdown("---")
+                _action_col1, _action_col2 = st.columns(2)
+                if _action_col1.button(
+                    "Pin Drop",
+                    use_container_width=True,
+                    key="drop_pin_btn",
+                    help="Click on the map to add a custom station by location instead of by address."
+                ):
+                    st.session_state['pin_drop_mode'] = True
+                    st.rerun()
+                if _action_col2.button(
+                    "Lock Stations",
+                    use_container_width=True,
+                    key="lock_stations_btn",
+                    help="Open the station lock manager to review or adjust Guardian and Responder assignments."
+                ):
+                    st.session_state['show_lock_stations'] = True
+                    st.rerun()
+
+                # ── Session custom station list ───────────────────────────────
                 _cst_display = st.session_state.get('custom_stations', pd.DataFrame())
-                if not _cst_display.empty:
-                    _custom_added = _cst_display['name'].tolist()
-                else:
-                    _custom_added = []
+                _custom_added = _cst_display['name'].tolist() if not _cst_display.empty else []
                 if _custom_added:
-                    st.markdown(
-                        f"<div style='font-size:0.65rem; color:{text_muted}; margin-top:8px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>"
-                        f"Custom Stations This Session ({len(_custom_added)}) <span class='tip' data-tip='These are the custom stations added during this session. The badge shows which fleet each one is pinned to.'>?</span></div>",
-                        unsafe_allow_html=True
-                    )
+                    st.markdown("---")
+                    st.caption(f"Custom Stations This Session ({len(_custom_added)})")
                     _pg_set = set(st.session_state.get('pinned_guard_names', []))
-                    _pr_set = set(st.session_state.get('pinned_resp_names', []))
                     _cst_disp = st.session_state.get('custom_stations', pd.DataFrame())
                     for _cn in _custom_added[:8]:
                         _cst_row = _cst_disp[_cst_disp['name'] == _cn].iloc[0] if not _cst_disp.empty and (_cst_disp['name'] == _cn).any() else None

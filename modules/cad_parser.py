@@ -776,6 +776,3 @@ def _get_annualized_calls(raw_count: int) -> int:
     if 14 <= span_days < 330:
         return round(raw_count * 365 / span_days)
     return raw_count
-
-
-def _build_apprehension_table(df_calls, text_main, text_muted, card_bg, card_border, accent_color):

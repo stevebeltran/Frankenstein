@@ -1714,8 +1714,9 @@ if 'target_cities' not in st.session_state:
 # ============================================================
 
 def main():
+    _render_version_badge("bottom-right" if st.session_state.get('csvs_ready') else "top-right")
+
     if not st.session_state['csvs_ready']:
-        _render_version_badge("top-right")
 
         # GRAB THE LOGO FOR THE UPLOAD PAGE
         logo_b64 = get_themed_logo_base64("logo.png", theme="dark")

@@ -77,7 +77,7 @@ def load_cached_airfields():
 
 @st.cache_data
 def load_faa_parquet(minx, miny, maxx, maxy):
-    """Optimized FAA loader — uses cached state-level parquets."""
+    """Optimized FAA loader â€” uses cached state-level parquets."""
     try:
         # State bounds for coordinate-to-state mapping
         state_bounds = {
@@ -196,7 +196,7 @@ def add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=True):
             text_lons.append(centroid.x)
             text_lats.append(centroid.y)
             text_strings.append(str(ceiling))
-            text_hovers.append(f"{ceiling} ft — {zone_name}")
+            text_hovers.append(f"{ceiling} ft â€” {zone_name}")
         except Exception:
             pass
 
@@ -309,7 +309,7 @@ def get_station_faa_ceiling(lat, lon, faa_geojson):
 @st.cache_data
 def fetch_airfields(minx, miny, maxx, maxy):
     """
-    Fetch airfields — prefers cached US dataset, falls back to Overpass API.
+    Fetch airfields â€” prefers cached US dataset, falls back to Overpass API.
     Much faster than querying Overpass per-region during app runtime.
     """
     # Try cached version first
@@ -420,7 +420,7 @@ def get_circle_coords(lat, lon, r_mi=2.0):
     return c_lats, c_lons
 
 
-# ── 4G LTE coverage overlay ───────────────────────────────────────────────────
+# â”€â”€ 4G LTE coverage overlay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _COVERAGE_CACHE: dict = {}   # {state_abbr: GeoDataFrame or None}
 
@@ -559,7 +559,7 @@ def _build_carrier_mini_map(cinfo, boundary_geom, center_lat, center_lon, zoom, 
     return fig
 
 
-# ── RF Link Budget — 3390 MHz Friis free-space model ─────────────────────────
+# â”€â”€ RF Link Budget â€” 3390 MHz Friis free-space model â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _rf_range_rings_3390(infra_height_m: float = 9.14,
                           drone_alt_m: float = 61.0,
@@ -582,21 +582,21 @@ def _rf_range_rings_3390(infra_height_m: float = 9.14,
     link_budget = eirp - 43.05 + abs(noise_floor_dbm) - clutter_db
 
     tiers = [
-        ("Excellent (SNR ≥ 20 dB)", "#22c55e", 20),
-        ("Good (SNR ≥ 10 dB)",      "#f59e0b", 10),
-        ("Marginal (SNR ≥ 0 dB)",   "#ef4444",  0),
+        ("Excellent (SNR â‰¥ 20 dB)", "#22c55e", 20),
+        ("Good (SNR â‰¥ 10 dB)",      "#f59e0b", 10),
+        ("Marginal (SNR â‰¥ 0 dB)",   "#ef4444",  0),
     ]
     rings = []
     for label, color, snr_thresh in tiers:
         d_m = 10 ** ((link_budget - snr_thresh) / 20.0)
-        # Add height correction — effective slant range
+        # Add height correction â€” effective slant range
         h_diff = abs(drone_alt_m - infra_height_m)
         d_horiz = max(0.0, _math.sqrt(max(0, d_m**2 - h_diff**2)))
         rings.append((label, color, d_horiz / 1609.34))  # convert to miles
     return rings
 
 
-# ── ADVANCED GEOGRAPHY-AWARE RF COVERAGE ENGINE ──────────────────────────────────
+# â”€â”€ ADVANCED GEOGRAPHY-AWARE RF COVERAGE ENGINE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Coverage Probability model with terrain, clutter, building losses, uplink/downlink
 
 import scipy.interpolate as _sp_interp
@@ -608,7 +608,7 @@ def _get_terrain_cache():
     return {}
 
 def _estimate_elevation_simple(lat, lon, cache=None):
-    """Fetch elevation for a point (cached) — fallback to 100 ft if unavailable."""
+    """Fetch elevation for a point (cached) â€” fallback to 100 ft if unavailable."""
     if cache is None:
         cache = {}
     key = (round(lat, 2), round(lon, 2))
@@ -824,7 +824,7 @@ def _compute_rf_grid_coverage(tx_lat, tx_lon, tx_alt_m,
 
             # Coverage probability (simple model: P = 1 / (1 + 10^(-SNR/10)))
             # i.e., logistic CDF of SNR with threshold at 0 dB
-            snr_threshold = 3.0  # Need ≥3 dB for 50% link success
+            snr_threshold = 3.0  # Need â‰¥3 dB for 50% link success
             if snr_uplink > snr_threshold:
                 uplink_prob[i, j] = 1.0 / (1.0 + 10.0 ** (-(snr_uplink - snr_threshold) / 10.0))
             if snr_downlink > snr_threshold:
@@ -846,59 +846,197 @@ def _compute_rf_grid_coverage(tx_lat, tx_lon, tx_alt_m,
         'rx_power_dbm': rx_power_grid,
     }
 
-def _plot_rf_coverage_heatmap(grid_data, station_name, center_lat, center_lon, zoom,
-                              layer_type='coverage_prob', link_type='combined',
-                              map_style="carto-darkmatter"):
-    """
-    Plot RF coverage as a Plotly heatmap overlay.
-
-    layer_type: 'coverage_prob', 'snr_db', 'rx_power_dbm'
-    link_type: 'uplink', 'downlink', 'combined'
-    """
-    lats = grid_data['lats']
-    lons = grid_data['lons']
-
+def _rf_surface_for_layer(grid_data, layer_type='coverage_prob', link_type='combined'):
     if layer_type == 'coverage_prob':
         if link_type == 'uplink':
             z_data = grid_data['uplink_prob']
             title = "Uplink Coverage Probability"
-            colorscale = "Viridis"
         elif link_type == 'downlink':
             z_data = grid_data['downlink_prob']
             title = "Downlink Coverage Probability"
-            colorscale = "Viridis"
-        else:  # combined
+        else:
             z_data = grid_data['coverage_prob']
             title = "Combined Coverage Probability"
-            colorscale = "Viridis"
-    elif layer_type == 'snr_db':
-        z_data = grid_data['snr_db']
-        title = "Signal to Noise Ratio (dB)"
-        colorscale = "RdYlGn"
-    else:  # rx_power_dbm
-        z_data = grid_data['rx_power_dbm']
-        title = "Received Power (dBm)"
-        colorscale = "Turbo"
+        return {
+            'z_data': z_data,
+            'title': title,
+            'colorscale': [(0.0, '#132238'), (0.2, '#1f5f8b'), (0.5, '#2fbf71'), (0.75, '#f4c95d'), (1.0, '#ef476f')],
+            'zmin': 0.0,
+            'zmax': 1.0,
+            'hover_label': 'Coverage',
+            'value_fmt': lambda v: f"{v * 100:.0f}%",
+            'thresholds': [("Strong", 0.80, '#2fbf71'), ("Operational", 0.55, '#f4c95d'), ("Fringe", 0.30, '#ef476f')],
+        }
+    if layer_type == 'snr_db':
+        return {
+            'z_data': grid_data['snr_db'],
+            'title': "Signal to Noise Ratio (dB)",
+            'colorscale': [(0.0, '#8b1e3f'), (0.35, '#d1495b'), (0.55, '#edae49'), (0.75, '#66a182'), (1.0, '#2a9d8f')],
+            'zmin': -5.0,
+            'zmax': 25.0,
+            'hover_label': 'SNR',
+            'value_fmt': lambda v: f"{v:.1f} dB",
+            'thresholds': [("Strong", 15.0, '#2fbf71'), ("Operational", 8.0, '#f4c95d'), ("Fringe", 3.0, '#ef476f')],
+        }
+    return {
+        'z_data': grid_data['rx_power_dbm'],
+        'title': "Received Power (dBm)",
+        'colorscale': [(0.0, '#7a1631'), (0.35, '#c44536'), (0.6, '#f4c95d'), (0.8, '#56cfe1'), (1.0, '#3a86ff')],
+        'zmin': -110.0,
+        'zmax': -60.0,
+        'hover_label': 'Received Power',
+        'value_fmt': lambda v: f"{v:.1f} dBm",
+        'thresholds': [("Strong", -75.0, '#2fbf71'), ("Operational", -85.0, '#f4c95d'), ("Fringe", -95.0, '#ef476f')],
+    }
+
+
+def _summarize_rf_grid(grid_data, tx_lat, tx_lon, layer_type='coverage_prob', link_type='combined'):
+    meta = _rf_surface_for_layer(grid_data, layer_type=layer_type, link_type=link_type)
+    z_data = np.array(meta['z_data'])
+    lats = np.array(grid_data['lats'])
+    lons = np.array(grid_data['lons'])
+    lon_grid, lat_grid = np.meshgrid(lons, lats)
+    valid_mask = np.isfinite(z_data) & ((z_data > 0) if layer_type == 'coverage_prob' else True)
+
+    lat_idx = int(np.abs(lats - tx_lat).argmin()) if len(lats) else 0
+    lon_idx = int(np.abs(lons - tx_lon).argmin()) if len(lons) else 0
+    center_value = float(z_data[lat_idx, lon_idx]) if z_data.size else 0.0
+
+    if not valid_mask.any():
+        return {
+            'status': 'Limited',
+            'status_color': '#ef476f',
+            'center_text': meta['value_fmt'](center_value),
+            'primary_text': 'No usable coverage',
+            'secondary_text': '0.0 mi operational radius',
+            'rings': [],
+            'title': meta['title'],
+        }
+
+    lat_dist_m = (lat_grid - tx_lat) * 111000.0
+    lon_dist_m = (lon_grid - tx_lon) * 111000.0 * np.cos(np.radians((lat_grid + tx_lat) / 2.0))
+    radial_miles = np.sqrt(lat_dist_m**2 + lon_dist_m**2) / 1609.34
+
+    ring_summaries = []
+    for label, threshold, color in meta['thresholds']:
+        mask = valid_mask & (z_data >= threshold)
+        radius_mi = float(radial_miles[mask].max()) if mask.any() else 0.0
+        ring_summaries.append({'label': label, 'threshold': threshold, 'color': color, 'radius_mi': radius_mi})
+
+    if center_value >= meta['thresholds'][0][1]:
+        status, status_color = 'Strong', '#2fbf71'
+    elif center_value >= meta['thresholds'][1][1]:
+        status, status_color = 'Operational', '#f4c95d'
+    else:
+        status, status_color = 'Limited', '#ef476f'
+
+    strong_radius = ring_summaries[0]['radius_mi'] if ring_summaries else 0.0
+    operational_radius = ring_summaries[1]['radius_mi'] if len(ring_summaries) > 1 else strong_radius
+
+    return {
+        'status': status,
+        'status_color': status_color,
+        'center_text': meta['value_fmt'](center_value),
+        'primary_text': f"{strong_radius:.1f} mi strong radius",
+        'secondary_text': f"{operational_radius:.1f} mi operational radius",
+        'rings': ring_summaries,
+        'title': meta['title'],
+    }
+
+
+def _plot_rf_coverage_map(grid_data, station_name, center_lat, center_lon, zoom,
+                          layer_type='coverage_prob', link_type='combined',
+                          map_style="carto-darkmatter", boundary_geom=None,
+                          station_color="#00D2FF", grid_resolution_m=250):
+    meta = _rf_surface_for_layer(grid_data, layer_type=layer_type, link_type=link_type)
+    z_data = np.array(meta['z_data'])
+    lats = np.array(grid_data['lats'])
+    lons = np.array(grid_data['lons'])
+    lon_grid, lat_grid = np.meshgrid(lons, lats)
+    valid_mask = np.isfinite(z_data) & ((z_data > 0) if layer_type == 'coverage_prob' else True)
+
+    flat_lat = lat_grid[valid_mask]
+    flat_lon = lon_grid[valid_mask]
+    flat_z = z_data[valid_mask]
+
+    if len(flat_z) > 7000:
+        stride = max(1, len(flat_z) // 7000)
+        flat_lat = flat_lat[::stride]
+        flat_lon = flat_lon[::stride]
+        flat_z = flat_z[::stride]
+
+    summary = _summarize_rf_grid(grid_data, center_lat, center_lon, layer_type=layer_type, link_type=link_type)
+    marker_size = max(7, min(18, int(round(2200 / max(grid_resolution_m, 100)))))
 
     fig = go.Figure()
 
-    # Add heatmap
-    fig.add_trace(go.Heatmap(
-        z=z_data,
-        x=lons,
-        y=lats,
-        colorscale=colorscale,
-        colorbar=dict(title=title.split('(')[0].strip()),
-        hovertemplate="Lat: %{y:.4f}<br>Lon: %{x:.4f}<br>Value: %{z:.2f}<extra></extra>",
-        name=title,
+    if boundary_geom is not None and not boundary_geom.is_empty:
+        _geoms = [boundary_geom] if boundary_geom.geom_type == 'Polygon' else list(boundary_geom.geoms)
+        for idx, geom in enumerate(_geoms):
+            bx, by = geom.exterior.coords.xy
+            fig.add_trace(go.Scattermap(
+                mode='lines',
+                lon=list(bx),
+                lat=list(by),
+                line=dict(color='rgba(255,255,255,0.45)', width=1.2),
+                name='Jurisdiction',
+                hoverinfo='skip',
+                showlegend=(idx == 0),
+            ))
+
+    if len(flat_z):
+        fig.add_trace(go.Scattermap(
+            lat=flat_lat.tolist(),
+            lon=flat_lon.tolist(),
+            mode='markers',
+            marker=dict(
+                size=marker_size,
+                color=flat_z.tolist(),
+                colorscale=meta['colorscale'],
+                cmin=meta['zmin'],
+                cmax=meta['zmax'],
+                opacity=0.42,
+                colorbar=dict(title=meta['hover_label'], thickness=12, len=0.7),
+            ),
+            name=summary['title'],
+            hovertemplate=(
+                f"<b>{station_name}</b><br>Lat: %{{lat:.4f}}<br>Lon: %{{lon:.4f}}<br>"
+                + meta['hover_label'] + ": %{marker.color:.2f}<extra></extra>"
+            ),
+            showlegend=False,
+        ))
+
+    for ring in summary['rings']:
+        if ring['radius_mi'] <= 0:
+            continue
+        ring_lats, ring_lons = get_circle_coords(center_lat, center_lon, r_mi=ring['radius_mi'])
+        fig.add_trace(go.Scattermap(
+            lat=list(ring_lats),
+            lon=list(ring_lons),
+            mode='lines',
+            line=dict(color=ring['color'], width=2),
+            name=f"{ring['label']} radius",
+            hovertemplate=f"<b>{station_name}</b><br>{ring['label']} radius: {ring['radius_mi']:.1f} mi<extra></extra>",
+            showlegend=False,
+        ))
+
+    fig.add_trace(go.Scattermap(
+        lat=[center_lat],
+        lon=[center_lon],
+        mode='markers+text',
+        marker=dict(size=14, color=station_color, symbol='circle'),
+        text=[station_name.split(',')[0]],
+        textposition='top right',
+        textfont=dict(size=10, color='#ffffff'),
+        name='Station',
+        hovertemplate=f"<b>{station_name}</b><br>RF anchor<extra></extra>",
+        showlegend=False,
     ))
 
     fig.update_layout(
-        title=f"{station_name} · {title}",
-        xaxis_title="Longitude",
-        yaxis_title="Latitude",
-        height=500,
-        margin=dict(l=50, r=50, t=60, b=50),
+        map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=max(10.5, zoom + 0.4), style=map_style),
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=340,
+        showlegend=False,
     )
-
-    return fig
+    return fig, summary

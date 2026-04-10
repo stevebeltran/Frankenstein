@@ -396,24 +396,40 @@ def generate_stations_from_calls(df_calls, max_stations=100):
         (lats >= q1_la - 2.5 * iqr_la) & (lats <= q3_la + 2.5 * iqr_la) &
         (lons >= q1_lo - 2.5 * iqr_lo) & (lons <= q3_lo + 2.5 * iqr_lo)
     )
+    if not np.any(mask):
+        mask = np.ones(len(lats), dtype=bool)
     cen_lat_r = round(float(lats[mask].mean()), 2)
     cen_lon_r = round(float(lons[mask].mean()), 2)
 
-    # Bounding box for HIFLD (rounded to 2 dp cache key)
     _pad = 0.45
     min_lat_r = round(cen_lat_r - _pad, 2)
     max_lat_r = round(cen_lat_r + _pad, 2)
     min_lon_r = round(cen_lon_r - _pad, 2)
     max_lon_r = round(cen_lon_r + _pad, 2)
 
-    # Fire both sources in parallel — total latency = max(osm, hifld), not sum
-    with _cf.ThreadPoolExecutor(max_workers=2) as pool:
-        fut_osm   = pool.submit(_fetch_osm_stations_cached,   cen_lat_r, cen_lon_r, max_stations)
-        fut_hifld = pool.submit(_fetch_hifld_stations_cached, min_lat_r, min_lon_r, max_lat_r, max_lon_r)
-        osm_rows,   osm_note   = fut_osm.result()
-        hifld_rows, hifld_note = fut_hifld.result()
+    osm_rows, osm_note = None, "OSM unavailable"
+    hifld_rows, hifld_note = None, "HIFLD unavailable"
 
-    # Merge both result sets
+    with _cf.ThreadPoolExecutor(max_workers=2) as pool:
+        futures = {
+            'OSM': pool.submit(_fetch_osm_stations_cached, cen_lat_r, cen_lon_r, max_stations),
+            'HIFLD': pool.submit(_fetch_hifld_stations_cached, min_lat_r, min_lon_r, max_lat_r, max_lon_r),
+        }
+        _, not_done = _cf.wait(futures.values(), timeout=12)
+
+        for name, fut in futures.items():
+            if fut in not_done:
+                fut.cancel()
+                continue
+            try:
+                rows, note = fut.result()
+            except Exception:
+                rows, note = None, f"{name} unavailable"
+            if name == 'OSM':
+                osm_rows, osm_note = rows, note
+            else:
+                hifld_rows, hifld_note = rows, note
+
     combined = []
     if osm_rows:
         combined.extend(osm_rows)
@@ -422,10 +438,8 @@ def generate_stations_from_calls(df_calls, max_stations=100):
 
     if combined:
         df_combined = pd.DataFrame(combined)
-        # Deduplicate: drop points within ~100 m of each other (0.001° ≈ 111 m)
         df_combined = df_combined.round({'lat': 3, 'lon': 3})
         df_combined = df_combined.drop_duplicates(subset=['lat', 'lon']).reset_index(drop=True)
-        # Prioritise Police/Fire over secondary types when trimming to max_stations
         _pri_map = {'Police': 0, 'Fire': 1, 'School': 2, 'Hospital': 3, 'Government': 4, 'Library': 5}
         df_combined['_pri'] = df_combined['type'].map(_pri_map).fillna(9)
         df_combined = df_combined.sort_values('_pri').head(max_stations).drop(columns='_pri').reset_index(drop=True)
@@ -433,11 +447,11 @@ def generate_stations_from_calls(df_calls, max_stations=100):
         note = f"Found {len(df_combined)} candidate sites from {' + '.join(sources)}."
         return df_combined, note
 
-    # All remote sources failed — derive candidate sites from call density
     df_fallback = _make_random_stations(df_calls, n=40)
     if not df_fallback.empty:
-        return df_fallback, "⚠️ OSM and HIFLD unavailable — using estimated locations from call data. Upload a stations CSV for accuracy."
-    return None, "Could not generate stations — no valid call coordinates."
+        notes = [n for n in [osm_note, hifld_note] if n]
+        return df_fallback, "Fallback stations generated from call data. " + " | ".join(notes)
+    return None, "Could not generate stations ? no valid call coordinates."
 
 # ============================================================
 # CACHED DATA FUNCTIONS
@@ -932,37 +946,97 @@ def add_no_fly_zones_layer_to_plotly(fig, minx, miny, maxx, maxy):
     except Exception:
         pass
 
+def _prepare_sampling_polygon(polygon):
+    if polygon is None:
+        return None
+    try:
+        if isinstance(polygon, MultiPolygon):
+            non_empty = [p for p in polygon.geoms if p is not None and not p.is_empty]
+            polygon = max(non_empty, key=lambda p: p.area) if non_empty else None
+        if polygon is None or polygon.is_empty:
+            return None
+        if not polygon.is_valid:
+            polygon = polygon.buffer(0)
+        if polygon is None or polygon.is_empty:
+            return None
+        return polygon
+    except Exception:
+        return None
+
+
 def generate_random_points_in_polygon(polygon, num_points):
-    # Flatten MultiPolygon to its largest component so bbox sampling stays efficient
-    if isinstance(polygon, MultiPolygon):
-        polygon = max(polygon.geoms, key=lambda p: p.area)
+    polygon = _prepare_sampling_polygon(polygon)
+    target = max(0, int(num_points))
+    if target == 0 or polygon is None:
+        return []
+
     points = []
+    seen = set()
     minx, miny, maxx, maxy = polygon.bounds
-    while len(points) < num_points:
+
+    for _ in range(200):
+        if len(points) >= target:
+            break
         x_coords = np.random.uniform(minx, maxx, 1000)
         y_coords = np.random.uniform(miny, maxy, 1000)
         for x, y in zip(x_coords, y_coords):
-            if len(points) >= num_points: break
-            if polygon.contains(Point(x, y)): points.append((y, x))
+            if len(points) >= target:
+                break
+            pt = Point(x, y)
+            if polygon.covers(pt):
+                key = (round(y, 8), round(x, 8))
+                if key not in seen:
+                    seen.add(key)
+                    points.append((y, x))
+
+    if len(points) < target:
+        rep = polygon.representative_point()
+        fallback = (rep.y, rep.x)
+        while len(points) < target:
+            points.append(fallback)
     return points
 
+
 def generate_clustered_calls(polygon, num_points):
-    if isinstance(polygon, MultiPolygon):
-        polygon = max(polygon.geoms, key=lambda p: p.area)
-    points = []
+    polygon = _prepare_sampling_polygon(polygon)
+    target = max(0, int(num_points))
+    if target == 0 or polygon is None:
+        return []
+
     minx, miny, maxx, maxy = polygon.bounds
     hotspots = []
-    while len(hotspots) < random.randint(5, 15):
+    hotspot_target = min(max(1, random.randint(5, 15)), target)
+
+    for _ in range(5000):
+        if len(hotspots) >= hotspot_target:
+            break
         hx, hy = random.uniform(minx, maxx), random.uniform(miny, maxy)
-        if polygon.contains(Point(hx, hy)): hotspots.append((hx, hy))
-    target_clustered = int(num_points * 0.75)
-    while len(points) < target_clustered:
+        if polygon.covers(Point(hx, hy)):
+            hotspots.append((hx, hy))
+
+    if not hotspots:
+        rep = polygon.representative_point()
+        hotspots = [(rep.x, rep.y)]
+
+    points = []
+    target_clustered = int(target * 0.75)
+    sigma_x = max((maxx - minx) / 18.0, 1e-4)
+    sigma_y = max((maxy - miny) / 18.0, 1e-4)
+
+    for _ in range(max(target * 60, 2000)):
+        if len(points) >= target_clustered:
+            break
         hx, hy = random.choice(hotspots)
-        px, py = np.random.normal(hx, 0.02), np.random.normal(hy, 0.02)
-        if polygon.contains(Point(px, py)): points.append((py, px))
-    while len(points) < num_points:
-        px, py = random.uniform(minx, maxx), random.uniform(miny, maxy)
-        if polygon.contains(Point(px, py)): points.append((py, px))
+        px, py = np.random.normal(hx, sigma_x), np.random.normal(hy, sigma_y)
+        if polygon.covers(Point(px, py)):
+            points.append((py, px))
+
+    remaining = target - len(points)
+    if remaining > 0:
+        points.extend(generate_random_points_in_polygon(polygon, remaining))
+
+    if len(points) > target:
+        points = points[:target]
     np.random.shuffle(points)
     return points
 
@@ -2530,33 +2604,30 @@ def main():
                         sim_uploader.seek(0)
                         s_df = pd.read_csv(sim_uploader)
                     s_df.columns = [str(c).lower().strip() for c in s_df.columns]
-                
-                    # Detect what columns the user provided
+
                     lat_col = next((c for c in s_df.columns if c in ['lat', 'latitude', 'y']), None)
                     lon_col = next((c for c in s_df.columns if c in ['lon', 'long', 'longitude', 'x']), None)
                     addr_col = next((c for c in s_df.columns if any(a in c for a in ['address', 'street', 'location'])), None)
                     name_col = next((c for c in s_df.columns if any(n in c for n in ['name', 'station', 'facility', 'dept'])), None)
                     type_col = next((c for c in s_df.columns if any(t in c for t in ['type', 'category'])), None)
-                
+
                     parsed_stations = []
                     for idx, row in s_df.iterrows():
                         s_name = str(row[name_col]) if name_col and pd.notna(row[name_col]) else f"Custom Station {idx+1}"
                         s_type = str(row[type_col]) if type_col and pd.notna(row[type_col]) else 'Custom'
                         s_lat, s_lon = None, None
-                    
+
                         if lat_col and lon_col and pd.notna(row[lat_col]) and pd.notna(row[lon_col]):
                             s_lat, s_lon = float(row[lat_col]), float(row[lon_col])
                         elif addr_col and pd.notna(row[addr_col]):
                             addr_str = str(row[addr_col])
-                            # Attempt geocoding
                             s_lat, s_lon = forward_geocode(addr_str)
                             if s_lat is None:
-                                # Fallback: Try appending the city and state to the address string
                                 s_lat, s_lon = forward_geocode(f"{addr_str}, {active_targets[0]['city']}, {active_targets[0]['state']}")
                             if s_lat is None:
-                                st.toast(f"⚠️ Could not geocode: {addr_str}")
-                            time.sleep(1) # Slow down requests slightly to prevent API blocking
-                        
+                                st.toast(f"Could not geocode: {addr_str}")
+                            time.sleep(1)
+
                         if s_lat and s_lon:
                             parsed_stations.append({
                                 'name': s_name,
@@ -2564,31 +2635,31 @@ def main():
                                 'lon': s_lon,
                                 'type': s_type
                             })
-                        
+
                     if parsed_stations:
                         st.session_state['df_stations'] = pd.DataFrame(parsed_stations)
                         st.session_state['stations_user_uploaded'] = True
                         custom_stations_used = True
                     else:
-                        st.warning("⚠️ Could not geocode or parse your custom stations. Falling back to 100 random stations.")
+                        st.warning("Could not geocode or parse your custom stations. Falling back to generated stations.")
                 except Exception as e:
                     st.session_state['stations_user_uploaded'] = False
-                    st.warning(f"⚠️ Error reading custom stations: {e}. Falling back to random stations.")
+                    st.warning(f"Error reading custom stations: {e}. Falling back to generated stations.")
 
-            # --- FALLBACK: PULL REAL STATIONS FROM OPENSTREETMAP ---
             if not custom_stations_used:
                 st.session_state['stations_user_uploaded'] = False
-                prog.progress(80, text="🌐 Querying OpenStreetMap for real police, fire & schools…")
-            
-                # Use the simulated calls we just made to find the bounding box, and pull real OSM data!
-                df_s, osm_note = generate_stations_from_calls(st.session_state['df_calls'])
-            
+                prog.progress(80, text="Querying OpenStreetMap for real police, fire, and school stations...")
+
+                try:
+                    df_s, osm_note = generate_stations_from_calls(st.session_state['df_calls'])
+                except Exception as e:
+                    df_s, osm_note = None, f"Remote station lookup failed: {e}"
+
                 if df_s is not None and not df_s.empty:
                     st.session_state['df_stations'] = df_s
-                    st.toast(f"✅ {osm_note}")
+                    st.toast(osm_note)
                 else:
-                    # Absolute worst-case scenario (no internet or OSM API is down): fall back to random
-                    st.warning("⚠️ Could not reach OpenStreetMap for real stations. Falling back to random placements.")
+                    st.warning(f"{osm_note}. Falling back to random placements.")
                     station_points = generate_random_points_in_polygon(city_poly, 100)
                     types = ['Police', 'Fire', 'EMS'] * 34
                     st.session_state['df_stations'] = pd.DataFrame({
@@ -2613,7 +2684,7 @@ def main():
     # ============================================================
     # MAIN MAP INTERFACE
     # ============================================================
-    if st.session_state['csvs_ready']:
+    if False and st.session_state['csvs_ready']:
         components.html("<script>window._brincHasData = true;</script>", height=0)
 
         df_calls = st.session_state['df_calls'].copy()
@@ -2864,6 +2935,7 @@ def main():
                 all_types = sorted(df_stations_all['type'].dropna().astype(str).unique().tolist())
                 if all_types:
                     selected_types = st.multiselect("Facility Type", options=all_types, default=all_types,
+                                                    key='facility_type_multiselect_a',
                                                     help="Filter which station types are eligible for drone deployment.")
                     if not selected_types:
                         st.warning("Select at least one facility type.")
@@ -2875,6 +2947,7 @@ def main():
                 all_priorities = sorted(pd.Series(priority_source['priority']).dropna().astype(int).unique().tolist())
                 if all_priorities:
                     selected_priorities = st.multiselect("Incident Priority", options=all_priorities, default=all_priorities,
+                                                         key='incident_priority_multiselect_a',
                                                          help="Filter which call priorities to include in coverage scoring.")
                     if not selected_priorities:
                         st.warning("Select at least one priority level.")
@@ -2890,37 +2963,37 @@ def main():
 
         disp_expander = st.sidebar.expander("👁️ Display Options", expanded=False)
         with disp_expander:
-            show_satellite  = st.toggle("Satellite Imagery", value=False,
+            show_satellite  = st.toggle("Satellite Imagery", value=False, key='show_satellite_a',
                                         help="Switch the basemap from the default street view to satellite imagery.")
-            show_boundaries = st.toggle("Jurisdiction Boundaries", value=True,
+            show_boundaries = st.toggle("Jurisdiction Boundaries", value=True, key='show_boundaries_a',
                                         help="Show the selected city or place boundary used for deployment analysis.")
             st.toggle("County Boundary", value=False, key='use_county_boundary',
                       help="Redraw the map using the county boundary instead of the city/place boundary.")
 
             # Regulatory overlays (stacked vertically)
-            show_faa        = st.toggle("FAA LAANC Airspace", value=False,
+            show_faa        = st.toggle("FAA LAANC Airspace", value=False, key='show_faa_a',
                                        help="Show FAA-authorized flight ceilings by area (LAANC). Lighter = higher altitude allowed.")
-            show_no_fly = st.toggle("No-Fly Zones", value=False,
+            show_no_fly = st.toggle("No-Fly Zones", value=False, key='show_no_fly_a',
                                    help="Parks, protected areas, and water. Reference for deployment planning.")
-            show_obstacles  = st.toggle("Flight Hazards", value=False,
+            show_obstacles  = st.toggle("Flight Hazards", value=False, key='show_obstacles_a',
                                        help="FAA Digital Obstacle File ? obstacles > 200 ft AGL. Diamond markers.")
-            show_coverage   = st.toggle("4G LTE Coverage", value=False,
+            show_coverage   = st.toggle("4G LTE Coverage", value=False, key='show_coverage_a',
                                         help="Show AT&T, T-Mobile, and Verizon 4G LTE coverage polygons. Toggle individual carriers in the map legend.")
-            show_cell_towers = st.toggle("Cell Towers", value=False,
+            show_cell_towers = st.toggle("Cell Towers", value=False, key='show_cell_towers_a',
                                         help="OpenCelliD cell tower locations. Useful for data-link RF validation.")
 
-            show_heatmap    = st.toggle("911 Call Heatmap", value=False,
+            show_heatmap    = st.toggle("911 Call Heatmap", value=False, key='show_heatmap_a',
                                         help="Show a density heatmap of 911 call locations to highlight incident concentration.")
-            show_dots       = st.toggle("Incident Dots", value=True,
+            show_dots       = st.toggle("Incident Dots", value=True, key='show_dots_a',
                                         help="Show individual 911 call locations as dots on the map.")
-            simulate_traffic = st.toggle("Simulate Ground Traffic", value=False,
+            simulate_traffic = st.toggle("Simulate Ground Traffic", value=False, key='simulate_traffic_a',
                                          help="Apply traffic-based travel delays to ground response estimates and related metrics.")
-            show_health     = st.toggle("Health Score", value=False,
+            show_health     = st.toggle("Health Score", value=False, key='show_health_a',
                                         help="Show the department health score summary based on current deployment coverage and utilization.")
-            show_financials = st.toggle("Show Financials", value=True,
+            show_financials = st.toggle("Show Financials", value=True, key='show_financials_a',
                                         help="Show or hide all financial figures (CapEx, annual savings, ROI, break-even, specialty values) on the cards and in the sidebar.")
             show_cards      = True
-            simple_cards    = st.toggle("Simple Cards", value=False,
+            simple_cards    = st.toggle("Simple Cards", value=False, key='simple_cards_a',
                                         help="Show a compact card with just the key numbers ? name, type, response time, annual savings, and CapEx.")
             traffic_level   = st.slider("Traffic Congestion", 0, 100, 40) if simulate_traffic else 40
 
@@ -3604,21 +3677,21 @@ def main():
         _lock_expanded = bool(
             st.session_state.get('show_lock_stations', False) or pinned_guard_names or pinned_resp_names
         )
-        st.session_state['lock_guard_ms_widget'] = list(pinned_guard_names)
-        st.session_state['lock_resp_ms_widget'] = list(pinned_resp_names)
+        st.session_state['lock_guard_ms_widget_a'] = list(pinned_guard_names)
+        st.session_state['lock_resp_ms_widget_a'] = list(pinned_resp_names)
         lock_expander = st.sidebar.expander("Lock Stations", expanded=_lock_expanded)
         with lock_expander:
             st.caption("Assign specific stations to Guardian or Responder and force them into the deployed fleet.")
             _new_g = st.multiselect(
                 "Lock as Guardian",
                 options=_station_names,
-                key="lock_guard_ms_widget",
+                key="lock_guard_ms_widget_a",
                 help="These stations will always be assigned a Guardian drone and deployed into Unit Economics."
             )
             _new_r = st.multiselect(
                 "Lock as Responder",
                 options=[s for s in _station_names if s not in _new_g],
-                key="lock_resp_ms_widget",
+                key="lock_resp_ms_widget_a",
                 help="These stations will always be assigned a Responder drone and deployed into Unit Economics."
             )
             if _new_g != pinned_guard_names or _new_r != pinned_resp_names:
@@ -4934,7 +5007,7 @@ def main():
             st.markdown(f"<h3 style='color:{text_main};'>🚁 3D Swarm Simulation <span class='tip' data-tip='Deck.gl-powered 3D animation of all DFR flights compressed into a single 24-hour day. Each arc represents a dispatch flight from station to incident. Use the speed slider to control playback. Best viewed fullscreen for council presentations.'>?</span></h3>", unsafe_allow_html=True)
             st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Animated deck.gl simulation of all DFR flights over a compressed 24-hour day. Use the speed slider to accelerate or slow the simulation. Great for council presentations.</div>", unsafe_allow_html=True)
 
-            show_sim = st.toggle("🎬 Enable 3D Simulation", value=False)
+            show_sim = st.toggle("🎬 Enable 3D Simulation", value=False, key='show_sim_a')
             if show_sim:
                 calls_lonlat = calls_in_city.to_crs(epsg=4326)
                 calls_coords = np.column_stack((calls_lonlat.geometry.x, calls_lonlat.geometry.y))
@@ -5323,6 +5396,7 @@ def main():
     
             default_selection = [all_options[0]] if all_options else []
             selected_labels = st.sidebar.multiselect("Jurisdictions", options=all_options, default=default_selection,
+                                                     key='jurisdictions_multiselect',
                                                      help="Select which geographic areas to include in coverage analysis.")
 
             _jur_debug = st.session_state.get('_jur_debug', [])
@@ -5345,6 +5419,7 @@ def main():
                     all_types = sorted(df_stations_all['type'].dropna().astype(str).unique().tolist())
                     if all_types:
                         selected_types = st.multiselect("Facility Type", options=all_types, default=all_types,
+                                                        key='facility_type_multiselect_b',
                                                         help="Filter which station types are eligible for drone deployment.")
                         if not selected_types:
                             st.warning("Select at least one facility type.")
@@ -5356,6 +5431,7 @@ def main():
                     all_priorities = sorted(pd.Series(priority_source['priority']).dropna().astype(int).unique().tolist())
                     if all_priorities:
                         selected_priorities = st.multiselect("Incident Priority", options=all_priorities, default=all_priorities,
+                                                             key='incident_priority_multiselect_b',
                                                              help="Filter which call priorities to include in coverage scoring.")
                         if not selected_priorities:
                             st.warning("Select at least one priority level.")
@@ -5371,37 +5447,37 @@ def main():
 
             disp_expander = st.sidebar.expander("👁️ Display Options", expanded=False)
             with disp_expander:
-                show_satellite  = st.toggle("Satellite Imagery", value=False,
+                show_satellite  = st.toggle("Satellite Imagery", value=False, key='show_satellite_b',
                                             help="Switch the basemap from the default street view to satellite imagery.")
-                show_boundaries = st.toggle("Jurisdiction Boundaries", value=True,
+                show_boundaries = st.toggle("Jurisdiction Boundaries", value=True, key='show_boundaries_b',
                                             help="Show the selected city or place boundary used for deployment analysis.")
                 st.toggle("County Boundary", value=False, key='use_county_boundary',
                           help="Redraw the map using the county boundary instead of the city/place boundary.")
 
                 # Regulatory overlays (stacked vertically)
-                show_faa        = st.toggle("FAA LAANC Airspace", value=False,
+                show_faa        = st.toggle("FAA LAANC Airspace", value=False, key='show_faa_b',
                                            help="Show FAA-authorized flight ceilings by area (LAANC). Lighter = higher altitude allowed.")
-                show_no_fly = st.toggle("No-Fly Zones", value=False,
+                show_no_fly = st.toggle("No-Fly Zones", value=False, key='show_no_fly_b',
                                        help="Parks, protected areas, and water. Reference for deployment planning.")
-                show_obstacles  = st.toggle("Flight Hazards", value=False,
+                show_obstacles  = st.toggle("Flight Hazards", value=False, key='show_obstacles_b',
                                            help="FAA Digital Obstacle File ? obstacles > 200 ft AGL. Diamond markers.")
-                show_coverage   = st.toggle("4G LTE Coverage", value=False,
+                show_coverage   = st.toggle("4G LTE Coverage", value=False, key='show_coverage_b',
                                             help="Show AT&T, T-Mobile, and Verizon 4G LTE coverage polygons. Toggle individual carriers in the map legend.")
-                show_cell_towers = st.toggle("Cell Towers", value=False,
+                show_cell_towers = st.toggle("Cell Towers", value=False, key='show_cell_towers_b',
                                             help="OpenCelliD cell tower locations. Useful for data-link RF validation.")
 
-                show_heatmap    = st.toggle("911 Call Heatmap", value=False,
+                show_heatmap    = st.toggle("911 Call Heatmap", value=False, key='show_heatmap_b',
                                             help="Show a density heatmap of 911 call locations to highlight incident concentration.")
-                show_dots       = st.toggle("Incident Dots", value=True,
+                show_dots       = st.toggle("Incident Dots", value=True, key='show_dots_b',
                                             help="Show individual 911 call locations as dots on the map.")
-                simulate_traffic = st.toggle("Simulate Ground Traffic", value=False,
+                simulate_traffic = st.toggle("Simulate Ground Traffic", value=False, key='simulate_traffic_b',
                                              help="Apply traffic-based travel delays to ground response estimates and related metrics.")
-                show_health     = st.toggle("Health Score", value=False,
+                show_health     = st.toggle("Health Score", value=False, key='show_health_b',
                                             help="Show the department health score summary based on current deployment coverage and utilization.")
-                show_financials = st.toggle("Show Financials", value=True,
+                show_financials = st.toggle("Show Financials", value=True, key='show_financials_b',
                                             help="Show or hide all financial figures (CapEx, annual savings, ROI, break-even, specialty values) on the cards and in the sidebar.")
                 show_cards      = True
-                simple_cards    = st.toggle("Simple Cards", value=False,
+                simple_cards    = st.toggle("Simple Cards", value=False, key='simple_cards_b',
                                             help="Show a compact card with just the key numbers ? name, type, response time, annual savings, and CapEx.")
                 traffic_level   = st.slider("Traffic Congestion", 0, 100, 40) if simulate_traffic else 40
 
@@ -6085,21 +6161,21 @@ def main():
             _lock_expanded = bool(
                 st.session_state.get('show_lock_stations', False) or pinned_guard_names or pinned_resp_names
             )
-            st.session_state['lock_guard_ms_widget'] = list(pinned_guard_names)
-            st.session_state['lock_resp_ms_widget'] = list(pinned_resp_names)
+            st.session_state['lock_guard_ms_widget_b'] = list(pinned_guard_names)
+            st.session_state['lock_resp_ms_widget_b'] = list(pinned_resp_names)
             lock_expander = st.sidebar.expander("Lock Stations", expanded=_lock_expanded)
             with lock_expander:
                 st.caption("Assign specific stations to Guardian or Responder and force them into the deployed fleet.")
                 _new_g = st.multiselect(
                     "Lock as Guardian",
                     options=_station_names,
-                    key="lock_guard_ms_widget",
+                    key="lock_guard_ms_widget_b",
                     help="These stations will always be assigned a Guardian drone and deployed into Unit Economics."
                 )
                 _new_r = st.multiselect(
                     "Lock as Responder",
                     options=[s for s in _station_names if s not in _new_g],
-                    key="lock_resp_ms_widget",
+                    key="lock_resp_ms_widget_b",
                     help="These stations will always be assigned a Responder drone and deployed into Unit Economics."
                 )
                 if _new_g != pinned_guard_names or _new_r != pinned_resp_names:
@@ -7415,7 +7491,7 @@ def main():
                 st.markdown(f"<h3 style='color:{text_main};'>🚁 3D Swarm Simulation <span class='tip' data-tip='Deck.gl-powered 3D animation of all DFR flights compressed into a single 24-hour day. Each arc represents a dispatch flight from station to incident. Use the speed slider to control playback. Best viewed fullscreen for council presentations.'>?</span></h3>", unsafe_allow_html=True)
                 st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Animated deck.gl simulation of all DFR flights over a compressed 24-hour day. Use the speed slider to accelerate or slow the simulation. Great for council presentations.</div>", unsafe_allow_html=True)
 
-                show_sim = st.toggle("🎬 Enable 3D Simulation", value=False)
+                show_sim = st.toggle("🎬 Enable 3D Simulation", value=False, key='show_sim_b')
                 if show_sim:
                     calls_lonlat = calls_in_city.to_crs(epsg=4326)
                     calls_coords = np.column_stack((calls_lonlat.geometry.x, calls_lonlat.geometry.y))

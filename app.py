@@ -2684,7 +2684,7 @@ def main():
     # ============================================================
     # MAIN MAP INTERFACE
     # ============================================================
-    if False and st.session_state['csvs_ready']:
+    if st.session_state['csvs_ready']:
         components.html("<script>window._brincHasData = true;</script>", height=0)
 
         df_calls = st.session_state['df_calls'].copy()

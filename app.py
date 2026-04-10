@@ -1714,7 +1714,8 @@ if 'target_cities' not in st.session_state:
 # ============================================================
 
 def main():
-    _render_version_badge("bottom-right" if st.session_state.get('csvs_ready') else "top-right")
+    if st.session_state.get('csvs_ready'):
+        _render_version_badge("bottom-right")
 
     if not st.session_state['csvs_ready']:
 
@@ -2631,10 +2632,15 @@ def main():
             """, unsafe_allow_html=True)
 
         st.markdown(f"""
-        <div style="text-align:center; margin-top:8px; font-size:0.63rem; color:#2a2a2a;">
-            BRINC Drones, Inc. · <a href="https://brincdrones.com" target="_blank"
-            style="color:#333; text-decoration:none;">brincdrones.com</a>
-            · All coverage estimates are for planning purposes only.
+        <div style="text-align:center; margin-top:8px;">
+            <div style="font-family:'IBM Plex Mono',monospace; font-size:0.68rem; letter-spacing:0.08em; color:#4b5563; margin-bottom:8px;">
+                © v {__version__}
+            </div>
+            <div style="font-size:0.63rem; color:#2a2a2a;">
+                BRINC Drones, Inc. · <a href="https://brincdrones.com" target="_blank"
+                style="color:#333; text-decoration:none;">brincdrones.com</a>
+                · All coverage estimates are for planning purposes only.
+            </div>
         </div>
         """, unsafe_allow_html=True)
 

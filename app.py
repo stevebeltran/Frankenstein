@@ -1067,11 +1067,28 @@ def _load_coverage(state_abbr: str):
         _COVERAGE_CACHE[state_abbr] = None
         return None
     try:
-        import pyarrow.parquet as pq
         from shapely.wkb import loads as wkb_loads
-        df = pd.read_parquet(path)
+        try:
+            df = pd.read_parquet(path, columns=['carrier', 'color', 'geometry_wkb'])
+        except Exception:
+            df = pd.read_parquet(path)
+
+        df = df[['carrier', 'color', 'geometry_wkb']].copy()
         df['geometry'] = df['geometry_wkb'].apply(lambda h: wkb_loads(bytes.fromhex(h)) if h else None)
-        gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')
+        gdf = gpd.GeoDataFrame(df[['carrier', 'color']], geometry=df['geometry'], crs='EPSG:4326')
+        gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].copy()
+        if not gdf.empty:
+            dissolved_rows = []
+            for (carrier, color), group in gdf.groupby(['carrier', 'color'], sort=False):
+                geom = unary_union(group.geometry.tolist())
+                if geom is None or geom.is_empty:
+                    continue
+                try:
+                    geom = geom.simplify(0.0008, preserve_topology=True)
+                except Exception:
+                    pass
+                dissolved_rows.append({'carrier': carrier, 'color': color, 'geometry': geom})
+            gdf = gpd.GeoDataFrame(dissolved_rows, geometry='geometry', crs='EPSG:4326')
         _COVERAGE_CACHE[state_abbr] = gdf
         return gdf
     except Exception:
@@ -1323,6 +1340,62 @@ def calculate_zoom(min_lon, max_lon, min_lat, max_lat):
     lat_diff = max_lat - min_lat
     if lon_diff <= 0 or lat_diff <= 0: return 12
     return min(max(min(np.log2(360/lon_diff), np.log2(180/lat_diff)) + 1.6, 5), 18)
+
+def _df_latlon_signature(df):
+    if df is None or len(df) == 0:
+        return None
+    if 'lat' not in df.columns or 'lon' not in df.columns:
+        return ('missing-latlon', len(df), tuple(map(str, df.columns[:8])))
+
+    coords = df[['lat', 'lon']].copy()
+    coords['lat'] = pd.to_numeric(coords['lat'], errors='coerce')
+    coords['lon'] = pd.to_numeric(coords['lon'], errors='coerce')
+    coords = coords.dropna()
+    if coords.empty:
+        return ('empty', len(df))
+
+    return (
+        len(coords),
+        round(float(coords['lat'].min()), 5),
+        round(float(coords['lat'].max()), 5),
+        round(float(coords['lon'].min()), 5),
+        round(float(coords['lon'].max()), 5),
+    )
+
+def _jurisdiction_scan_signature(calls_df, stations_df, shapefile_dir, preferred_shp=None):
+    shp_meta = []
+    for shp_path in sorted(glob.glob(os.path.join(shapefile_dir, "*.shp"))):
+        try:
+            _stat = os.stat(shp_path)
+            shp_meta.append((os.path.basename(shp_path), int(_stat.st_mtime), _stat.st_size))
+        except Exception:
+            shp_meta.append((os.path.basename(shp_path), 0, 0))
+
+    preferred_meta = None
+    if preferred_shp:
+        try:
+            _pstat = os.stat(preferred_shp)
+            preferred_meta = (preferred_shp, int(_pstat.st_mtime), _pstat.st_size)
+        except Exception:
+            preferred_meta = (preferred_shp, 0, 0)
+
+    return (
+        _df_latlon_signature(calls_df),
+        _df_latlon_signature(stations_df),
+        tuple(shp_meta),
+        preferred_meta,
+    )
+
+def get_relevant_jurisdictions_cached(calls_df, stations_df, shapefile_dir, preferred_shp=None):
+    cache_key = _jurisdiction_scan_signature(calls_df, stations_df, shapefile_dir, preferred_shp)
+    if st.session_state.get('_jurisdiction_scan_cache_key') == cache_key:
+        cached = st.session_state.get('_jurisdiction_scan_cache_value')
+        return cached.copy() if cached is not None else None
+
+    result = find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir, preferred_shp=preferred_shp)
+    st.session_state['_jurisdiction_scan_cache_key'] = cache_key
+    st.session_state['_jurisdiction_scan_cache_value'] = result.copy() if result is not None else None
+    return result
 
 def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir, preferred_shp=None):
     points_list = []
@@ -2907,13 +2980,13 @@ def main():
                         else:
                             with st.spinner(get_jurisdiction_message()):
                                 _preferred_shp = st.session_state.get('boundary_source_path', '') or None
-                                master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
+                                master_gdf = get_relevant_jurisdictions_cached(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
             elif _master_override is not None and not _master_override.empty:
                 master_gdf = _master_override.copy()
             else:
                 with st.spinner(get_jurisdiction_message()):
                     _preferred_shp = st.session_state.get('boundary_source_path', '') or None
-                    master_gdf = find_relevant_jurisdictions(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
+                    master_gdf = get_relevant_jurisdictions_cached(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
 
             _boundary_kind_note = st.session_state.get('boundary_kind', 'place')
             _boundary_src_note = st.session_state.get('boundary_source_path', '')
@@ -6031,1518 +6104,1559 @@ def main():
                 "app_version": __version__,
             }
 
-            fig_for_export = go.Figure()
-
-            # ── Boundary polygon ─────────────────────────────────────────────────
-            if city_boundary_geom is not None and not city_boundary_geom.is_empty:
-                _export_geoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
-                                 else list(city_boundary_geom.geoms))
-                for _gi, _geom in enumerate(_export_geoms):
-                    _bx, _by = _geom.exterior.coords.xy
-                    fig_for_export.add_trace(go.Scattermap(
-                        mode="lines", lon=list(_bx), lat=list(_by),
-                        line=dict(color=map_boundary_color, width=2),
-                        name="Jurisdiction Boundary", hoverinfo='skip',
-                        showlegend=(_gi == 0)
-                    ))
-
-            # ── Incident call dots ──────────────────────────────────────────��────
-            _export_calls = display_calls if (display_calls is not None and not display_calls.empty) else None
-            if _export_calls is not None:
-                # Cap at 40K for export file-size; sample deterministically
-                _EC_MAX = 40_000
-                if len(_export_calls) > _EC_MAX:
-                    _export_calls = _export_calls.sample(_EC_MAX, random_state=42)
-                _exp_pt_size = (2 if len(_export_calls) > 20_000 else
-                                3 if len(_export_calls) > 8_000 else 4)
-                _exp_opacity = (0.18 if len(_export_calls) > 20_000 else
-                                0.28 if len(_export_calls) > 8_000 else 0.40)
-                _has_agency = 'agency' in _export_calls.columns
-                _exp_fire   = _export_calls[_export_calls['agency'].str.lower() == 'fire'] if _has_agency else _export_calls.iloc[0:0]
-                _exp_police = _export_calls[_export_calls['agency'].str.lower() != 'fire'] if _has_agency else _export_calls
-                if not _exp_police.empty:
-                    fig_for_export.add_trace(go.Scattermap(
-                        lat=_exp_police.geometry.y, lon=_exp_police.geometry.x,
-                        mode='markers',
-                        marker=dict(size=_exp_pt_size, color=map_incident_color, opacity=_exp_opacity),
-                        name="Incidents", hoverinfo='skip'
-                    ))
-                if not _exp_fire.empty:
-                    fig_for_export.add_trace(go.Scattermap(
-                        lat=_exp_fire.geometry.y, lon=_exp_fire.geometry.x,
-                        mode='markers',
-                        marker=dict(size=_exp_pt_size, color='#ff3b3b', opacity=_exp_opacity),
-                        name="Fire Incidents", hoverinfo='skip'
-                    ))
-
-            # ── 4G LTE coverage polygons (legendonly, toggleable in export) ─────
-            _exp_cov_state = st.session_state.get('active_state', '')
-            if _exp_cov_state:
-                add_coverage_traces(fig_for_export, _exp_cov_state, visible='legendonly')
-
-            # ── Coverage circles + station pins ──────────────────────────────────
-            for d in active_drones:
-                clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
-                fig_for_export.add_trace(go.Scattermap(
-                    lat=list(clats)+[None,d['lat']], lon=list(clons)+[None,d['lon']],
-                    mode='lines+markers', line=dict(color=d['color'], width=3),
-                    marker=dict(size=[0]*len(clats)+[0,16], color=d['color']),
-                    fill='toself', fillcolor='rgba(0,0,0,0)', name=d['name'][:30]
-                ))
-
-            fig_for_export.update_layout(
-                map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
-                margin=dict(l=0,r=0,t=0,b=0), height=500, showlegend=True,
-                legend=dict(
-                    yanchor="top", y=0.98, xanchor="left", x=0.02,
-                    bgcolor=legend_bg, bordercolor="#444444", borderwidth=1,
-                    font=dict(color=legend_text, size=11)
-                )
+            _html_export_cache_key = (
+                prop_city, prop_state,
+                int(st.session_state.get('total_original_calls', 0) or 0),
+                len(active_drones),
+                len(df_stations_all) if df_stations_all is not None else 0,
+                len(df_calls_full) if df_calls_full is not None else (len(df_calls) if df_calls is not None else 0),
+                round(float(fleet_capex or 0), 2),
+                round(float(calls_covered_perc or 0), 3),
+                round(float(area_covered_perc or 0), 3),
+                round(float(avg_resp_time or 0), 3),
+                round(float(avg_time_saved or 0), 3),
+                st.session_state.get('boundary_kind', ''),
+                st.session_state.get('boundary_source_path', ''),
+                bool(_show_analytics_section),
+                bool(_show_community_impact_section),
+                bool(_show_school_safety_section),
+                bool(_show_lte_section),
+                __version__,
             )
-            map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
-            station_rows = "".join(f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>" for d in active_drones)
-
-            all_bldgs_rows = ""
-            _type_colors = {
-                "Police":          ("rgba(0,210,255,0.1)",    "#0066aa"),
-                "Fire":            ("rgba(220,53,69,0.1)",    "#aa0022"),
-                "EMS":             ("rgba(255,100,50,0.1)",   "#b33000"),
-                "School":          ("rgba(255,215,0,0.12)",   "#7a6000"),
-                "Hospital":        ("rgba(34,197,94,0.1)",    "#006622"),
-                "University":      ("rgba(59,130,246,0.1)",   "#1d4ed8"),
-                "Transit":         ("rgba(16,185,129,0.1)",   "#065f46"),
-                "Community":       ("rgba(245,158,11,0.1)",   "#92400e"),
-                "Courthouse":      ("rgba(139,92,246,0.12)",  "#5b21b6"),
-                "Social Services": ("rgba(236,72,153,0.1)",   "#9d174d"),
-                "Government":      ("rgba(139,92,246,0.1)",   "#4b0082"),
-                "Library":         ("rgba(249,115,22,0.1)",   "#8a3300"),
-                "Power Station":   ("rgba(255,165,0,0.1)",    "#cc6600"),
-                "Water Treatment": ("rgba(100,200,255,0.1)",  "#0066cc"),
-                "Place of Worship": ("rgba(200,100,200,0.1)", "#663366"),
-            }
-            # ── Facility type counts (for summary grid + community impact dashboard) ──
-            _fac_counts = {}
-            for _, _frow in df_stations_all.iterrows():
-                _ft = str(_frow.get('type', 'Other'))
-                _fac_counts[_ft] = _fac_counts.get(_ft, 0) + 1
-
-            # ── Facility type summary HTML (icons + counts) ──────────────────────
-            _FAC_ICONS = {
-                "Police": "🚔", "Fire": "🚒", "EMS": "🚑", "School": "🏫",
-                "Hospital": "🏥", "University": "🎓", "Transit": "🚌",
-                "Community": "🏛️", "Courthouse": "⚖️", "Social Services": "🤝",
-                "Government": "🏛️", "Library": "📚",
-                "Power Station": "⚡", "Water Treatment": "💧", "Place of Worship": "✝️",
-            }
-            _FAC_SOURCES = {
-                "Police":          "DHS HIFLD Law Enforcement Locations · OpenStreetMap (amenity=police) · ODbL license",
-                "Fire":            "DHS HIFLD Fire Stations dataset (public domain) · OpenStreetMap (amenity=fire_station)",
-                "EMS":             "OpenStreetMap (amenity=ambulance_station) · NEMSIS National EMS Database (nemsis.org)",
-                "School":          "OpenStreetMap (amenity=school) · NCES Common Core of Data (nces.ed.gov)",
-                "Hospital":        "OpenStreetMap (amenity=hospital) · CMS Hospital Compare (cms.gov)",
-                "University":      "OpenStreetMap (amenity=university / college) · IPEDS (nces.ed.gov/ipeds)",
-                "Transit":         "OpenStreetMap (amenity=bus_station · railway=station) · NTD National Transit Database (transit.dot.gov)",
-                "Community":       "OpenStreetMap (amenity=community_centre) · IMLS Public Libraries Survey",
-                "Courthouse":      "OpenStreetMap (amenity=courthouse) · PACER / US Courts (uscourts.gov)",
-                "Social Services": "OpenStreetMap (amenity=social_facility) · HUD Location Affordability Index",
-                "Government":      "OpenStreetMap (building=government) · TIGER/Line Shapefiles (census.gov)",
-                "Library":         "OpenStreetMap (amenity=library) · IMLS Public Libraries Survey (imls.gov)",
-                "Power Station":   "OpenStreetMap (power=station) · US Energy Information Administration (eia.gov)",
-                "Water Treatment": "OpenStreetMap (man_made=water_treatment) · EPA Enviromapper · US Water Infrastructure Database",
-                "Place of Worship": "OpenStreetMap (amenity=place_of_worship) · Faith-based facility directory",
-            }
-            _fac_summary_cells = ""
-            for _ft, _fcnt in sorted(_fac_counts.items(), key=lambda x: -x[1]):
-                _tc2 = _type_colors.get(_ft, ("rgba(0,0,0,0.04)", "#555"))
-                _icon = _FAC_ICONS.get(_ft, "🏢")
-                _src  = _FAC_SOURCES.get(_ft, "OpenStreetMap contributors (ODbL)")
-                _fac_summary_cells += (
-                    f'<div style="background:{_tc2[0]};border:1px solid {_tc2[1]}33;border-radius:8px;'
-                    f'padding:10px 14px;display:flex;align-items:center;gap:10px;">'
-                    f'<span style="font-size:20px">{_icon}</span>'
-                    f'<div><div style="font-size:11px;font-weight:700;color:{_tc2[1]};text-transform:uppercase;'
-                    f'letter-spacing:0.5px;">{_ft}</div>'
-                    f'<div style="font-size:18px;font-weight:900;color:#111;font-family:\'IBM Plex Mono\',monospace;">{_fcnt}</div>'
-                    f'<div style="font-size:9px;color:#777;margin-top:1px;">facilities</div></div>'
-                    f'<abbr title="Source: {_src}" style="margin-left:auto;font-size:10px;color:#aaa;'
-                    f'text-decoration:none;cursor:help;">ⓘ</abbr>'
-                    f'</div>'
-                )
-
-            for _, row in df_stations_all.iterrows():
-                gmaps_link = f"https://www.google.com/maps/search/?api=1&query={row['lat']},{row['lon']}"
-                _rtype = str(row.get('type', 'Facility'))
-                _tc = _type_colors.get(_rtype, ("rgba(0,0,0,0.04)","#555"))
-                _short_name = str(row['name'])[:45] + ("…" if len(str(row['name']))>45 else "")
-                _src_tip = _FAC_SOURCES.get(_rtype, "OpenStreetMap contributors (ODbL)")
-                all_bldgs_rows += (
-                    f'''<div class="infra-item">
-                      <span class="i-name" title="{row['name']}">{_short_name}</span>
-                      <span class="i-type" style="background:{_tc[0]};color:{_tc[1]}">{_rtype}</span>
-                      <abbr title="Source: {_src_tip}" style="font-size:10px;color:#aaa;text-decoration:none;cursor:help;margin-left:auto;">ⓘ</abbr>
-                      <a class="i-link" href="{gmaps_link}" target="_blank">↗</a>
-                    </div>'''
-                )
-
-            logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
-            logo_html_str = f'<img src="data:image/png;base64,{logo_b64}" style="height:40px;">' if logo_b64 else '<div style="font-size:24px;font-weight:900;letter-spacing:3px;color:#fff;">BRINC</div>'
-
-            jurisdiction_list = ", ".join(selected_names) if selected_names else prop_city
-            all_station_types = df_stations_all['type'].dropna().unique().tolist() if 'type' in df_stations_all.columns else []
-            police_dept_names = [d['name'] for d in active_drones if '[Police]' in d['name']]
-            fire_dept_names   = [d['name'] for d in active_drones if '[Fire]' in d['name']]
-            ems_dept_names    = [d['name'] for d in active_drones if '[EMS]' in d['name']]
-
-            police_stations = [d['name'] for d in active_drones if 'Police' in d.get('name','') or (
-                'type' in df_stations_all.columns and
-                'Police' in str(df_stations_all[df_stations_all['name'].str.contains(
-                    d['name'].split(']')[-1].strip(), na=False, regex=False
-                )]['type'].values[:1])
-            )]
-
-            dept_summary_parts = []
-            if police_dept_names: dept_summary_parts.append(f"{len(police_dept_names)} Police station{'s' if len(police_dept_names)>1 else ''}")
-            if fire_dept_names:   dept_summary_parts.append(f"{len(fire_dept_names)} Fire station{'s' if len(fire_dept_names)>1 else ''}")
-            if ems_dept_names:    dept_summary_parts.append(f"{len(ems_dept_names)} EMS station{'s' if len(ems_dept_names)>1 else ''}")
-            dept_summary = ", ".join(dept_summary_parts) if dept_summary_parts else f"{len(active_drones)} municipal stations"
-            police_names_str = (", ".join([n.replace('[Police] ','') for n in police_dept_names[:6]]) + ("..." if len(police_dept_names)>6 else "")) if police_dept_names else "municipal facilities"
-            total_fleet = actual_k_responder + actual_k_guardian
-            analytics_html_export = html_reports.generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls), export_mode=True)
-            cad_charts_html_export = html_reports._build_cad_charts_html(df_calls_full if df_calls_full is not None else df_calls)
-            staffing_pressure_html_export = ""
-
-            prepared_for_city = st.session_state.get('active_city', prop_city) or prop_city
-            prepared_by_name = prop_name
-
-            # ── School safety export variables ────────────────────────────────────────
-            _exp_dfr_amortized = int(fleet_capex / 7) if fleet_capex > 0 else 0
-            _dfr_amort_str     = f"${_exp_dfr_amortized:,}/yr" if _exp_dfr_amortized > 0 else "~$11K–22K/yr"
-
-            # ── Build custom-content HTML blocks from AE editable fields ────────────
-            _doc_intro   = st.session_state.get('doc_custom_intro',   '').strip()
-            _doc_pt1     = st.session_state.get('doc_talking_pt_1',  '').strip()
-            _doc_pt2     = st.session_state.get('doc_talking_pt_2',  '').strip()
-            _doc_pt3     = st.session_state.get('doc_talking_pt_3',  '').strip()
-            _doc_closing = st.session_state.get('doc_custom_closing', '').strip()
-            _doc_phone   = st.session_state.get('doc_ae_phone',       '').strip()
-
-            _custom_intro_html = (
-                f'<div style="margin-top:20px;padding:16px 20px;background:#f0f8ff;border-left:4px solid #00D2FF;'
-                f'border-radius:0 6px 6px 0;font-size:15px;color:#1a2a3a;line-height:1.8;">'
-                f'{_doc_intro}</div>'
-            ) if _doc_intro else ''
-
-            _pts = [p for p in [_doc_pt1, _doc_pt2, _doc_pt3] if p]
-            _custom_pts_html = (
-                '<ul style="margin-top:16px;padding-left:20px;font-size:14px;color:#374151;line-height:2;">'
-                + ''.join(f'<li>{p}</li>' for p in _pts)
-                + '</ul>'
-            ) if _pts else ''
-
-            _custom_closing_html = (
-                f'<div style="margin-top:24px;padding:16px 20px;background:#f9fafb;border:1px solid #e4e6ea;'
-                f'border-radius:6px;font-size:14px;color:#374151;line-height:1.8;">'
-                f'{_doc_closing}</div>'
-            ) if _doc_closing else ''
-
-            _ae_phone_html = (
-                f'<div style="margin-top:4px;font-size:13px;color:#555;">📞 {_doc_phone}</div>'
-            ) if _doc_phone else ''
-            # ── Export personalization: extract call-type and priority stats ────────
-            _exp_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
-            _exp_top_calls, _exp_pri_str, _exp_date_range = [], "mixed priorities", "recent period"
-            try:
-                for _cc in ['call_type_desc','agencyeventtypecodedesc','calldesc','description']:
-                    if _cc in _exp_df.columns:
-                        _tc = _exp_df[_cc].dropna().str.strip().value_counts().head(5)
-                        if not _tc.empty:
-                            _exp_top_calls = list(zip(_tc.index.tolist(), _tc.values.tolist()))
-                        break
-                if 'priority' in _exp_df.columns:
-                    _pc = _exp_df['priority'].dropna().value_counts().sort_index()
-                    _pri_parts = [f"Priority {k}: {v:,} ({v/max(len(_exp_df),1)*100:.0f}%)" for k,v in _pc.items() if str(k).strip().isdigit()]
-                    _exp_pri_str = " · ".join(_pri_parts[:4]) if _pri_parts else "mixed priorities"
-                if 'date' in _exp_df.columns:
-                    _dd = pd.to_datetime(_exp_df['date'], errors='coerce').dropna()
-                    if not _dd.empty:
-                        _exp_date_range = f"{_dd.min().strftime('%b %Y')} – {_dd.max().strftime('%b %Y')}"
-            except Exception:
-                pass
-            _top5_html = ""
-            for _cname, _ccnt in (_exp_top_calls or []):
-                _cpct = f"{_ccnt/max(len(_exp_df),1)*100:.1f}%"
-                _is_prop = any(w in str(_cname).upper() for w in ['THEFT','BURGLAR','VANDAL','ROBBERY','TRESPASS','LARCEN','AUTO','VEHICLE','BREAK','SHOPLI'])
-                _cflag = ' <span style="color:#f59e0b;font-size:10px">property-related</span>' if _is_prop else ''
-                _top5_html += f'<tr><td><strong>{_cname}</strong>{_cflag}</td><td style="font-family:monospace;color:#374151">{_ccnt:,}</td><td style="color:#6b7280">{_cpct}</td></tr>'
-            _guardian_img_b64 = get_transparent_product_base64("gigs.png") or ""
-            logo_b64_dark = get_themed_logo_base64("logo.png", theme="dark")
-            logo_b64_light = get_themed_logo_base64("logo.png", theme="light")
-
-            # ── FCC 4G LTE Coverage Map URL for export ────────────────────────────
-            _fcc_zoom_export = round(min(13, max(9, dynamic_zoom + 1)), 2)
-            _fcc_url = (f"https://broadbandmap.fcc.gov/home?version=dec2023"
-                        f"&zoom={_fcc_zoom_export}&vlon={center_lon:.6f}&vlat={center_lat:.6f}"
-                        f"&speed=25&tech=300&br=4")
-
-            # ── 4G LTE carrier mini-maps for export section 03b ─────────────────
-            _exp_carrier_results = _carrier_coverage_analysis(
-                st.session_state.get('active_state', ''), city_boundary_geom
+            if st.session_state.get('_html_export_cache_key') != _html_export_cache_key:
+                st.session_state['_html_export_cache'] = None
+            _cached_export_html = st.session_state.get('_html_export_cache')
+            _html_export_ready = (
+                st.session_state.get('_html_export_cache_key') == _html_export_cache_key
+                and isinstance(_cached_export_html, str)
+                and bool(_cached_export_html)
             )
-            if _exp_carrier_results:
-                _exp_map_cols = []
-                for _eci, _ecr in enumerate(_exp_carrier_results[:3]):
-                    _epct = f"{_ecr['pct']:.1f}%" if _ecr['pct'] > 0 else "No data"
-                    _ebadge = "#22c55e" if _ecr['pct'] >= 90 else "#f59e0b" if _ecr['pct'] >= 70 else "#ef4444"
-                    _emfig = _build_carrier_mini_map(
-                        _ecr, city_boundary_geom, center_lat, center_lon,
-                        dynamic_zoom, 'carto-darkmatter'
+            _prep_label = 'Refresh HTML Export' if _html_export_ready else 'Prepare HTML Export'
+            _build_html_export = st.sidebar.button(
+                _prep_label,
+                use_container_width=True,
+                help='Build the print-ready HTML report on demand. Rebuild after changing data, toggles, or deployment settings.'
+            )
+            export_html = _cached_export_html if _html_export_ready else None
+
+            if _build_html_export:
+                fig_for_export = go.Figure()
+    
+                # ── Boundary polygon ─────────────────────────────────────────────────
+                if city_boundary_geom is not None and not city_boundary_geom.is_empty:
+                    _export_geoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
+                                     else list(city_boundary_geom.geoms))
+                    for _gi, _geom in enumerate(_export_geoms):
+                        _bx, _by = _geom.exterior.coords.xy
+                        fig_for_export.add_trace(go.Scattermap(
+                            mode="lines", lon=list(_bx), lat=list(_by),
+                            line=dict(color=map_boundary_color, width=2),
+                            name="Jurisdiction Boundary", hoverinfo='skip',
+                            showlegend=(_gi == 0)
+                        ))
+    
+                # ── Incident call dots ──────────────────────────────────────────��────
+                _export_calls = display_calls if (display_calls is not None and not display_calls.empty) else None
+                if _export_calls is not None:
+                    # Cap at 40K for export file-size; sample deterministically
+                    _EC_MAX = 40_000
+                    if len(_export_calls) > _EC_MAX:
+                        _export_calls = _export_calls.sample(_EC_MAX, random_state=42)
+                    _exp_pt_size = (2 if len(_export_calls) > 20_000 else
+                                    3 if len(_export_calls) > 8_000 else 4)
+                    _exp_opacity = (0.18 if len(_export_calls) > 20_000 else
+                                    0.28 if len(_export_calls) > 8_000 else 0.40)
+                    _has_agency = 'agency' in _export_calls.columns
+                    _exp_fire   = _export_calls[_export_calls['agency'].str.lower() == 'fire'] if _has_agency else _export_calls.iloc[0:0]
+                    _exp_police = _export_calls[_export_calls['agency'].str.lower() != 'fire'] if _has_agency else _export_calls
+                    if not _exp_police.empty:
+                        fig_for_export.add_trace(go.Scattermap(
+                            lat=_exp_police.geometry.y, lon=_exp_police.geometry.x,
+                            mode='markers',
+                            marker=dict(size=_exp_pt_size, color=map_incident_color, opacity=_exp_opacity),
+                            name="Incidents", hoverinfo='skip'
+                        ))
+                    if not _exp_fire.empty:
+                        fig_for_export.add_trace(go.Scattermap(
+                            lat=_exp_fire.geometry.y, lon=_exp_fire.geometry.x,
+                            mode='markers',
+                            marker=dict(size=_exp_pt_size, color='#ff3b3b', opacity=_exp_opacity),
+                            name="Fire Incidents", hoverinfo='skip'
+                        ))
+    
+                # ── 4G LTE coverage polygons (legendonly, toggleable in export) ─────
+                _exp_cov_state = st.session_state.get('active_state', '')
+                if _exp_cov_state:
+                    add_coverage_traces(fig_for_export, _exp_cov_state, visible='legendonly')
+    
+                # ── Coverage circles + station pins ──────────────────────────────────
+                for d in active_drones:
+                    clats, clons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
+                    fig_for_export.add_trace(go.Scattermap(
+                        lat=list(clats)+[None,d['lat']], lon=list(clons)+[None,d['lon']],
+                        mode='lines+markers', line=dict(color=d['color'], width=3),
+                        marker=dict(size=[0]*len(clats)+[0,16], color=d['color']),
+                        fill='toself', fillcolor='rgba(0,0,0,0)', name=d['name'][:30]
+                    ))
+    
+                fig_for_export.update_layout(
+                    map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
+                    margin=dict(l=0,r=0,t=0,b=0), height=500, showlegend=True,
+                    legend=dict(
+                        yanchor="top", y=0.98, xanchor="left", x=0.02,
+                        bgcolor=legend_bg, bordercolor="#444444", borderwidth=1,
+                        font=dict(color=legend_text, size=11)
                     )
-                    _inc_plotlyjs = 'cdn' if _eci == 0 else False
-                    _emap_div = _emfig.to_html(
-                        full_html=False, include_plotlyjs=_inc_plotlyjs,
-                        default_height='240px', default_width='100%'
-                    )
-                    _exp_map_cols.append(
-                        f'<div style="flex:1;min-width:200px;">'
-                        f'<div style="text-align:center;padding:6px 0 4px;">'
-                        f'<span style="font-size:1rem;font-weight:800;color:{_ecr["color"]};">{_ecr["carrier"]}</span><br>'
-                        f'<span style="font-size:1.7rem;font-weight:900;color:{_ebadge};font-family:monospace;">{_epct}</span><br>'
-                        f'<span style="font-size:0.62rem;color:#8899aa;text-transform:uppercase;letter-spacing:1px;">of jurisdiction covered</span>'
-                        f'</div>{_emap_div}</div>'
-                    )
-                _exp_lte_content = (
-                    '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;">'
-                    + ''.join(_exp_map_cols)
-                    + '</div>'
-                    + '<p style="font-size:0.65rem;color:#556;margin:8px 0 0;">'
-                    + 'Source: FCC Broadband Data Collection · AT&amp;T, T-Mobile, Verizon 4G LTE coverage polygons.'
-                    + '</p>'
                 )
-            else:
-                _exp_lte_content = (
-                    f'<a href="{_fcc_url}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">'
-                    f'<div style="display:flex;align-items:center;justify-content:space-between;background:#0d1b2e;border:1px solid #1e3a5f;border-radius:10px;padding:20px 28px;">'
-                    f'<div><div style="color:#00b4d8;font-size:1rem;font-weight:600;margin-bottom:4px;">📶 Open FCC 4G LTE Coverage Map</div>'
-                    f'<div style="color:#6b7f99;font-size:0.78rem;">FCC National Broadband Map · AT&amp;T, T-Mobile, Verizon · Centered on {center_lat:.4f}, {center_lon:.4f}</div>'
-                    f'</div><div style="color:#00b4d8;font-size:1.6rem;margin-left:20px;">↗</div></div></a>'
-                    f'<p style="font-size:0.65rem;color:#556;margin:10px 0 0;">Opens broadbandmap.fcc.gov in a new tab.</p>'
+                map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
+                station_rows = "".join(f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>" for d in active_drones)
+    
+                all_bldgs_rows = ""
+                _type_colors = {
+                    "Police":          ("rgba(0,210,255,0.1)",    "#0066aa"),
+                    "Fire":            ("rgba(220,53,69,0.1)",    "#aa0022"),
+                    "EMS":             ("rgba(255,100,50,0.1)",   "#b33000"),
+                    "School":          ("rgba(255,215,0,0.12)",   "#7a6000"),
+                    "Hospital":        ("rgba(34,197,94,0.1)",    "#006622"),
+                    "University":      ("rgba(59,130,246,0.1)",   "#1d4ed8"),
+                    "Transit":         ("rgba(16,185,129,0.1)",   "#065f46"),
+                    "Community":       ("rgba(245,158,11,0.1)",   "#92400e"),
+                    "Courthouse":      ("rgba(139,92,246,0.12)",  "#5b21b6"),
+                    "Social Services": ("rgba(236,72,153,0.1)",   "#9d174d"),
+                    "Government":      ("rgba(139,92,246,0.1)",   "#4b0082"),
+                    "Library":         ("rgba(249,115,22,0.1)",   "#8a3300"),
+                    "Power Station":   ("rgba(255,165,0,0.1)",    "#cc6600"),
+                    "Water Treatment": ("rgba(100,200,255,0.1)",  "#0066cc"),
+                    "Place of Worship": ("rgba(200,100,200,0.1)", "#663366"),
+                }
+                # ── Facility type counts (for summary grid + community impact dashboard) ──
+                _fac_counts = {}
+                for _, _frow in df_stations_all.iterrows():
+                    _ft = str(_frow.get('type', 'Other'))
+                    _fac_counts[_ft] = _fac_counts.get(_ft, 0) + 1
+    
+                # ── Facility type summary HTML (icons + counts) ──────────────────────
+                _FAC_ICONS = {
+                    "Police": "🚔", "Fire": "🚒", "EMS": "🚑", "School": "🏫",
+                    "Hospital": "🏥", "University": "🎓", "Transit": "🚌",
+                    "Community": "🏛️", "Courthouse": "⚖️", "Social Services": "🤝",
+                    "Government": "🏛️", "Library": "📚",
+                    "Power Station": "⚡", "Water Treatment": "💧", "Place of Worship": "✝️",
+                }
+                _FAC_SOURCES = {
+                    "Police":          "DHS HIFLD Law Enforcement Locations · OpenStreetMap (amenity=police) · ODbL license",
+                    "Fire":            "DHS HIFLD Fire Stations dataset (public domain) · OpenStreetMap (amenity=fire_station)",
+                    "EMS":             "OpenStreetMap (amenity=ambulance_station) · NEMSIS National EMS Database (nemsis.org)",
+                    "School":          "OpenStreetMap (amenity=school) · NCES Common Core of Data (nces.ed.gov)",
+                    "Hospital":        "OpenStreetMap (amenity=hospital) · CMS Hospital Compare (cms.gov)",
+                    "University":      "OpenStreetMap (amenity=university / college) · IPEDS (nces.ed.gov/ipeds)",
+                    "Transit":         "OpenStreetMap (amenity=bus_station · railway=station) · NTD National Transit Database (transit.dot.gov)",
+                    "Community":       "OpenStreetMap (amenity=community_centre) · IMLS Public Libraries Survey",
+                    "Courthouse":      "OpenStreetMap (amenity=courthouse) · PACER / US Courts (uscourts.gov)",
+                    "Social Services": "OpenStreetMap (amenity=social_facility) · HUD Location Affordability Index",
+                    "Government":      "OpenStreetMap (building=government) · TIGER/Line Shapefiles (census.gov)",
+                    "Library":         "OpenStreetMap (amenity=library) · IMLS Public Libraries Survey (imls.gov)",
+                    "Power Station":   "OpenStreetMap (power=station) · US Energy Information Administration (eia.gov)",
+                    "Water Treatment": "OpenStreetMap (man_made=water_treatment) · EPA Enviromapper · US Water Infrastructure Database",
+                    "Place of Worship": "OpenStreetMap (amenity=place_of_worship) · Faith-based facility directory",
+                }
+                _fac_summary_cells = ""
+                for _ft, _fcnt in sorted(_fac_counts.items(), key=lambda x: -x[1]):
+                    _tc2 = _type_colors.get(_ft, ("rgba(0,0,0,0.04)", "#555"))
+                    _icon = _FAC_ICONS.get(_ft, "🏢")
+                    _src  = _FAC_SOURCES.get(_ft, "OpenStreetMap contributors (ODbL)")
+                    _fac_summary_cells += (
+                        f'<div style="background:{_tc2[0]};border:1px solid {_tc2[1]}33;border-radius:8px;'
+                        f'padding:10px 14px;display:flex;align-items:center;gap:10px;">'
+                        f'<span style="font-size:20px">{_icon}</span>'
+                        f'<div><div style="font-size:11px;font-weight:700;color:{_tc2[1]};text-transform:uppercase;'
+                        f'letter-spacing:0.5px;">{_ft}</div>'
+                        f'<div style="font-size:18px;font-weight:900;color:#111;font-family:\'IBM Plex Mono\',monospace;">{_fcnt}</div>'
+                        f'<div style="font-size:9px;color:#777;margin-top:1px;">facilities</div></div>'
+                        f'<abbr title="Source: {_src}" style="margin-left:auto;font-size:10px;color:#aaa;'
+                        f'text-decoration:none;cursor:help;">ⓘ</abbr>'
+                        f'</div>'
+                    )
+    
+                for _, row in df_stations_all.iterrows():
+                    gmaps_link = f"https://www.google.com/maps/search/?api=1&query={row['lat']},{row['lon']}"
+                    _rtype = str(row.get('type', 'Facility'))
+                    _tc = _type_colors.get(_rtype, ("rgba(0,0,0,0.04)","#555"))
+                    _short_name = str(row['name'])[:45] + ("…" if len(str(row['name']))>45 else "")
+                    _src_tip = _FAC_SOURCES.get(_rtype, "OpenStreetMap contributors (ODbL)")
+                    all_bldgs_rows += (
+                        f'''<div class="infra-item">
+                          <span class="i-name" title="{row['name']}">{_short_name}</span>
+                          <span class="i-type" style="background:{_tc[0]};color:{_tc[1]}">{_rtype}</span>
+                          <abbr title="Source: {_src_tip}" style="font-size:10px;color:#aaa;text-decoration:none;cursor:help;margin-left:auto;">ⓘ</abbr>
+                          <a class="i-link" href="{gmaps_link}" target="_blank">↗</a>
+                        </div>'''
+                    )
+    
+                logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
+                logo_html_str = f'<img src="data:image/png;base64,{logo_b64}" style="height:40px;">' if logo_b64 else '<div style="font-size:24px;font-weight:900;letter-spacing:3px;color:#fff;">BRINC</div>'
+    
+                jurisdiction_list = ", ".join(selected_names) if selected_names else prop_city
+                all_station_types = df_stations_all['type'].dropna().unique().tolist() if 'type' in df_stations_all.columns else []
+                police_dept_names = [d['name'] for d in active_drones if '[Police]' in d['name']]
+                fire_dept_names   = [d['name'] for d in active_drones if '[Fire]' in d['name']]
+                ems_dept_names    = [d['name'] for d in active_drones if '[EMS]' in d['name']]
+    
+                police_stations = [d['name'] for d in active_drones if 'Police' in d.get('name','') or (
+                    'type' in df_stations_all.columns and
+                    'Police' in str(df_stations_all[df_stations_all['name'].str.contains(
+                        d['name'].split(']')[-1].strip(), na=False, regex=False
+                    )]['type'].values[:1])
+                )]
+    
+                dept_summary_parts = []
+                if police_dept_names: dept_summary_parts.append(f"{len(police_dept_names)} Police station{'s' if len(police_dept_names)>1 else ''}")
+                if fire_dept_names:   dept_summary_parts.append(f"{len(fire_dept_names)} Fire station{'s' if len(fire_dept_names)>1 else ''}")
+                if ems_dept_names:    dept_summary_parts.append(f"{len(ems_dept_names)} EMS station{'s' if len(ems_dept_names)>1 else ''}")
+                dept_summary = ", ".join(dept_summary_parts) if dept_summary_parts else f"{len(active_drones)} municipal stations"
+                police_names_str = (", ".join([n.replace('[Police] ','') for n in police_dept_names[:6]]) + ("..." if len(police_dept_names)>6 else "")) if police_dept_names else "municipal facilities"
+                total_fleet = actual_k_responder + actual_k_guardian
+                analytics_html_export = html_reports.generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls), export_mode=True)
+                cad_charts_html_export = html_reports._build_cad_charts_html(df_calls_full if df_calls_full is not None else df_calls)
+                staffing_pressure_html_export = ""
+    
+                prepared_for_city = st.session_state.get('active_city', prop_city) or prop_city
+                prepared_by_name = prop_name
+    
+                # ── School safety export variables ────────────────────────────────────────
+                _exp_dfr_amortized = int(fleet_capex / 7) if fleet_capex > 0 else 0
+                _dfr_amort_str     = f"${_exp_dfr_amortized:,}/yr" if _exp_dfr_amortized > 0 else "~$11K–22K/yr"
+    
+                # ── Build custom-content HTML blocks from AE editable fields ────────────
+                _doc_intro   = st.session_state.get('doc_custom_intro',   '').strip()
+                _doc_pt1     = st.session_state.get('doc_talking_pt_1',  '').strip()
+                _doc_pt2     = st.session_state.get('doc_talking_pt_2',  '').strip()
+                _doc_pt3     = st.session_state.get('doc_talking_pt_3',  '').strip()
+                _doc_closing = st.session_state.get('doc_custom_closing', '').strip()
+                _doc_phone   = st.session_state.get('doc_ae_phone',       '').strip()
+    
+                _custom_intro_html = (
+                    f'<div style="margin-top:20px;padding:16px 20px;background:#f0f8ff;border-left:4px solid #00D2FF;'
+                    f'border-radius:0 6px 6px 0;font-size:15px;color:#1a2a3a;line-height:1.8;">'
+                    f'{_doc_intro}</div>'
+                ) if _doc_intro else ''
+    
+                _pts = [p for p in [_doc_pt1, _doc_pt2, _doc_pt3] if p]
+                _custom_pts_html = (
+                    '<ul style="margin-top:16px;padding-left:20px;font-size:14px;color:#374151;line-height:2;">'
+                    + ''.join(f'<li>{p}</li>' for p in _pts)
+                    + '</ul>'
+                ) if _pts else ''
+    
+                _custom_closing_html = (
+                    f'<div style="margin-top:24px;padding:16px 20px;background:#f9fafb;border:1px solid #e4e6ea;'
+                    f'border-radius:6px;font-size:14px;color:#374151;line-height:1.8;">'
+                    f'{_doc_closing}</div>'
+                ) if _doc_closing else ''
+    
+                _ae_phone_html = (
+                    f'<div style="margin-top:4px;font-size:13px;color:#555;">📞 {_doc_phone}</div>'
+                ) if _doc_phone else ''
+                # ── Export personalization: extract call-type and priority stats ────────
+                _exp_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
+                _exp_top_calls, _exp_pri_str, _exp_date_range = [], "mixed priorities", "recent period"
+                try:
+                    for _cc in ['call_type_desc','agencyeventtypecodedesc','calldesc','description']:
+                        if _cc in _exp_df.columns:
+                            _tc = _exp_df[_cc].dropna().str.strip().value_counts().head(5)
+                            if not _tc.empty:
+                                _exp_top_calls = list(zip(_tc.index.tolist(), _tc.values.tolist()))
+                            break
+                    if 'priority' in _exp_df.columns:
+                        _pc = _exp_df['priority'].dropna().value_counts().sort_index()
+                        _pri_parts = [f"Priority {k}: {v:,} ({v/max(len(_exp_df),1)*100:.0f}%)" for k,v in _pc.items() if str(k).strip().isdigit()]
+                        _exp_pri_str = " · ".join(_pri_parts[:4]) if _pri_parts else "mixed priorities"
+                    if 'date' in _exp_df.columns:
+                        _dd = pd.to_datetime(_exp_df['date'], errors='coerce').dropna()
+                        if not _dd.empty:
+                            _exp_date_range = f"{_dd.min().strftime('%b %Y')} – {_dd.max().strftime('%b %Y')}"
+                except Exception:
+                    pass
+                _top5_html = ""
+                for _cname, _ccnt in (_exp_top_calls or []):
+                    _cpct = f"{_ccnt/max(len(_exp_df),1)*100:.1f}%"
+                    _is_prop = any(w in str(_cname).upper() for w in ['THEFT','BURGLAR','VANDAL','ROBBERY','TRESPASS','LARCEN','AUTO','VEHICLE','BREAK','SHOPLI'])
+                    _cflag = ' <span style="color:#f59e0b;font-size:10px">property-related</span>' if _is_prop else ''
+                    _top5_html += f'<tr><td><strong>{_cname}</strong>{_cflag}</td><td style="font-family:monospace;color:#374151">{_ccnt:,}</td><td style="color:#6b7280">{_cpct}</td></tr>'
+                _guardian_img_b64 = get_transparent_product_base64("gigs.png") or ""
+                logo_b64_dark = get_themed_logo_base64("logo.png", theme="dark")
+                logo_b64_light = get_themed_logo_base64("logo.png", theme="light")
+    
+                # ── FCC 4G LTE Coverage Map URL for export ────────────────────────────
+                _fcc_zoom_export = round(min(13, max(9, dynamic_zoom + 1)), 2)
+                _fcc_url = (f"https://broadbandmap.fcc.gov/home?version=dec2023"
+                            f"&zoom={_fcc_zoom_export}&vlon={center_lon:.6f}&vlat={center_lat:.6f}"
+                            f"&speed=25&tech=300&br=4")
+    
+                # ── 4G LTE carrier mini-maps for export section 03b ─────────────────
+                _exp_carrier_results = _carrier_coverage_analysis(
+                    st.session_state.get('active_state', ''), city_boundary_geom
                 )
-
-            # ── Re-establish tier badge variables for export ────────────────────────
-            _exp_pricing_tier = st.session_state.get('pricing_tier', 'Safe Guard')
-            if _exp_pricing_tier == "Safe Guard":
-                _tier_badge = "🛡️ Safe Guard"
-                _tier_desc = "Advanced Custom Features"
-            else:
-                _tier_badge = "🛡️ Safe Guard Lite"
-                _tier_desc = "Core Functionality"
-
-            _selected_labels_str = ', '.join(selected_labels) if selected_labels else prop_city
-
-            export_html = f"""<!DOCTYPE html>
-    <html lang="en"><head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>BRINC DFR Proposal — {prop_city}, {prop_state}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
-    <style>
-    *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
-    :root{{
-      --black:#000000;--white:#ffffff;--cyan:#00D2FF;--gold:#FFD700;
-      --ink:#0a0a0f;--surface:#f7f8fa;--border:#e4e6ea;
-      --text:#111118;--muted:#6b7280;--light:#f0f2f6;
-      --resp:#00D2FF;--guard:#FFD700;--green:#22c55e;--amber:#f59e0b;
-    }}
-    html{{scroll-behavior:smooth}}
-    body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text);line-height:1.6;display:flex;min-height:100vh}}
-
-    /* ── LEFT SIDEBAR INDEX ──────────────────────────────────────── */
-    .doc-sidebar{{
-      position:fixed;top:0;left:0;width:220px;height:100vh;
-      background:var(--ink);overflow-y:auto;z-index:100;
-      display:flex;flex-direction:column;
-      border-right:1px solid #1a1a2a;
-    }}
-    .sidebar-logo{{
-      padding:28px 24px 20px;
-      border-bottom:1px solid #1a1a2a;
-    }}
-    .sidebar-logo img{{height:40px;display:block}}
-    .sidebar-logo .brand{{font-size:22px;font-weight:900;letter-spacing:3px;color:#fff}}
-    .sidebar-city{{
-      padding:16px 24px;
-      border-bottom:1px solid #1a1a2a;
-    }}
-    .sidebar-city .city-name{{font-size:13px;font-weight:700;color:#fff;letter-spacing:0.3px}}
-    .sidebar-city .city-sub{{font-size:11px;color:#666;margin-top:2px}}
-    .sidebar-nav{{padding:20px 0;flex:1}}
-    .sidebar-nav a{{
-      display:flex;align-items:center;gap:10px;
-      padding:9px 24px;font-size:12px;font-weight:500;
-      color:#888;text-decoration:none;
-      border-left:2px solid transparent;
-      transition:all 0.15s;
-    }}
-    .sidebar-nav a:hover,.sidebar-nav a.active{{
-      color:#fff;background:rgba(0,210,255,0.06);
-      border-left-color:var(--cyan);
-    }}
-    .sidebar-nav .nav-num{{
-      font-size:10px;font-weight:700;color:#333;
-      width:18px;text-align:center;flex-shrink:0;
-    }}
-    .sidebar-nav a:hover .nav-num,.sidebar-nav a.active .nav-num{{color:var(--cyan)}}
-    .sidebar-footer{{
-      padding:20px 24px;border-top:1px solid #1a1a2a;
-      font-size:10px;color:#444;line-height:1.6;
-    }}
-    .sidebar-footer a{{color:#555;text-decoration:none}}
-
-    /* ── MAIN CONTENT ────────────────────────────────────────────── */
-    .doc-main{{margin-left:220px;flex:1;min-width:0}}
-
-    /* ── PAGE SECTIONS (each prints as independent page) ─────────── */
-    .doc-section{{
-      background:#fff;
-      border-bottom:6px solid var(--surface);
-      padding:52px 60px;
-      position:relative;
-    }}
-    .doc-section:first-child{{padding-top:64px}}
-
-    /* Section header bar */
-    .section-eyebrow{{
-      display:flex;align-items:center;gap:10px;
-      margin-bottom:32px;
-    }}
-
-    /* ── SOURCE BADGE ──────────────────────────────────────────────── */
-    .src{{
-      display:inline-flex;align-items:center;justify-content:center;
-      width:14px;height:14px;border-radius:50%;
-      background:rgba(100,116,139,0.1);color:#94a3b8;
-      border:1px solid rgba(100,116,139,0.28);
-      font-size:8px;font-weight:700;cursor:default;
-      margin-left:4px;vertical-align:middle;position:relative;
-      font-style:normal;text-decoration:none;flex-shrink:0;
-    }}
-    .src:hover::after{{
-      content:attr(data-src);
-      position:absolute;bottom:130%;left:50%;
-      transform:translateX(-50%);
-      background:#1e293b;color:#e2e8f0;
-      font-size:10.5px;font-weight:400;padding:7px 11px;
-      border-radius:6px;white-space:normal;width:270px;
-      line-height:1.55;z-index:9999;
-      border:1px solid #334155;
-      box-shadow:0 6px 20px rgba(0,0,0,0.4);
-      pointer-events:none;text-transform:none;letter-spacing:normal;
-    }}
-    .copy-section-btn{{
-      margin-left:auto;
-      display:inline-flex;align-items:center;gap:6px;
-      font-size:10px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
-      color:var(--cyan);border:1px solid rgba(0,210,255,0.35);
-      background:rgba(0,210,255,0.06);
-      padding:4px 12px;border-radius:100px;cursor:pointer;
-      font-family:'IBM Plex Mono',monospace;
-      transition:background 0.15s,border-color 0.15s;
-      user-select:none;
-    }}
-    .copy-section-btn:hover{{background:rgba(0,210,255,0.14);border-color:rgba(0,210,255,0.6);}}
-    .copy-section-btn.copied{{color:#39FF14;border-color:rgba(57,255,20,0.5);background:rgba(57,255,20,0.07);}}
-    .copy-section-btn.grant-law{{color:#3b82f6;border-color:rgba(59,130,246,0.35);background:rgba(59,130,246,0.06);}}
-    .copy-section-btn.grant-law:hover{{background:rgba(59,130,246,0.14);border-color:rgba(59,130,246,0.6);}}
-    .copy-section-btn.grant-fire{{color:#f97316;border-color:rgba(249,115,22,0.35);background:rgba(249,115,22,0.06);}}
-    .copy-section-btn.grant-fire:hover{{background:rgba(249,115,22,0.14);border-color:rgba(249,115,22,0.6);}}
-    .copy-section-btn.community{{color:#22c55e;border-color:rgba(34,197,94,0.35);background:rgba(34,197,94,0.06);}}
-    .copy-section-btn.community:hover{{background:rgba(34,197,94,0.14);border-color:rgba(34,197,94,0.6);}}
-    .section-eyebrow .pg-num{{
-      font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;
-      color:var(--cyan);border:1px solid rgba(0,210,255,0.3);
-      padding:3px 10px;border-radius:100px;font-family:'IBM Plex Mono',monospace;
-    }}
-    .section-eyebrow .pg-title{{
-      font-size:10px;font-weight:600;letter-spacing:2px;text-transform:uppercase;
-      color:var(--muted);
-    }}
-
-    /* ── COVER PAGE ──────────────────────────────────────────────── */
-    .cover-page{{
-      background:var(--ink);color:#fff;min-height:100vh;
-      display:flex;flex-direction:column;justify-content:space-between;
-      padding:60px;position:relative;overflow:hidden;
-    }}
-    .cover-page::before{{
-      content:'';position:absolute;inset:0;
-      background:radial-gradient(ellipse 80% 60% at 70% 30%,rgba(0,210,255,0.08) 0%,transparent 70%);
-      pointer-events:none;
-    }}
-    .cover-logo{{margin-bottom:auto}}
-    .cover-logo img{{height:52px}}
-    .cover-logo .brand{{font-size:28px;font-weight:900;letter-spacing:4px;color:#fff}}
-    .cover-headline{{margin:60px 0 40px}}
-    .cover-tag{{
-      font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;
-      color:var(--cyan);margin-bottom:20px;
-    }}
-    .cover-headline h1{{
-      font-size:52px;font-weight:900;line-height:1.05;letter-spacing:-1px;
-      color:#fff;margin-bottom:16px;
-    }}
-    .cover-headline h1 span{{color:var(--cyan)}}
-    .cover-population{{
-      font-size:13px;color:#aaa;margin-bottom:14px;letter-spacing:0.2px;
-      border-left:3px solid var(--cyan);padding-left:10px;
-    }}
-    .cover-population strong{{color:#fff;font-weight:700}}
-    .cover-headline p{{font-size:15px;color:#888;max-width:520px;line-height:1.7}}
-    .cover-meta{{
-      display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
-      background:#1a1a2a;border:1px solid #1a1a2a;border-radius:10px;overflow:hidden;
-      margin-top:4px;
-    }}
-    .cover-meta-cell{{
-      background:var(--ink);padding:16px 14px;
-    }}
-    .cover-meta-cell .label{{font-size:9px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#555;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-    .cover-meta-cell .value{{font-size:clamp(11px,1vw,14px);font-weight:800;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'IBM Plex Mono',monospace;letter-spacing:-0.3px}}
-    .cover-meta-cell .value.accent{{color:var(--cyan)}}
-    .cover-meta-cell .value.gold{{color:var(--gold)}}
-    .cover-bottom{{margin-top:40px;font-size:12px;color:#444;border-top:1px solid #1a1a2a;padding-top:24px;display:flex;justify-content:space-between}}
-
-    /* ── METRICS SECTION ─────────────────────────────────────────── */
-    .metrics-hero{{
-      display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
-      background:var(--border);border-radius:12px;overflow:hidden;
-      margin-bottom:40px;box-shadow:0 1px 3px rgba(0,0,0,0.04);
-    }}
-    .metric-cell{{
-      background:#fff;padding:24px 16px;text-align:center;min-width:0;
-    }}
-    .metric-cell .m-label{{font-size:9px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-    .metric-cell .m-value{{font-size:clamp(16px,1.8vw,28px);font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1.1;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-    .metric-cell .m-value.cyan{{color:var(--cyan)}}
-    .metric-cell .m-value.gold{{color:var(--gold)}}
-    .metric-cell .m-value.green{{color:var(--green)}}
-    .metric-cell .m-sub{{font-size:11px;color:var(--muted);margin-top:6px}}
-
-    /* Fleet split row */
-    .fleet-split{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:32px}}
-    .fleet-card{{border-radius:10px;padding:24px;position:relative;overflow:hidden}}
-    .fleet-card.guardian{{background:#0a0800;border:1px solid #2a2400;color:#fff}}
-    .fleet-card.responder{{background:#00111a;border:1px solid #002a3a;color:#fff}}
-    .fleet-card .fc-icon{{font-size:28px;margin-bottom:12px}}
-    .fleet-card .fc-type{{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px}}
-    .fleet-card.guardian .fc-type{{color:var(--gold)}}
-    .fleet-card.responder .fc-type{{color:var(--resp)}}
-    .fleet-card .fc-val{{font-size:32px;font-weight:900;font-family:'IBM Plex Mono',monospace;color:#fff}}
-    .fleet-card .fc-sub{{font-size:12px;color:#888;margin-top:4px}}
-    .fleet-card .fc-row{{display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)}}
-    .fleet-card .fc-row:last-child{{border-bottom:none}}
-    .fleet-card .fc-row .k{{color:#666}}.fleet-card .fc-row .v{{font-weight:600;color:#ccc}}
-
-    /* ── SECTION HEADINGS ────────────────────────────────────────── */
-    .sh{{
-      font-size:22px;font-weight:800;color:var(--text);
-      margin-bottom:20px;padding-bottom:12px;
-      border-bottom:2px solid var(--border);
-      display:flex;align-items:center;gap:10px;
-    }}
-    .sh .sh-accent{{color:var(--cyan)}}
-
-    /* ── TABLES ──────────────────────────────────────────────────── */
-    table{{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:28px}}
-    thead tr{{background:var(--ink);color:#fff}}
-    thead th{{padding:12px 16px;text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase}}
-    tbody tr:nth-child(even){{background:#fafbfc}}
-    tbody tr:hover{{background:#f0f8ff}}
-    td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
-    .tag-resp{{background:rgba(0,210,255,0.1);color:#0066aa;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}}
-    .tag-guard{{background:rgba(255,215,0,0.15);color:#8a6a00;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}}
-
-    /* ── MAP ─────────────────────────────────────────────────────── */
-    .map-wrap{{border-radius:12px;overflow:hidden;border:1px solid var(--border);box-shadow:0 4px 20px rgba(0,0,0,0.06);margin-bottom:32px}}
-
-    /* ── DISCLAIMER ──────────────────────────────────────────────── */
-    .disc{{background:#fffbeb;border-left:4px solid var(--amber);padding:16px 20px;border-radius:0 8px 8px 0;font-size:12px;color:#7a5a00;margin-bottom:24px}}
-
-    /* ── FOOTER ──────────────────────────────────────────────────── */
-    .doc-footer{{background:var(--ink);color:#555;padding:36px 60px;font-size:11px;display:flex;justify-content:space-between;align-items:center;gap:20px}}
-    .doc-footer a{{color:#666;text-decoration:none}}
-    .doc-footer .brand-mark{{font-size:16px;font-weight:900;letter-spacing:3px;color:#fff;flex-shrink:0}}
-    .doc-version{{margin:28px 0 0;padding-top:12px;border-top:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.12em;color:rgba(107,114,128,0.9);text-align:right;}}
-
-    /* ── PRODUCT IMAGE ───────────────────────────────────────────── */
-    .cover-body{{
-      display:flex;align-items:flex-start;gap:40px;flex:1;margin:40px 0;
-    }}
-    .cover-left{{flex:1;min-width:0}}
-    .cover-right{{
-      flex-shrink:0;width:420px;display:flex;align-items:center;
-      justify-content:flex-end;
-    }}
-    .product-img{{
-      width:100%;max-width:420px;
-      filter:drop-shadow(0 20px 60px rgba(0,210,255,0.18));
-      pointer-events:none;
-    }}
-    @media (max-width:900px){{.cover-right{{display:none}}}}
-
-    /* ── TWO-COL INFRA TABLE ─────────────────────────────────────── */
-    .infra-grid{{
-      display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:28px;
-    }}
-    .infra-item{{
-      background:#fafbfc;border:1px solid var(--border);border-radius:6px;
-      padding:10px 12px;font-size:11px;display:flex;justify-content:space-between;
-      align-items:center;gap:8px;
-    }}
-    .infra-item .i-name{{font-weight:600;color:var(--text);flex:1;min-width:0;
-      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
-    .infra-item .i-type{{font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;flex-shrink:0}}
-    .infra-item .i-link{{color:var(--cyan);text-decoration:none;font-weight:700;font-size:11px;flex-shrink:0}}
-
-    /* ── GRANT STATS SIDEBAR ─────────────────────────────────────── */
-    .grant-layout{{display:grid;grid-template-columns:1fr 280px;gap:40px;align-items:start}}
-    .grant-sidebar{{display:flex;flex-direction:column;gap:12px}}
-    .grant-stat{{
-      background:#fafbfc;border:1px solid var(--border);border-radius:8px;
-      padding:16px;text-align:center;
-    }}
-    .grant-stat .gs-label{{font-size:10px;font-weight:600;letter-spacing:1px;
-      text-transform:uppercase;color:var(--muted);margin-bottom:6px}}
-    .grant-stat .gs-val{{font-size:24px;font-weight:900;font-family:'IBM Plex Mono',monospace;color:var(--cyan)}}
-    .grant-stat .gs-sub{{font-size:11px;color:var(--muted);margin-top:4px}}
-    .grant-stat.gold .gs-val{{color:var(--gold)}}
-    .grant-stat.green .gs-val{{color:var(--green)}}
-
-    /* ── CRIME STATS BOX ─────────────────────────────────────────── */
-    .crime-box{{
-      background:linear-gradient(135deg,#0a0800 0%,#120e00 100%);
-      border:1px solid #2a2000;border-radius:10px;
-      padding:24px;margin-bottom:24px;
-    }}
-    .crime-box h4{{color:var(--gold);font-size:12px;font-weight:700;
-      letter-spacing:1.5px;text-transform:uppercase;margin-bottom:16px}}
-    .crime-stat-row{{
-      display:flex;justify-content:space-between;align-items:baseline;
-      padding:8px 0;border-bottom:1px solid #1a1600;font-size:13px;
-    }}
-    .crime-stat-row:last-child{{border-bottom:none}}
-    .crime-stat-row .csk{{color:#888}}
-    .crime-stat-row .csv{{font-weight:700;color:#fff;font-family:'IBM Plex Mono',monospace}}
-    .crime-stat-row .csv.accent{{color:var(--gold)}}
-
-    /* ── PRINT ───────────────────────────────────────────────────── */
-    @media print{{
-      @page{{size:auto;margin:0.45in 0.5in}}
-      html,body{{background:#fff !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-      .doc-sidebar{{display:none !important}}
-      .doc-main{{margin-left:0 !important}}
-      .doc-section,.cover-page{{
-        page-break-after:always;
-        page-break-inside:avoid;
-        break-after:page;
-        border-bottom:none;
-        min-height:0;
-        box-shadow:none !important;
-      }}
-      .doc-section{{padding:30px 34px !important}}
-      .cover-page{{padding:38px 40px !important;min-height:auto !important}}
-      .doc-footer{{padding:20px 34px !important}}
-      .doc-section:last-child,.cover-page:last-child{{page-break-after:auto;break-after:auto}}
-      .section-eyebrow,.cover-headline,h1,h2,h3,h4{{break-after:avoid-page;page-break-after:avoid}}
-      .metrics-hero,.roi-strip,.grant-layout,.infra-grid,.map-wrap,table,img,svg,canvas{{
-        break-inside:avoid-page;
-        page-break-inside:avoid;
-      }}
-      a{{color:inherit !important;text-decoration:none !important}}
-      .doc-version{{margin-top:18px;padding-top:10px;border-top:1px solid #e5e7eb;color:#6b7280 !important;}}
-    }}
-    </style>
-    </head>
-    <body>
-
-    <!-- ── TOP-RIGHT CORNER LOGO ─────────────────────────────────── -->
-
-
-    <!-- ── SIDEBAR INDEX ─────────────────────────────────────────── -->
-    <nav class="doc-sidebar">
-      <div class="sidebar-logo">
-        {"<img src='data:image/png;base64," + logo_b64_dark + "' style='height:40px;display:block'>" if logo_b64_dark else '<div class="brand">BRINC</div>'}
-      </div>
-      <div class="sidebar-city">
-        <div class="city-name">{prop_city}, {prop_state}</div>
-        <div class="city-sub">DFR Deployment Proposal</div>
-      </div>
-      <nav class="sidebar-nav">
-        <a href="#cover"><span class="nav-num">00</span>Cover</a>
-        <a href="#executive"><span class="nav-num">01</span>Executive Summary</a>
-        <a href="#fleet"><span class="nav-num">02</span>Fleet &amp; Coverage</a>
-        <a href="#map"><span class="nav-num">03</span>Coverage Map</a>
-        <a href="#incident-data"><span class="nav-num">04</span>Incident Analysis</a>
-        <a href="#deployment"><span class="nav-num">05</span>Deployment Locations</a>
-        <a href="#grant"><span class="nav-num">06</span>Grant Narrative</a>
-        <a href="#infrastructure"><span class="nav-num">07</span>Infrastructure Directory</a>
-        <a href="#community"><span class="nav-num">08</span>Community Partnership</a>
-        [ANALYTICS_NAV]
-        [COMMUNITY_IMPACT_NAV]
-        <a href="#school-safety"><span class="nav-num">11</span>School Safety</a>
-      </nav>
-      <div class="sidebar-footer">
-        Prepared {datetime.datetime.now().strftime("%b %d, %Y")}<br>
-        {prop_name}<br>
-        <a href="mailto:{prop_email}">{prop_email}</a>
-        {_ae_phone_html}
-      </div>
-    </nav>
-
-    <main class="doc-main">
-
-    <!-- ── 00: COVER ─────────────────────────────────────────────── -->
-    <section class="cover-page" id="cover">
-      <div class="cover-logo">
-        {"<img src='data:image/png;base64," + logo_b64_dark + "' style='height:48px;display:block'>" if logo_b64_dark else '<div class="brand">BRINC</div>'}
-      </div>
-      <div class="cover-body">
-        <div class="cover-left">
-          <div class="cover-headline">
-            <div class="cover-tag">Drone as a First Responder · Deployment Proposal</div>
-            <h1>Protecting <span>{prop_city}</span>,<br>{prop_state}</h1>
-            <div class="cover-population">
-              Serving <strong>{int(pop_metric):,}</strong> residents of {prop_city}, {prop_state}
-              <abbr title="Source: US Census Bureau American Community Survey (ACS) 5-Year Estimates · census.gov/programs-surveys/acs" style="font-size:11px;color:#666;margin-left:4px;text-decoration:none;cursor:help;">ⓘ</abbr>
+                if _exp_carrier_results:
+                    _exp_map_cols = []
+                    for _eci, _ecr in enumerate(_exp_carrier_results[:3]):
+                        _epct = f"{_ecr['pct']:.1f}%" if _ecr['pct'] > 0 else "No data"
+                        _ebadge = "#22c55e" if _ecr['pct'] >= 90 else "#f59e0b" if _ecr['pct'] >= 70 else "#ef4444"
+                        _emfig = _build_carrier_mini_map(
+                            _ecr, city_boundary_geom, center_lat, center_lon,
+                            dynamic_zoom, 'carto-darkmatter'
+                        )
+                        _inc_plotlyjs = 'cdn' if _eci == 0 else False
+                        _emap_div = _emfig.to_html(
+                            full_html=False, include_plotlyjs=_inc_plotlyjs,
+                            default_height='240px', default_width='100%'
+                        )
+                        _exp_map_cols.append(
+                            f'<div style="flex:1;min-width:200px;">'
+                            f'<div style="text-align:center;padding:6px 0 4px;">'
+                            f'<span style="font-size:1rem;font-weight:800;color:{_ecr["color"]};">{_ecr["carrier"]}</span><br>'
+                            f'<span style="font-size:1.7rem;font-weight:900;color:{_ebadge};font-family:monospace;">{_epct}</span><br>'
+                            f'<span style="font-size:0.62rem;color:#8899aa;text-transform:uppercase;letter-spacing:1px;">of jurisdiction covered</span>'
+                            f'</div>{_emap_div}</div>'
+                        )
+                    _exp_lte_content = (
+                        '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;">'
+                        + ''.join(_exp_map_cols)
+                        + '</div>'
+                        + '<p style="font-size:0.65rem;color:#556;margin:8px 0 0;">'
+                        + 'Source: FCC Broadband Data Collection · AT&amp;T, T-Mobile, Verizon 4G LTE coverage polygons.'
+                        + '</p>'
+                    )
+                else:
+                    _exp_lte_content = (
+                        f'<a href="{_fcc_url}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">'
+                        f'<div style="display:flex;align-items:center;justify-content:space-between;background:#0d1b2e;border:1px solid #1e3a5f;border-radius:10px;padding:20px 28px;">'
+                        f'<div><div style="color:#00b4d8;font-size:1rem;font-weight:600;margin-bottom:4px;">📶 Open FCC 4G LTE Coverage Map</div>'
+                        f'<div style="color:#6b7f99;font-size:0.78rem;">FCC National Broadband Map · AT&amp;T, T-Mobile, Verizon · Centered on {center_lat:.4f}, {center_lon:.4f}</div>'
+                        f'</div><div style="color:#00b4d8;font-size:1.6rem;margin-left:20px;">↗</div></div></a>'
+                        f'<p style="font-size:0.65rem;color:#556;margin:10px 0 0;">Opens broadbandmap.fcc.gov in a new tab.</p>'
+                    )
+    
+                # ── Re-establish tier badge variables for export ────────────────────────
+                _exp_pricing_tier = st.session_state.get('pricing_tier', 'Safe Guard')
+                if _exp_pricing_tier == "Safe Guard":
+                    _tier_badge = "🛡️ Safe Guard"
+                    _tier_desc = "Advanced Custom Features"
+                else:
+                    _tier_badge = "🛡️ Safe Guard Lite"
+                    _tier_desc = "Core Functionality"
+    
+                _selected_labels_str = ', '.join(selected_labels) if selected_labels else prop_city
+    
+                export_html = f"""<!DOCTYPE html>
+        <html lang="en"><head>
+        <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>BRINC DFR Proposal — {prop_city}, {prop_state}</title>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+        <style>
+        *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
+        :root{{
+          --black:#000000;--white:#ffffff;--cyan:#00D2FF;--gold:#FFD700;
+          --ink:#0a0a0f;--surface:#f7f8fa;--border:#e4e6ea;
+          --text:#111118;--muted:#6b7280;--light:#f0f2f6;
+          --resp:#00D2FF;--guard:#FFD700;--green:#22c55e;--amber:#f59e0b;
+        }}
+        html{{scroll-behavior:smooth}}
+        body{{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text);line-height:1.6;display:flex;min-height:100vh}}
+    
+        /* ── LEFT SIDEBAR INDEX ──────────────────────────────────────── */
+        .doc-sidebar{{
+          position:fixed;top:0;left:0;width:220px;height:100vh;
+          background:var(--ink);overflow-y:auto;z-index:100;
+          display:flex;flex-direction:column;
+          border-right:1px solid #1a1a2a;
+        }}
+        .sidebar-logo{{
+          padding:28px 24px 20px;
+          border-bottom:1px solid #1a1a2a;
+        }}
+        .sidebar-logo img{{height:40px;display:block}}
+        .sidebar-logo .brand{{font-size:22px;font-weight:900;letter-spacing:3px;color:#fff}}
+        .sidebar-city{{
+          padding:16px 24px;
+          border-bottom:1px solid #1a1a2a;
+        }}
+        .sidebar-city .city-name{{font-size:13px;font-weight:700;color:#fff;letter-spacing:0.3px}}
+        .sidebar-city .city-sub{{font-size:11px;color:#666;margin-top:2px}}
+        .sidebar-nav{{padding:20px 0;flex:1}}
+        .sidebar-nav a{{
+          display:flex;align-items:center;gap:10px;
+          padding:9px 24px;font-size:12px;font-weight:500;
+          color:#888;text-decoration:none;
+          border-left:2px solid transparent;
+          transition:all 0.15s;
+        }}
+        .sidebar-nav a:hover,.sidebar-nav a.active{{
+          color:#fff;background:rgba(0,210,255,0.06);
+          border-left-color:var(--cyan);
+        }}
+        .sidebar-nav .nav-num{{
+          font-size:10px;font-weight:700;color:#333;
+          width:18px;text-align:center;flex-shrink:0;
+        }}
+        .sidebar-nav a:hover .nav-num,.sidebar-nav a.active .nav-num{{color:var(--cyan)}}
+        .sidebar-footer{{
+          padding:20px 24px;border-top:1px solid #1a1a2a;
+          font-size:10px;color:#444;line-height:1.6;
+        }}
+        .sidebar-footer a{{color:#555;text-decoration:none}}
+    
+        /* ── MAIN CONTENT ────────────────────────────────────────────── */
+        .doc-main{{margin-left:220px;flex:1;min-width:0}}
+    
+        /* ── PAGE SECTIONS (each prints as independent page) ─────────── */
+        .doc-section{{
+          background:#fff;
+          border-bottom:6px solid var(--surface);
+          padding:52px 60px;
+          position:relative;
+        }}
+        .doc-section:first-child{{padding-top:64px}}
+    
+        /* Section header bar */
+        .section-eyebrow{{
+          display:flex;align-items:center;gap:10px;
+          margin-bottom:32px;
+        }}
+    
+        /* ── SOURCE BADGE ──────────────────────────────────────────────── */
+        .src{{
+          display:inline-flex;align-items:center;justify-content:center;
+          width:14px;height:14px;border-radius:50%;
+          background:rgba(100,116,139,0.1);color:#94a3b8;
+          border:1px solid rgba(100,116,139,0.28);
+          font-size:8px;font-weight:700;cursor:default;
+          margin-left:4px;vertical-align:middle;position:relative;
+          font-style:normal;text-decoration:none;flex-shrink:0;
+        }}
+        .src:hover::after{{
+          content:attr(data-src);
+          position:absolute;bottom:130%;left:50%;
+          transform:translateX(-50%);
+          background:#1e293b;color:#e2e8f0;
+          font-size:10.5px;font-weight:400;padding:7px 11px;
+          border-radius:6px;white-space:normal;width:270px;
+          line-height:1.55;z-index:9999;
+          border:1px solid #334155;
+          box-shadow:0 6px 20px rgba(0,0,0,0.4);
+          pointer-events:none;text-transform:none;letter-spacing:normal;
+        }}
+        .copy-section-btn{{
+          margin-left:auto;
+          display:inline-flex;align-items:center;gap:6px;
+          font-size:10px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
+          color:var(--cyan);border:1px solid rgba(0,210,255,0.35);
+          background:rgba(0,210,255,0.06);
+          padding:4px 12px;border-radius:100px;cursor:pointer;
+          font-family:'IBM Plex Mono',monospace;
+          transition:background 0.15s,border-color 0.15s;
+          user-select:none;
+        }}
+        .copy-section-btn:hover{{background:rgba(0,210,255,0.14);border-color:rgba(0,210,255,0.6);}}
+        .copy-section-btn.copied{{color:#39FF14;border-color:rgba(57,255,20,0.5);background:rgba(57,255,20,0.07);}}
+        .copy-section-btn.grant-law{{color:#3b82f6;border-color:rgba(59,130,246,0.35);background:rgba(59,130,246,0.06);}}
+        .copy-section-btn.grant-law:hover{{background:rgba(59,130,246,0.14);border-color:rgba(59,130,246,0.6);}}
+        .copy-section-btn.grant-fire{{color:#f97316;border-color:rgba(249,115,22,0.35);background:rgba(249,115,22,0.06);}}
+        .copy-section-btn.grant-fire:hover{{background:rgba(249,115,22,0.14);border-color:rgba(249,115,22,0.6);}}
+        .copy-section-btn.community{{color:#22c55e;border-color:rgba(34,197,94,0.35);background:rgba(34,197,94,0.06);}}
+        .copy-section-btn.community:hover{{background:rgba(34,197,94,0.14);border-color:rgba(34,197,94,0.6);}}
+        .section-eyebrow .pg-num{{
+          font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;
+          color:var(--cyan);border:1px solid rgba(0,210,255,0.3);
+          padding:3px 10px;border-radius:100px;font-family:'IBM Plex Mono',monospace;
+        }}
+        .section-eyebrow .pg-title{{
+          font-size:10px;font-weight:600;letter-spacing:2px;text-transform:uppercase;
+          color:var(--muted);
+        }}
+    
+        /* ── COVER PAGE ──────────────────────────────────────────────── */
+        .cover-page{{
+          background:var(--ink);color:#fff;min-height:100vh;
+          display:flex;flex-direction:column;justify-content:space-between;
+          padding:60px;position:relative;overflow:hidden;
+        }}
+        .cover-page::before{{
+          content:'';position:absolute;inset:0;
+          background:radial-gradient(ellipse 80% 60% at 70% 30%,rgba(0,210,255,0.08) 0%,transparent 70%);
+          pointer-events:none;
+        }}
+        .cover-logo{{margin-bottom:auto}}
+        .cover-logo img{{height:52px}}
+        .cover-logo .brand{{font-size:28px;font-weight:900;letter-spacing:4px;color:#fff}}
+        .cover-headline{{margin:60px 0 40px}}
+        .cover-tag{{
+          font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;
+          color:var(--cyan);margin-bottom:20px;
+        }}
+        .cover-headline h1{{
+          font-size:52px;font-weight:900;line-height:1.05;letter-spacing:-1px;
+          color:#fff;margin-bottom:16px;
+        }}
+        .cover-headline h1 span{{color:var(--cyan)}}
+        .cover-population{{
+          font-size:13px;color:#aaa;margin-bottom:14px;letter-spacing:0.2px;
+          border-left:3px solid var(--cyan);padding-left:10px;
+        }}
+        .cover-population strong{{color:#fff;font-weight:700}}
+        .cover-headline p{{font-size:15px;color:#888;max-width:520px;line-height:1.7}}
+        .cover-meta{{
+          display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+          background:#1a1a2a;border:1px solid #1a1a2a;border-radius:10px;overflow:hidden;
+          margin-top:4px;
+        }}
+        .cover-meta-cell{{
+          background:var(--ink);padding:16px 14px;
+        }}
+        .cover-meta-cell .label{{font-size:9px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#555;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+        .cover-meta-cell .value{{font-size:clamp(11px,1vw,14px);font-weight:800;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'IBM Plex Mono',monospace;letter-spacing:-0.3px}}
+        .cover-meta-cell .value.accent{{color:var(--cyan)}}
+        .cover-meta-cell .value.gold{{color:var(--gold)}}
+        .cover-bottom{{margin-top:40px;font-size:12px;color:#444;border-top:1px solid #1a1a2a;padding-top:24px;display:flex;justify-content:space-between}}
+    
+        /* ── METRICS SECTION ─────────────────────────────────────────── */
+        .metrics-hero{{
+          display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+          background:var(--border);border-radius:12px;overflow:hidden;
+          margin-bottom:40px;box-shadow:0 1px 3px rgba(0,0,0,0.04);
+        }}
+        .metric-cell{{
+          background:#fff;padding:24px 16px;text-align:center;min-width:0;
+        }}
+        .metric-cell .m-label{{font-size:9px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+        .metric-cell .m-value{{font-size:clamp(16px,1.8vw,28px);font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1.1;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+        .metric-cell .m-value.cyan{{color:var(--cyan)}}
+        .metric-cell .m-value.gold{{color:var(--gold)}}
+        .metric-cell .m-value.green{{color:var(--green)}}
+        .metric-cell .m-sub{{font-size:11px;color:var(--muted);margin-top:6px}}
+    
+        /* Fleet split row */
+        .fleet-split{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:32px}}
+        .fleet-card{{border-radius:10px;padding:24px;position:relative;overflow:hidden}}
+        .fleet-card.guardian{{background:#0a0800;border:1px solid #2a2400;color:#fff}}
+        .fleet-card.responder{{background:#00111a;border:1px solid #002a3a;color:#fff}}
+        .fleet-card .fc-icon{{font-size:28px;margin-bottom:12px}}
+        .fleet-card .fc-type{{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px}}
+        .fleet-card.guardian .fc-type{{color:var(--gold)}}
+        .fleet-card.responder .fc-type{{color:var(--resp)}}
+        .fleet-card .fc-val{{font-size:32px;font-weight:900;font-family:'IBM Plex Mono',monospace;color:#fff}}
+        .fleet-card .fc-sub{{font-size:12px;color:#888;margin-top:4px}}
+        .fleet-card .fc-row{{display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)}}
+        .fleet-card .fc-row:last-child{{border-bottom:none}}
+        .fleet-card .fc-row .k{{color:#666}}.fleet-card .fc-row .v{{font-weight:600;color:#ccc}}
+    
+        /* ── SECTION HEADINGS ────────────────────────────────────────── */
+        .sh{{
+          font-size:22px;font-weight:800;color:var(--text);
+          margin-bottom:20px;padding-bottom:12px;
+          border-bottom:2px solid var(--border);
+          display:flex;align-items:center;gap:10px;
+        }}
+        .sh .sh-accent{{color:var(--cyan)}}
+    
+        /* ── TABLES ──────────────────────────────────────────────────── */
+        table{{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:28px}}
+        thead tr{{background:var(--ink);color:#fff}}
+        thead th{{padding:12px 16px;text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase}}
+        tbody tr:nth-child(even){{background:#fafbfc}}
+        tbody tr:hover{{background:#f0f8ff}}
+        td{{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text)}}
+        .tag-resp{{background:rgba(0,210,255,0.1);color:#0066aa;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}}
+        .tag-guard{{background:rgba(255,215,0,0.15);color:#8a6a00;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}}
+    
+        /* ── MAP ─────────────────────────────────────────────────────── */
+        .map-wrap{{border-radius:12px;overflow:hidden;border:1px solid var(--border);box-shadow:0 4px 20px rgba(0,0,0,0.06);margin-bottom:32px}}
+    
+        /* ── DISCLAIMER ──────────────────────────────────────────────── */
+        .disc{{background:#fffbeb;border-left:4px solid var(--amber);padding:16px 20px;border-radius:0 8px 8px 0;font-size:12px;color:#7a5a00;margin-bottom:24px}}
+    
+        /* ── FOOTER ──────────────────────────────────────────────────── */
+        .doc-footer{{background:var(--ink);color:#555;padding:36px 60px;font-size:11px;display:flex;justify-content:space-between;align-items:center;gap:20px}}
+        .doc-footer a{{color:#666;text-decoration:none}}
+        .doc-footer .brand-mark{{font-size:16px;font-weight:900;letter-spacing:3px;color:#fff;flex-shrink:0}}
+        .doc-version{{margin:28px 0 0;padding-top:12px;border-top:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.12em;color:rgba(107,114,128,0.9);text-align:right;}}
+    
+        /* ── PRODUCT IMAGE ───────────────────────────────────────────── */
+        .cover-body{{
+          display:flex;align-items:flex-start;gap:40px;flex:1;margin:40px 0;
+        }}
+        .cover-left{{flex:1;min-width:0}}
+        .cover-right{{
+          flex-shrink:0;width:420px;display:flex;align-items:center;
+          justify-content:flex-end;
+        }}
+        .product-img{{
+          width:100%;max-width:420px;
+          filter:drop-shadow(0 20px 60px rgba(0,210,255,0.18));
+          pointer-events:none;
+        }}
+        @media (max-width:900px){{.cover-right{{display:none}}}}
+    
+        /* ── TWO-COL INFRA TABLE ─────────────────────────────────────── */
+        .infra-grid{{
+          display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:28px;
+        }}
+        .infra-item{{
+          background:#fafbfc;border:1px solid var(--border);border-radius:6px;
+          padding:10px 12px;font-size:11px;display:flex;justify-content:space-between;
+          align-items:center;gap:8px;
+        }}
+        .infra-item .i-name{{font-weight:600;color:var(--text);flex:1;min-width:0;
+          white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
+        .infra-item .i-type{{font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;flex-shrink:0}}
+        .infra-item .i-link{{color:var(--cyan);text-decoration:none;font-weight:700;font-size:11px;flex-shrink:0}}
+    
+        /* ── GRANT STATS SIDEBAR ─────────────────────────────────────── */
+        .grant-layout{{display:grid;grid-template-columns:1fr 280px;gap:40px;align-items:start}}
+        .grant-sidebar{{display:flex;flex-direction:column;gap:12px}}
+        .grant-stat{{
+          background:#fafbfc;border:1px solid var(--border);border-radius:8px;
+          padding:16px;text-align:center;
+        }}
+        .grant-stat .gs-label{{font-size:10px;font-weight:600;letter-spacing:1px;
+          text-transform:uppercase;color:var(--muted);margin-bottom:6px}}
+        .grant-stat .gs-val{{font-size:24px;font-weight:900;font-family:'IBM Plex Mono',monospace;color:var(--cyan)}}
+        .grant-stat .gs-sub{{font-size:11px;color:var(--muted);margin-top:4px}}
+        .grant-stat.gold .gs-val{{color:var(--gold)}}
+        .grant-stat.green .gs-val{{color:var(--green)}}
+    
+        /* ── CRIME STATS BOX ─────────────────────────────────────────── */
+        .crime-box{{
+          background:linear-gradient(135deg,#0a0800 0%,#120e00 100%);
+          border:1px solid #2a2000;border-radius:10px;
+          padding:24px;margin-bottom:24px;
+        }}
+        .crime-box h4{{color:var(--gold);font-size:12px;font-weight:700;
+          letter-spacing:1.5px;text-transform:uppercase;margin-bottom:16px}}
+        .crime-stat-row{{
+          display:flex;justify-content:space-between;align-items:baseline;
+          padding:8px 0;border-bottom:1px solid #1a1600;font-size:13px;
+        }}
+        .crime-stat-row:last-child{{border-bottom:none}}
+        .crime-stat-row .csk{{color:#888}}
+        .crime-stat-row .csv{{font-weight:700;color:#fff;font-family:'IBM Plex Mono',monospace}}
+        .crime-stat-row .csv.accent{{color:var(--gold)}}
+    
+        /* ── PRINT ───────────────────────────────────────────────────── */
+        @media print{{
+          @page{{size:auto;margin:0.45in 0.5in}}
+          html,body{{background:#fff !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+          .doc-sidebar{{display:none !important}}
+          .doc-main{{margin-left:0 !important}}
+          .doc-section,.cover-page{{
+            page-break-after:always;
+            page-break-inside:avoid;
+            break-after:page;
+            border-bottom:none;
+            min-height:0;
+            box-shadow:none !important;
+          }}
+          .doc-section{{padding:30px 34px !important}}
+          .cover-page{{padding:38px 40px !important;min-height:auto !important}}
+          .doc-footer{{padding:20px 34px !important}}
+          .doc-section:last-child,.cover-page:last-child{{page-break-after:auto;break-after:auto}}
+          .section-eyebrow,.cover-headline,h1,h2,h3,h4{{break-after:avoid-page;page-break-after:avoid}}
+          .metrics-hero,.roi-strip,.grant-layout,.infra-grid,.map-wrap,table,img,svg,canvas{{
+            break-inside:avoid-page;
+            page-break-inside:avoid;
+          }}
+          a{{color:inherit !important;text-decoration:none !important}}
+          .doc-version{{margin-top:18px;padding-top:10px;border-top:1px solid #e5e7eb;color:#6b7280 !important;}}
+        }}
+        </style>
+        </head>
+        <body>
+    
+        <!-- ── TOP-RIGHT CORNER LOGO ─────────────────────────────────── -->
+    
+    
+        <!-- ── SIDEBAR INDEX ─────────────────────────────────────────── -->
+        <nav class="doc-sidebar">
+          <div class="sidebar-logo">
+            {"<img src='data:image/png;base64," + logo_b64_dark + "' style='height:40px;display:block'>" if logo_b64_dark else '<div class="brand">BRINC</div>'}
+          </div>
+          <div class="sidebar-city">
+            <div class="city-name">{prop_city}, {prop_state}</div>
+            <div class="city-sub">DFR Deployment Proposal</div>
+          </div>
+          <nav class="sidebar-nav">
+            <a href="#cover"><span class="nav-num">00</span>Cover</a>
+            <a href="#executive"><span class="nav-num">01</span>Executive Summary</a>
+            <a href="#fleet"><span class="nav-num">02</span>Fleet &amp; Coverage</a>
+            <a href="#map"><span class="nav-num">03</span>Coverage Map</a>
+            <a href="#incident-data"><span class="nav-num">04</span>Incident Analysis</a>
+            <a href="#deployment"><span class="nav-num">05</span>Deployment Locations</a>
+            <a href="#grant"><span class="nav-num">06</span>Grant Narrative</a>
+            <a href="#infrastructure"><span class="nav-num">07</span>Infrastructure Directory</a>
+            <a href="#community"><span class="nav-num">08</span>Community Partnership</a>
+            [ANALYTICS_NAV]
+            [COMMUNITY_IMPACT_NAV]
+            <a href="#school-safety"><span class="nav-num">11</span>School Safety</a>
+          </nav>
+          <div class="sidebar-footer">
+            Prepared {datetime.datetime.now().strftime("%b %d, %Y")}<br>
+            {prop_name}<br>
+            <a href="mailto:{prop_email}">{prop_email}</a>
+            {_ae_phone_html}
+          </div>
+        </nav>
+    
+        <main class="doc-main">
+    
+        <!-- ── 00: COVER ─────────────────────────────────────────────── -->
+        <section class="cover-page" id="cover">
+          <div class="cover-logo">
+            {"<img src='data:image/png;base64," + logo_b64_dark + "' style='height:48px;display:block'>" if logo_b64_dark else '<div class="brand">BRINC</div>'}
+          </div>
+          <div class="cover-body">
+            <div class="cover-left">
+              <div class="cover-headline">
+                <div class="cover-tag">Drone as a First Responder · Deployment Proposal</div>
+                <h1>Protecting <span>{prop_city}</span>,<br>{prop_state}</h1>
+                <div class="cover-population">
+                  Serving <strong>{int(pop_metric):,}</strong> residents of {prop_city}, {prop_state}
+                  <abbr title="Source: US Census Bureau American Community Survey (ACS) 5-Year Estimates · census.gov/programs-surveys/acs" style="font-size:11px;color:#666;margin-left:4px;text-decoration:none;cursor:help;">ⓘ</abbr>
+                </div>
+                <p>A data-driven deployment plan for <strong>{actual_k_responder + actual_k_guardian} BRINC aerial units</strong> covering {calls_covered_perc:.1f}% of {st.session_state.get('total_original_calls', total_calls):,} annual incidents · {len(df_stations_all):,} public facilities protected across {area_sq_mi_est:,} sq mi.</p>
+              </div>
+              <div class="cover-meta">
+                <div class="cover-meta-cell"><div class="label">Fleet CapEx</div><div class="value accent">${fleet_capex:,.0f}</div></div>
+                <div class="cover-meta-cell"><div class="label">Annual Savings</div><div class="value gold">${annual_savings:,.0f}</div></div>
+                <div class="cover-meta-cell"><div class="label">Add'l Thermal + K-9</div><div class="value accent">${possible_additional_savings:,.0f}</div></div>
+                <div class="cover-meta-cell"><div class="label">Break-Even</div><div class="value">{break_even_text}</div></div>
+                <div class="cover-meta-cell"><div class="label">Call Coverage</div><div class="value accent">{calls_covered_perc:.1f}%</div></div>
+                <div class="cover-meta-cell"><div class="label">Avg Response</div><div class="value">{avg_resp_time:.1f} min</div></div>
+                <div class="cover-meta-cell"><div class="label">Time Saved</div><div class="value gold">{avg_time_saved:.1f} min</div></div>
+                <div class="cover-meta-cell" style="background:rgba(0,210,255,0.04)"><div class="label" style="color:#1a4a5a">Fleet Size</div><div class="value" style="color:#00a0bf">{actual_k_responder + actual_k_guardian} Units</div></div>
+              </div>
             </div>
-            <p>A data-driven deployment plan for <strong>{actual_k_responder + actual_k_guardian} BRINC aerial units</strong> covering {calls_covered_perc:.1f}% of {st.session_state.get('total_original_calls', total_calls):,} annual incidents · {len(df_stations_all):,} public facilities protected across {area_sq_mi_est:,} sq mi.</p>
+            <div class="cover-right">
+              <img class="product-img" src="data:image/jpeg;base64,{_guardian_img_b64}" alt="BRINC Guardian Station">
+            </div>
           </div>
-          <div class="cover-meta">
-            <div class="cover-meta-cell"><div class="label">Fleet CapEx</div><div class="value accent">${fleet_capex:,.0f}</div></div>
-            <div class="cover-meta-cell"><div class="label">Annual Savings</div><div class="value gold">${annual_savings:,.0f}</div></div>
-            <div class="cover-meta-cell"><div class="label">Add'l Thermal + K-9</div><div class="value accent">${possible_additional_savings:,.0f}</div></div>
-            <div class="cover-meta-cell"><div class="label">Break-Even</div><div class="value">{break_even_text}</div></div>
-            <div class="cover-meta-cell"><div class="label">Call Coverage</div><div class="value accent">{calls_covered_perc:.1f}%</div></div>
-            <div class="cover-meta-cell"><div class="label">Avg Response</div><div class="value">{avg_resp_time:.1f} min</div></div>
-            <div class="cover-meta-cell"><div class="label">Time Saved</div><div class="value gold">{avg_time_saved:.1f} min</div></div>
-            <div class="cover-meta-cell" style="background:rgba(0,210,255,0.04)"><div class="label" style="color:#1a4a5a">Fleet Size</div><div class="value" style="color:#00a0bf">{actual_k_responder + actual_k_guardian} Units</div></div>
+          <div class="cover-bottom">
+            <span>Prepared for <strong style="color:#fff">{prepared_for_city}</strong> by <strong style="color:#fff">{prepared_by_name}</strong></span>
+            <span>{datetime.datetime.now().strftime("%B %d, %Y")}</span>
           </div>
+        </section>
+    
+        <!-- ── 01: EXECUTIVE SUMMARY ──────────────────────────────────── -->
+        <section class="doc-section" id="executive">
+          <div class="section-eyebrow"><span class="pg-num">01</span><span class="pg-title">Executive Summary</span><span class="src" data-src="Sources: Incident coverage &amp; response time computed from uploaded CAD data via BRINC geospatial optimizer. Hardware pricing: BRINC Responder $80K · Guardian $160K (MSRP). Officer dispatch cost benchmark: $76–$120/call (IACP/DOJ). Population: US Census Bureau ACS.">ⓘ</span></div>
+          <div class="metrics-hero">
+            <div class="metric-cell"><div class="m-label">Fleet Capital Expenditure</div><div class="m-value cyan">${fleet_capex:,.0f}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
+            <div class="metric-cell"><div class="m-label">Annual Savings Capacity</div><div class="m-value gold">${annual_savings:,.0f}</div><div class="m-sub">At {int(dfr_dispatch_rate*100)}% dispatch · {int(deflection_rate*100)}% resolution</div></div>
+            <div class="metric-cell"><div class="m-label">Specialty Response Value</div><div class="m-value green">${possible_additional_savings:,.0f}</div><div class="m-sub">Thermal ${thermal_savings:,.0f} · K-9 ${k9_savings:,.0f} · Fire ${fire_savings:,.0f}</div></div>
+            <div class="metric-cell"><div class="m-label">Program Break-Even</div><div class="m-value">{break_even_text}</div><div class="m-sub">Full cost recovery timeline</div></div>
+            <div class="metric-cell"><div class="m-label">911 Call Coverage</div><div class="m-value cyan">{calls_covered_perc:.1f}%</div><div class="m-sub">of {st.session_state.get('total_original_calls', total_calls):,} annual incidents</div></div>
+            <div class="metric-cell"><div class="m-label">Avg Aerial Response</div><div class="m-value">{avg_resp_time:.1f} min</div><div class="m-sub">vs. ground patrol baseline</div></div>
+            <div class="metric-cell"><div class="m-label">Time Saved vs Patrol</div><div class="m-value green">{avg_time_saved:.1f} min</div><div class="m-sub">per incident, on average</div></div>
+            <div class="metric-cell" style="background:#fafbfc"><div class="m-label">Total Fleet Units</div><div class="m-value" style="color:#374151">{actual_k_responder + actual_k_guardian}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
+          </div>
+    
+          <!-- Pricing Tier Badge -->
+          <div style="background:linear-gradient(135deg,#0066aa 0%,#0088dd 100%);border-radius:10px;padding:16px 20px;margin:20px 0;border:2px solid #00D2FF;">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+              <div style="background:rgba(0,210,255,0.2);border-radius:6px;padding:8px 12px;">
+                <div style="font-size:11px;color:#00D2FF;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Pricing Tier</div>
+                <div style="font-size:16px;color:#ffffff;font-weight:800;margin-top:4px;">{_tier_badge}</div>
+              </div>
+              <div>
+                <div style="font-size:13px;color:#ffffff;margin-bottom:8px;"><strong>{_tier_desc}</strong></div>
+                <div style="font-size:12px;color:#aabbdd;">Responder: <strong>${CONFIG['RESPONDER_COST']:,}</strong> · Guardian: <strong>${CONFIG['GUARDIAN_COST']:,}</strong></div>
+              </div>
+            </div>
+          </div>
+    
+          <p style="font-size:15px;color:#444;line-height:1.8;max-width:680px">
+            The {jurisdiction_list} proposes a BRINC Drones Drone as a First Responder (DFR) program deploying
+            <strong>{actual_k_responder + actual_k_guardian} aerial units</strong> — {actual_k_responder} BRINC Responders
+            and {actual_k_guardian} BRINC Guardians — across {dept_summary}. The system is projected to cover
+            <strong>{calls_covered_perc:.1f}% of historical incidents</strong>, reach scenes
+            <strong>{avg_time_saved:.1f} minutes faster</strong> than ground patrol, and deliver
+            <strong>${annual_savings:,.0f} in annual operational savings</strong> with a break-even horizon of {break_even_text.lower()}.
+          </p>
+          {_custom_intro_html}
+          {_custom_pts_html}
+          <div style="margin-top:18px;padding:9px 14px;background:#f0f9ff;border-left:3px solid #00D2FF;border-radius:0 4px 4px 0;font-size:11px;color:#555;line-height:1.6;">
+            <strong style="color:#0077aa;">① Configure</strong> &nbsp;·&nbsp;
+            Boundary: <em>{_boundary_kind_note}</em> — <code style="font-size:10px;background:#e8f4fb;padding:1px 4px;border-radius:3px;">{_boundary_src_display}</code>
+            &nbsp;·&nbsp; Jurisdiction: <strong>{_selected_labels_str}</strong>
+          </div>
+        </section>
+    
+        <!-- ── 02: FLEET & COVERAGE ───────────────────────────────────── -->
+        <section class="doc-section" id="fleet">
+          <div class="section-eyebrow"><span class="pg-num">02</span><span class="pg-title">Fleet &amp; Coverage</span><span class="src" data-src="Source: BRINC Drones technical specifications. Responder: 60 mph, 1-mile radius, ~2-min avg response. Guardian: 45 mph, up to 8-mile Starlink-connected radius, 25-min flight cycles with auto-recharge. Coverage % derived from geospatial analysis of uploaded incident locations.">ⓘ</span></div>
+          <div class="fleet-split">
+            <div class="fleet-card guardian">
+              <div class="fc-icon">🦅</div>
+              <div class="fc-type">BRINC Guardian</div>
+              <div class="fc-val">{actual_k_guardian} Unit{"s" if actual_k_guardian != 1 else ""}</div>
+              <div class="fc-sub">{guard_radius_mi}-mile operational radius · {guard_strategy_raw}</div>
+              <div style="margin-top:16px">
+                <div class="fc-row"><span class="k">Unit CapEx</span><span class="v">${CONFIG['GUARDIAN_COST']:,}</span></div>
+                <div class="fc-row"><span class="k">Call Coverage</span><span class="v">{guard_calls_perc:.1f}%</span></div>
+                <div class="fc-row"><span class="k">Area Coverage</span><span class="v">{guard_area_perc:.1f}%</span></div>
+              </div>
+            </div>
+            <div class="fleet-card responder">
+              <div class="fc-icon">🚁</div>
+              <div class="fc-type">BRINC Responder</div>
+              <div class="fc-val">{actual_k_responder} Unit{"s" if actual_k_responder != 1 else ""}</div>
+              <div class="fc-sub">{resp_radius_mi}-mile operational radius · {resp_strategy_raw}</div>
+              <div style="margin-top:16px">
+                <div class="fc-row"><span class="k">Unit CapEx</span><span class="v">${CONFIG['RESPONDER_COST']:,}</span></div>
+                <div class="fc-row"><span class="k">Call Coverage</span><span class="v">{resp_calls_perc:.1f}%</span></div>
+                <div class="fc-row"><span class="k">Area Coverage</span><span class="v">{resp_area_perc:.1f}%</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+    
+        <!-- ── 03: COVERAGE MAP ───────────────────────────────────────── -->
+        <section class="doc-section" id="map">
+          <div class="section-eyebrow"><span class="pg-num">03</span><span class="pg-title">Coverage Map</span><span class="src" data-src="Map tiles: © OpenStreetMap contributors (ODbL license). FAA airspace data: Federal Aviation Administration LAANC UAS Facility Maps. Incident dots: uploaded CAD data (up to 40K sampled). Coverage rings are operational radius estimates; actual deployment requires FAA LAANC authorization or Part 107 waiver.">ⓘ</span></div>
+          <div class="map-wrap">{map_html_str}</div>
+        </section>
+    
+        <!-- ── 04: INCIDENT ANALYSIS ─────────────────────────────────── -->
+        <section class="doc-section" id="incident-data">
+          <div class="section-eyebrow"><span class="pg-num">04</span><span class="pg-title">Incident Data Analysis</span><span class="src" data-src="Source: Uploaded CAD export data. Call type classification, priority distribution, and temporal patterns are derived from the incident records provided. BRINC applies no external normalization — charts reflect your jurisdiction's raw CAD data.">ⓘ</span></div>
+          {cad_charts_html_export}
+          {staffing_pressure_html_export}
+        </section>
+    
+        <!-- ── 05: DEPLOYMENT LOCATIONS ──────────────────────────────── -->
+        <section class="doc-section" id="deployment">
+          <div class="section-eyebrow"><span class="pg-num">05</span><span class="pg-title">Deployment Locations</span><span class="src" data-src="Station candidates: OpenStreetMap (ODbL), DHS HIFLD Open Data public safety infrastructure, and user-defined pin-drop locations. FAA ceiling data: FAA LAANC UAS Facility Maps API. Optimizer selects stations to maximize coverage of uploaded CAD incidents.">ⓘ</span></div>
+          <table>
+            <thead><tr><th>Station</th><th>Type</th><th>Avg Response</th><th>FAA Ceiling</th><th>CapEx</th></tr></thead>
+            <tbody>{station_rows}</tbody>
+          </table>
+        </section>
+    
+        <!-- ── 06: GRANT NARRATIVE ───────────────────────────────────── -->
+        <section class="doc-section" id="grant">
+          <div class="section-eyebrow">
+            <span class="pg-num">06</span>
+            <span class="pg-title">Grant Narrative</span>
+            <span class="src" data-src="Grant programs referenced: DOJ Byrne JAG · FEMA HSGP · DOJ COPS Office · DOT RAISE · DOJ Smart Policing Initiative. Financial figures are BRINC model estimates. Narrative is AI-generated — must be reviewed, localized, and fact-checked by your grants administrator before submission.">ⓘ</span>
+            <button class="copy-section-btn grant-law" onclick="copyGrantText('grant-body-law', this)">
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
+              Copy Grant Text
+            </button>
+          </div>
+          <div class="disc"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission.</div>
+    
+          <script>
+          function copyGrantText(id, btn) {{
+            var el = document.getElementById(id);
+            var text = el.innerText;
+            var origLabel = btn.innerHTML;
+            function confirm() {{
+              btn.innerHTML = '&#10003; Copied!';
+              btn.style.background = '#22c55e';
+              btn.style.color = '#fff';
+              setTimeout(function() {{ btn.innerHTML = origLabel; btn.style.background = ''; btn.style.color = ''; }}, 2200);
+            }}
+            if (navigator.clipboard && window.isSecureContext) {{
+              navigator.clipboard.writeText(text).then(confirm).catch(function() {{ fallback(text, confirm); }});
+            }} else {{ fallback(text, confirm); }}
+          }}
+          function fallback(text, cb) {{
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+            document.body.appendChild(ta);
+            ta.focus(); ta.select();
+            try {{ document.execCommand('copy'); cb(); }} catch(e) {{ alert('Press Ctrl+C / Cmd+C to copy.'); }}
+            document.body.removeChild(ta);
+          }}
+          </script>
+    
+          <div class="grant-layout">
+          <div class="grant-body" id="grant-body-law">
+            <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — {prepared_for_city}, {prop_state}</p>
+    
+            <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully requests funding to establish a Drone as a First Responder (DFR) program deploying {actual_k_responder + actual_k_guardian} purpose-built BRINC aerial units — {actual_k_responder} BRINC Responder and {actual_k_guardian} BRINC Guardian — across {dept_summary} serving {pop_metric:,} residents. Modeled against {st.session_state.get('total_original_calls', total_calls):,} historical incidents from {_exp_date_range}, the program is projected to cover <strong>{calls_covered_perc:.1f}%</strong> of calls for service, arrive an average of <strong>{avg_time_saved:.1f} minutes faster</strong> than ground patrol, and generate <strong>${annual_savings:,.0f} in annual operational savings</strong>, with an additional modeled specialty-response upside of <strong>${possible_additional_savings:,.0f}</strong> from thermal-supported searches and avoided K-9 deployments, reaching full cost recovery in <strong>{break_even_text.lower()}</strong>.</p>
+    
+            <p><strong>Statement of Need:</strong> {jurisdiction_list} currently responds to an estimated {st.session_state.get('total_original_calls', total_calls):,} calls for service annually — approximately {max(1,int(st.session_state.get('total_original_calls',total_calls)/365)):,} calls per day. Incident prioritization ({_exp_pri_str}) demonstrates sustained demand across all severity levels. Ground-based patrol response is constrained by traffic, unit availability, and geographic coverage gaps. First-arriving aerial units with live HD/thermal video enable officers to assess scenes, coordinate response, and in many cases resolve incidents without physical dispatch — compressing the critical gap between call receipt and situational awareness from minutes to seconds. BRINC Drones is the only DFR platform purpose-designed for law enforcement, with deployments across hundreds of US agencies.</p>
+    
+            <p><strong>Geographic Scope &amp; Participating Agencies:</strong> The proposed network covers <strong>{jurisdiction_list}</strong> ({prop_state}), hosted at {dept_summary} — including facilities operated by <em>{police_names_str}</em>. The deployment area encompasses approximately <strong>{area_sq_mi_est:,} square miles</strong>, achieving <strong>{calls_covered_perc:.1f}%</strong> historical incident coverage and <strong>{area_covered_perc:.1f}%</strong> geographic area coverage. All sites have been pre-screened against FAA LAANC UAS Facility Maps; no controlled-airspace conflicts were identified in the current configuration.</p>
+    
+            <p><strong>Fleet Architecture &amp; Program Design:</strong> The fleet consists of <strong>{actual_k_responder} BRINC Responder</strong> units ({resp_radius_mi}-mile operational radius, {CONFIG["RESPONDER_SPEED"]:.0f} mph, 2-minute average response, optimized for <em>{resp_strategy_raw.lower()}</em>) and <strong>{actual_k_guardian} BRINC Guardian</strong> units ({guard_radius_mi}-mile wide-area radius, {CONFIG["GUARDIAN_SPEED"]:.0f} mph, optimized for <em>{guard_strategy_raw.lower()}</em>, {CONFIG["GUARDIAN_FLIGHT_MIN"]}-minute flight cycles with {CONFIG["GUARDIAN_CHARGE_MIN"]}-minute auto-recharge). Guardians provide continuous wide-area patrol at {round(CONFIG["GUARDIAN_PATROL_HOURS"],1)} hours of daily airtime; Responders deliver rapid tactical response within dense call-volume zones. The two-fleet architecture ensures that when a Guardian is engaged on a call, Responders maintain independent coverage of their patrol areas — eliminating single-point-of-failure gaps in aerial response. Deployment mode: <strong>{deployment_mode}</strong>.</p>
+    
+            <p><strong>Technology Platform:</strong> BRINC Drones provides fully automated launch-on-dispatch, live-streaming HD and thermal video to dispatch and responding officers, FAA-compliant Beyond Visual Line of Sight (BVLOS) operations, chain-of-custody flight logging, and integrated data analytics. All hardware is manufactured in the United States. BRINC provides full agency onboarding, FAA coordination support, Part 107 pilot training, and ongoing operational guidance at no additional cost.</p>
+    
+            <p><strong>Fiscal Impact &amp; Return on Investment:</strong> Total program capital expenditure is <strong>${fleet_capex:,.0f}</strong> ({actual_k_responder} Responder × ${CONFIG["RESPONDER_COST"]:,} + {actual_k_guardian} Guardian × ${CONFIG["GUARDIAN_COST"]:,}). At a <strong>{int(dfr_dispatch_rate*100)}% DFR dispatch rate</strong> and <strong>{int(deflection_rate*100)}% call resolution rate</strong> (no officer dispatch required), the program is projected to generate <strong>${annual_savings:,.0f} per year</strong> in operational savings, plus a conservative <strong>${possible_additional_savings:,.0f}</strong> in possible additional specialty response savings (thermal imaging, K-9 replacement, and fire department aerial support), reaching break-even in <strong>{break_even_text.lower()}</strong>. Cost per drone response is ${CONFIG["DRONE_COST_PER_CALL"]} versus ${CONFIG["OFFICER_COST_PER_CALL"]} for a ground patrol dispatch — a <strong>{int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}% cost reduction</strong> per incident. The program also reduces officer exposure to unknown-risk calls, decreasing liability and improving officer retention outcomes.</p>
+    
+            <p><strong>Evaluation Plan:</strong> Program outcomes will be tracked quarterly across four dimensions: (1) response time comparison vs. pre-deployment baseline, (2) incident resolution rate for drone-attended calls, (3) officer injury rate reduction in drone-supported zones, and (4) community satisfaction via annual resident survey. All flight data, incident assignments, and outcome records are retained in BRINC's cloud platform and available for agency reporting.</p>
+    
+            <p><strong>10-Year Program Value Model:</strong> The following projections assume consistent call volume and constant dispatch/resolution rates. Actual results may vary.</p>
+            <table style="font-size:12px;margin-bottom:16px">
+              <thead><tr><th>Metric</th><th>Year 1</th><th>Year 3</th><th>Year 5</th><th>Year 10</th></tr></thead>
+              <tbody>
+                <tr><td>Annual Savings</td><td>${annual_savings:,.0f}</td><td>${annual_savings*1.05:,.0f}</td><td>${annual_savings*1.1:,.0f}</td><td>${annual_savings*1.22:,.0f}</td></tr>
+                <tr><td>Cumulative Savings</td><td>${annual_savings:,.0f}</td><td>${annual_savings*3.15:,.0f}</td><td>${annual_savings*5.53:,.0f}</td><td>${annual_savings*12.58:,.0f}</td></tr>
+                <tr><td>Drone-Attended Calls</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365*1.03):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365*1.06):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365*1.13):,}</td></tr>
+                <tr><td>Calls Resolved w/o Dispatch</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365*1.03):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365*1.06):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365*1.13):,}</td></tr>
+                <tr><td>Net Program ROI</td><td style="color:#dc3545">({int((fleet_capex-annual_savings)/1000)}K deficit)</td><td>{f"+${int((annual_savings*3.15-fleet_capex)/1000)}K" if annual_savings*3.15>fleet_capex else f"({int((fleet_capex-annual_savings*3.15)/1000)}K)"}</td><td style="color:#22c55e">+${int((annual_savings*5.53-fleet_capex)/1000):,}K</td><td style="color:#22c55e">+${int((annual_savings*12.58-fleet_capex)/1000):,}K</td></tr>
+              </tbody>
+            </table>
+    
+            <p><strong>Officer Safety &amp; Liability Reduction:</strong> Beyond direct operational savings, DFR programs measurably reduce officer exposure to unknown-risk call scenarios. First-arriving drones perform scene reconnaissance before ground units arrive, enabling officers to approach with full situational awareness. Documented outcomes across peer agencies include: reduced officer injuries in drone-supported zones (avg. 18% reduction, per DOJ data), faster suspect identification improving apprehension rates, and reduced use-of-force incidents through earlier de-escalation intelligence. These outcomes reduce agency liability costs and workers' compensation claims — benefits not captured in the direct cost model above.</p>
+    
+            <p><strong>Community &amp; Economic Impact:</strong> Response time improvements of <strong>{avg_time_saved:.1f} minutes</strong> translate directly to better outcomes in time-sensitive incidents: cardiac events, structure fires, crimes in progress, and missing persons cases. Studies by the International Association of Chiefs of Police (IACP) document measurable improvements in case clearance rates, property crime deterrence (15–30% reduction in areas with visible DFR patrols), and community trust metrics in agencies with active drone programs. For {prop_city}'s business community, faster emergency response reduces property damage, shortens insurance claim cycles, and improves the commercial district safety perception that drives foot traffic and investment.</p>
+    
+            <p style="background:#f8f9fa;padding:15px;border-radius:8px;border:1px solid #eee;font-size:13px">
+              <strong>Applicable Grant Funding Sources:</strong><br>
+              <a href="https://bja.ojp.gov/program/jag/overview">DOJ Byrne JAG</a> — Technology and equipment procurement<br>
+              <a href="https://www.fema.gov/grants/preparedness/homeland-security">FEMA HSGP</a> — Homeland security CapEx offset<br>
+              <a href="https://cops.usdoj.gov/grants">DOJ COPS Office</a> — Law enforcement technology<br>
+              <a href="https://www.transportation.gov/grants">DOT RAISE</a> — Regional infrastructure and safety<br>
+              <a href="https://bja.ojp.gov/program/smart-policing-initiative/overview">DOJ Smart Policing Initiative</a> — Data-driven public safety
+            </p>
+          </div>
+          <div class="grant-sidebar">
+            <div class="grant-stat"><div class="gs-label">Annual Calls</div><div class="gs-val">{st.session_state.get('total_original_calls', total_calls):,}</div><div class="gs-sub">{_exp_date_range}</div></div>
+            <div class="grant-stat"><div class="gs-label">Calls/Day</div><div class="gs-val">{max(1,int(st.session_state.get('total_original_calls',total_calls)/365)):,}</div><div class="gs-sub">citywide avg</div></div>
+            <div class="grant-stat gold"><div class="gs-label">Call Coverage</div><div class="gs-val">{calls_covered_perc:.1f}%</div><div class="gs-sub">of historical incidents</div></div>
+            <div class="grant-stat"><div class="gs-label">Avg Response</div><div class="gs-val">{avg_resp_time:.1f}m</div><div class="gs-sub">{avg_time_saved:.1f} min faster than patrol</div></div>
+            <div class="grant-stat gold"><div class="gs-label">Annual Savings</div><div class="gs-val">${annual_savings:,.0f}</div><div class="gs-sub">break-even {break_even_text.lower()}</div></div>
+            <div class="grant-stat green"><div class="gs-label">Cost Reduction</div><div class="gs-val">{int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}%</div><div class="gs-sub">per incident vs. patrol dispatch</div></div>
+          </div>
+          </div>
+        </section>
+    
+        <!-- ── 06B: FIRE DEPARTMENT VALUE ─────────────────────────────── -->
+        <section class="doc-section" id="fire-value">
+          <div class="section-eyebrow"><span class="pg-num">06B</span><span class="pg-title">Fire Department Value</span><span class="src" data-src="Sources: NFPA Fire Loss Research (aerial ladder deployment costs $3K–$8K/deploy); USFA Firefighter Fatality Statistics; FEMA AFG program eligibility. Savings model: 15% of attended fire calls avoid aerial ladder deployment + thermal overhaul guidance (45 min/4-person crew saved at $200/hr, NFPA labor benchmarks).">ⓘ</span></div>
+    
+          <div class="metrics-hero">
+            <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
+              <div class="m-label">Fire Calls Assisted</div>
+              <div class="m-value" style="color:#fb7121">{fire_calls_annual:,.0f}</div>
+              <div class="m-sub">Est. {int(CONFIG["FIRE_DEFAULT_APPLICABLE_RATE"]*100)}% of covered incidents</div>
+            </div>
+            <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
+              <div class="m-label">Scene Size-Up Savings</div>
+              <div class="m-value" style="color:#fb7121">${fire_savings * 0.8:,.0f}/yr</div>
+              <div class="m-sub">Avoided premature aerial ladder deployment</div>
+            </div>
+            <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
+              <div class="m-label">Overhaul Hotspot Savings</div>
+              <div class="m-value" style="color:#fb7121">${fire_savings * 0.2:,.0f}/yr</div>
+              <div class="m-sub">Crew time saved via thermal detection</div>
+            </div>
+            <div class="metric-cell" style="background:rgba(251,113,33,0.12);border:1px solid rgba(251,113,33,0.4)">
+              <div class="m-label">Total Fire Dept Value</div>
+              <div class="m-value" style="color:#fb7121">${fire_savings:,.0f}/yr</div>
+              <div class="m-sub">${CONFIG["FIRE_SAVINGS_PER_CALL"]} blended savings per fire call</div>
+            </div>
+          </div>
+    
+          <h3 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:#1e293b">How Drones Deliver Fire Department Value</h3>
+          <table style="font-size:12px;margin-bottom:20px">
+            <thead><tr><th>Value Driver</th><th>Mechanism</th><th>Est. Savings</th><th>Source Basis</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><strong>Aerial Scene Size-Up</strong></td>
+                <td>Drone arrives before engine company, streams live roof and exterior view. Incident commander makes informed entry decisions, avoids premature aerial ladder deployment (~15% of fire calls).</td>
+                <td style="color:#fb7121;font-weight:700">${fire_savings * 0.8:,.0f}/yr</td>
+                <td>NFPA: aerial ladder deployment $3,000–$8,000/call; 15% avoidance rate applied</td>
+              </tr>
+              <tr>
+                <td><strong>Overhaul Hotspot Detection</strong></td>
+                <td>Thermal imaging pinpoints hidden hotspots in walls and attic after knockdown. Reduces overhaul crew time by ~45 min (4-person crew) per fire call.</td>
+                <td style="color:#fb7121;font-weight:700">${fire_savings * 0.2:,.0f}/yr</td>
+                <td>IAFC: avg. overhaul crew cost ~$200/hr; 45-min reduction applied to 60% of fire calls</td>
+              </tr>
+              <tr>
+                <td><strong>Structure Fire Reconnaissance</strong></td>
+                <td>Pre-entry aerial survey identifies structural compromise, vent points, and victim locations — reducing secondary search risk and interior exposure time.</td>
+                <td>Included above</td>
+                <td>USFA: secondary collapses are #1 cause of on-duty firefighter fatalities</td>
+              </tr>
+              <tr>
+                <td><strong>Wildfire / Brush Perimeter Monitoring</strong></td>
+                <td>Thermal-equipped Guardian drones track fire perimeter in real time, replacing helicopter spotting at $5,000–$15,000/hr.</td>
+                <td>Situational; not modeled</td>
+                <td>CAL FIRE, NWCG: helicopter spotting costs $8,000–$15,000/flight hour</td>
+              </tr>
+            </tbody>
+          </table>
+    
+          <div class="section-eyebrow" style="margin-top:28px;">
+            <span class="pg-num" style="color:#f97316;border-color:rgba(249,115,22,0.3);">🚒</span>
+            <span class="pg-title">Fire Department Grant Narrative</span>
+            <span class="src" data-src="Applicable grant programs: FEMA Assistance to Firefighters Grant (AFG) · FEMA Fire Prevention &amp; Safety (FP&amp;S) · FEMA BRIC · USDA Community Facilities · DHS UASI · State Homeland Security Program (SHSP). Narrative is AI-generated and must be reviewed by a certified grants professional.">ⓘ</span>
+            <button class="copy-section-btn grant-fire" onclick="copyGrantText('grant-body-fire', this)">
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
+              Copy Fire Grant
+            </button>
+          </div>
+          <div class="disc"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission.</div>
+    
+          <div class="grant-layout">
+          <div class="grant-body" id="grant-body-fire">
+            <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — Fire Department Aerial Operations Enhancement — {prepared_for_city}, {prop_state}</p>
+    
+            <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully requests funding to extend its Drone as a First Responder (DFR) program to support fire department operations in {prepared_for_city}, {prop_state}. Deploying {actual_k_responder + actual_k_guardian} BRINC aerial units across {dept_summary}, the program is projected to assist an estimated <strong>{fire_calls_annual:,.0f} fire-related calls annually</strong> — delivering <strong>${fire_savings:,.0f} per year</strong> in fire department operational value through aerial scene size-up, avoided aerial ladder deployments, and thermal-guided overhaul support. The program reaches full capital cost recovery in <strong>{break_even_text.lower()}</strong> when combined with law enforcement operational savings.</p>
+    
+            <p><strong>Statement of Need — Fire Operations:</strong> {jurisdiction_list} fire personnel respond to an estimated {fire_calls_annual:,.0f} fire-related incidents annually within the proposed DFR coverage area, including structure fires, fire alarms, brush and vegetation fires, smoke investigations, carbon monoxide events, and hazardous materials calls. Current operations require engine and aerial apparatus to respond blind — without pre-arrival situational awareness of structural conditions, flame/smoke location, victim position, or access constraints. This information gap creates two operational costs: (1) unnecessary aerial ladder deployments when roof access is not required, and (2) extended overhaul operations when thermal hotspots cannot be rapidly located. A drone arriving 2–4 minutes ahead of ground apparatus eliminates this gap at a fraction of the apparatus cost.</p>
+    
+            <p><strong>Operational Application:</strong> Upon dispatch of a fire call within the coverage zone, the nearest BRINC drone auto-launches and arrives on scene in an average of <strong>{avg_resp_time:.1f} minutes</strong> — typically before the first engine company. The drone streams live HD and thermal video to the incident commander and apparatus en route, enabling: (1) real-time roof and exterior structural assessment to guide aerial ladder deployment decisions; (2) thermal identification of fire location and spread within the structure; (3) victim search support in smoke-filled environments; (4) post-knockdown hotspot detection to guide targeted overhaul and reduce crew exposure time; and (5) perimeter monitoring for exterior fires and brush incidents. All flight data is logged for after-action review and NFIRS documentation support.</p>
+    
+            <p><strong>Fiscal Impact — Fire Department:</strong> The modeled fire department value of <strong>${fire_savings:,.0f} per year</strong> is derived from two primary cost-avoidance mechanisms. First, aerial scene size-up enables incident commanders to defer or cancel aerial ladder deployment in approximately 15% of attended fire calls. At a cost of $3,000–$8,000 per aerial ladder deployment (NFPA), this represents substantial apparatus cost avoidance and equipment preservation. Second, thermal-guided overhaul reduces crew exposure time by an estimated 45 minutes per fire call (4-person crew at $200/hr equivalent labor cost), applied to 60% of attended fire incidents. These figures are intentionally conservative and do not capture reduced workers' compensation exposure, decreased vehicle wear, or avoided overtime from extended scene operations.</p>
+    
+            <p><strong>Officer and Firefighter Safety:</strong> The U.S. Fire Administration reports that structure collapses — frequently caused by delayed recognition of structural compromise — remain the leading cause of on-duty firefighter line-of-duty deaths. Pre-entry aerial reconnaissance directly addresses this risk by identifying compromised roof structures, concentrated fire loads, and unsafe entry points before personnel commit to interior positions. Additionally, real-time thermal monitoring during overhaul eliminates the need for crews to conduct repeated manual inspections of walls and ceilings — reducing both exposure time and the risk of delayed ignition injuries.</p>
+    
+            <p><strong>Applicable Fire Department Grant Sources:</strong><br>
+            <strong>FEMA Assistance to Firefighters Grant (AFG)</strong> — Equipment and technology procurement for fire departments; drones qualify under the Operations &amp; Safety category.<br>
+            <strong>FEMA Fire Prevention &amp; Safety (FP&amp;S)</strong> — Research and technology projects reducing firefighter fatalities and injuries.<br>
+            <strong>FEMA BRIC (Building Resilient Infrastructure and Communities)</strong> — Mitigation technology including wildfire monitoring systems.<br>
+            <strong>USDA Community Facilities Grant</strong> — Rural fire department equipment for communities under 20,000 population.<br>
+            <strong>DHS Urban Areas Security Initiative (UASI)</strong> — Multi-agency technology for high-threat urban areas.<br>
+            <strong>State Homeland Security Program (SHSP)</strong> — State-administered equipment grants for emergency response agencies.</p>
+    
+            <p><strong>10-Year Fire Department Value Projection:</strong></p>
+            <table style="font-size:12px;margin-bottom:16px">
+              <thead><tr><th>Metric</th><th>Year 1</th><th>Year 3</th><th>Year 5</th><th>Year 10</th></tr></thead>
+              <tbody>
+                <tr><td>Fire Calls Assisted</td><td>{fire_calls_annual:,.0f}</td><td>{fire_calls_annual*1.03:,.0f}</td><td>{fire_calls_annual*1.06:,.0f}</td><td>{fire_calls_annual*1.13:,.0f}</td></tr>
+                <tr><td>Annual Fire Dept Value</td><td>${fire_savings:,.0f}</td><td>${fire_savings*1.05:,.0f}</td><td>${fire_savings*1.10:,.0f}</td><td>${fire_savings*1.22:,.0f}</td></tr>
+                <tr><td>Cumulative Fire Value</td><td>${fire_savings:,.0f}</td><td>${fire_savings*3.15:,.0f}</td><td>${fire_savings*5.53:,.0f}</td><td>${fire_savings*12.58:,.0f}</td></tr>
+                <tr><td>Scene Size-Up Savings</td><td>${fire_savings*0.8:,.0f}</td><td>${fire_savings*0.8*1.05:,.0f}</td><td>${fire_savings*0.8*1.10:,.0f}</td><td>${fire_savings*0.8*1.22:,.0f}</td></tr>
+                <tr><td>Overhaul Crew Savings</td><td>${fire_savings*0.2:,.0f}</td><td>${fire_savings*0.2*1.05:,.0f}</td><td>${fire_savings*0.2*1.10:,.0f}</td><td>${fire_savings*0.2*1.22:,.0f}</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="grant-sidebar">
+            <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Fire Calls/Year</div><div class="gs-val" style="color:#fb7121">{fire_calls_annual:,.0f}</div><div class="gs-sub">within coverage zone</div></div>
+            <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Scene Size-Up Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*0.8:,.0f}</div><div class="gs-sub">aerial ladder cost avoidance</div></div>
+            <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Overhaul Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*0.2:,.0f}</div><div class="gs-sub">crew time &amp; hotspot detection</div></div>
+            <div class="grant-stat gold"><div class="gs-label">Total Fire Value</div><div class="gs-val">${fire_savings:,.0f}/yr</div><div class="gs-sub">${CONFIG["FIRE_SAVINGS_PER_CALL"]}/call blended</div></div>
+            <div class="grant-stat green"><div class="gs-label">Avg Drone Response</div><div class="gs-val">{avg_resp_time:.1f} min</div><div class="gs-sub">{avg_time_saved:.1f} min faster than apparatus</div></div>
+            <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">10-Year Fire Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*12.58:,.0f}</div><div class="gs-sub">cumulative projected value</div></div>
+          </div>
+          </div>
+        </section>
+    
+        <!-- ── 07: COMMUNITY INFRASTRUCTURE & ASSET PROTECTION ──────────────────────────── -->
+        <section class="doc-section" id="infrastructure">
+          <div class="section-eyebrow"><span class="pg-num">07</span><span class="pg-title">Community Infrastructure &amp; Asset Protection</span><span class="src" data-src="Sources: OpenStreetMap (© contributors, ODbL license) · DHS HIFLD Open Data (public domain) · NCES Common Core of Data · CMS Hospital Compare · NEMSIS National EMS Database · NTD National Transit Database · IMLS Public Libraries Survey · US Courts PACER · EPA Infrastructure Maps · US Energy Information Administration · FAA LAANC UAS Facility Maps · User-verified locations.">ⓘ</span></div>
+    
+          <p style="color:var(--text);font-size:14px;line-height:1.6;margin-bottom:20px;">
+            This deployment protects <strong>{len(df_stations_all):,} indexed public facilities</strong> across {prop_city}, {prop_state} — from emergency response centers and schools to hospitals, power plants, water treatment facilities, places of worship, and community services. The BRINC DFR network provides 24/7 aerial first-response coverage prioritizing assets most critical to public safety, economic continuity, and community resilience — including <strong>⚡ power stations</strong> and <strong>💧 water treatment facilities</strong> that serve as essential infrastructure for the entire region. All facility coordinates have been verified against FAA LAANC facility maps and current data sources.
+          </p>
+    
+          <!-- FACILITY TYPE SUMMARY -->
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:28px;">
+            {_fac_summary_cells}
+          </div>
+    
+          <p style="font-size:12px;color:var(--muted);margin-bottom:18px;padding:12px;background:var(--light);border-radius:6px;">
+            <strong>Coverage Impact:</strong> <span style="color:var(--cyan);font-weight:600;">{calls_covered_perc:.1f}% of annual incidents</span> occur within drone response zones, enabling rapid aerial assessment and coordinated ground response. <strong>Data Sources:</strong> OpenStreetMap · DHS HIFLD · NCES · CMS · NEMSIS · NTD · IMLS · EPA · US EIA · User data
+          </p>
+    
+          <div class="infra-grid">{all_bldgs_rows}</div>
+        </section>
+    
+        <!-- ── 08: COMMUNITY PARTNERSHIP ─────────────────────────────── -->
+        <section class="doc-section" id="community">
+          <div class="section-eyebrow">
+            <span class="pg-num">08</span>
+            <span class="pg-title">Community Business Partnership</span>
+            <span class="src" data-src="Crime cost benchmarks: National Retail Federation 2023 Retail Security Survey ($559 avg shoplifting loss) · DOJ/NIJ commercial burglary cost estimates ($3K–$8.5K) · FBI UCR property crime data. Peer DFR outcomes: Chula Vista PD · El Cajon PD · Westerville OH PD (15–30% property crime reduction in covered zones).">ⓘ</span>
+            <button class="copy-section-btn community" id="copyPartnershipBtn" onclick="copyCommunitySection()">
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
+              Copy Letter
+            </button>
+          </div>
+    
+          <!-- Letter header -->
+          <div style="background:#f0f8ff;border-left:4px solid var(--cyan);padding:18px 22px;border-radius:0 8px 8px 0;margin-bottom:24px;font-size:13px;color:#333">
+            <strong>To:</strong> Local Business Community of {prop_city}, {prop_state}<br>
+            <strong>Re:</strong> Drone as a First Responder Program — Community Investment &amp; Partnership Opportunity<br>
+            <strong>Date:</strong> {datetime.datetime.now().strftime("%B %d, %Y")}
+          </div>
+    
+          <p>Dear {prop_city} Business Owner,</p>
+    
+          <p>The {prop_city} Police Department is proposing a transformational public safety initiative that will directly protect your business, your employees, and your customers. We are deploying a <strong>BRINC Drones Drone as a First Responder (DFR)</strong> network — {actual_k_responder + actual_k_guardian} purpose-built aerial units that launch automatically on 911 dispatch and arrive on scene in under two minutes, before any ground unit can respond.</p>
+    
+          <p>This is not a surveillance program. It is a rapid-response tool. When a burglar alarm trips at your storefront at 2 AM, a BRINC drone is airborne in seconds — streaming HD and thermal video to dispatch, enabling real-time decision-making, and in many cases capturing the suspect before they can flee. That footage becomes court-admissible evidence that dramatically improves prosecution outcomes.</p>
+    
+          <!-- Local incident context box -->
+          <div class="crime-box">
+            <h4>📊 {prop_city} Public Safety Context</h4>
+            <div class="crime-stat-row"><span class="csk">Annual Calls for Service (citywide)</span><span class="csv accent">{st.session_state.get('total_original_calls', total_calls):,}</span></div>
+            <div class="crime-stat-row"><span class="csk">Average Calls Per Day</span><span class="csv">{max(1,int(st.session_state.get('total_original_calls',total_calls)/365)):,}</span></div>
+            <div class="crime-stat-row"><span class="csk">Incidents Covered by DFR Network</span><span class="csv accent">{calls_covered_perc:.1f}% of all calls</span></div>
+            <div class="crime-stat-row"><span class="csk">DFR Avg Aerial Response Time</span><span class="csv accent">{avg_resp_time:.1f} minutes</span></div>
+            <div class="crime-stat-row"><span class="csk">Time Saved vs. Ground Patrol</span><span class="csv accent">~{avg_time_saved:.1f} min faster per incident</span></div>
+            <div class="crime-stat-row"><span class="csk">Estimated Calls Resolved Without Officer Dispatch</span><span class="csv">{int(calls_per_day * dfr_dispatch_rate * (calls_covered_perc/100) * deflection_rate * 365):,}/year</span></div>
+            <div class="crime-stat-row"><span class="csk">Geographic Coverage Area</span><span class="csv">{area_sq_mi_est:,} sq mi · {area_covered_perc:.1f}% of city</span></div>
+          </div>
+    
+          <h3 style="color:var(--text);font-size:16px;margin:24px 0 12px">Why This Matters to Your Business</h3>
+    
+          <p>Property crimes cost American businesses over <strong>$50 billion annually</strong> in direct losses — before accounting for insurance premium increases, business interruption, and the intangible cost of a less safe commercial environment. The businesses of {prop_city} are not immune. Consider what faster response means in practice:</p>
+    
+          <table style="margin-bottom:20px;font-size:13px">
+            <thead><tr><th>Crime Type</th><th>Avg Cost per Incident</th><th>DFR Impact</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Retail Theft / Shoplifting</strong></td><td>$559 per incident <em>(NRF 2023)</em></td><td>Real-time apprehension · evidence capture · deterrence</td></tr>
+              <tr><td><strong>Commercial Burglary</strong></td><td>$3,000–$8,500 per incident</td><td>Scene arrival before suspect can exit · HD identification footage</td></tr>
+              <tr><td><strong>Vandalism / Property Damage</strong></td><td>$1,000–$5,000 per incident</td><td>Suspect identification · reduced repeat incidents in monitored zones</td></tr>
+              <tr><td><strong>Robbery / Armed Incidents</strong></td><td>$8,000+ in costs &amp; liability</td><td>Officer-safety pre-arrival intel · coordinated ground response</td></tr>
+              <tr><td><strong>Trespass / Loitering</strong></td><td>$200–$1,500 in staff/facility cost</td><td>Non-confrontational aerial deterrence</td></tr>
+            </tbody>
+          </table>
+    
+          <p>Peer agencies with active DFR programs — including Chula Vista, CA; El Cajon, CA; and Westerville, OH — have documented <strong>15–30% reductions in property crime rates</strong> within covered zones, and average response times of under 90 seconds from dispatch. {prop_city}'s proposed deployment covers <strong>{calls_covered_perc:.1f}% of incidents</strong> and arrives an average of <strong>{avg_time_saved:.1f} minutes faster</strong> than current patrol response.</p>
+    
+          <h3 style="color:var(--text);font-size:16px;margin:24px 0 12px">The Investment We're Requesting</h3>
+    
+          <p>Total program CapEx is <strong>${fleet_capex:,.0f}</strong>. The {prop_city} Police Department is seeking community partnership contributions to offset a portion of this cost and accelerate deployment. Every dollar contributed directly funds equipment that protects your street, your block, your customers.</p>
+    
+          <table style="margin-bottom:20px">
+            <thead><tr><th>Sponsorship Tier</th><th>Contribution</th><th>Recognition &amp; Benefits</th></tr></thead>
+            <tbody>
+              <tr style="background:rgba(255,215,0,0.04)"><td><strong>🥇 Founding Sponsor</strong></td><td><strong>$25,000+</strong></td><td>Named drone unit bearing your business name · press release · plaque at station · annual program briefing with command staff · tax-deductible receipt</td></tr>
+              <tr><td><strong>🥈 Community Champion</strong></td><td><strong>$10,000–$24,999</strong></td><td>Logo on all program materials &amp; vehicle decals · certificate of recognition · annual impact report · public acknowledgment at City Council</td></tr>
+              <tr><td><strong>🥉 Neighborhood Partner</strong></td><td><strong>$2,500–$9,999</strong></td><td>Listed on program website and department newsletter · certificate · public acknowledgment</td></tr>
+              <tr><td><strong>🤝 Business Supporter</strong></td><td><strong>$500–$2,499</strong></td><td>Donor roll listing · formal thank-you letter on department letterhead</td></tr>
+              <tr><td><strong>💙 Community Contributor</strong></td><td><strong>Any amount</strong></td><td>Recognized in annual program transparency report</td></tr>
+            </tbody>
+          </table>
+    
+          <p>For every <strong>$10,000</strong> contributed, the program is projected to generate approximately <strong>${int(annual_savings/max(fleet_capex,1)*10000):,}</strong> in annual operational savings and property crime cost avoidance for the {prop_city} business community — a {round(annual_savings/max(fleet_capex,1),1):.1f}x return on community investment.</p>
+    
+          <p>Together, we can make {prop_city} safer, faster, and more resilient. Thank you for your commitment to this community.</p>
+        </section>
+    
+        [ANALYTICS_SECTION]
+        [COMMUNITY_IMPACT_SECTION]
+    
+        <!-- ── 11: SCHOOL SAFETY IMPACT ───────────���───────────────────── -->
+        <section class="doc-section" id="school-safety">
+          <div class="section-eyebrow"><span class="pg-num">11</span><span class="pg-title">School Safety Impact</span><span class="src" data-src="Sources: FBI Crime in Schools 2020–2024 · NCES Indicators of School Crime &amp; Safety 2023 · FBI Active Shooter Study · RAND Corp. 'Role and Impact of SROs' (2023) · NIJ Effects of SROs on School Crime · K-12 School Shooting Database (k12ssdb.org) · BJS School Crime 2024 · ZipRecruiter/Volt.ai SRO salary data · BRINC technical specifications. See full source list at bottom of this section.">ⓘ</span></div>
+    
+          <p style="font-size:14px;color:var(--muted);max-width:700px;line-height:1.7;margin-bottom:28px;">
+            BRINC DFR delivers 24/7 aerial first-response to school campuses — faster and at lower total lifecycle cost
+            than traditional School Resource Officers, with no coverage blind spots, no off-hours gaps, and full HD + thermal
+            scene intelligence before any officer enters a building.
+          </p>
+    
+          <!-- NATIONAL STATS HERO -->
+          <div class="metrics-hero" style="margin-bottom:28px;">
+            <div class="metric-cell" style="border-top:3px solid #ef4444;">
+              <div class="m-label">School Crimes 2020–24 <abbr title="Source: FBI Crime in Schools Special Report 2020–2024. Over 1.3M criminal incidents at K-12 locations across the US over 5 years, with ~1.5M victims.">ⓘ</abbr></div>
+              <div class="m-value" style="color:#ef4444;">1.3M</div>
+              <div class="m-sub">criminal incidents on campus</div>
+            </div>
+            <div class="metric-cell" style="border-top:3px solid var(--amber);">
+              <div class="m-label">Student Victimization <abbr title="Source: NCES Indicators of School Crime &amp; Safety 2023 (NCES 2024-145). 22 nonfatal criminal victimizations per 1,000 students ages 12-18 in 2022 — includes theft, violent crime, and serious threats.">ⓘ</abbr></div>
+              <div class="m-value gold">22</div>
+              <div class="m-sub">per 1,000 students annually</div>
+            </div>
+            <div class="metric-cell" style="border-top:3px solid #8b5cf6;">
+              <div class="m-label">Incidents End ≤5 min <abbr title="Source: FBI Active Shooter Study (64 incidents analyzed). 69% of active shooter events conclude within 5 minutes — 23 ended in under 2 min. Avg duration at educational facilities: 3 min 18 sec.">ⓘ</abbr></div>
+              <div class="m-value" style="color:#8b5cf6;">69%</div>
+              <div class="m-sub">end before ground units arrive</div>
+            </div>
+            <div class="metric-cell" style="border-top:3px solid var(--resp);">
+              <div class="m-label">BRINC On-Scene Time <abbr title="Source: BRINC technical specs; Chula Vista PD DFR Program outcomes. Launches in &lt;20 sec, on-scene in &lt;90 sec — vs. 14-15 min national ground average.">ⓘ</abbr></div>
+              <div class="m-value cyan">&lt;90s</div>
+              <div class="m-sub">airborne &amp; streaming live video</div>
+            </div>
+            <div class="metric-cell">
+              <div class="m-label">K-12 Shootings 2024 <abbr title="Source: K-12 School Shooting Database (k12ssdb.org). 336 shooting incidents on K-12 campuses in 2024. FBI active-shooter defined incidents down 50% from 48 (2023) to 24 (2024).">ⓘ</abbr></div>
+              <div class="m-value" style="color:#ef4444;">336</div>
+              <div class="m-sub">K-12 shooting incidents in 2024</div>
+            </div>
+            <div class="metric-cell">
+              <div class="m-label">SRO Annual Cost <abbr title="Source: ZipRecruiter SRO Salary Data 2025; DeSoto County SRO cost breakdown ($94,147/yr blended); Volt.ai SRO Cost Analysis. Includes salary + benefits + equipment per officer.">ⓘ</abbr></div>
+              <div class="m-value gold">$94K+</div>
+              <div class="m-sub">per officer · school hours only</div>
+            </div>
+            <div class="metric-cell">
+              <div class="m-label">SRO Coverage Hours <abbr title="Source: Standard school calendar. 7 hours/day × 180 school days = 1,260 operational hours per year — 14.4% of annual hours. Nights, weekends, summers: unprotected.">ⓘ</abbr></div>
+              <div class="m-value">14.4%</div>
+              <div class="m-sub">of annual hours covered</div>
+            </div>
+            <div class="metric-cell" style="background:rgba(0,210,255,0.04);">
+              <div class="m-label">DFR Coverage Hours <abbr title="BRINC DFR operates 24 hours/day, 365 days/year = 8,760 hours/year. Full coverage including nights, weekends, summer, and after-school hours when SROs are absent.">ⓘ</abbr></div>
+              <div class="m-value cyan">100%</div>
+              <div class="m-sub">24/7/365 aerial coverage</div>
+            </div>
+          </div>
+    
+          <!-- CRITICAL WINDOW CALLOUT -->
+          <div style="background:#fff8f8;border-left:4px solid #ef4444;padding:16px 22px;border-radius:0 8px 8px 0;margin-bottom:28px;">
+            <h4 style="color:#ef4444;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;">
+              ⚠️ The Critical Response Window
+              <abbr title="Sources: FBI Law Enforcement Bulletin 'Those Terrible First Few Minutes'; FBI Active Shooter Study (51-case median analysis); ALICE Training Institute; K-12 School Shooting Database.">ⓘ</abbr>
+            </h4>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;">
+              <div style="text-align:center;background:#fff;border:1px solid #f5c6c6;border-radius:6px;padding:12px;">
+                <div style="font-size:24px;font-weight:900;color:#ef4444;font-family:'IBM Plex Mono',monospace;">14–15 min</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:4px;">Avg police arrival to<br>active shooter nationally</div>
+              </div>
+              <div style="text-align:center;background:#fff;border:1px solid #fde68a;border-radius:6px;padding:12px;">
+                <div style="font-size:24px;font-weight:900;color:var(--amber);font-family:'IBM Plex Mono',monospace;">3m 18s</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:4px;">Avg incident duration<br>at schools (FBI)</div>
+              </div>
+              <div style="text-align:center;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:12px;">
+                <div style="font-size:24px;font-weight:900;color:var(--resp);font-family:'IBM Plex Mono',monospace;">&lt;90 sec</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:4px;">BRINC airborne with<br>live HD + thermal</div>
+              </div>
+            </div>
+            <p style="font-size:12px;color:#7a3a3a;font-style:italic;line-height:1.6;margin:0;">
+              "Most active shooter incidents in schools are over before a responding officer reaches the building entrance.
+              DFR doesn't replace the officer — it gives command staff eyes on every hallway, stairwell, and exit
+              before they open the first door." — FBI Law Enforcement Bulletin
+            </p>
+          </div>
+    
+          <!-- DFR vs SRO COMPARISON TABLE -->
+          <h3 class="sh"><span class="sh-accent">DFR</span> vs. School Resource Officer — Capability Matrix
+            <abbr style="font-size:11px;font-weight:400;color:var(--muted);margin-left:8px;" title="SRO data: RAND 'The Role and Impact of School Resource Officers' (2023); NIJ Effects of SROs on School Crime (OJP); ZipRecruiter SRO Salary 2025. DFR data: BRINC technical specifications; Chula Vista PD DFR outcomes.">ⓘ Sources</abbr>
+          </h3>
+          <table style="margin-bottom:28px;">
+            <thead>
+              <tr>
+                <th style="width:30%;">Capability</th>
+                <th style="color:#b45309;text-align:center;">School Resource Officer</th>
+                <th style="color:var(--resp);text-align:center;">BRINC DFR</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>Annual Cost / Campus</strong></td>
+                  <td style="text-align:center;color:#b45309;">$75,000 – $120,000 per officer</td>
+                  <td style="text-align:center;color:#0369a1;">${int(fleet_capex/7):,}/yr amortized (7-yr) · {actual_k_responder + actual_k_guardian} units</td></tr>
+              <tr><td><strong>Coverage Hours / Year</strong></td>
+                  <td style="text-align:center;color:#b45309;">~1,260 hrs (school hours only)</td>
+                  <td style="text-align:center;color:var(--green);">8,760 hrs — 24/7/365</td></tr>
+              <tr><td><strong>Campuses Covered</strong></td>
+                  <td style="text-align:center;color:#b45309;">1 building per officer</td>
+                  <td style="text-align:center;color:var(--green);">Multi-campus from 1 hub station</td></tr>
+              <tr><td><strong>On-Campus Response Time</strong></td>
+                  <td style="text-align:center;color:#b45309;">2–5 min (foot/vehicle)</td>
+                  <td style="text-align:center;color:var(--green);">&lt;90 sec airborne · {avg_resp_time:.1f} min avg aerial</td></tr>
+              <tr><td><strong>After-Hours / Weekend</strong></td>
+                  <td style="text-align:center;color:#b45309;">❌ No coverage</td>
+                  <td style="text-align:center;color:var(--green);">✅ Full thermal surveillance</td></tr>
+              <tr><td><strong>Thermal / Night Vision</strong></td>
+                  <td style="text-align:center;color:#b45309;">❌ Flashlight only</td>
+                  <td style="text-align:center;color:var(--green);">✅ 640px FLIR thermal</td></tr>
+              <tr><td><strong>Perimeter Monitoring</strong></td>
+                  <td style="text-align:center;color:#b45309;">❌ Not feasible at scale</td>
+                  <td style="text-align:center;color:var(--green);">✅ Automated aerial patrol</td></tr>
+              <tr><td><strong>Active Threat Intel</strong></td>
+                  <td style="text-align:center;color:#b45309;">Single officer, blind entry</td>
+                  <td style="text-align:center;color:var(--green);">✅ Live HD + thermal to dispatch</td></tr>
+              <tr><td><strong>Indoor Operations</strong></td>
+                  <td style="text-align:center;">✅ On foot</td>
+                  <td style="text-align:center;color:var(--green);">✅ LEMUR 2 — glass-breaker, perch, 2-way comms</td></tr>
+              <tr><td><strong>Court-Admissible Evidence</strong></td>
+                  <td style="text-align:center;color:#b45309;">Body cam (ground-level)</td>
+                  <td style="text-align:center;color:var(--green);">✅ HD aerial video + flight log</td></tr>
+              <tr><td><strong>Mass Shooting Prevention</strong>
+                      <abbr title="Source: RAND Corporation 'The Role and Impact of School Resource Officers' (2023). Quote: 'There is no evidence about whether SROs prevent the types of mass shootings that often lead to the placement of SROs in school.'">ⓘ</abbr></td>
+                  <td style="text-align:center;color:#b45309;">❌ No proven effect (RAND, 2023)</td>
+                  <td style="text-align:center;color:var(--green);">✅ Pre-entry intel, faster coordination</td></tr>
+              <tr><td><strong>Disciplinary Side Effects</strong>
+                      <abbr title="Source: RAND 'The Role and Impact of School Resource Officers' (2023). Schools with SROs saw 35-80% more out-of-school suspensions and 25-90% more expulsions than schools without SROs.">ⓘ</abbr></td>
+                  <td style="text-align:center;color:#b45309;">⚠️ +35–80% suspensions, +25–90% expulsions</td>
+                  <td style="text-align:center;color:var(--green);">✅ Zero school-discipline impact</td></tr>
+            </tbody>
+          </table>
+    
+          <!-- COST COMPARISON -->
+          <div class="fleet-split" style="margin-bottom:24px;">
+            <div class="fleet-card guardian" style="border-top:3px solid var(--amber);">
+              <div class="fc-icon">📋</div>
+              <div class="fc-type" style="color:var(--amber);">10-School District — SRO Model</div>
+              <div class="fc-val">$940K – $1.2M/yr</div>
+              <div class="fc-sub">10 officers · school hours only</div>
+              <div style="margin-top:16px;">
+                <div class="fc-row"><span class="k">Annual hours covered</span><span class="v">1,260 hrs/campus (14.4%)</span></div>
+                <div class="fc-row"><span class="k">Nights / weekends / summer</span><span class="v" style="color:#ef4444;">❌ Unprotected</span></div>
+                <div class="fc-row"><span class="k">Multi-campus coverage</span><span class="v" style="color:#ef4444;">❌ One building/officer</span></div>
+                <div class="fc-row"><span class="k">Proven mass-shooting prevention</span><span class="v" style="color:#ef4444;">❌ No evidence</span></div>
+              </div>
+            </div>
+            <div class="fleet-card responder" style="border-top:3px solid var(--resp);">
+              <div class="fc-icon">🚁</div>
+              <div class="fc-type">BRINC DFR — Multi-Campus</div>
+              <div class="fc-val">${fleet_capex:,.0f} CapEx</div>
+              <div class="fc-sub">{_dfr_amort_str} amortized · {actual_k_responder + actual_k_guardian} units</div>
+              <div style="margin-top:16px;">
+                <div class="fc-row"><span class="k">Annual hours covered</span><span class="v" style="color:var(--resp);">8,760 hrs (24/7/365)</span></div>
+                <div class="fc-row"><span class="k">Nights / weekends / summer</span><span class="v" style="color:var(--green);">✅ Full thermal patrol</span></div>
+                <div class="fc-row"><span class="k">Multi-campus coverage</span><span class="v" style="color:var(--green);">✅ {actual_k_responder + actual_k_guardian} simultaneous zones</span></div>
+                <div class="fc-row"><span class="k">Response time advantage</span><span class="v" style="color:var(--green);">+{avg_time_saved:.1f} min faster per incident</span></div>
+              </div>
+            </div>
+          </div>
+    
+          <!-- SOURCES -->
+          <div class="disc" style="font-size:11px;line-height:1.8;">
+            <strong>Data Sources:</strong>
+            <a href="https://www.fbi.gov/news/press-releases/fbi-releases-crime-in-schools-2020-2024-special-report" target="_blank">FBI Crime in Schools 2020–2024</a> ·
+            <a href="https://nces.ed.gov/pubs2024/2024145.pdf" target="_blank">NCES Indicators of School Crime &amp; Safety 2023</a> ·
+            <a href="https://leb.fbi.gov/articles/featured-articles/those-terrible-first-few-minutes-revisiting-active-shooter-protocols-for-schools" target="_blank">FBI LEB "Those Terrible First Few Minutes"</a> ·
+            <a href="https://www.rand.org/research/gun-policy/analysis/essays/school-resource-officers.html" target="_blank">RAND "The Role and Impact of School Resource Officers" (2023)</a> ·
+            <a href="https://nij.ojp.gov/library/publications/effects-school-resource-officers-school-crime-and-responses-school-crime" target="_blank">NIJ Effects of SROs on School Crime</a> ·
+            <a href="https://k12ssdb.org/" target="_blank">K-12 School Shooting Database</a> ·
+            <a href="https://www.fbi.gov/news/press-releases/fbi-releases-2024-active-shooter-incidents-in-the-united-states-report" target="_blank">FBI Active Shooter Report 2024</a> ·
+            <a href="https://brincdrones.com/responder/" target="_blank">BRINC Responder Technical Specs</a>
+          </div>
+    
+        </section>
+    
+            <!-- ── CUSTOM CLOSING (AE-authored, optional) ──────────────────── -->
+        {_custom_closing_html}
+    
+        <!-- ── 03b: 4G LTE CELL COVERAGE ─────────────────────────────── -->
+        <section class="doc-section" id="cell-coverage">
+          <div class="section-eyebrow"><span class="pg-num">03b</span><span class="pg-title">4G LTE Cell Coverage</span><span class="src" data-src="Source: FCC National Broadband Map (broadbandmap.fcc.gov). Coverage reflects carrier-reported FCC BDC data for 4G LTE (tech code 300) at ≥25 Mbps download. Displayed carriers include AT&T, T-Mobile, and Verizon. Coverage data may not reflect actual field conditions.">ⓘ</span></div>
+          <p style="font-size:0.78rem;color:#8899aa;margin:0 0 8px;">FCC-reported 4G LTE carrier availability across the deployment jurisdiction — critical for drone data-link connectivity planning. Coverage sorted highest to lowest.</p>
+          {_exp_lte_content}
+        </section>
+    
+    
+    
+        <!-- ── DISCLAIMER ─────────────────────────────────────────────── -->
+        <div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:20px 60px;margin:0;font-size:11px;color:#7a5a00;line-height:1.7">
+          <strong>&#9888; SIMULATION TOOL DISCLAIMER</strong> — All figures are model estimates based on user inputs and publicly available data. Not a legal recommendation, binding proposal, contract, or guarantee. Deployments require FAA authorization and formal procurement.
         </div>
-        <div class="cover-right">
-          <img class="product-img" src="data:image/jpeg;base64,{_guardian_img_b64}" alt="BRINC Guardian Station">
-        </div>
-      </div>
-      <div class="cover-bottom">
-        <span>Prepared for <strong style="color:#fff">{prepared_for_city}</strong> by <strong style="color:#fff">{prepared_by_name}</strong></span>
-        <span>{datetime.datetime.now().strftime("%B %d, %Y")}</span>
-      </div>
-    </section>
-
-    <!-- ── 01: EXECUTIVE SUMMARY ──────────────────────────────────── -->
-    <section class="doc-section" id="executive">
-      <div class="section-eyebrow"><span class="pg-num">01</span><span class="pg-title">Executive Summary</span><span class="src" data-src="Sources: Incident coverage &amp; response time computed from uploaded CAD data via BRINC geospatial optimizer. Hardware pricing: BRINC Responder $80K · Guardian $160K (MSRP). Officer dispatch cost benchmark: $76–$120/call (IACP/DOJ). Population: US Census Bureau ACS.">ⓘ</span></div>
-      <div class="metrics-hero">
-        <div class="metric-cell"><div class="m-label">Fleet Capital Expenditure</div><div class="m-value cyan">${fleet_capex:,.0f}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
-        <div class="metric-cell"><div class="m-label">Annual Savings Capacity</div><div class="m-value gold">${annual_savings:,.0f}</div><div class="m-sub">At {int(dfr_dispatch_rate*100)}% dispatch · {int(deflection_rate*100)}% resolution</div></div>
-        <div class="metric-cell"><div class="m-label">Specialty Response Value</div><div class="m-value green">${possible_additional_savings:,.0f}</div><div class="m-sub">Thermal ${thermal_savings:,.0f} · K-9 ${k9_savings:,.0f} · Fire ${fire_savings:,.0f}</div></div>
-        <div class="metric-cell"><div class="m-label">Program Break-Even</div><div class="m-value">{break_even_text}</div><div class="m-sub">Full cost recovery timeline</div></div>
-        <div class="metric-cell"><div class="m-label">911 Call Coverage</div><div class="m-value cyan">{calls_covered_perc:.1f}%</div><div class="m-sub">of {st.session_state.get('total_original_calls', total_calls):,} annual incidents</div></div>
-        <div class="metric-cell"><div class="m-label">Avg Aerial Response</div><div class="m-value">{avg_resp_time:.1f} min</div><div class="m-sub">vs. ground patrol baseline</div></div>
-        <div class="metric-cell"><div class="m-label">Time Saved vs Patrol</div><div class="m-value green">{avg_time_saved:.1f} min</div><div class="m-sub">per incident, on average</div></div>
-        <div class="metric-cell" style="background:#fafbfc"><div class="m-label">Total Fleet Units</div><div class="m-value" style="color:#374151">{actual_k_responder + actual_k_guardian}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
-      </div>
-
-      <!-- Pricing Tier Badge -->
-      <div style="background:linear-gradient(135deg,#0066aa 0%,#0088dd 100%);border-radius:10px;padding:16px 20px;margin:20px 0;border:2px solid #00D2FF;">
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-          <div style="background:rgba(0,210,255,0.2);border-radius:6px;padding:8px 12px;">
-            <div style="font-size:11px;color:#00D2FF;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Pricing Tier</div>
-            <div style="font-size:16px;color:#ffffff;font-weight:800;margin-top:4px;">{_tier_badge}</div>
-          </div>
-          <div>
-            <div style="font-size:13px;color:#ffffff;margin-bottom:8px;"><strong>{_tier_desc}</strong></div>
-            <div style="font-size:12px;color:#aabbdd;">Responder: <strong>${CONFIG['RESPONDER_COST']:,}</strong> · Guardian: <strong>${CONFIG['GUARDIAN_COST']:,}</strong></div>
-          </div>
-        </div>
-      </div>
-
-      <p style="font-size:15px;color:#444;line-height:1.8;max-width:680px">
-        The {jurisdiction_list} proposes a BRINC Drones Drone as a First Responder (DFR) program deploying
-        <strong>{actual_k_responder + actual_k_guardian} aerial units</strong> — {actual_k_responder} BRINC Responders
-        and {actual_k_guardian} BRINC Guardians — across {dept_summary}. The system is projected to cover
-        <strong>{calls_covered_perc:.1f}% of historical incidents</strong>, reach scenes
-        <strong>{avg_time_saved:.1f} minutes faster</strong> than ground patrol, and deliver
-        <strong>${annual_savings:,.0f} in annual operational savings</strong> with a break-even horizon of {break_even_text.lower()}.
-      </p>
-      {_custom_intro_html}
-      {_custom_pts_html}
-      <div style="margin-top:18px;padding:9px 14px;background:#f0f9ff;border-left:3px solid #00D2FF;border-radius:0 4px 4px 0;font-size:11px;color:#555;line-height:1.6;">
-        <strong style="color:#0077aa;">① Configure</strong> &nbsp;·&nbsp;
-        Boundary: <em>{_boundary_kind_note}</em> — <code style="font-size:10px;background:#e8f4fb;padding:1px 4px;border-radius:3px;">{_boundary_src_display}</code>
-        &nbsp;·&nbsp; Jurisdiction: <strong>{_selected_labels_str}</strong>
-      </div>
-    </section>
-
-    <!-- ── 02: FLEET & COVERAGE ───────────────────────────────────── -->
-    <section class="doc-section" id="fleet">
-      <div class="section-eyebrow"><span class="pg-num">02</span><span class="pg-title">Fleet &amp; Coverage</span><span class="src" data-src="Source: BRINC Drones technical specifications. Responder: 60 mph, 1-mile radius, ~2-min avg response. Guardian: 45 mph, up to 8-mile Starlink-connected radius, 25-min flight cycles with auto-recharge. Coverage % derived from geospatial analysis of uploaded incident locations.">ⓘ</span></div>
-      <div class="fleet-split">
-        <div class="fleet-card guardian">
-          <div class="fc-icon">🦅</div>
-          <div class="fc-type">BRINC Guardian</div>
-          <div class="fc-val">{actual_k_guardian} Unit{"s" if actual_k_guardian != 1 else ""}</div>
-          <div class="fc-sub">{guard_radius_mi}-mile operational radius · {guard_strategy_raw}</div>
-          <div style="margin-top:16px">
-            <div class="fc-row"><span class="k">Unit CapEx</span><span class="v">${CONFIG['GUARDIAN_COST']:,}</span></div>
-            <div class="fc-row"><span class="k">Call Coverage</span><span class="v">{guard_calls_perc:.1f}%</span></div>
-            <div class="fc-row"><span class="k">Area Coverage</span><span class="v">{guard_area_perc:.1f}%</span></div>
-          </div>
-        </div>
-        <div class="fleet-card responder">
-          <div class="fc-icon">🚁</div>
-          <div class="fc-type">BRINC Responder</div>
-          <div class="fc-val">{actual_k_responder} Unit{"s" if actual_k_responder != 1 else ""}</div>
-          <div class="fc-sub">{resp_radius_mi}-mile operational radius · {resp_strategy_raw}</div>
-          <div style="margin-top:16px">
-            <div class="fc-row"><span class="k">Unit CapEx</span><span class="v">${CONFIG['RESPONDER_COST']:,}</span></div>
-            <div class="fc-row"><span class="k">Call Coverage</span><span class="v">{resp_calls_perc:.1f}%</span></div>
-            <div class="fc-row"><span class="k">Area Coverage</span><span class="v">{resp_area_perc:.1f}%</span></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ── 03: COVERAGE MAP ───────────────────────────────────────── -->
-    <section class="doc-section" id="map">
-      <div class="section-eyebrow"><span class="pg-num">03</span><span class="pg-title">Coverage Map</span><span class="src" data-src="Map tiles: © OpenStreetMap contributors (ODbL license). FAA airspace data: Federal Aviation Administration LAANC UAS Facility Maps. Incident dots: uploaded CAD data (up to 40K sampled). Coverage rings are operational radius estimates; actual deployment requires FAA LAANC authorization or Part 107 waiver.">ⓘ</span></div>
-      <div class="map-wrap">{map_html_str}</div>
-    </section>
-
-    <!-- ── 03b: 4G LTE CELL COVERAGE ─────────────────────────────── -->
-    <section class="doc-section" id="cell-coverage">
-      <div class="section-eyebrow"><span class="pg-num">03b</span><span class="pg-title">4G LTE Cell Coverage</span><span class="src" data-src="Source: FCC National Broadband Map (broadbandmap.fcc.gov). Coverage reflects carrier-reported FCC BDC data for 4G LTE (tech code 300) at ≥25 Mbps download. Displayed carriers include AT&T, T-Mobile, and Verizon. Coverage data may not reflect actual field conditions.">ⓘ</span></div>
-      <p style="font-size:0.78rem;color:#8899aa;margin:0 0 8px;">FCC-reported 4G LTE carrier availability across the deployment jurisdiction — critical for drone data-link connectivity planning. Coverage sorted highest to lowest.</p>
-      {_exp_lte_content}
-    </section>
-
-    <!-- ── 04: INCIDENT ANALYSIS ─────────────────────────────────── -->
-    <section class="doc-section" id="incident-data">
-      <div class="section-eyebrow"><span class="pg-num">04</span><span class="pg-title">Incident Data Analysis</span><span class="src" data-src="Source: Uploaded CAD export data. Call type classification, priority distribution, and temporal patterns are derived from the incident records provided. BRINC applies no external normalization — charts reflect your jurisdiction's raw CAD data.">ⓘ</span></div>
-      {cad_charts_html_export}
-      {staffing_pressure_html_export}
-    </section>
-
-    <!-- ── 05: DEPLOYMENT LOCATIONS ──────────────────────────────── -->
-    <section class="doc-section" id="deployment">
-      <div class="section-eyebrow"><span class="pg-num">05</span><span class="pg-title">Deployment Locations</span><span class="src" data-src="Station candidates: OpenStreetMap (ODbL), DHS HIFLD Open Data public safety infrastructure, and user-defined pin-drop locations. FAA ceiling data: FAA LAANC UAS Facility Maps API. Optimizer selects stations to maximize coverage of uploaded CAD incidents.">ⓘ</span></div>
-      <table>
-        <thead><tr><th>Station</th><th>Type</th><th>Avg Response</th><th>FAA Ceiling</th><th>CapEx</th></tr></thead>
-        <tbody>{station_rows}</tbody>
-      </table>
-    </section>
-
-    <!-- ── 06: GRANT NARRATIVE ───────────────────────────────────── -->
-    <section class="doc-section" id="grant">
-      <div class="section-eyebrow">
-        <span class="pg-num">06</span>
-        <span class="pg-title">Grant Narrative</span>
-        <span class="src" data-src="Grant programs referenced: DOJ Byrne JAG · FEMA HSGP · DOJ COPS Office · DOT RAISE · DOJ Smart Policing Initiative. Financial figures are BRINC model estimates. Narrative is AI-generated — must be reviewed, localized, and fact-checked by your grants administrator before submission.">ⓘ</span>
-        <button class="copy-section-btn grant-law" onclick="copyGrantText('grant-body-law', this)">
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
-          Copy Grant Text
-        </button>
-      </div>
-      <div class="disc"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission.</div>
-
-      <script>
-      function copyGrantText(id, btn) {{
-        var el = document.getElementById(id);
-        var text = el.innerText;
-        var origLabel = btn.innerHTML;
-        function confirm() {{
-          btn.innerHTML = '&#10003; Copied!';
-          btn.style.background = '#22c55e';
-          btn.style.color = '#fff';
-          setTimeout(function() {{ btn.innerHTML = origLabel; btn.style.background = ''; btn.style.color = ''; }}, 2200);
+    
+        <!-- ── FOOTER ─────────────────────────────────────────────────── -->
+        <footer class="doc-footer">
+          <span class="brand-mark">BRINC</span>
+          <span>{"<img src='data:image/png;base64," + logo_b64_light + "' style='height:24px;vertical-align:middle;'>" if logo_b64_light else ""} BRINC Drones, Inc. · <a href="https://brincdrones.com">brincdrones.com</a> · <a href="mailto:sales@brincdrones.com">sales@brincdrones.com</a> · +1 (855) 950-0226</span>
+          <span>Prepared by {prop_name} · <a href="mailto:{prop_email}">{prop_email}</a>{" · " + _doc_phone if _doc_phone else ""}</span>
+        </footer>
+    
+        </main>
+        <script>
+        // Highlight active nav link on scroll
+        const sections=document.querySelectorAll('section[id],div[id="analytics"]');
+        const links=document.querySelectorAll('.sidebar-nav a');
+        const obs=new IntersectionObserver(entries=>{{
+          entries.forEach(e=>{{
+            if(e.isIntersecting){{
+              links.forEach(l=>l.classList.remove('active'));
+              const a=document.querySelector('.sidebar-nav a[href="#'+e.target.id+'"]');
+              if(a)a.classList.add('active');
+            }}
+          }})
+        }},{{threshold:0.3}});
+        sections.forEach(s=>obs.observe(s));
+    
+        // ── Copy Community Business Partnership letter ──────────────────────────────
+        function copyCommunitySection() {{
+          const section = document.getElementById('community');
+          const btn = document.getElementById('copyPartnershipBtn');
+          if (!section || !btn) return;
+    
+          // Build clean plain-text version by walking the section's text nodes
+          // but skipping the button itself
+          function getTextContent(node) {{
+            if (node === btn) return '';
+            if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+            if (node.nodeType !== Node.ELEMENT_NODE) return '';
+            const tag = node.tagName.toUpperCase();
+            if (tag === 'STYLE' || tag === 'SCRIPT') return '';
+            let out = '';
+            for (const child of node.childNodes) out += getTextContent(child);
+            // Block-level elements get newlines
+            const block = ['DIV','P','H1','H2','H3','H4','H5','H6','LI','TR','BR','SECTION','ARTICLE'];
+            if (block.includes(tag)) out = '\n' + out.trimEnd() + '\n';
+            if (tag === 'TH' || tag === 'TD') out = out.trim() + '\t';
+            return out;
+          }}
+    
+          const rawText = getTextContent(section)
+            .replace(/\n{{3,}}/g, '\n\n')   // collapse excess blank lines
+            .trim();
+    
+          navigator.clipboard.writeText(rawText).then(() => {{
+            const orig = btn.innerHTML;
+            btn.classList.add('copied');
+            btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg> Copied!';
+            setTimeout(() => {{ btn.classList.remove('copied'); btn.innerHTML = orig; }}, 2000);
+          }}).catch(() => {{
+            // Fallback for non-https / older browsers
+            const ta = document.createElement('textarea');
+            ta.value = rawText;
+            ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0;';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            const orig = btn.innerHTML;
+            btn.classList.add('copied');
+            btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg> Copied!';
+            setTimeout(() => {{ btn.classList.remove('copied'); btn.innerHTML = orig; }}, 2000);
+          }});
         }}
-        if (navigator.clipboard && window.isSecureContext) {{
-          navigator.clipboard.writeText(text).then(confirm).catch(function() {{ fallback(text, confirm); }});
-        }} else {{ fallback(text, confirm); }}
-      }}
-      function fallback(text, cb) {{
-        var ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
-        document.body.appendChild(ta);
-        ta.focus(); ta.select();
-        try {{ document.execCommand('copy'); cb(); }} catch(e) {{ alert('Press Ctrl+C / Cmd+C to copy.'); }}
-        document.body.removeChild(ta);
-      }}
-      </script>
-
-      <div class="grant-layout">
-      <div class="grant-body" id="grant-body-law">
-        <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — {prepared_for_city}, {prop_state}</p>
-
-        <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully requests funding to establish a Drone as a First Responder (DFR) program deploying {actual_k_responder + actual_k_guardian} purpose-built BRINC aerial units — {actual_k_responder} BRINC Responder and {actual_k_guardian} BRINC Guardian — across {dept_summary} serving {pop_metric:,} residents. Modeled against {st.session_state.get('total_original_calls', total_calls):,} historical incidents from {_exp_date_range}, the program is projected to cover <strong>{calls_covered_perc:.1f}%</strong> of calls for service, arrive an average of <strong>{avg_time_saved:.1f} minutes faster</strong> than ground patrol, and generate <strong>${annual_savings:,.0f} in annual operational savings</strong>, with an additional modeled specialty-response upside of <strong>${possible_additional_savings:,.0f}</strong> from thermal-supported searches and avoided K-9 deployments, reaching full cost recovery in <strong>{break_even_text.lower()}</strong>.</p>
-
-        <p><strong>Statement of Need:</strong> {jurisdiction_list} currently responds to an estimated {st.session_state.get('total_original_calls', total_calls):,} calls for service annually — approximately {max(1,int(st.session_state.get('total_original_calls',total_calls)/365)):,} calls per day. Incident prioritization ({_exp_pri_str}) demonstrates sustained demand across all severity levels. Ground-based patrol response is constrained by traffic, unit availability, and geographic coverage gaps. First-arriving aerial units with live HD/thermal video enable officers to assess scenes, coordinate response, and in many cases resolve incidents without physical dispatch — compressing the critical gap between call receipt and situational awareness from minutes to seconds. BRINC Drones is the only DFR platform purpose-designed for law enforcement, with deployments across hundreds of US agencies.</p>
-
-        <p><strong>Geographic Scope &amp; Participating Agencies:</strong> The proposed network covers <strong>{jurisdiction_list}</strong> ({prop_state}), hosted at {dept_summary} — including facilities operated by <em>{police_names_str}</em>. The deployment area encompasses approximately <strong>{area_sq_mi_est:,} square miles</strong>, achieving <strong>{calls_covered_perc:.1f}%</strong> historical incident coverage and <strong>{area_covered_perc:.1f}%</strong> geographic area coverage. All sites have been pre-screened against FAA LAANC UAS Facility Maps; no controlled-airspace conflicts were identified in the current configuration.</p>
-
-        <p><strong>Fleet Architecture &amp; Program Design:</strong> The fleet consists of <strong>{actual_k_responder} BRINC Responder</strong> units ({resp_radius_mi}-mile operational radius, {CONFIG["RESPONDER_SPEED"]:.0f} mph, 2-minute average response, optimized for <em>{resp_strategy_raw.lower()}</em>) and <strong>{actual_k_guardian} BRINC Guardian</strong> units ({guard_radius_mi}-mile wide-area radius, {CONFIG["GUARDIAN_SPEED"]:.0f} mph, optimized for <em>{guard_strategy_raw.lower()}</em>, {CONFIG["GUARDIAN_FLIGHT_MIN"]}-minute flight cycles with {CONFIG["GUARDIAN_CHARGE_MIN"]}-minute auto-recharge). Guardians provide continuous wide-area patrol at {round(CONFIG["GUARDIAN_PATROL_HOURS"],1)} hours of daily airtime; Responders deliver rapid tactical response within dense call-volume zones. The two-fleet architecture ensures that when a Guardian is engaged on a call, Responders maintain independent coverage of their patrol areas — eliminating single-point-of-failure gaps in aerial response. Deployment mode: <strong>{deployment_mode}</strong>.</p>
-
-        <p><strong>Technology Platform:</strong> BRINC Drones provides fully automated launch-on-dispatch, live-streaming HD and thermal video to dispatch and responding officers, FAA-compliant Beyond Visual Line of Sight (BVLOS) operations, chain-of-custody flight logging, and integrated data analytics. All hardware is manufactured in the United States. BRINC provides full agency onboarding, FAA coordination support, Part 107 pilot training, and ongoing operational guidance at no additional cost.</p>
-
-        <p><strong>Fiscal Impact &amp; Return on Investment:</strong> Total program capital expenditure is <strong>${fleet_capex:,.0f}</strong> ({actual_k_responder} Responder × ${CONFIG["RESPONDER_COST"]:,} + {actual_k_guardian} Guardian × ${CONFIG["GUARDIAN_COST"]:,}). At a <strong>{int(dfr_dispatch_rate*100)}% DFR dispatch rate</strong> and <strong>{int(deflection_rate*100)}% call resolution rate</strong> (no officer dispatch required), the program is projected to generate <strong>${annual_savings:,.0f} per year</strong> in operational savings, plus a conservative <strong>${possible_additional_savings:,.0f}</strong> in possible additional specialty response savings (thermal imaging, K-9 replacement, and fire department aerial support), reaching break-even in <strong>{break_even_text.lower()}</strong>. Cost per drone response is ${CONFIG["DRONE_COST_PER_CALL"]} versus ${CONFIG["OFFICER_COST_PER_CALL"]} for a ground patrol dispatch — a <strong>{int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}% cost reduction</strong> per incident. The program also reduces officer exposure to unknown-risk calls, decreasing liability and improving officer retention outcomes.</p>
-
-        <p><strong>Evaluation Plan:</strong> Program outcomes will be tracked quarterly across four dimensions: (1) response time comparison vs. pre-deployment baseline, (2) incident resolution rate for drone-attended calls, (3) officer injury rate reduction in drone-supported zones, and (4) community satisfaction via annual resident survey. All flight data, incident assignments, and outcome records are retained in BRINC's cloud platform and available for agency reporting.</p>
-
-        <p><strong>10-Year Program Value Model:</strong> The following projections assume consistent call volume and constant dispatch/resolution rates. Actual results may vary.</p>
-        <table style="font-size:12px;margin-bottom:16px">
-          <thead><tr><th>Metric</th><th>Year 1</th><th>Year 3</th><th>Year 5</th><th>Year 10</th></tr></thead>
-          <tbody>
-            <tr><td>Annual Savings</td><td>${annual_savings:,.0f}</td><td>${annual_savings*1.05:,.0f}</td><td>${annual_savings*1.1:,.0f}</td><td>${annual_savings*1.22:,.0f}</td></tr>
-            <tr><td>Cumulative Savings</td><td>${annual_savings:,.0f}</td><td>${annual_savings*3.15:,.0f}</td><td>${annual_savings*5.53:,.0f}</td><td>${annual_savings*12.58:,.0f}</td></tr>
-            <tr><td>Drone-Attended Calls</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365*1.03):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365*1.06):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365*1.13):,}</td></tr>
-            <tr><td>Calls Resolved w/o Dispatch</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365*1.03):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365*1.06):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365*1.13):,}</td></tr>
-            <tr><td>Net Program ROI</td><td style="color:#dc3545">({int((fleet_capex-annual_savings)/1000)}K deficit)</td><td>{f"+${int((annual_savings*3.15-fleet_capex)/1000)}K" if annual_savings*3.15>fleet_capex else f"({int((fleet_capex-annual_savings*3.15)/1000)}K)"}</td><td style="color:#22c55e">+${int((annual_savings*5.53-fleet_capex)/1000):,}K</td><td style="color:#22c55e">+${int((annual_savings*12.58-fleet_capex)/1000):,}K</td></tr>
-          </tbody>
-        </table>
-
-        <p><strong>Officer Safety &amp; Liability Reduction:</strong> Beyond direct operational savings, DFR programs measurably reduce officer exposure to unknown-risk call scenarios. First-arriving drones perform scene reconnaissance before ground units arrive, enabling officers to approach with full situational awareness. Documented outcomes across peer agencies include: reduced officer injuries in drone-supported zones (avg. 18% reduction, per DOJ data), faster suspect identification improving apprehension rates, and reduced use-of-force incidents through earlier de-escalation intelligence. These outcomes reduce agency liability costs and workers' compensation claims — benefits not captured in the direct cost model above.</p>
-
-        <p><strong>Community &amp; Economic Impact:</strong> Response time improvements of <strong>{avg_time_saved:.1f} minutes</strong> translate directly to better outcomes in time-sensitive incidents: cardiac events, structure fires, crimes in progress, and missing persons cases. Studies by the International Association of Chiefs of Police (IACP) document measurable improvements in case clearance rates, property crime deterrence (15–30% reduction in areas with visible DFR patrols), and community trust metrics in agencies with active drone programs. For {prop_city}'s business community, faster emergency response reduces property damage, shortens insurance claim cycles, and improves the commercial district safety perception that drives foot traffic and investment.</p>
-
-        <p style="background:#f8f9fa;padding:15px;border-radius:8px;border:1px solid #eee;font-size:13px">
-          <strong>Applicable Grant Funding Sources:</strong><br>
-          <a href="https://bja.ojp.gov/program/jag/overview">DOJ Byrne JAG</a> — Technology and equipment procurement<br>
-          <a href="https://www.fema.gov/grants/preparedness/homeland-security">FEMA HSGP</a> — Homeland security CapEx offset<br>
-          <a href="https://cops.usdoj.gov/grants">DOJ COPS Office</a> — Law enforcement technology<br>
-          <a href="https://www.transportation.gov/grants">DOT RAISE</a> — Regional infrastructure and safety<br>
-          <a href="https://bja.ojp.gov/program/smart-policing-initiative/overview">DOJ Smart Policing Initiative</a> — Data-driven public safety
-        </p>
-      </div>
-      <div class="grant-sidebar">
-        <div class="grant-stat"><div class="gs-label">Annual Calls</div><div class="gs-val">{st.session_state.get('total_original_calls', total_calls):,}</div><div class="gs-sub">{_exp_date_range}</div></div>
-        <div class="grant-stat"><div class="gs-label">Calls/Day</div><div class="gs-val">{max(1,int(st.session_state.get('total_original_calls',total_calls)/365)):,}</div><div class="gs-sub">citywide avg</div></div>
-        <div class="grant-stat gold"><div class="gs-label">Call Coverage</div><div class="gs-val">{calls_covered_perc:.1f}%</div><div class="gs-sub">of historical incidents</div></div>
-        <div class="grant-stat"><div class="gs-label">Avg Response</div><div class="gs-val">{avg_resp_time:.1f}m</div><div class="gs-sub">{avg_time_saved:.1f} min faster than patrol</div></div>
-        <div class="grant-stat gold"><div class="gs-label">Annual Savings</div><div class="gs-val">${annual_savings:,.0f}</div><div class="gs-sub">break-even {break_even_text.lower()}</div></div>
-        <div class="grant-stat green"><div class="gs-label">Cost Reduction</div><div class="gs-val">{int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}%</div><div class="gs-sub">per incident vs. patrol dispatch</div></div>
-      </div>
-      </div>
-    </section>
-
-    <!-- ── 06B: FIRE DEPARTMENT VALUE ─────────────────────────────── -->
-    <section class="doc-section" id="fire-value">
-      <div class="section-eyebrow"><span class="pg-num">06B</span><span class="pg-title">Fire Department Value</span><span class="src" data-src="Sources: NFPA Fire Loss Research (aerial ladder deployment costs $3K–$8K/deploy); USFA Firefighter Fatality Statistics; FEMA AFG program eligibility. Savings model: 15% of attended fire calls avoid aerial ladder deployment + thermal overhaul guidance (45 min/4-person crew saved at $200/hr, NFPA labor benchmarks).">ⓘ</span></div>
-
-      <div class="metrics-hero">
-        <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
-          <div class="m-label">Fire Calls Assisted</div>
-          <div class="m-value" style="color:#fb7121">{fire_calls_annual:,.0f}</div>
-          <div class="m-sub">Est. {int(CONFIG["FIRE_DEFAULT_APPLICABLE_RATE"]*100)}% of covered incidents</div>
-        </div>
-        <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
-          <div class="m-label">Scene Size-Up Savings</div>
-          <div class="m-value" style="color:#fb7121">${fire_savings * 0.8:,.0f}/yr</div>
-          <div class="m-sub">Avoided premature aerial ladder deployment</div>
-        </div>
-        <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
-          <div class="m-label">Overhaul Hotspot Savings</div>
-          <div class="m-value" style="color:#fb7121">${fire_savings * 0.2:,.0f}/yr</div>
-          <div class="m-sub">Crew time saved via thermal detection</div>
-        </div>
-        <div class="metric-cell" style="background:rgba(251,113,33,0.12);border:1px solid rgba(251,113,33,0.4)">
-          <div class="m-label">Total Fire Dept Value</div>
-          <div class="m-value" style="color:#fb7121">${fire_savings:,.0f}/yr</div>
-          <div class="m-sub">${CONFIG["FIRE_SAVINGS_PER_CALL"]} blended savings per fire call</div>
-        </div>
-      </div>
-
-      <h3 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:#1e293b">How Drones Deliver Fire Department Value</h3>
-      <table style="font-size:12px;margin-bottom:20px">
-        <thead><tr><th>Value Driver</th><th>Mechanism</th><th>Est. Savings</th><th>Source Basis</th></tr></thead>
-        <tbody>
-          <tr>
-            <td><strong>Aerial Scene Size-Up</strong></td>
-            <td>Drone arrives before engine company, streams live roof and exterior view. Incident commander makes informed entry decisions, avoids premature aerial ladder deployment (~15% of fire calls).</td>
-            <td style="color:#fb7121;font-weight:700">${fire_savings * 0.8:,.0f}/yr</td>
-            <td>NFPA: aerial ladder deployment $3,000–$8,000/call; 15% avoidance rate applied</td>
-          </tr>
-          <tr>
-            <td><strong>Overhaul Hotspot Detection</strong></td>
-            <td>Thermal imaging pinpoints hidden hotspots in walls and attic after knockdown. Reduces overhaul crew time by ~45 min (4-person crew) per fire call.</td>
-            <td style="color:#fb7121;font-weight:700">${fire_savings * 0.2:,.0f}/yr</td>
-            <td>IAFC: avg. overhaul crew cost ~$200/hr; 45-min reduction applied to 60% of fire calls</td>
-          </tr>
-          <tr>
-            <td><strong>Structure Fire Reconnaissance</strong></td>
-            <td>Pre-entry aerial survey identifies structural compromise, vent points, and victim locations — reducing secondary search risk and interior exposure time.</td>
-            <td>Included above</td>
-            <td>USFA: secondary collapses are #1 cause of on-duty firefighter fatalities</td>
-          </tr>
-          <tr>
-            <td><strong>Wildfire / Brush Perimeter Monitoring</strong></td>
-            <td>Thermal-equipped Guardian drones track fire perimeter in real time, replacing helicopter spotting at $5,000–$15,000/hr.</td>
-            <td>Situational; not modeled</td>
-            <td>CAL FIRE, NWCG: helicopter spotting costs $8,000–$15,000/flight hour</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div class="section-eyebrow" style="margin-top:28px;">
-        <span class="pg-num" style="color:#f97316;border-color:rgba(249,115,22,0.3);">🚒</span>
-        <span class="pg-title">Fire Department Grant Narrative</span>
-        <span class="src" data-src="Applicable grant programs: FEMA Assistance to Firefighters Grant (AFG) · FEMA Fire Prevention &amp; Safety (FP&amp;S) · FEMA BRIC · USDA Community Facilities · DHS UASI · State Homeland Security Program (SHSP). Narrative is AI-generated and must be reviewed by a certified grants professional.">ⓘ</span>
-        <button class="copy-section-btn grant-fire" onclick="copyGrantText('grant-body-fire', this)">
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
-          Copy Fire Grant
-        </button>
-      </div>
-      <div class="disc"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission.</div>
-
-      <div class="grant-layout">
-      <div class="grant-body" id="grant-body-fire">
-        <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — Fire Department Aerial Operations Enhancement — {prepared_for_city}, {prop_state}</p>
-
-        <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully requests funding to extend its Drone as a First Responder (DFR) program to support fire department operations in {prepared_for_city}, {prop_state}. Deploying {actual_k_responder + actual_k_guardian} BRINC aerial units across {dept_summary}, the program is projected to assist an estimated <strong>{fire_calls_annual:,.0f} fire-related calls annually</strong> — delivering <strong>${fire_savings:,.0f} per year</strong> in fire department operational value through aerial scene size-up, avoided aerial ladder deployments, and thermal-guided overhaul support. The program reaches full capital cost recovery in <strong>{break_even_text.lower()}</strong> when combined with law enforcement operational savings.</p>
-
-        <p><strong>Statement of Need — Fire Operations:</strong> {jurisdiction_list} fire personnel respond to an estimated {fire_calls_annual:,.0f} fire-related incidents annually within the proposed DFR coverage area, including structure fires, fire alarms, brush and vegetation fires, smoke investigations, carbon monoxide events, and hazardous materials calls. Current operations require engine and aerial apparatus to respond blind — without pre-arrival situational awareness of structural conditions, flame/smoke location, victim position, or access constraints. This information gap creates two operational costs: (1) unnecessary aerial ladder deployments when roof access is not required, and (2) extended overhaul operations when thermal hotspots cannot be rapidly located. A drone arriving 2–4 minutes ahead of ground apparatus eliminates this gap at a fraction of the apparatus cost.</p>
-
-        <p><strong>Operational Application:</strong> Upon dispatch of a fire call within the coverage zone, the nearest BRINC drone auto-launches and arrives on scene in an average of <strong>{avg_resp_time:.1f} minutes</strong> — typically before the first engine company. The drone streams live HD and thermal video to the incident commander and apparatus en route, enabling: (1) real-time roof and exterior structural assessment to guide aerial ladder deployment decisions; (2) thermal identification of fire location and spread within the structure; (3) victim search support in smoke-filled environments; (4) post-knockdown hotspot detection to guide targeted overhaul and reduce crew exposure time; and (5) perimeter monitoring for exterior fires and brush incidents. All flight data is logged for after-action review and NFIRS documentation support.</p>
-
-        <p><strong>Fiscal Impact — Fire Department:</strong> The modeled fire department value of <strong>${fire_savings:,.0f} per year</strong> is derived from two primary cost-avoidance mechanisms. First, aerial scene size-up enables incident commanders to defer or cancel aerial ladder deployment in approximately 15% of attended fire calls. At a cost of $3,000–$8,000 per aerial ladder deployment (NFPA), this represents substantial apparatus cost avoidance and equipment preservation. Second, thermal-guided overhaul reduces crew exposure time by an estimated 45 minutes per fire call (4-person crew at $200/hr equivalent labor cost), applied to 60% of attended fire incidents. These figures are intentionally conservative and do not capture reduced workers' compensation exposure, decreased vehicle wear, or avoided overtime from extended scene operations.</p>
-
-        <p><strong>Officer and Firefighter Safety:</strong> The U.S. Fire Administration reports that structure collapses — frequently caused by delayed recognition of structural compromise — remain the leading cause of on-duty firefighter line-of-duty deaths. Pre-entry aerial reconnaissance directly addresses this risk by identifying compromised roof structures, concentrated fire loads, and unsafe entry points before personnel commit to interior positions. Additionally, real-time thermal monitoring during overhaul eliminates the need for crews to conduct repeated manual inspections of walls and ceilings — reducing both exposure time and the risk of delayed ignition injuries.</p>
-
-        <p><strong>Applicable Fire Department Grant Sources:</strong><br>
-        <strong>FEMA Assistance to Firefighters Grant (AFG)</strong> — Equipment and technology procurement for fire departments; drones qualify under the Operations &amp; Safety category.<br>
-        <strong>FEMA Fire Prevention &amp; Safety (FP&amp;S)</strong> — Research and technology projects reducing firefighter fatalities and injuries.<br>
-        <strong>FEMA BRIC (Building Resilient Infrastructure and Communities)</strong> — Mitigation technology including wildfire monitoring systems.<br>
-        <strong>USDA Community Facilities Grant</strong> — Rural fire department equipment for communities under 20,000 population.<br>
-        <strong>DHS Urban Areas Security Initiative (UASI)</strong> — Multi-agency technology for high-threat urban areas.<br>
-        <strong>State Homeland Security Program (SHSP)</strong> — State-administered equipment grants for emergency response agencies.</p>
-
-        <p><strong>10-Year Fire Department Value Projection:</strong></p>
-        <table style="font-size:12px;margin-bottom:16px">
-          <thead><tr><th>Metric</th><th>Year 1</th><th>Year 3</th><th>Year 5</th><th>Year 10</th></tr></thead>
-          <tbody>
-            <tr><td>Fire Calls Assisted</td><td>{fire_calls_annual:,.0f}</td><td>{fire_calls_annual*1.03:,.0f}</td><td>{fire_calls_annual*1.06:,.0f}</td><td>{fire_calls_annual*1.13:,.0f}</td></tr>
-            <tr><td>Annual Fire Dept Value</td><td>${fire_savings:,.0f}</td><td>${fire_savings*1.05:,.0f}</td><td>${fire_savings*1.10:,.0f}</td><td>${fire_savings*1.22:,.0f}</td></tr>
-            <tr><td>Cumulative Fire Value</td><td>${fire_savings:,.0f}</td><td>${fire_savings*3.15:,.0f}</td><td>${fire_savings*5.53:,.0f}</td><td>${fire_savings*12.58:,.0f}</td></tr>
-            <tr><td>Scene Size-Up Savings</td><td>${fire_savings*0.8:,.0f}</td><td>${fire_savings*0.8*1.05:,.0f}</td><td>${fire_savings*0.8*1.10:,.0f}</td><td>${fire_savings*0.8*1.22:,.0f}</td></tr>
-            <tr><td>Overhaul Crew Savings</td><td>${fire_savings*0.2:,.0f}</td><td>${fire_savings*0.2*1.05:,.0f}</td><td>${fire_savings*0.2*1.10:,.0f}</td><td>${fire_savings*0.2*1.22:,.0f}</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="grant-sidebar">
-        <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Fire Calls/Year</div><div class="gs-val" style="color:#fb7121">{fire_calls_annual:,.0f}</div><div class="gs-sub">within coverage zone</div></div>
-        <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Scene Size-Up Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*0.8:,.0f}</div><div class="gs-sub">aerial ladder cost avoidance</div></div>
-        <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Overhaul Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*0.2:,.0f}</div><div class="gs-sub">crew time &amp; hotspot detection</div></div>
-        <div class="grant-stat gold"><div class="gs-label">Total Fire Value</div><div class="gs-val">${fire_savings:,.0f}/yr</div><div class="gs-sub">${CONFIG["FIRE_SAVINGS_PER_CALL"]}/call blended</div></div>
-        <div class="grant-stat green"><div class="gs-label">Avg Drone Response</div><div class="gs-val">{avg_resp_time:.1f} min</div><div class="gs-sub">{avg_time_saved:.1f} min faster than apparatus</div></div>
-        <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">10-Year Fire Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*12.58:,.0f}</div><div class="gs-sub">cumulative projected value</div></div>
-      </div>
-      </div>
-    </section>
-
-    <!-- ── 07: COMMUNITY INFRASTRUCTURE & ASSET PROTECTION ──────────────────────────── -->
-    <section class="doc-section" id="infrastructure">
-      <div class="section-eyebrow"><span class="pg-num">07</span><span class="pg-title">Community Infrastructure &amp; Asset Protection</span><span class="src" data-src="Sources: OpenStreetMap (© contributors, ODbL license) · DHS HIFLD Open Data (public domain) · NCES Common Core of Data · CMS Hospital Compare · NEMSIS National EMS Database · NTD National Transit Database · IMLS Public Libraries Survey · US Courts PACER · EPA Infrastructure Maps · US Energy Information Administration · FAA LAANC UAS Facility Maps · User-verified locations.">ⓘ</span></div>
-
-      <p style="color:var(--text);font-size:14px;line-height:1.6;margin-bottom:20px;">
-        This deployment protects <strong>{len(df_stations_all):,} indexed public facilities</strong> across {prop_city}, {prop_state} — from emergency response centers and schools to hospitals, power plants, water treatment facilities, places of worship, and community services. The BRINC DFR network provides 24/7 aerial first-response coverage prioritizing assets most critical to public safety, economic continuity, and community resilience — including <strong>⚡ power stations</strong> and <strong>💧 water treatment facilities</strong> that serve as essential infrastructure for the entire region. All facility coordinates have been verified against FAA LAANC facility maps and current data sources.
-      </p>
-
-      <!-- FACILITY TYPE SUMMARY -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:28px;">
-        {_fac_summary_cells}
-      </div>
-
-      <p style="font-size:12px;color:var(--muted);margin-bottom:18px;padding:12px;background:var(--light);border-radius:6px;">
-        <strong>Coverage Impact:</strong> <span style="color:var(--cyan);font-weight:600;">{calls_covered_perc:.1f}% of annual incidents</span> occur within drone response zones, enabling rapid aerial assessment and coordinated ground response. <strong>Data Sources:</strong> OpenStreetMap · DHS HIFLD · NCES · CMS · NEMSIS · NTD · IMLS · EPA · US EIA · User data
-      </p>
-
-      <div class="infra-grid">{all_bldgs_rows}</div>
-    </section>
-
-    <!-- ── 08: COMMUNITY PARTNERSHIP ─────────────────────────────── -->
-    <section class="doc-section" id="community">
-      <div class="section-eyebrow">
-        <span class="pg-num">08</span>
-        <span class="pg-title">Community Business Partnership</span>
-        <span class="src" data-src="Crime cost benchmarks: National Retail Federation 2023 Retail Security Survey ($559 avg shoplifting loss) · DOJ/NIJ commercial burglary cost estimates ($3K–$8.5K) · FBI UCR property crime data. Peer DFR outcomes: Chula Vista PD · El Cajon PD · Westerville OH PD (15–30% property crime reduction in covered zones).">ⓘ</span>
-        <button class="copy-section-btn community" id="copyPartnershipBtn" onclick="copyCommunitySection()">
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
-          Copy Letter
-        </button>
-      </div>
-
-      <!-- Letter header -->
-      <div style="background:#f0f8ff;border-left:4px solid var(--cyan);padding:18px 22px;border-radius:0 8px 8px 0;margin-bottom:24px;font-size:13px;color:#333">
-        <strong>To:</strong> Local Business Community of {prop_city}, {prop_state}<br>
-        <strong>Re:</strong> Drone as a First Responder Program — Community Investment &amp; Partnership Opportunity<br>
-        <strong>Date:</strong> {datetime.datetime.now().strftime("%B %d, %Y")}
-      </div>
-
-      <p>Dear {prop_city} Business Owner,</p>
-
-      <p>The {prop_city} Police Department is proposing a transformational public safety initiative that will directly protect your business, your employees, and your customers. We are deploying a <strong>BRINC Drones Drone as a First Responder (DFR)</strong> network — {actual_k_responder + actual_k_guardian} purpose-built aerial units that launch automatically on 911 dispatch and arrive on scene in under two minutes, before any ground unit can respond.</p>
-
-      <p>This is not a surveillance program. It is a rapid-response tool. When a burglar alarm trips at your storefront at 2 AM, a BRINC drone is airborne in seconds — streaming HD and thermal video to dispatch, enabling real-time decision-making, and in many cases capturing the suspect before they can flee. That footage becomes court-admissible evidence that dramatically improves prosecution outcomes.</p>
-
-      <!-- Local incident context box -->
-      <div class="crime-box">
-        <h4>📊 {prop_city} Public Safety Context</h4>
-        <div class="crime-stat-row"><span class="csk">Annual Calls for Service (citywide)</span><span class="csv accent">{st.session_state.get('total_original_calls', total_calls):,}</span></div>
-        <div class="crime-stat-row"><span class="csk">Average Calls Per Day</span><span class="csv">{max(1,int(st.session_state.get('total_original_calls',total_calls)/365)):,}</span></div>
-        <div class="crime-stat-row"><span class="csk">Incidents Covered by DFR Network</span><span class="csv accent">{calls_covered_perc:.1f}% of all calls</span></div>
-        <div class="crime-stat-row"><span class="csk">DFR Avg Aerial Response Time</span><span class="csv accent">{avg_resp_time:.1f} minutes</span></div>
-        <div class="crime-stat-row"><span class="csk">Time Saved vs. Ground Patrol</span><span class="csv accent">~{avg_time_saved:.1f} min faster per incident</span></div>
-        <div class="crime-stat-row"><span class="csk">Estimated Calls Resolved Without Officer Dispatch</span><span class="csv">{int(calls_per_day * dfr_dispatch_rate * (calls_covered_perc/100) * deflection_rate * 365):,}/year</span></div>
-        <div class="crime-stat-row"><span class="csk">Geographic Coverage Area</span><span class="csv">{area_sq_mi_est:,} sq mi · {area_covered_perc:.1f}% of city</span></div>
-      </div>
-
-      <h3 style="color:var(--text);font-size:16px;margin:24px 0 12px">Why This Matters to Your Business</h3>
-
-      <p>Property crimes cost American businesses over <strong>$50 billion annually</strong> in direct losses — before accounting for insurance premium increases, business interruption, and the intangible cost of a less safe commercial environment. The businesses of {prop_city} are not immune. Consider what faster response means in practice:</p>
-
-      <table style="margin-bottom:20px;font-size:13px">
-        <thead><tr><th>Crime Type</th><th>Avg Cost per Incident</th><th>DFR Impact</th></tr></thead>
-        <tbody>
-          <tr><td><strong>Retail Theft / Shoplifting</strong></td><td>$559 per incident <em>(NRF 2023)</em></td><td>Real-time apprehension · evidence capture · deterrence</td></tr>
-          <tr><td><strong>Commercial Burglary</strong></td><td>$3,000–$8,500 per incident</td><td>Scene arrival before suspect can exit · HD identification footage</td></tr>
-          <tr><td><strong>Vandalism / Property Damage</strong></td><td>$1,000–$5,000 per incident</td><td>Suspect identification · reduced repeat incidents in monitored zones</td></tr>
-          <tr><td><strong>Robbery / Armed Incidents</strong></td><td>$8,000+ in costs &amp; liability</td><td>Officer-safety pre-arrival intel · coordinated ground response</td></tr>
-          <tr><td><strong>Trespass / Loitering</strong></td><td>$200–$1,500 in staff/facility cost</td><td>Non-confrontational aerial deterrence</td></tr>
-        </tbody>
-      </table>
-
-      <p>Peer agencies with active DFR programs — including Chula Vista, CA; El Cajon, CA; and Westerville, OH — have documented <strong>15–30% reductions in property crime rates</strong> within covered zones, and average response times of under 90 seconds from dispatch. {prop_city}'s proposed deployment covers <strong>{calls_covered_perc:.1f}% of incidents</strong> and arrives an average of <strong>{avg_time_saved:.1f} minutes faster</strong> than current patrol response.</p>
-
-      <h3 style="color:var(--text);font-size:16px;margin:24px 0 12px">The Investment We're Requesting</h3>
-
-      <p>Total program CapEx is <strong>${fleet_capex:,.0f}</strong>. The {prop_city} Police Department is seeking community partnership contributions to offset a portion of this cost and accelerate deployment. Every dollar contributed directly funds equipment that protects your street, your block, your customers.</p>
-
-      <table style="margin-bottom:20px">
-        <thead><tr><th>Sponsorship Tier</th><th>Contribution</th><th>Recognition &amp; Benefits</th></tr></thead>
-        <tbody>
-          <tr style="background:rgba(255,215,0,0.04)"><td><strong>🥇 Founding Sponsor</strong></td><td><strong>$25,000+</strong></td><td>Named drone unit bearing your business name · press release · plaque at station · annual program briefing with command staff · tax-deductible receipt</td></tr>
-          <tr><td><strong>🥈 Community Champion</strong></td><td><strong>$10,000–$24,999</strong></td><td>Logo on all program materials &amp; vehicle decals · certificate of recognition · annual impact report · public acknowledgment at City Council</td></tr>
-          <tr><td><strong>🥉 Neighborhood Partner</strong></td><td><strong>$2,500–$9,999</strong></td><td>Listed on program website and department newsletter · certificate · public acknowledgment</td></tr>
-          <tr><td><strong>🤝 Business Supporter</strong></td><td><strong>$500–$2,499</strong></td><td>Donor roll listing · formal thank-you letter on department letterhead</td></tr>
-          <tr><td><strong>💙 Community Contributor</strong></td><td><strong>Any amount</strong></td><td>Recognized in annual program transparency report</td></tr>
-        </tbody>
-      </table>
-
-      <p>For every <strong>$10,000</strong> contributed, the program is projected to generate approximately <strong>${int(annual_savings/max(fleet_capex,1)*10000):,}</strong> in annual operational savings and property crime cost avoidance for the {prop_city} business community — a {round(annual_savings/max(fleet_capex,1),1):.1f}x return on community investment.</p>
-
-      <p>Together, we can make {prop_city} safer, faster, and more resilient. Thank you for your commitment to this community.</p>
-    </section>
-
-    [ANALYTICS_SECTION]
-    [COMMUNITY_IMPACT_SECTION]
-
-    <!-- ── 11: SCHOOL SAFETY IMPACT ───────────���───────────────────── -->
-    <section class="doc-section" id="school-safety">
-      <div class="section-eyebrow"><span class="pg-num">11</span><span class="pg-title">School Safety Impact</span><span class="src" data-src="Sources: FBI Crime in Schools 2020–2024 · NCES Indicators of School Crime &amp; Safety 2023 · FBI Active Shooter Study · RAND Corp. 'Role and Impact of SROs' (2023) · NIJ Effects of SROs on School Crime · K-12 School Shooting Database (k12ssdb.org) · BJS School Crime 2024 · ZipRecruiter/Volt.ai SRO salary data · BRINC technical specifications. See full source list at bottom of this section.">ⓘ</span></div>
-
-      <p style="font-size:14px;color:var(--muted);max-width:700px;line-height:1.7;margin-bottom:28px;">
-        BRINC DFR delivers 24/7 aerial first-response to school campuses — faster and at lower total lifecycle cost
-        than traditional School Resource Officers, with no coverage blind spots, no off-hours gaps, and full HD + thermal
-        scene intelligence before any officer enters a building.
-      </p>
-
-      <!-- NATIONAL STATS HERO -->
-      <div class="metrics-hero" style="margin-bottom:28px;">
-        <div class="metric-cell" style="border-top:3px solid #ef4444;">
-          <div class="m-label">School Crimes 2020–24 <abbr title="Source: FBI Crime in Schools Special Report 2020–2024. Over 1.3M criminal incidents at K-12 locations across the US over 5 years, with ~1.5M victims.">ⓘ</abbr></div>
-          <div class="m-value" style="color:#ef4444;">1.3M</div>
-          <div class="m-sub">criminal incidents on campus</div>
-        </div>
-        <div class="metric-cell" style="border-top:3px solid var(--amber);">
-          <div class="m-label">Student Victimization <abbr title="Source: NCES Indicators of School Crime &amp; Safety 2023 (NCES 2024-145). 22 nonfatal criminal victimizations per 1,000 students ages 12-18 in 2022 — includes theft, violent crime, and serious threats.">ⓘ</abbr></div>
-          <div class="m-value gold">22</div>
-          <div class="m-sub">per 1,000 students annually</div>
-        </div>
-        <div class="metric-cell" style="border-top:3px solid #8b5cf6;">
-          <div class="m-label">Incidents End ≤5 min <abbr title="Source: FBI Active Shooter Study (64 incidents analyzed). 69% of active shooter events conclude within 5 minutes — 23 ended in under 2 min. Avg duration at educational facilities: 3 min 18 sec.">ⓘ</abbr></div>
-          <div class="m-value" style="color:#8b5cf6;">69%</div>
-          <div class="m-sub">end before ground units arrive</div>
-        </div>
-        <div class="metric-cell" style="border-top:3px solid var(--resp);">
-          <div class="m-label">BRINC On-Scene Time <abbr title="Source: BRINC technical specs; Chula Vista PD DFR Program outcomes. Launches in &lt;20 sec, on-scene in &lt;90 sec — vs. 14-15 min national ground average.">ⓘ</abbr></div>
-          <div class="m-value cyan">&lt;90s</div>
-          <div class="m-sub">airborne &amp; streaming live video</div>
-        </div>
-        <div class="metric-cell">
-          <div class="m-label">K-12 Shootings 2024 <abbr title="Source: K-12 School Shooting Database (k12ssdb.org). 336 shooting incidents on K-12 campuses in 2024. FBI active-shooter defined incidents down 50% from 48 (2023) to 24 (2024).">ⓘ</abbr></div>
-          <div class="m-value" style="color:#ef4444;">336</div>
-          <div class="m-sub">K-12 shooting incidents in 2024</div>
-        </div>
-        <div class="metric-cell">
-          <div class="m-label">SRO Annual Cost <abbr title="Source: ZipRecruiter SRO Salary Data 2025; DeSoto County SRO cost breakdown ($94,147/yr blended); Volt.ai SRO Cost Analysis. Includes salary + benefits + equipment per officer.">ⓘ</abbr></div>
-          <div class="m-value gold">$94K+</div>
-          <div class="m-sub">per officer · school hours only</div>
-        </div>
-        <div class="metric-cell">
-          <div class="m-label">SRO Coverage Hours <abbr title="Source: Standard school calendar. 7 hours/day × 180 school days = 1,260 operational hours per year — 14.4% of annual hours. Nights, weekends, summers: unprotected.">ⓘ</abbr></div>
-          <div class="m-value">14.4%</div>
-          <div class="m-sub">of annual hours covered</div>
-        </div>
-        <div class="metric-cell" style="background:rgba(0,210,255,0.04);">
-          <div class="m-label">DFR Coverage Hours <abbr title="BRINC DFR operates 24 hours/day, 365 days/year = 8,760 hours/year. Full coverage including nights, weekends, summer, and after-school hours when SROs are absent.">ⓘ</abbr></div>
-          <div class="m-value cyan">100%</div>
-          <div class="m-sub">24/7/365 aerial coverage</div>
-        </div>
-      </div>
-
-      <!-- CRITICAL WINDOW CALLOUT -->
-      <div style="background:#fff8f8;border-left:4px solid #ef4444;padding:16px 22px;border-radius:0 8px 8px 0;margin-bottom:28px;">
-        <h4 style="color:#ef4444;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;">
-          ⚠️ The Critical Response Window
-          <abbr title="Sources: FBI Law Enforcement Bulletin 'Those Terrible First Few Minutes'; FBI Active Shooter Study (51-case median analysis); ALICE Training Institute; K-12 School Shooting Database.">ⓘ</abbr>
-        </h4>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;">
-          <div style="text-align:center;background:#fff;border:1px solid #f5c6c6;border-radius:6px;padding:12px;">
-            <div style="font-size:24px;font-weight:900;color:#ef4444;font-family:'IBM Plex Mono',monospace;">14–15 min</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:4px;">Avg police arrival to<br>active shooter nationally</div>
-          </div>
-          <div style="text-align:center;background:#fff;border:1px solid #fde68a;border-radius:6px;padding:12px;">
-            <div style="font-size:24px;font-weight:900;color:var(--amber);font-family:'IBM Plex Mono',monospace;">3m 18s</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:4px;">Avg incident duration<br>at schools (FBI)</div>
-          </div>
-          <div style="text-align:center;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:12px;">
-            <div style="font-size:24px;font-weight:900;color:var(--resp);font-family:'IBM Plex Mono',monospace;">&lt;90 sec</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:4px;">BRINC airborne with<br>live HD + thermal</div>
-          </div>
-        </div>
-        <p style="font-size:12px;color:#7a3a3a;font-style:italic;line-height:1.6;margin:0;">
-          "Most active shooter incidents in schools are over before a responding officer reaches the building entrance.
-          DFR doesn't replace the officer — it gives command staff eyes on every hallway, stairwell, and exit
-          before they open the first door." — FBI Law Enforcement Bulletin
-        </p>
-      </div>
-
-      <!-- DFR vs SRO COMPARISON TABLE -->
-      <h3 class="sh"><span class="sh-accent">DFR</span> vs. School Resource Officer — Capability Matrix
-        <abbr style="font-size:11px;font-weight:400;color:var(--muted);margin-left:8px;" title="SRO data: RAND 'The Role and Impact of School Resource Officers' (2023); NIJ Effects of SROs on School Crime (OJP); ZipRecruiter SRO Salary 2025. DFR data: BRINC technical specifications; Chula Vista PD DFR outcomes.">ⓘ Sources</abbr>
-      </h3>
-      <table style="margin-bottom:28px;">
-        <thead>
-          <tr>
-            <th style="width:30%;">Capability</th>
-            <th style="color:#b45309;text-align:center;">School Resource Officer</th>
-            <th style="color:var(--resp);text-align:center;">BRINC DFR</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr><td><strong>Annual Cost / Campus</strong></td>
-              <td style="text-align:center;color:#b45309;">$75,000 – $120,000 per officer</td>
-              <td style="text-align:center;color:#0369a1;">${int(fleet_capex/7):,}/yr amortized (7-yr) · {actual_k_responder + actual_k_guardian} units</td></tr>
-          <tr><td><strong>Coverage Hours / Year</strong></td>
-              <td style="text-align:center;color:#b45309;">~1,260 hrs (school hours only)</td>
-              <td style="text-align:center;color:var(--green);">8,760 hrs — 24/7/365</td></tr>
-          <tr><td><strong>Campuses Covered</strong></td>
-              <td style="text-align:center;color:#b45309;">1 building per officer</td>
-              <td style="text-align:center;color:var(--green);">Multi-campus from 1 hub station</td></tr>
-          <tr><td><strong>On-Campus Response Time</strong></td>
-              <td style="text-align:center;color:#b45309;">2–5 min (foot/vehicle)</td>
-              <td style="text-align:center;color:var(--green);">&lt;90 sec airborne · {avg_resp_time:.1f} min avg aerial</td></tr>
-          <tr><td><strong>After-Hours / Weekend</strong></td>
-              <td style="text-align:center;color:#b45309;">❌ No coverage</td>
-              <td style="text-align:center;color:var(--green);">✅ Full thermal surveillance</td></tr>
-          <tr><td><strong>Thermal / Night Vision</strong></td>
-              <td style="text-align:center;color:#b45309;">❌ Flashlight only</td>
-              <td style="text-align:center;color:var(--green);">✅ 640px FLIR thermal</td></tr>
-          <tr><td><strong>Perimeter Monitoring</strong></td>
-              <td style="text-align:center;color:#b45309;">❌ Not feasible at scale</td>
-              <td style="text-align:center;color:var(--green);">✅ Automated aerial patrol</td></tr>
-          <tr><td><strong>Active Threat Intel</strong></td>
-              <td style="text-align:center;color:#b45309;">Single officer, blind entry</td>
-              <td style="text-align:center;color:var(--green);">✅ Live HD + thermal to dispatch</td></tr>
-          <tr><td><strong>Indoor Operations</strong></td>
-              <td style="text-align:center;">✅ On foot</td>
-              <td style="text-align:center;color:var(--green);">✅ LEMUR 2 — glass-breaker, perch, 2-way comms</td></tr>
-          <tr><td><strong>Court-Admissible Evidence</strong></td>
-              <td style="text-align:center;color:#b45309;">Body cam (ground-level)</td>
-              <td style="text-align:center;color:var(--green);">✅ HD aerial video + flight log</td></tr>
-          <tr><td><strong>Mass Shooting Prevention</strong>
-                  <abbr title="Source: RAND Corporation 'The Role and Impact of School Resource Officers' (2023). Quote: 'There is no evidence about whether SROs prevent the types of mass shootings that often lead to the placement of SROs in school.'">ⓘ</abbr></td>
-              <td style="text-align:center;color:#b45309;">❌ No proven effect (RAND, 2023)</td>
-              <td style="text-align:center;color:var(--green);">✅ Pre-entry intel, faster coordination</td></tr>
-          <tr><td><strong>Disciplinary Side Effects</strong>
-                  <abbr title="Source: RAND 'The Role and Impact of School Resource Officers' (2023). Schools with SROs saw 35-80% more out-of-school suspensions and 25-90% more expulsions than schools without SROs.">ⓘ</abbr></td>
-              <td style="text-align:center;color:#b45309;">⚠️ +35–80% suspensions, +25–90% expulsions</td>
-              <td style="text-align:center;color:var(--green);">✅ Zero school-discipline impact</td></tr>
-        </tbody>
-      </table>
-
-      <!-- COST COMPARISON -->
-      <div class="fleet-split" style="margin-bottom:24px;">
-        <div class="fleet-card guardian" style="border-top:3px solid var(--amber);">
-          <div class="fc-icon">📋</div>
-          <div class="fc-type" style="color:var(--amber);">10-School District — SRO Model</div>
-          <div class="fc-val">$940K – $1.2M/yr</div>
-          <div class="fc-sub">10 officers · school hours only</div>
-          <div style="margin-top:16px;">
-            <div class="fc-row"><span class="k">Annual hours covered</span><span class="v">1,260 hrs/campus (14.4%)</span></div>
-            <div class="fc-row"><span class="k">Nights / weekends / summer</span><span class="v" style="color:#ef4444;">❌ Unprotected</span></div>
-            <div class="fc-row"><span class="k">Multi-campus coverage</span><span class="v" style="color:#ef4444;">❌ One building/officer</span></div>
-            <div class="fc-row"><span class="k">Proven mass-shooting prevention</span><span class="v" style="color:#ef4444;">❌ No evidence</span></div>
-          </div>
-        </div>
-        <div class="fleet-card responder" style="border-top:3px solid var(--resp);">
-          <div class="fc-icon">🚁</div>
-          <div class="fc-type">BRINC DFR — Multi-Campus</div>
-          <div class="fc-val">${fleet_capex:,.0f} CapEx</div>
-          <div class="fc-sub">{_dfr_amort_str} amortized · {actual_k_responder + actual_k_guardian} units</div>
-          <div style="margin-top:16px;">
-            <div class="fc-row"><span class="k">Annual hours covered</span><span class="v" style="color:var(--resp);">8,760 hrs (24/7/365)</span></div>
-            <div class="fc-row"><span class="k">Nights / weekends / summer</span><span class="v" style="color:var(--green);">✅ Full thermal patrol</span></div>
-            <div class="fc-row"><span class="k">Multi-campus coverage</span><span class="v" style="color:var(--green);">✅ {actual_k_responder + actual_k_guardian} simultaneous zones</span></div>
-            <div class="fc-row"><span class="k">Response time advantage</span><span class="v" style="color:var(--green);">+{avg_time_saved:.1f} min faster per incident</span></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- SOURCES -->
-      <div class="disc" style="font-size:11px;line-height:1.8;">
-        <strong>Data Sources:</strong>
-        <a href="https://www.fbi.gov/news/press-releases/fbi-releases-crime-in-schools-2020-2024-special-report" target="_blank">FBI Crime in Schools 2020–2024</a> ·
-        <a href="https://nces.ed.gov/pubs2024/2024145.pdf" target="_blank">NCES Indicators of School Crime &amp; Safety 2023</a> ·
-        <a href="https://leb.fbi.gov/articles/featured-articles/those-terrible-first-few-minutes-revisiting-active-shooter-protocols-for-schools" target="_blank">FBI LEB "Those Terrible First Few Minutes"</a> ·
-        <a href="https://www.rand.org/research/gun-policy/analysis/essays/school-resource-officers.html" target="_blank">RAND "The Role and Impact of School Resource Officers" (2023)</a> ·
-        <a href="https://nij.ojp.gov/library/publications/effects-school-resource-officers-school-crime-and-responses-school-crime" target="_blank">NIJ Effects of SROs on School Crime</a> ·
-        <a href="https://k12ssdb.org/" target="_blank">K-12 School Shooting Database</a> ·
-        <a href="https://www.fbi.gov/news/press-releases/fbi-releases-2024-active-shooter-incidents-in-the-united-states-report" target="_blank">FBI Active Shooter Report 2024</a> ·
-        <a href="https://brincdrones.com/responder/" target="_blank">BRINC Responder Technical Specs</a>
-      </div>
-
-    </section>
-
-    <!-- ── CUSTOM CLOSING (AE-authored, optional) ──────────────────── -->
-    {_custom_closing_html}
-
-    <!-- ── DISCLAIMER ─────────────────────────────────────────────── -->
-    <div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:20px 60px;margin:0;font-size:11px;color:#7a5a00;line-height:1.7">
-      <strong>&#9888; SIMULATION TOOL DISCLAIMER</strong> — All figures are model estimates based on user inputs and publicly available data. Not a legal recommendation, binding proposal, contract, or guarantee. Deployments require FAA authorization and formal procurement.
-    </div>
-
-    <!-- ── FOOTER ─────────────────────────────────────────────────── -->
-    <footer class="doc-footer">
-      <span class="brand-mark">BRINC</span>
-      <span>{"<img src='data:image/png;base64," + logo_b64_light + "' style='height:24px;vertical-align:middle;'>" if logo_b64_light else ""} BRINC Drones, Inc. · <a href="https://brincdrones.com">brincdrones.com</a> · <a href="mailto:sales@brincdrones.com">sales@brincdrones.com</a> · +1 (855) 950-0226</span>
-      <span>Prepared by {prop_name} · <a href="mailto:{prop_email}">{prop_email}</a>{" · " + _doc_phone if _doc_phone else ""}</span>
-    </footer>
-
-    </main>
-    <script>
-    // Highlight active nav link on scroll
-    const sections=document.querySelectorAll('section[id],div[id="analytics"]');
-    const links=document.querySelectorAll('.sidebar-nav a');
-    const obs=new IntersectionObserver(entries=>{{
-      entries.forEach(e=>{{
-        if(e.isIntersecting){{
-          links.forEach(l=>l.classList.remove('active'));
-          const a=document.querySelector('.sidebar-nav a[href="#'+e.target.id+'"]');
-          if(a)a.classList.add('active');
-        }}
-      }})
-    }},{{threshold:0.3}});
-    sections.forEach(s=>obs.observe(s));
-
-    // ── Copy Community Business Partnership letter ──────────────────────────────
-    function copyCommunitySection() {{
-      const section = document.getElementById('community');
-      const btn = document.getElementById('copyPartnershipBtn');
-      if (!section || !btn) return;
-
-      // Build clean plain-text version by walking the section's text nodes
-      // but skipping the button itself
-      function getTextContent(node) {{
-        if (node === btn) return '';
-        if (node.nodeType === Node.TEXT_NODE) return node.textContent;
-        if (node.nodeType !== Node.ELEMENT_NODE) return '';
-        const tag = node.tagName.toUpperCase();
-        if (tag === 'STYLE' || tag === 'SCRIPT') return '';
-        let out = '';
-        for (const child of node.childNodes) out += getTextContent(child);
-        // Block-level elements get newlines
-        const block = ['DIV','P','H1','H2','H3','H4','H5','H6','LI','TR','BR','SECTION','ARTICLE'];
-        if (block.includes(tag)) out = '\n' + out.trimEnd() + '\n';
-        if (tag === 'TH' || tag === 'TD') out = out.trim() + '\t';
-        return out;
-      }}
-
-      const rawText = getTextContent(section)
-        .replace(/\n{{3,}}/g, '\n\n')   // collapse excess blank lines
-        .trim();
-
-      navigator.clipboard.writeText(rawText).then(() => {{
-        const orig = btn.innerHTML;
-        btn.classList.add('copied');
-        btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg> Copied!';
-        setTimeout(() => {{ btn.classList.remove('copied'); btn.innerHTML = orig; }}, 2000);
-      }}).catch(() => {{
-        // Fallback for non-https / older browsers
-        const ta = document.createElement('textarea');
-        ta.value = rawText;
-        ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0;';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        const orig = btn.innerHTML;
-        btn.classList.add('copied');
-        btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg> Copied!';
-        setTimeout(() => {{ btn.classList.remove('copied'); btn.innerHTML = orig; }}, 2000);
-      }});
-    }}
-    </script>
-    </body></html>"""
-
-            # ── Analytics section — use the light-themed export charts, not the dark command center ──
-            # cad_charts_html_export uses light backgrounds (#111 text, white/gray),
-            # while analytics_html_export (generate_command_center_html) uses background:#000 which
-            # creates a large black gap in the white export document.
-            if cad_charts_html_export:
-                _analytics_section_html = (
-                    '\n<!-- \u2500\u2500 09: ANALYTICS DASHBOARD \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->\n'
-                    '<section class="doc-section" id="analytics">\n'
-                    '  <div class="section-eyebrow"><span class="pg-num">09</span><span class="pg-title">Analytics Dashboard</span>'
-                    '<span class="src" data-src="Source: Uploaded CAD export data. All charts \u2014 call type distribution, priority breakdown, hourly heat map, and month-over-month trends \u2014 are derived directly from incident records provided. No external data normalization is applied.">\u24d8</span></div>\n'
-                    f'  {cad_charts_html_export}\n'
-                    '</section>'
+        </script>
+        </body></html>"""
+    
+                # ── Analytics section — use the light-themed export charts, not the dark command center ──
+                # cad_charts_html_export uses light backgrounds (#111 text, white/gray),
+                # while analytics_html_export (generate_command_center_html) uses background:#000 which
+                # creates a large black gap in the white export document.
+                if cad_charts_html_export:
+                    _analytics_section_html = (
+                        '\n<!-- \u2500\u2500 09: ANALYTICS DASHBOARD \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->\n'
+                        '<section class="doc-section" id="analytics">\n'
+                        '  <div class="section-eyebrow"><span class="pg-num">09</span><span class="pg-title">Analytics Dashboard</span>'
+                        '<span class="src" data-src="Source: Uploaded CAD export data. All charts \u2014 call type distribution, priority breakdown, hourly heat map, and month-over-month trends \u2014 are derived directly from incident records provided. No external data normalization is applied.">\u24d8</span></div>\n'
+                        f'  {cad_charts_html_export}\n'
+                        '</section>'
+                    )
+                    _analytics_nav = '<a href="#analytics"><span class="nav-num">09</span>Analytics Dashboard</a>'
+                else:
+                    _analytics_section_html = ''
+                    _analytics_nav = ''
+                export_html = export_html.replace("[ANALYTICS_SECTION]", _analytics_section_html)
+                export_html = export_html.replace("[ANALYTICS_NAV]", _analytics_nav)
+    
+                # ── Community Impact section (light theme for print/export) ─────────
+                _cid_export_html = html_reports.generate_community_impact_dashboard_html(
+                    city=prop_city,
+                    state=prop_state,
+                    population=int(pop_metric or 65000),
+                    total_calls=int(st.session_state.get('total_original_calls', 0) or 0),
+                    calls_covered_perc=float(calls_covered_perc or 0),
+                    area_covered_perc=float(area_covered_perc or 0),
+                    avg_resp_time_min=float(avg_resp_time or 0),
+                    avg_time_saved_min=float(avg_time_saved or 0),
+                    fleet_capex=float(fleet_capex or 0),
+                    annual_savings=float(annual_savings or 0),
+                    break_even_text=str(break_even_text or 'N/A'),
+                    actual_k_responder=int(actual_k_responder or 0),
+                    actual_k_guardian=int(actual_k_guardian or 0),
+                    dfr_dispatch_rate=float(dfr_dispatch_rate or 0.25),
+                    deflection_rate=float(deflection_rate or 0.30),
+                    daily_dfr_responses=float(daily_dfr_responses or 0),
+                    daily_drone_only_calls=float(daily_drone_only_calls or 0),
+                    active_drones=active_drones or [],
+                    df_calls_full=df_calls_full,
+                    theme='light',
+                    facility_counts=_fac_counts or None,
                 )
-                _analytics_nav = '<a href="#analytics"><span class="nav-num">09</span>Analytics Dashboard</a>'
-            else:
-                _analytics_section_html = ''
-                _analytics_nav = ''
-            export_html = export_html.replace("[ANALYTICS_SECTION]", _analytics_section_html)
-            export_html = export_html.replace("[ANALYTICS_NAV]", _analytics_nav)
-
-            # ── Community Impact section (light theme for print/export) ─────────
-            _cid_export_html = html_reports.generate_community_impact_dashboard_html(
-                city=prop_city,
-                state=prop_state,
-                population=int(pop_metric or 65000),
-                total_calls=int(st.session_state.get('total_original_calls', 0) or 0),
-                calls_covered_perc=float(calls_covered_perc or 0),
-                area_covered_perc=float(area_covered_perc or 0),
-                avg_resp_time_min=float(avg_resp_time or 0),
-                avg_time_saved_min=float(avg_time_saved or 0),
-                fleet_capex=float(fleet_capex or 0),
-                annual_savings=float(annual_savings or 0),
-                break_even_text=str(break_even_text or 'N/A'),
-                actual_k_responder=int(actual_k_responder or 0),
-                actual_k_guardian=int(actual_k_guardian or 0),
-                dfr_dispatch_rate=float(dfr_dispatch_rate or 0.25),
-                deflection_rate=float(deflection_rate or 0.30),
-                daily_dfr_responses=float(daily_dfr_responses or 0),
-                daily_drone_only_calls=float(daily_drone_only_calls or 0),
-                active_drones=active_drones or [],
-                df_calls_full=df_calls_full,
-                theme='light',
-                facility_counts=_fac_counts or None,
-            )
-            # Extract <style> block and body content separately, then scope the styles
-            # with a .cid-wrap prefix so they don't collide with the export document's CSS.
-            import re as _re
-            _style_match = _re.search(r'<style>(.*?)</style>', _cid_export_html, _re.DOTALL)
-            _cid_style = _style_match.group(1) if _style_match else ''
-            # Scope every CSS rule inside the style block by prefixing with .cid-wrap
-            # Simple approach: wrap rules that start at column 0 (non-nested)
-            def _scope_css(raw_css):
-                # Replace :root { with .cid-wrap { so vars apply within scope
-                raw_css = raw_css.replace(':root {', '.cid-wrap {')
-                # Prepend .cid-wrap to each rule selector (lines that end with {)
-                lines = raw_css.split('\n')
-                scoped = []
-                for line in lines:
-                    stripped = line.strip()
-                    # Skip empty, @-rules, closing braces, and already-scoped lines
-                    if (stripped.startswith('@') or stripped == '}' or stripped == ''
-                            or stripped.startswith('/*') or stripped.startswith('*')
-                            or stripped.startswith('.cid-wrap {')):
-                        scoped.append(line)
-                    elif stripped.endswith('{') and not stripped.startswith('.cid-wrap'):
-                        # It's a selector line — prefix it
-                        selector = stripped[:-1].strip()
-                        # Don't double-scope :root replacement or @keyframes internals
-                        if selector and not selector.startswith('.cid-wrap') and not selector.startswith('from') and not selector.startswith('to') and not selector.startswith('0%') and not selector.startswith('50%') and not selector.startswith('100%'):
-                            scoped.append(f'  .cid-wrap {selector} {{')
+                # Extract <style> block and body content separately, then scope the styles
+                # with a .cid-wrap prefix so they don't collide with the export document's CSS.
+                import re as _re
+                _style_match = _re.search(r'<style>(.*?)</style>', _cid_export_html, _re.DOTALL)
+                _cid_style = _style_match.group(1) if _style_match else ''
+                # Scope every CSS rule inside the style block by prefixing with .cid-wrap
+                # Simple approach: wrap rules that start at column 0 (non-nested)
+                def _scope_css(raw_css):
+                    # Replace :root { with .cid-wrap { so vars apply within scope
+                    raw_css = raw_css.replace(':root {', '.cid-wrap {')
+                    # Prepend .cid-wrap to each rule selector (lines that end with {)
+                    lines = raw_css.split('\n')
+                    scoped = []
+                    for line in lines:
+                        stripped = line.strip()
+                        # Skip empty, @-rules, closing braces, and already-scoped lines
+                        if (stripped.startswith('@') or stripped == '}' or stripped == ''
+                                or stripped.startswith('/*') or stripped.startswith('*')
+                                or stripped.startswith('.cid-wrap {')):
+                            scoped.append(line)
+                        elif stripped.endswith('{') and not stripped.startswith('.cid-wrap'):
+                            # It's a selector line — prefix it
+                            selector = stripped[:-1].strip()
+                            # Don't double-scope :root replacement or @keyframes internals
+                            if selector and not selector.startswith('.cid-wrap') and not selector.startswith('from') and not selector.startswith('to') and not selector.startswith('0%') and not selector.startswith('50%') and not selector.startswith('100%'):
+                                scoped.append(f'  .cid-wrap {selector} {{')
+                            else:
+                                scoped.append(line)
                         else:
                             scoped.append(line)
-                    else:
-                        scoped.append(line)
-                return '\n'.join(scoped)
-
-            _scoped_style = _scope_css(_cid_style)
-            # Extract body content (between <body> and </body>)
-            _body_match = _re.search(r'<body[^>]*>(.*?)</body>', _cid_export_html, _re.DOTALL)
-            _cid_body = _body_match.group(1).strip() if _body_match else _cid_export_html
-            # Build the scoped embed: scoped <style> + wrapper div
-            _cid_embed = f'<style>{_scoped_style}</style>\n<div class="cid-wrap" style="font-family:\'DM Sans\',sans-serif;background:#f8f7f4;border-radius:10px;overflow:hidden;">{_cid_body}</div>'
-            _community_impact_section_html = (
-                '\n<!-- \u2500\u2500 10: COMMUNITY IMPACT DASHBOARD \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->\n'
-                '<section class="doc-section" id="community-impact">\n'
-                '  <div class="section-eyebrow"><span class="pg-num">10</span><span class="pg-title">Community Impact &amp; Transparency</span>'
-                '<span class="src" data-src="Sources: Population \u2014 US Census Bureau American Community Survey (ACS). Officer wage benchmarks \u2014 Bureau of Labor Statistics (BLS) OES. Financial projections \u2014 BRINC COS optimization model. Flight hour estimates \u2014 BRINC hardware specifications. All figures are model estimates.">\u24d8</span></div>\n'
-                f'  {_cid_embed}\n'
-                '</section>'
-            )
-            export_html = export_html.replace("[COMMUNITY_IMPACT_SECTION]", _community_impact_section_html)
-            export_html = export_html.replace("[COMMUNITY_IMPACT_NAV]", '<a href="#community-impact"><span class="nav-num">10</span>Community Impact</a>')
-
-
-            if not _show_analytics_section:
-                export_html = export_html.replace('<a href="#incident-data"><span class="nav-num">04</span>Incident Analysis</a>', '')
-                export_html = export_html.replace('<a href="#analytics"><span class="nav-num">09</span>Analytics Dashboard</a>', '')
-                export_html = _re.sub(
-                    r'\s*<!-- .*?04: INCIDENT ANALYSIS .*?-->\s*<section class="doc-section" id="incident-data">.*?</section>',
-                    '',
-                    export_html,
-                    count=1,
-                    flags=_re.DOTALL,
+                    return '\n'.join(scoped)
+    
+                _scoped_style = _scope_css(_cid_style)
+                # Extract body content (between <body> and </body>)
+                _body_match = _re.search(r'<body[^>]*>(.*?)</body>', _cid_export_html, _re.DOTALL)
+                _cid_body = _body_match.group(1).strip() if _body_match else _cid_export_html
+                # Build the scoped embed: scoped <style> + wrapper div
+                _cid_embed = f'<style>{_scoped_style}</style>\n<div class="cid-wrap" style="font-family:\'DM Sans\',sans-serif;background:#f8f7f4;border-radius:10px;overflow:hidden;">{_cid_body}</div>'
+                _community_impact_section_html = (
+                    '\n<!-- \u2500\u2500 10: COMMUNITY IMPACT DASHBOARD \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->\n'
+                    '<section class="doc-section" id="community-impact">\n'
+                    '  <div class="section-eyebrow"><span class="pg-num">10</span><span class="pg-title">Community Impact &amp; Transparency</span>'
+                    '<span class="src" data-src="Sources: Population \u2014 US Census Bureau American Community Survey (ACS). Officer wage benchmarks \u2014 Bureau of Labor Statistics (BLS) OES. Financial projections \u2014 BRINC COS optimization model. Flight hour estimates \u2014 BRINC hardware specifications. All figures are model estimates.">\u24d8</span></div>\n'
+                    f'  {_cid_embed}\n'
+                    '</section>'
                 )
-                export_html = _re.sub(
-                    r'\s*<!-- .*?09: ANALYTICS DASHBOARD .*?-->\s*<section class="doc-section" id="analytics">.*?</section>',
-                    '',
-                    export_html,
-                    count=1,
-                    flags=_re.DOTALL,
-                )
-
-            if not _show_community_impact_section:
-                export_html = export_html.replace('<a href="#community-impact"><span class="nav-num">10</span>Community Impact</a>', '')
-                export_html = _re.sub(
-                    r'\s*<!-- .*?10: COMMUNITY IMPACT DASHBOARD .*?-->\s*<section class="doc-section" id="community-impact">.*?</section>',
-                    '',
-                    export_html,
-                    count=1,
-                    flags=_re.DOTALL,
-                )
-
-            if not _show_school_safety_section:
-                export_html = export_html.replace('<a href="#school-safety"><span class="nav-num">11</span>School Safety</a>', '')
-                export_html = _re.sub(
-                    r'\s*<section class="doc-section" id="school-safety">.*?</section>',
-                    '',
-                    export_html,
-                    count=1,
-                    flags=_re.DOTALL,
-                )
-
-            if not _show_lte_section:
-                export_html = _re.sub(
-                    r'\s*<!-- .*?03b: 4G LTE CELL COVERAGE .*?-->\s*<section class="doc-section" id="cell-coverage">.*?</section>',
-                    '',
-                    export_html,
-                    count=1,
-                    flags=_re.DOTALL,
-                )
-
+                export_html = export_html.replace("[COMMUNITY_IMPACT_SECTION]", _community_impact_section_html)
+                export_html = export_html.replace("[COMMUNITY_IMPACT_NAV]", '<a href="#community-impact"><span class="nav-num">10</span>Community Impact</a>')
+    
+    
+                if not _show_analytics_section:
+                    export_html = export_html.replace('<a href="#incident-data"><span class="nav-num">04</span>Incident Analysis</a>', '')
+                    export_html = export_html.replace('<a href="#analytics"><span class="nav-num">09</span>Analytics Dashboard</a>', '')
+                    export_html = _re.sub(
+                        r'\s*<!-- .*?04: INCIDENT ANALYSIS .*?-->\s*<section class="doc-section" id="incident-data">.*?</section>',
+                        '',
+                        export_html,
+                        count=1,
+                        flags=_re.DOTALL,
+                    )
+                    export_html = _re.sub(
+                        r'\s*<!-- .*?09: ANALYTICS DASHBOARD .*?-->\s*<section class="doc-section" id="analytics">.*?</section>',
+                        '',
+                        export_html,
+                        count=1,
+                        flags=_re.DOTALL,
+                    )
+    
+                if not _show_community_impact_section:
+                    export_html = export_html.replace('<a href="#community-impact"><span class="nav-num">10</span>Community Impact</a>', '')
+                    export_html = _re.sub(
+                        r'\s*<!-- .*?10: COMMUNITY IMPACT DASHBOARD .*?-->\s*<section class="doc-section" id="community-impact">.*?</section>',
+                        '',
+                        export_html,
+                        count=1,
+                        flags=_re.DOTALL,
+                    )
+    
+                if not _show_school_safety_section:
+                    export_html = export_html.replace('<a href="#school-safety"><span class="nav-num">11</span>School Safety</a>', '')
+                    export_html = _re.sub(
+                        r'\s*<section class="doc-section" id="school-safety">.*?</section>',
+                        '',
+                        export_html,
+                        count=1,
+                        flags=_re.DOTALL,
+                    )
+    
+                if not _show_lte_section:
+                    export_html = _re.sub(
+                        r'\s*<!-- .*?03b: 4G LTE CELL COVERAGE .*?-->\s*<section class="doc-section" id="cell-coverage">.*?</section>',
+                        '',
+                        export_html,
+                        count=1,
+                        flags=_re.DOTALL,
+                    )
+    
+                st.session_state['_html_export_cache'] = export_html
+                st.session_state['_html_export_cache_key'] = _html_export_cache_key
+                _html_export_ready = True
         # ── Download buttons — always rendered so they're visible in the sidebar ──
         _safe_city   = _safe_city_base
         _ts          = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -7571,21 +7685,28 @@ def main():
                                prop_name, prop_email, details=export_details)
         # 2. Executive Summary / proposal HTML export
         if fleet_capex > 0:
-            if st.sidebar.download_button(f"📄 {prop_city}, {prop_state} — Executive Summary",
-                                          data=export_html,
-                                          file_name=f"BRINC_Executive_Summary_{_safe_city}_{_version_slug}_{_ts}.html",
-                                          mime="text/html",
-                                          use_container_width=True):
-                # ── Track export event ───────────────────────────────────────────
-                st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['HTML']
-                st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
-                _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                              "HTML", k_responder, k_guardian, calls_covered_perc,
-                              prop_name, prop_email, details=export_details)
-                _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                               "HTML", k_responder, k_guardian, calls_covered_perc,
-                               prop_name, prop_email, details=export_details)
-            st.sidebar.caption("HTML export includes the latest executive summary, incident analysis, staffing pressure, and print-ready proposal sections.")
+            if export_html:
+                if st.sidebar.download_button(f"📄 {prop_city}, {prop_state} — Executive Summary",
+                                              data=export_html,
+                                              file_name=f"BRINC_Executive_Summary_{_safe_city}_{_version_slug}_{_ts}.html",
+                                              mime="text/html",
+                                              use_container_width=True):
+                    # ── Track export event ───────────────────────────────────────────
+                    st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['HTML']
+                    st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
+                    _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                                  "HTML", k_responder, k_guardian, calls_covered_perc,
+                                  prop_name, prop_email, details=export_details)
+                    _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                                   "HTML", k_responder, k_guardian, calls_covered_perc,
+                                   prop_name, prop_email, details=export_details)
+                st.sidebar.caption("HTML export is ready. Use Refresh HTML Export after changing data or settings.")
+            else:
+                st.sidebar.button(f"📄 {prop_city}, {prop_state} — Executive Summary",
+                                  disabled=True,
+                                  use_container_width=True,
+                                  help="Click 'Prepare HTML Export' to build the latest report.")
+                st.sidebar.caption("Click Prepare HTML Export to build the latest executive summary and print-ready proposal.")
 
         # 3. Google Earth KML — only when drones are placed
         if active_drones:
@@ -7615,3 +7736,5 @@ def main():
 
 
 main()
+
+

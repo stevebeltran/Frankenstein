@@ -46,596 +46,7 @@ from modules.geospatial import (
     _load_uploaded_boundary_overlay, _boundary_overlay_status,
     _count_points_within_boundary, find_jurisdictions_by_coordinates
 )
-
-
-
-def _boundary_overlay_status(boundary_geom_4326, overlay_gdf, epsg_code):
-    if boundary_geom_4326 is None or boundary_geom_4326.is_empty or overlay_gdf is None or overlay_gdf.empty:
-        return None
-    try:
-        _overlay_utm = overlay_gdf.to_crs(epsg=epsg_code)
-        _overlay_union = (_overlay_utm.geometry.union_all() if hasattr(_overlay_utm.geometry, 'union_all') else _overlay_utm.geometry.unary_union)
-        _boundary_utm = gpd.GeoSeries([boundary_geom_4326], crs='EPSG:4326').to_crs(epsg=epsg_code).iloc[0]
-        if _overlay_union.is_empty or _boundary_utm.is_empty:
-            return None
-        _inter = _overlay_union.intersection(_boundary_utm)
-        _overlay_area = float(_overlay_union.area or 0)
-        _boundary_area = float(_boundary_utm.area or 0)
-        _inter_area = float(_inter.area or 0)
-        if _overlay_area <= 0 or _boundary_area <= 0:
-            return None
-        _pct_overlay_inside = max(0.0, min(100.0, _inter_area / _overlay_area * 100.0))
-        _pct_boundary_covered = max(0.0, min(100.0, _inter_area / _boundary_area * 100.0))
-        if _inter_area <= 0:
-            _status = 'no_overlap'
-            _message = 'Uploaded boundary overlay does not overlap the selected city/county boundary.'
-        elif _pct_overlay_inside >= 99.5:
-            _status = 'inside'
-            _message = f"Uploaded boundary overlay sits within the selected boundary ({_pct_overlay_inside:.1f}% inside)."
-        elif _pct_boundary_covered >= 99.5:
-            _status = 'contains'
-            _message = f"Uploaded boundary overlay fully contains the selected boundary ({_pct_overlay_inside:.1f}% of overlay overlaps)."
-        else:
-            _status = 'partial'
-            _message = f"Uploaded boundary overlay partially overlaps the selected boundary ({_pct_overlay_inside:.1f}% of overlay overlaps)."
-        return {'status': _status, 'message': _message, 'pct_overlay_inside': _pct_overlay_inside, 'pct_boundary_covered': _pct_boundary_covered}
-    except Exception:
-        return None
-
-
-# --- MOBILE SUMMARY ROUTE (must run before set_page_config) ---
-if st.query_params.get("view") == "mobile":
-    st.set_page_config(page_title="BRINC DFR — Mobile Summary", page_icon="🚁",
-                       layout="centered", initial_sidebar_state="collapsed")
-    st.markdown("""
-<style>
-[data-testid="stAppViewContainer"],[data-testid="stMain"]{background:#080c14!important;}
-[data-testid="block-container"]{padding:1rem 1rem 3rem!important;max-width:480px!important;margin:0 auto!important;}
-[data-testid="stSidebar"],[data-testid="collapsedControl"],[data-testid="stSidebarNav"]{display:none!important;}
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&family=DM+Mono:wght@500&display=swap');
-.mob-header{text-align:center;padding:24px 0 20px;border-bottom:1px solid rgba(0,210,255,0.2);margin-bottom:24px;}
-.mob-logo{font-size:2rem;font-weight:900;color:#00D2FF;letter-spacing:3px;font-family:'DM Sans',sans-serif;line-height:1;}
-.mob-logo span{color:#fff;}
-.mob-city{font-size:1.35rem;font-weight:700;color:#f0f0f0;margin-top:8px;font-family:'DM Sans',sans-serif;}
-.mob-tagline{font-size:0.75rem;color:#666;text-transform:uppercase;letter-spacing:1.5px;margin-top:4px;}
-.mob-fleet{display:inline-block;background:rgba(0,210,255,0.1);border:1px solid rgba(0,210,255,0.35);border-radius:20px;padding:4px 14px;font-size:0.72rem;color:#00D2FF;font-weight:700;margin-top:8px;}
-.kpi-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
-.kpi-card{background:#111520;border:1px solid #1e2535;border-radius:12px;padding:16px 12px 14px;text-align:center;}
-.kpi-card.accent{border-top:3px solid #00D2FF;}.kpi-card.green{border-top:3px solid #22c55e;}.kpi-card.gold{border-top:3px solid #f59e0b;}
-.kpi-val{font-size:1.95rem;font-weight:900;color:#f0f0f0;font-family:'DM Mono',monospace;line-height:1.1;}
-.kpi-val.cyan{color:#00D2FF;}.kpi-val.green{color:#22c55e;}.kpi-val.gold{color:#f59e0b;}
-.kpi-label{font-size:0.60rem;color:#667;text-transform:uppercase;letter-spacing:0.8px;margin-top:4px;font-family:'DM Sans',sans-serif;}
-.section-head{font-size:0.65rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.8px;font-weight:700;margin:20px 0 10px;font-family:'DM Sans',sans-serif;border-left:3px solid #00D2FF;padding-left:8px;}
-.roi-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #1e2535;font-size:0.78rem;font-family:'DM Sans',sans-serif;}
-.roi-row:last-child{border-bottom:none;}.roi-label{color:#8899aa;}.roi-val{color:#f0f0f0;font-family:'DM Mono',monospace;font-weight:600;font-size:0.75rem;}.roi-val.g{color:#22c55e;}
-.roi-panel{background:#111520;border:1px solid #1e2535;border-radius:12px;padding:14px 16px;margin-bottom:14px;}
-.disclaimer{font-size:0.62rem;color:#445;line-height:1.55;text-align:center;margin-top:28px;padding-top:14px;border-top:1px solid #1a1f2e;}
-.no-data-msg{background:rgba(0,210,255,0.05);border:1px dashed rgba(0,210,255,0.3);border-radius:12px;padding:28px 20px;text-align:center;color:#556;font-size:0.85rem;line-height:1.7;}
-</style>""", unsafe_allow_html=True)
-    p      = st.query_params
-    city   = str(p.get("city",  "Your City")).title()
-    state  = str(p.get("state", ""))
-    pop    = int(p.get("pop",   0) or 0)
-    cov    = float(p.get("cov", 0) or 0)
-    resp   = float(p.get("resp", 0) or 0)
-    saves  = int(p.get("saves", 0) or 0)
-    capex  = int(p.get("capex", 0) or 0)
-    k_r    = int(p.get("r",     0) or 0)
-    k_g    = int(p.get("g",     0) or 0)
-    calls  = int(p.get("calls", 0) or 0)
-    area   = int(p.get("area",  0) or 0)
-    tsav   = float(p.get("tsav", 0) or 0)
-    roi_mult  = round(saves / max(capex, 1), 2) if capex > 0 else 0
-    be_months = round(capex / max(saves / 12, 1)) if saves > 0 else 0
-    fleet_txt = []
-    if k_g: fleet_txt.append(f"{k_g} Guardian{'s' if k_g!=1 else ''}")
-    if k_r: fleet_txt.append(f"{k_r} Responder{'s' if k_r!=1 else ''}")
-    fleet_str = " + ".join(fleet_txt) if fleet_txt else "No drones deployed"
-    no_data   = (cov == 0 and saves == 0 and k_r == 0 and k_g == 0)
-    location_str = f"{city}, {state}" if state else city
-    pop_str = f"{pop:,} residents" if pop > 0 else ""
-    st.markdown(f"""<div class="mob-header">
-  <div class="mob-logo">BRINC<span> DFR</span></div>
-  <div class="mob-city">{location_str}</div>
-  {"<div class='mob-tagline'>"+pop_str+"</div>" if pop_str else ""}
-  {"<div class='mob-fleet'>"+fleet_str+"</div>" if not no_data else ""}
-</div>""", unsafe_allow_html=True)
-    if no_data:
-        st.markdown('<div class="no-data-msg"><div style="font-size:2rem;margin-bottom:10px;">🚁</div><strong style="color:#aaa;">Report not yet generated</strong><br>Open the full optimizer on a desktop browser, configure your deployment, then scan the QR code again.</div>', unsafe_allow_html=True)
-        st.stop()
-    resp_display  = f"{resp:.1f} min" if resp > 0 else "N/A"
-    tsav_display  = f"{tsav:.1f} min" if tsav > 0 else "N/A"
-    calls_display = f"{calls:,}" if calls > 0 else "N/A"
-    area_display  = f"{area:,} mi²" if area > 0 else "N/A"
-    roi_display   = f"{roi_mult:.1f}×" if roi_mult > 0 else "N/A"
-    be_display    = f"{be_months} mo" if be_months > 0 else "N/A"
-    st.markdown('<div class="section-head">Coverage &amp; Response</div>', unsafe_allow_html=True)
-    st.markdown(f"""<div class="kpi-grid">
-  <div class="kpi-card accent"><div class="kpi-val cyan">{cov:.1f}%</div><div class="kpi-label">Call Coverage</div></div>
-  <div class="kpi-card"><div class="kpi-val">{resp_display}</div><div class="kpi-label">Avg Aerial Response</div></div>
-  <div class="kpi-card"><div class="kpi-val">{calls_display}</div><div class="kpi-label">Annual Calls</div></div>
-  <div class="kpi-card"><div class="kpi-val">{area_display}</div><div class="kpi-label">Coverage Area</div></div>
-</div>""", unsafe_allow_html=True)
-    if tsav > 0:
-        st.markdown(f'<div class="roi-panel" style="margin-bottom:6px;"><div style="font-size:0.68rem;color:#556;text-align:center;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.8px;">Time Saved Per Incident</div><div style="text-align:center;font-size:2.2rem;font-weight:900;color:#00D2FF;font-family:\'DM Mono\',monospace;">{tsav_display}</div><div style="text-align:center;font-size:0.65rem;color:#556;margin-top:4px;">faster than traditional ground response</div></div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-head">Financial Impact</div>', unsafe_allow_html=True)
-    st.markdown(f"""<div class="kpi-grid">
-  <div class="kpi-card green"><div class="kpi-val green">${saves:,.0f}</div><div class="kpi-label">Annual Savings</div></div>
-  <div class="kpi-card gold"><div class="kpi-val gold">{roi_display}</div><div class="kpi-label">ROI Multiple</div></div>
-  <div class="kpi-card"><div class="kpi-val">${capex:,.0f}</div><div class="kpi-label">Fleet CapEx</div></div>
-  <div class="kpi-card"><div class="kpi-val">{be_display}</div><div class="kpi-label">Break-Even</div></div>
-</div>""", unsafe_allow_html=True)
-    st.markdown('<div class="section-head">Deployment Summary</div>', unsafe_allow_html=True)
-    monthly_saves = saves // 12 if saves > 0 else 0
-    rows = []
-    if k_g > 0: rows.append(("Guardian Drones", str(k_g), ""))
-    if k_r > 0: rows.append(("Responder Drones", str(k_r), ""))
-    rows += [("Annual Operational Savings", f"${saves:,.0f}", "g"), ("Monthly Savings", f"${monthly_saves:,.0f}", "g"),
-             ("Total Fleet CapEx", f"${capex:,.0f}", "")]
-    if be_months > 0: rows.append(("Break-Even Timeline", f"{be_months} months", ""))
-    if roi_mult > 0:  rows.append(("Return on Investment", f"{roi_mult:.2f}× annually", "g"))
-    roi_html = '<div class="roi-panel">' + "".join(f'<div class="roi-row"><span class="roi-label">{l}</span><span class="roi-val {c}">{v}</span></div>' for l,v,c in rows) + '</div>'
-    st.markdown(roi_html, unsafe_allow_html=True)
-
-    # ── Deployment map ────────────────────────────────────────────────────────
-    _mob_stn_str = str(p.get("s", "")).strip()
-    _mob_clat    = float(p.get("clat", 0) or 0)
-    _mob_clon    = float(p.get("clon", 0) or 0)
-    _mob_zoom    = float(p.get("zoom", 11) or 11)
-    _mob_calls_str = str(p.get("m_calls", "")).strip()  # Incident data: "lat1,lon1;lat2,lon2;..."
-
-    if _mob_stn_str and _mob_clat and _mob_clon:
-        try:
-            import plotly.graph_objects as _go_mob
-            _mob_pairs = [pair.split(",") for pair in _mob_stn_str.split(";") if "," in pair]
-            _mob_slats = [float(p2[0]) for p2 in _mob_pairs]
-            _mob_slons = [float(p2[1]) for p2 in _mob_pairs]
-
-            _mob_fig = _go_mob.Figure()
-
-            # Incident data points (call for service dots)
-            if _mob_calls_str:
-                try:
-                    _mob_call_pairs = [pair.split(",") for pair in _mob_calls_str.split(";") if "," in pair]
-                    if _mob_call_pairs:
-                        _mob_call_lats = [float(cp[0]) for cp in _mob_call_pairs]
-                        _mob_call_lons = [float(cp[1]) for cp in _mob_call_pairs]
-                        _mob_fig.add_trace(_go_mob.Scattermap(
-                            lat=_mob_call_lats, lon=_mob_call_lons,
-                            mode='markers',
-                            marker=dict(size=3, color='#ff6b6b', opacity=0.5),
-                            hoverinfo='skip', showlegend=False, name='Calls for Service'
-                        ))
-                except Exception:
-                    pass
-
-            # Station markers with coverage circles
-            if _mob_slats:
-                # Coverage circles around stations (typical ~3 mile radius)
-                try:
-                    def get_circle_coords_mob(lat, lon, r_mi=3.0):
-                        import math
-                        r_m = r_mi * 1609.34
-                        angles = [i * (360/120) for i in range(121)]
-                        lats, lons = [], []
-                        for angle_deg in angles:
-                            angle_rad = math.radians(angle_deg)
-                            dlat = (r_m / 111_000) * math.cos(angle_rad)
-                            dlon = (r_m / (111_000 * math.cos(math.radians(lat)))) * math.sin(angle_rad)
-                            lats.append(lat + dlat)
-                            lons.append(lon + dlon)
-                        return lats, lons
-
-                    for _stn_lat, _stn_lon in zip(_mob_slats, _mob_slons):
-                        _circ_lats, _circ_lons = get_circle_coords_mob(_stn_lat, _stn_lon, r_mi=3.0)
-                        _mob_fig.add_trace(_go_mob.Scattermap(
-                            lat=_circ_lats, lon=_circ_lons,
-                            mode='lines', fill='toself',
-                            line=dict(color='#00D2FF', width=1.5),
-                            fillcolor='rgba(0,210,255,0.08)',
-                            hoverinfo='skip', showlegend=False
-                        ))
-                except Exception:
-                    pass
-
-                # Station markers
-                _mob_fig.add_trace(_go_mob.Scattermap(
-                    lat=_mob_slats, lon=_mob_slons,
-                    mode='markers',
-                    marker=dict(size=14, color='#00D2FF', symbol='circle'),
-                    hoverinfo='skip', showlegend=False, name='Stations'
-                ))
-
-            _mob_fig.update_layout(
-                map=dict(center=dict(lat=_mob_clat, lon=_mob_clon),
-                         zoom=max(9, _mob_zoom - 1),
-                         style="carto-darkmatter"),
-                margin=dict(l=0, r=0, t=0, b=0),
-                height=260, showlegend=False,
-                paper_bgcolor='#080c14',
-            )
-            st.markdown('<div class="section-head">Deployment Map</div>', unsafe_allow_html=True)
-            st.plotly_chart(_mob_fig, use_container_width=True, config={"displayModeBar": False})
-        except Exception:
-            pass
-
-    # ── Footer with BRINC logo ────────────────────────────────────────────────
-    try:
-        _mob_logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
-        _mob_logo_html = f'<img src="data:image/png;base64,{_mob_logo_b64}" style="height:32px;display:block;margin:0 auto;">' if _mob_logo_b64 else '<div style="font-size:0.75rem;font-weight:900;color:#00D2FF;letter-spacing:3px;">BRINC</div>'
-    except Exception:
-        _mob_logo_html = '<div style="font-size:0.75rem;font-weight:900;color:#00D2FF;letter-spacing:3px;">BRINC</div>'
-
-    st.markdown(f'<div class="disclaimer">All figures are model estimates based on deployment parameters, national DFR benchmark rates, and CAD data. Response times, ROI, and outcomes are projections — not guarantees.</div><div style="text-align:center;margin-top:20px;">{_mob_logo_html}<div style="font-size:0.60rem;color:#334;letter-spacing:1px;text-transform:uppercase;margin-top:6px;">Drone as First Responder · brincdrones.com</div></div>', unsafe_allow_html=True)
-    st.stop()
-
-# --- PAGE CONFIG & INITIALIZE SESSION STATE ---
-st.set_page_config(page_title="BRINC COS Drone Optimizer", layout="wide", initial_sidebar_state="expanded")
-
-
-# ── Google OAuth Login Gate ────────────────────────────────────────────────────
-# Only runs if [auth] section exists in .streamlit/secrets.toml
-try:
-    if hasattr(st, 'user') and "auth" in st.secrets:
-        if not st.user.is_logged_in:
-            import base64 as _b64
-            try:
-                _logo_b64 = _b64.b64encode(open("logo.png","rb").read()).decode()
-                _logo_tag = f'<img src="data:image/png;base64,{_logo_b64}" style="height:80px;object-fit:contain;" alt="BRINC">'
-            except Exception:
-                _logo_tag = '<div style="font-size:2rem;font-weight:900;color:#00D2FF;letter-spacing:4px;">BRINC DFR</div>'
-            # CSS: hide sidebar, branding, and style the login page + center the button
-            st.markdown(f"""
-            <style>
-            section[data-testid="stSidebar"] {{ display: none !important; }}
-            [data-testid="collapsedControl"],
-            [data-testid="stSidebarCollapsedControl"] {{ display: none !important; }}
-            /* Full-page dark background */
-            [data-testid="stAppViewContainer"] {{
-                background: radial-gradient(ellipse at 50% 30%, #0d1b2e 0%, #060a12 70%) !important;
-            }}
-            /* Remove all padding so our card can be centered */
-            [data-testid="block-container"] {{
-                padding-top: 0 !important;
-                padding-bottom: 0 !important;
-                max-width: 100% !important;
-            }}
-            /* Center the Streamlit button */
-            div[data-testid="stButton"] {{
-                display: flex !important;
-                justify-content: center !important;
-                margin-top: 0 !important;
-            }}
-            div[data-testid="stButton"] > button {{
-                background: linear-gradient(135deg, #0077b6, #00b4d8) !important;
-                color: #fff !important;
-                border: none !important;
-                border-radius: 10px !important;
-                padding: 13px 44px !important;
-                font-size: 0.95rem !important;
-                font-weight: 600 !important;
-                letter-spacing: 0.6px !important;
-                box-shadow: 0 4px 24px rgba(0,180,216,0.35) !important;
-            }}
-            div[data-testid="stButton"] > button:hover {{
-                background: linear-gradient(135deg, #005f8a, #009dbf) !important;
-                box-shadow: 0 6px 30px rgba(0,180,216,0.5) !important;
-            }}
-            /* ── Hide ALL Streamlit branding (local + Streamlit Cloud) ── */
-            header {{ visibility: hidden !important; display: none !important; }}
-            header[data-testid="stHeader"] {{ display: none !important; }}
-            footer {{ visibility: hidden !important; display: none !important; }}
-            #MainMenu {{ display: none !important; }}
-            [data-testid="stToolbar"] {{ display: none !important; }}
-            [data-testid="stDecoration"] {{ display: none !important; }}
-            [data-testid="stStatusWidget"] {{ display: none !important; }}
-            .stDeployButton {{ display: none !important; }}
-            [data-testid="stToolbarActionButtonIcon"] {{ display: none !important; }}
-            [data-testid="appCreatorAvatar"] {{ display: none !important; }}
-            [data-testid="appCreatorContainer"] {{ display: none !important; }}
-            [data-testid="appCreator"] {{ display: none !important; }}
-            svg[viewBox="0 0 303 165"] {{ display: none !important; visibility: hidden !important; }}
-            :has(> svg[viewBox="0 0 303 165"]) {{ display: none !important; visibility: hidden !important; }}
-            a[href*="streamlit"] {{ display: none !important; visibility: hidden !important; }}
-            a[href*="github.com"] {{ display: none !important; visibility: hidden !important; }}
-            img[src*="avatars.githubusercontent.com"] {{ display: none !important; visibility: hidden !important; }}
-            img[src*="259721542"] {{ display: none !important; visibility: hidden !important; }}
-            :has(> img[src*="avatars.githubusercontent.com"]) {{ display: none !important; visibility: hidden !important; }}
-            [class*="_profileImage_"] {{ display: none !important; visibility: hidden !important; }}
-            [class*="_darkThemeShadow_"] {{ display: none !important; visibility: hidden !important; }}
-            [class*="_link_gzau3"] {{ display: none !important; visibility: hidden !important; }}
-            [class*="_appCreator_"] {{ display: none !important; visibility: hidden !important; }}
-            [class*="_viewerBadge_"] {{ display: none !important; visibility: hidden !important; }}
-            </style>
-            <div style="
-                display:flex;flex-direction:column;align-items:center;justify-content:center;
-                min-height:85vh;gap:0;
-            ">
-              <!-- Card -->
-              <div style="
-                background:rgba(255,255,255,0.03);
-                border:1px solid rgba(255,255,255,0.08);
-                border-radius:20px;
-                padding:52px 64px 44px;
-                display:flex;flex-direction:column;align-items:center;gap:18px;
-                box-shadow:0 20px 60px rgba(0,0,0,0.6);
-                backdrop-filter:blur(12px);
-                min-width:340px;
-              ">
-                {_logo_tag}
-                <div style="width:48px;height:2px;background:linear-gradient(90deg,transparent,#00b4d8,transparent);margin:2px 0;"></div>
-                <div style="color:#8a9bb5;font-size:0.78rem;letter-spacing:2.5px;text-transform:uppercase;font-weight:500;">
-                  Drone as First Responder &nbsp;·&nbsp; Optimizer
-                </div>
-                <div style="height:12px;"></div>
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-            st.button("Sign in with Google", on_click=st.login, args=("google",),
-                      type="primary", use_container_width=False)
-            # Use components.v1.html — same-origin iframe, so window.parent.document is reachable
-            import streamlit.components.v1 as _cv1_login
-            _cv1_login.html("""
-<script>
-(function() {
-    var CSS = [
-        'header{display:none!important;visibility:hidden!important;}',
-        'footer{display:none!important;visibility:hidden!important;}',
-        '#MainMenu{display:none!important;}',
-        '[data-testid="stHeader"]{display:none!important;}',
-        '[data-testid="stToolbar"]{display:none!important;}',
-        '[data-testid="stDecoration"]{display:none!important;}',
-        '[data-testid="stStatusWidget"]{display:none!important;}',
-        '[data-testid="appCreatorAvatar"]{display:none!important;}',
-        '[data-testid="appCreatorContainer"]{display:none!important;}',
-        '[data-testid="appCreator"]{display:none!important;}',
-        '.stDeployButton{display:none!important;}',
-        'svg[viewBox="0 0 303 165"]{display:none!important;}',
-        ':has(>svg[viewBox="0 0 303 165"]){display:none!important;}',
-        'a[href*="streamlit"]{display:none!important;}',
-        'a[href*="github.com"]{display:none!important;}'
-    ].join('');
-
-    function apply() {
-        try {
-            var doc = window.parent.document;
-            if (!doc.getElementById('_brinc_hide_login')) {
-                var s = doc.createElement('style');
-                s.id = '_brinc_hide_login';
-                s.textContent = CSS;
-                (doc.head || doc.documentElement).appendChild(s);
-            }
-            doc.querySelectorAll('svg[viewBox="0 0 303 165"]').forEach(function(svg) {
-                var p = svg.parentElement || svg;
-                p.style.setProperty('display','none','important');
-                if (p.parentElement) p.parentElement.style.setProperty('display','none','important');
-            });
-            doc.querySelectorAll('[data-testid="appCreatorAvatar"],[data-testid="appCreator"]').forEach(function(el) {
-                (el.parentElement || el).style.setProperty('display','none','important');
-            });
-        } catch(e) {}
-    }
-
-    apply();
-    try {
-        new MutationObserver(apply).observe(window.parent.document.documentElement, {childList:true, subtree:true});
-    } catch(e) {}
-})();
-</script>
-""", height=0)
-            st.stop()
-
-        # Restrict to @brincdrones.com accounts only
-        _user_email = getattr(st.user, "email", "") or ""
-        _user_name = getattr(st.user, "username", "") or ""  # Fallback: use email prefix
-        if not _user_email.lower().endswith("@brincdrones.com"):
-            st.markdown("<style>section[data-testid='stSidebar'] { display: none !important; }</style>",
-                        unsafe_allow_html=True)
-            st.error(f"Access restricted to BRINC Drones employees.  \n"
-                     f"You are signed in as **{_user_email}**.  \n"
-                     "Please sign in with your @brincdrones.com account.")
-            st.button("Sign out", on_click=st.logout)
-            st.stop()
-
-        # Extract name from Google account; fallback to email prefix
-        if not _user_name or _user_name.strip() == "":
-            _user_name = _user_email.split("@")[0]  # e.g., "john.smith" from "john.smith@brincdrones.com"
-
-        # Store authenticated user data in session state (bypassing manual input)
-        st.session_state['google_user_email'] = _user_email
-        st.session_state['google_user_name'] = _user_name
-        st.session_state['brinc_user'] = _user_email.split("@")[0]  # For backward compatibility
-
-        # Log login event to Google Sheets
-        _log_login_to_sheets(_user_email, _user_name)
-except Exception:
-    pass  # Auth not configured — app runs without login gate
-# ──────────────────────────────────────────────────────────────────────────────
-
-# ── Mobile-responsive CSS (applied globally, activated by media queries) ──
-st.markdown("""
-<style>
-/* ── Hide the auto-generated multi-page nav from sidebar ── */
-[data-testid="stSidebarNav"] { display: none !important; }
-/* ── Hide sidebar collapse/expand chevron ── */
-[data-testid="collapsedControl"],
-[data-testid="stSidebarCollapsedControl"],
-button[aria-label="Collapse sidebar"],
-button[aria-label="Expand sidebar"],
-button[aria-label="Open sidebar"],
-button[aria-label="Close sidebar"] { display: none !important; }
-/* ── Hide Streamlit branding (local + Streamlit Cloud) ── */
-header { display: none !important; visibility: hidden !important; }
-header[data-testid="stHeader"] { display: none !important; visibility: hidden !important; }
-footer { display: none !important; visibility: hidden !important; }
-#MainMenu { display: none !important; visibility: hidden !important; }
-[data-testid="stToolbar"] { display: none !important; visibility: hidden !important; }
-[data-testid="stDecoration"] { display: none !important; visibility: hidden !important; }
-[data-testid="stStatusWidget"] { display: none !important; visibility: hidden !important; }
-.stDeployButton { display: none !important; visibility: hidden !important; }
-[data-testid="stToolbarActionButtonIcon"] { display: none !important; visibility: hidden !important; }
-[data-testid="appCreatorAvatar"] { display: none !important; visibility: hidden !important; }
-[data-testid="appCreatorContainer"] { display: none !important; visibility: hidden !important; }
-[data-testid="appCreator"] { display: none !important; visibility: hidden !important; }
-svg[viewBox="0 0 303 165"] { display: none !important; visibility: hidden !important; }
-:has(> svg[viewBox="0 0 303 165"]) { display: none !important; visibility: hidden !important; }
-a[href*="streamlit"] { display: none !important; visibility: hidden !important; }
-a[href*="github.com"] { display: none !important; visibility: hidden !important; }
-img[src*="avatars.githubusercontent.com"] { display: none !important; visibility: hidden !important; }
-img[src*="259721542"] { display: none !important; visibility: hidden !important; }
-:has(> img[src*="avatars.githubusercontent.com"]) { display: none !important; visibility: hidden !important; }
-/* Target Streamlit Cloud branding by stable class prefix */
-[class*="_profileImage_"] { display: none !important; visibility: hidden !important; }
-[class*="_darkThemeShadow_"] { display: none !important; visibility: hidden !important; }
-[class*="_link_gzau3"] { display: none !important; visibility: hidden !important; }
-[class*="_appCreator_"] { display: none !important; visibility: hidden !important; }
-[class*="_viewerBadge_"] { display: none !important; visibility: hidden !important; }
-
-@media (max-width: 900px) {
-  [data-testid="block-container"] { padding: 1rem 0.5rem !important; }
-  [data-testid="column"] { min-width: 100% !important; }
-  .js-plotly-plot { max-width: 100% !important; overflow-x: auto; }
-  [data-testid="stMetricValue"] { font-size: 1.4rem !important; }
-  [data-testid="baseButton-secondary"] { font-size: 0.72rem !important; }
-}
-@media (max-width: 600px) {
-  [data-testid="block-container"] { padding: 0.5rem 0.25rem !important; }
-  [data-testid="stMetricValue"] { font-size: 1.1rem !important; }
-  section[data-testid="stSidebar"] { width: 260px !important; }
-}
-</style>
-""", unsafe_allow_html=True)
-
-# ── Hide sidebar chevron + all Streamlit/GitHub branding ──────────────────
-# st.components.v1.html() serves from the same origin so window.parent.document
-# is accessible — unlike st.html() which sandboxes without allow-same-origin.
-import streamlit.components.v1 as _cv1
-_cv1.html("""
-<script>
-(function() {
-    var HIDE = 'display:none!important;visibility:hidden!important;';
-    var CSS = [
-        'header{' + HIDE + '}',
-        'header[data-testid="stHeader"]{' + HIDE + '}',
-        'footer{' + HIDE + '}',
-        '#MainMenu{' + HIDE + '}',
-        '[data-testid="stToolbar"]{' + HIDE + '}',
-        '[data-testid="stDecoration"]{' + HIDE + '}',
-        '[data-testid="stStatusWidget"]{' + HIDE + '}',
-        '[data-testid="appCreatorAvatar"]{' + HIDE + '}',
-        '[data-testid="appCreatorContainer"]{' + HIDE + '}',
-        '[data-testid="appCreator"]{' + HIDE + '}',
-        '.stDeployButton{' + HIDE + '}',
-        'svg[viewBox="0 0 303 165"]{' + HIDE + '}',
-        ':has(>svg[viewBox="0 0 303 165"]){' + HIDE + '}',
-        'a[href*="streamlit"]{' + HIDE + '}',
-        'a[href*="github.com"]{' + HIDE + '}'
-    ].join('');
-
-    function injectStyle() {
-        try {
-            var doc = window.parent.document;
-            if (doc.getElementById('_brinc_hide')) return;
-            var s = doc.createElement('style');
-            s.id = '_brinc_hide';
-            s.textContent = CSS;
-            (doc.head || doc.documentElement).appendChild(s);
-        } catch(e) {}
-    }
-
-    function hideElements() {
-        try {
-            var doc = window.parent.document;
-            // Chevron toggles
-            doc.querySelectorAll('[data-testid="stIconMaterial"]').forEach(function(el) {
-                var t = el.textContent.trim();
-                if (t === 'keyboard_double_arrow_left' || t === 'keyboard_double_arrow_right') {
-                    var btn = el.closest('button');
-                    if (btn) btn.style.setProperty('display','none','important');
-                }
-            });
-            // Streamlit logo SVG by unique viewBox
-            doc.querySelectorAll('svg[viewBox="0 0 303 165"]').forEach(function(svg) {
-                var p = svg.parentElement || svg;
-                p.style.setProperty('display','none','important');
-                p.style.setProperty('visibility','hidden','important');
-                if (p.parentElement) {
-                    p.parentElement.style.setProperty('display','none','important');
-                    p.parentElement.style.setProperty('visibility','hidden','important');
-                }
-            });
-            // Anything linking to github or streamlit
-            doc.querySelectorAll('a[href*="github.com"],a[href*="streamlit.io"],a[href*="streamlit.app"]').forEach(function(a) {
-                var t = a.closest('div') || a;
-                t.style.setProperty('display','none','important');
-                t.style.setProperty('visibility','hidden','important');
-            });
-            // app creator elements
-            doc.querySelectorAll('[data-testid="appCreatorAvatar"],[data-testid="appCreatorContainer"],[data-testid="appCreator"]').forEach(function(el) {
-                var t = el.parentElement || el;
-                t.style.setProperty('display','none','important');
-                t.style.setProperty('visibility','hidden','important');
-            });
-        } catch(e) {}
-    }
-
-    injectStyle();
-    hideElements();
-
-    try {
-        new MutationObserver(function() {
-            injectStyle();
-            hideElements();
-        }).observe(window.parent.document.body, {childList:true, subtree:true});
-    } catch(e) {}
-})();
-</script>
-""", height=0)
-
-# This MUST run before any st.session_state checks to prevent KeyError
-defaults = {
-    'csvs_ready': False, 'df_calls': None, 'df_calls_full': None, 'df_stations': None,
-    'active_city': "Rockford", 'active_state': "IL", 'estimated_pop': 65000,
-    'k_resp': 2, 'k_guard': 0, 'r_resp': 2.0, 'r_guard': 8.0,
-    'dfr_rate': 12, 'deflect_rate': 25, 'total_original_calls': 0, 'total_modeled_calls': 0,
-    'onboarding_done': False, 'trigger_sim': False, 'city_count': 1,
-    'brinc_user': 'steven.beltran',
-    'session_start': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-    'session_id': str(uuid.uuid4())[:8],
-    'data_source': 'unknown',   # 'cad_upload' | 'simulation' | 'demo' | 'brinc_file'
-    'map_build_logged': False,  # prevent duplicate map-build rows per session
-    'boundary_kind': 'place',
-    'boundary_source_path': '',
-    'location_detection_source': '',
-    'boundary_detection_mode': '',
-    'master_gdf_override': None,  # GeoDataFrame from coordinate-based jurisdiction lookup
-    'boundary_overlay_gdf': None,
-    'boundary_overlay_name': '',
-    'boundary_overlay_file': '',
-    # ── NEW: file ingestion metadata & engagement tracking ──────────────────
-    'file_meta': {},            # populated by aggressive_parse_calls; see _extract_file_meta()
-    'export_event_log': [],     # ordered list of export types clicked this session
-    'export_count': 0,          # total download button clicks this session
-    'demo_mode_used': False,    # True if any demo city was loaded
-    'sim_mode_used': False,     # True if simulation (not real upload) was run
-    'pin_drop_mode': False,     # True when map-click pin placement is active
-    'pending_pin': None,        # dict(lat, lon) waiting for user confirmation
-    'pin_drop_used': False,     # True once a station was added via pin-drop; suppresses auto-minimums
-    # ── Document customization fields ──────────────────────────────────────────
-    'doc_custom_intro':   '',   # Optional opening paragraph injected after exec summary
-    'doc_talking_pt_1':  '',   # Custom bullet 1
-    'doc_talking_pt_2':  '',   # Custom bullet 2
-    'doc_talking_pt_3':  '',   # Custom bullet 3
-    'doc_custom_closing': '',  # Optional closing paragraph before AE signature
-    'doc_ae_phone':       '',  # AE phone number shown in contact block
-}
-for k, v in defaults.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
-
-
-if 'target_cities' not in st.session_state:
-    st.session_state['target_cities'] = [{"city": "", "state": st.session_state.get('active_state', 'IL')}]
+from modules import faa_rf, optimization, html_reports
 
 
 
@@ -1467,215 +878,10 @@ def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
     except Exception:
         return False, None
 
-def generate_mock_faa_grid(minx, miny, maxx, maxy):
-    features = []
-    x_steps = np.linspace(minx, maxx, 20)
-    y_steps = np.linspace(miny, maxy, 20)
-    mock_airports = [{"lon": minx + 0.3 * (maxx - minx), "lat": miny + 0.3 * (maxy - miny), "radius": 0.15, "name": "Mock Intl (MCK)"}]
-    for i in range(len(x_steps) - 1):
-        for j in range(len(y_steps) - 1):
-            cell_poly = [[x_steps[i], y_steps[j]], [x_steps[i+1], y_steps[j]], [x_steps[i+1], y_steps[j+1]], [x_steps[i], y_steps[j+1]], [x_steps[i], y_steps[j]]]
-            cell_center = Point((x_steps[i] + x_steps[i+1]) / 2, (y_steps[j] + y_steps[j+1]) / 2)
-            ceiling, arpt_name = None, ""
-            for ap in mock_airports:
-                dist_ratio = cell_center.distance(Point(ap["lon"], ap["lat"])) / ap["radius"]
-                if dist_ratio < 1.0:
-                    if   dist_ratio < 0.15: ceiling, arpt_name = 0,   ap["name"]
-                    elif dist_ratio < 0.35: ceiling, arpt_name = 50,  ap["name"]
-                    elif dist_ratio < 0.55: ceiling, arpt_name = 100, ap["name"]
-                    else:                   ceiling, arpt_name = 200, ap["name"]
-                    break
-            if ceiling is not None:
-                features.append({"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [cell_poly]}, "properties": {"CEILING": ceiling, "ARPT_Name": arpt_name}})
-    return {"type": "FeatureCollection", "features": features}
-
-@st.cache_data
-def load_cached_regulatory_layers(state_abbr, layer_type="faa_airspace"):
-    """
-    Load pre-cached regulatory layers (FAA, obstacles, cell towers, no-fly zones).
-    These are pre-downloaded by download_regulatory_layers.py and cached as parquet.
-
-    layer_type: "faa_airspace" | "faa_obstacles" | "cell_towers" | "no_fly_zones"
-    """
-    try:
-        layer_dir = Path("regulatory_layers")
-        if not layer_dir.exists():
-            return gpd.GeoDataFrame()
-
-        if layer_type == "faa_airspace":
-            fpath = layer_dir / f"faa_airspace_{state_abbr.upper()}.parquet"
-        elif layer_type == "faa_obstacles":
-            fpath = layer_dir / f"faa_obstacles.parquet"
-        elif layer_type == "cell_towers":
-            fpath = layer_dir / f"cell_towers_{state_abbr.upper()}.parquet"
-        elif layer_type == "no_fly_zones":
-            fpath = layer_dir / f"no_fly_zones.parquet"
-        else:
-            return gpd.GeoDataFrame()
-
-        if fpath.exists():
-            gdf = gpd.read_parquet(fpath)
-            return gdf
-        else:
-            return gpd.GeoDataFrame()
-
-    except Exception as e:
-        return gpd.GeoDataFrame()
-
-@st.cache_data
-def load_cached_airfields():
-    """Load all US airfields from pre-cached parquet."""
-    try:
-        fpath = Path("regulatory_layers") / "airfields_us.parquet"
-        if fpath.exists():
-            return gpd.read_parquet(fpath)
-    except Exception:
-        pass
-    return gpd.GeoDataFrame()
-
-@st.cache_data
-def load_faa_parquet(minx, miny, maxx, maxy):
-    """Optimized FAA loader — uses cached state-level parquets."""
-    try:
-        # State bounds for coordinate-to-state mapping
-        state_bounds = {
-            "AL": (-88.5, 30.2, -84.9, 35.0), "AK": (-172.0, 51.3, -130.0, 71.6),
-            "AZ": (-114.8, 31.3, -109.0, 37.0), "AR": (-94.4, 33.0, -89.6, 36.5),
-            "CA": (-124.5, 32.5, -114.1, 42.0), "CO": (-109.1, 36.9, -102.0, 41.0),
-            "CT": (-73.7, 40.9, -71.8, 42.1), "DE": (-75.8, 38.4, -75.0, 39.8),
-            "FL": (-87.6, 24.5, -80.0, 31.0), "GA": (-85.6, 30.4, -80.8, 35.0),
-            "HI": (-160.2, 18.9, -154.8, 22.2), "ID": (-117.2, 42.0, -111.0, 49.0),
-            "IL": (-91.5, 37.0, -87.0, 42.5), "IN": (-88.1, 37.8, -84.8, 41.8),
-            "IA": (-96.6, 40.3, -90.1, 43.5), "KS": (-102.0, 37.0, -94.6, 40.0),
-            "KY": (-89.6, 36.5, -81.9, 39.1), "LA": (-94.0, 29.0, -88.8, 33.0),
-            "ME": (-71.1, 43.0, -66.9, 47.5), "MD": (-79.5, 37.9, -75.0, 39.7),
-            "MA": (-73.5, 41.2, -69.9, 42.9), "MI": (-90.4, 41.7, -83.3, 48.3),
-            "MN": (-97.2, 43.5, -89.5, 49.4), "MS": (-91.7, 30.2, -88.1, 35.0),
-            "MO": (-95.8, 36.0, -90.1, 40.6), "MT": (-116.0, 45.0, -104.0, 49.0),
-            "NE": (-104.1, 40.0, -95.3, 43.0), "NV": (-120.0, 35.0, -114.4, 42.0),
-            "NH": (-72.6, 42.7, -70.7, 45.3), "NJ": (-75.6, 38.9, -73.9, 41.4),
-            "NM": (-109.0, 31.8, -103.0, 37.0), "NY": (-79.8, 40.5, -71.9, 45.0),
-            "NC": (-84.3, 33.8, -75.4, 36.6), "ND": (-104.0, 45.9, -96.6, 49.0),
-            "OH": (-84.8, 38.4, -80.5, 42.3), "OK": (-103.0, 33.6, -94.4, 37.0),
-            "OR": (-124.6, 42.0, -116.5, 46.3), "PA": (-80.5, 39.7, -74.7, 42.3),
-            "RI": (-71.9, 41.1, -71.1, 42.0), "SC": (-83.4, 32.0, -78.5, 35.2),
-            "SD": (-104.0, 42.5, -96.4, 45.9), "TN": (-90.3, 35.0, -81.6, 36.7),
-            "TX": (-106.6, 25.8, -93.5, 36.5), "UT": (-114.0, 37.0, -109.0, 42.0),
-            "VT": (-73.4, 42.7, -71.5, 45.0), "VA": (-83.7, 36.5, -75.2, 39.5),
-            "WA": (-124.7, 45.6, -116.9, 49.0), "WV": (-82.6, 37.2, -77.7, 40.6),
-            "WI": (-92.9, 42.5, -86.8, 47.3), "WY": (-111.0, 41.0, -104.0, 45.0),
-            "DC": (-77.1, 38.8, -76.9, 39.0),
-        }
-
-        # Find which state the map bounds fall into
-        center_lon = (minx + maxx) / 2.0
-        center_lat = (miny + maxy) / 2.0
-
-        best_state = None
-        for state, (sb_minx, sb_miny, sb_maxx, sb_maxy) in state_bounds.items():
-            if sb_minx <= center_lon <= sb_maxx and sb_miny <= center_lat <= sb_maxy:
-                best_state = state
-                break
-
-        if not best_state:
-            best_state = "IL"  # Default fallback
-
-        # Try to load state-level FAA airspace
-        gdf = load_cached_regulatory_layers(best_state, "faa_airspace")
-
-        if gdf.empty:
-            # Fallback to mock if no cached data
-            mock_result = generate_mock_faa_grid(minx, miny, maxx, maxy)
-            return mock_result
-
-        # Filter to bounding box
-        pad = 0.05
-        try:
-            filtered = gdf.cx[minx-pad:maxx+pad, miny-pad:maxy+pad]
-        except Exception as e:
-            # If cx indexing fails, return all data
-            filtered = gdf
-
-        if filtered.empty:
-            # No data in this bounding box, return empty
-            return {"type": "FeatureCollection", "features": []}
-
-        # Convert to GeoJSON
-        result = json.loads(filtered.to_json())
-        return result
-
-    except Exception as e:
-        return generate_mock_faa_grid(minx, miny, maxx, maxy)
-
-def add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=True):
-    if not faa_geojson or not faa_geojson.get("features"):
-        return
-
-    text_lons, text_lats, text_strings, text_hovers = [], [], [], []
-    trace_count = 0
-
-    for feature in faa_geojson.get("features", []):
-        geom = feature.get("geometry")
-        props = feature.get("properties", {})
-        # Try both old and new property names for backwards compatibility
-        ceiling = props.get("ceiling_ft") or props.get("CEILING")
-        zone_name = props.get("name") or props.get("ARPT_Name") or props.get("ARPT_NAME") or "Airspace Zone"
-
-        if ceiling is None or geom is None or geom.get("type") != "Polygon":
-            continue
-
-        snapped = min(FAA_CEILING_COLORS.keys(), key=lambda v: abs(v - ceiling))
-        colors = FAA_CEILING_COLORS.get(snapped, FAA_DEFAULT_COLOR)
-        coords = geom["coordinates"][0]
-
-        if not coords or len(coords) < 2:
-            continue
-
-        bx, by = zip(*coords)
-
-        # Add polygon trace
-        fig.add_trace(go.Scattermap(
-            mode="lines",
-            lon=list(bx),
-            lat=list(by),
-            fill="toself",
-            fillcolor=colors["fill"],
-            line=dict(color=colors["line"], width=2),
-            hoverinfo="text",
-            text=f"<b>{ceiling} ft AGL</b><br>{zone_name}",
-            name=f"LAANC {ceiling}ft",
-            showlegend=False
-        ))
-        trace_count += 1
-
-        # Add centroid label
-        try:
-            centroid = shape(geom).centroid
-            text_lons.append(centroid.x)
-            text_lats.append(centroid.y)
-            text_strings.append(str(ceiling))
-            text_hovers.append(f"{ceiling} ft — {zone_name}")
-        except Exception:
-            pass
-
-    # Add text labels if any
-    if text_lons:
-        fig.add_trace(go.Scattermap(
-            mode="text",
-            lon=text_lons,
-            lat=text_lats,
-            text=text_strings,
-            hovertext=text_hovers,
-            hoverinfo="text",
-            textfont=dict(size=10, color="#ffffff" if is_dark else "#000000"),
-            showlegend=False,
-            name="LAANC Labels"
-        ))
-
 def add_cell_towers_layer_to_plotly(fig, state_abbr, minx, miny, maxx, maxy):
     """Add OpenCelliD cell tower markers to map."""
     try:
-        gdf = load_cached_regulatory_layers(state_abbr, "cell_towers")
+        gdf = faa_rf.load_cached_regulatory_layers(state_abbr, "cell_towers")
         if gdf.empty: return
 
         # Clip to bounding box
@@ -1697,35 +903,10 @@ def add_cell_towers_layer_to_plotly(fig, state_abbr, minx, miny, maxx, maxy):
     except Exception:
         pass
 
-def add_faa_obstacles_layer_to_plotly(fig, minx, miny, maxx, maxy):
-    """Add FAA Digital Obstacle File (obstacles > 200 ft) to map."""
-    try:
-        gdf = load_cached_regulatory_layers("US", "faa_obstacles")
-        if gdf.empty: return
-
-        # Clip to bounding box
-        pad = 0.05
-        bbox = box(minx-pad, miny-pad, maxx+pad, maxy+pad)
-        clipped = gdf[gdf.geometry.intersects(bbox)]
-
-        if not clipped.empty:
-            fig.add_trace(go.Scattermap(
-                lat=clipped.geometry.y,
-                lon=clipped.geometry.x,
-                mode='markers',
-                marker=dict(size=6, color='#ff3b3b', opacity=0.5, symbol='diamond'),
-                name='Flight Hazards',
-                hovertext=['Obstacle > 200 ft' for _ in clipped],
-                hoverinfo='text',
-                showlegend=True,
-            ))
-    except Exception:
-        pass
-
 def add_no_fly_zones_layer_to_plotly(fig, minx, miny, maxx, maxy):
     """Add no-fly zones (parks, water, restricted areas) to map."""
     try:
-        gdf = load_cached_regulatory_layers("US", "no_fly_zones")
+        gdf = faa_rf.load_cached_regulatory_layers("US", "no_fly_zones")
         if gdf.empty: return
 
         # Clip to bounding box
@@ -1750,85 +931,6 @@ def add_no_fly_zones_layer_to_plotly(fig, minx, miny, maxx, maxy):
                     ))
     except Exception:
         pass
-
-def get_station_faa_ceiling(lat, lon, faa_geojson):
-    if not faa_geojson or 'features' not in faa_geojson: return "400 ft (Class G)"
-    pt = Point(lon, lat)
-    for feature in faa_geojson['features']:
-        if 'geometry' in feature and feature['geometry']:
-            try:
-                s = shape(feature['geometry'])
-                if s.contains(pt):
-                    val = feature['properties'].get('CEILING')
-                    if val is not None: return f"{val} ft (Controlled)"
-            except Exception: pass
-    return "400 ft (Class G)"
-
-@st.cache_data
-def fetch_airfields(minx, miny, maxx, maxy):
-    """
-    Fetch airfields — prefers cached US dataset, falls back to Overpass API.
-    Much faster than querying Overpass per-region during app runtime.
-    """
-    # Try cached version first
-    try:
-        gdf_cached = load_cached_airfields()
-        if not gdf_cached.empty:
-            # Clip to bounding box with padding
-            pad = 0.2
-            bbox = box(minx-pad, miny-pad, maxx+pad, maxy+pad)
-            clipped = gdf_cached[gdf_cached.geometry.intersects(bbox)]
-
-            if not clipped.empty:
-                airfields = []
-                for _, row in clipped.iterrows():
-                    airfields.append({
-                        'name': row.get('name', 'Unknown Airfield'),
-                        'lat': row.geometry.y,
-                        'lon': row.geometry.x,
-                        'iata': row.get('iata', ''),
-                        'icao': row.get('icao', ''),
-                    })
-                return airfields
-    except Exception:
-        pass
-
-    # Fallback: Query Overpass API (slower but works without pre-download)
-    pad = 0.2
-    query = f"""[out:json];(node["aeroway"~"aerodrome|heliport"]({miny-pad},{minx-pad},{maxy+pad},{maxx+pad});way["aeroway"~"aerodrome|heliport"]({miny-pad},{minx-pad},{maxy+pad},{maxx+pad}););out center;"""
-    try:
-        req = urllib.request.Request("https://overpass-api.de/api/interpreter", data=query.encode('utf-8'), headers={'User-Agent': 'BRINC_Optimizer'})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            airfields = []
-            for el in data.get('elements', []):
-                lat = el.get('lat') or el.get('center', {}).get('lat')
-                lon = el.get('lon') or el.get('center', {}).get('lon')
-                name = el.get('tags', {}).get('name', 'Unknown Airfield')
-                if lat and lon: airfields.append({'name': name, 'lat': lat, 'lon': lon})
-            return airfields
-    except Exception:
-        return []
-
-def get_nearest_airfield(lat, lon, airfields):
-    if not airfields: return "No data"
-    min_dist = float('inf')
-    best = None
-    for af in airfields:
-        lat1, lon1, lat2, lon2 = map(math.radians, [lat, lon, af['lat'], af['lon']])
-        a = math.sin((lat2-lat1)/2)**2 + math.cos(lat1)*math.cos(lat2)*math.sin((lon2-lon1)/2)**2
-        dist = 3958.8 * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        if dist < min_dist:
-            y = math.sin(lon2-lon1)*math.cos(lat2)
-            x = math.cos(lat1)*math.sin(lat2) - math.sin(lat1)*math.cos(lat2)*math.cos(lon2-lon1)
-            bearing = (math.degrees(math.atan2(y, x)) + 360) % 360
-            dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW']
-            min_dist = dist
-            best = (af['name'], dist, dirs[int((bearing+11.25)/22.5) % 16])
-    if best:
-        n = best[0][:18] + ("..." if len(best[0]) > 18 else "")
-        return f"{best[1]:.1f}mi {best[2]} ({n})"
-    return "No data"
 
 def generate_random_points_in_polygon(polygon, num_points):
     # Flatten MultiPolygon to its largest component so bbox sampling stays efficient
@@ -2019,48 +1121,6 @@ def _build_carrier_mini_map(cinfo, boundary_geom, center_lat, center_lon, zoom, 
 
 # ── RF Link Budget — 3390 MHz Friis free-space model ─────────────────────────
 
-def _rf_range_rings_3390(infra_height_m: float = 9.14,
-                          drone_alt_m: float = 61.0,
-                          clutter_db: float = 15.0,
-                          tx_power_dbm: float = 33.0,
-                          tx_gain_dbi: float = 3.0,
-                          rx_gain_dbi: float = 3.0) -> list:
-    """
-    Returns list of (label, hex_color, radius_miles) for 3 SNR tiers at 3390 MHz.
-
-    Link budget:
-      FSPL = 20*log10(d_m) + 43.05  (at 3390 MHz)
-      SNR  = tx_power + tx_gain + rx_gain - FSPL - noise_floor - clutter
-           = EIRP + rx_gain - 43.05 - 20*log10(d) + 94 - clutter
-    Noise floor: -174 + 10*log10(20e6 BW) + 7 NF = -94 dBm
-    """
-    import math as _math
-    eirp = tx_power_dbm + tx_gain_dbi + rx_gain_dbi
-    noise_floor_dbm = -94.0   # 20 MHz BW, 7 dB NF
-    link_budget = eirp - 43.05 + abs(noise_floor_dbm) - clutter_db
-
-    tiers = [
-        ("Excellent (SNR ≥ 20 dB)", "#22c55e", 20),
-        ("Good (SNR ≥ 10 dB)",      "#f59e0b", 10),
-        ("Marginal (SNR ≥ 0 dB)",   "#ef4444",  0),
-    ]
-    rings = []
-    for label, color, snr_thresh in tiers:
-        d_m = 10 ** ((link_budget - snr_thresh) / 20.0)
-        # Add height correction — effective slant range
-        h_diff = abs(drone_alt_m - infra_height_m)
-        d_horiz = max(0.0, _math.sqrt(max(0, d_m**2 - h_diff**2)))
-        rings.append((label, color, d_horiz / 1609.34))  # convert to miles
-    return rings
-
-
-# ── ADVANCED GEOGRAPHY-AWARE RF COVERAGE ENGINE ──────────────────────────────────
-# Coverage Probability model with terrain, clutter, building losses, uplink/downlink
-
-import scipy.interpolate as _sp_interp
-from scipy.spatial.distance import cdist as _cdist
-
-@st.cache_resource
 def _get_terrain_cache():
     """Global cache dict for DEM tiles to avoid re-downloading."""
     return {}
@@ -2183,183 +1243,6 @@ def _path_loss_advanced(distance_m, freq_mhz=3390, tx_alt_m=9.14, rx_alt_m=61.0,
 
     total_pl = fspl + clutter_db + terrain_db + fade_db
     return total_pl
-
-def _compute_rf_grid_coverage(tx_lat, tx_lon, tx_alt_m,
-                              boundary_geom=None,
-                              freq_mhz=3390,
-                              tx_power_dbm=33.0,
-                              tx_gain_dbi=3.0,
-                              rx_gain_dbi=3.0,
-                              noise_figure_db=7.0,
-                              bandwidth_mhz=20.0,
-                              land_use="suburban",
-                              grid_resolution_m=250):
-    """
-    Compute coverage probability grid for a single station.
-
-    Returns: grid_dict = {
-        'lats': array, 'lons': array,
-        'coverage_prob': 2D array,  # probability of successful link (uplink OR downlink)
-        'uplink_prob': 2D array,
-        'downlink_prob': 2D array,
-        'snr_db': 2D array,
-        'rx_power_dbm': 2D array,
-    }
-    """
-    import math as _m
-    import numpy as _np
-
-    # Get boundary extent
-    if boundary_geom is None or boundary_geom.is_empty:
-        # Default ~5 mile radius around station
-        dlat = 5 / 69.0  # 1 degree latitude ~ 69 miles
-        dlon = 5 / (69.0 * _m.cos(_m.radians(tx_lat)))
-        minx, miny = tx_lon - dlon, tx_lat - dlat
-        maxx, maxy = tx_lon + dlon, tx_lat + dlat
-    else:
-        minx, miny, maxx, maxy = boundary_geom.bounds
-
-    # Build grid
-    lat_count = max(10, int((maxy - miny) * 111000 / grid_resolution_m))
-    lon_count = max(10, int((maxx - minx) * 111000 * _m.cos(_m.radians((miny + maxy) / 2)) / grid_resolution_m))
-
-    lats = _np.linspace(miny, maxy, lat_count)
-    lons = _np.linspace(minx, maxx, lon_count)
-    lon_grid, lat_grid = _np.meshgrid(lons, lats)
-
-    # Noise floor calculation
-    noise_floor_dbm = -174 + 10.0 * _m.log10(bandwidth_mhz * 1e6) + noise_figure_db
-
-    # EIRP
-    eirp_dbm = tx_power_dbm + tx_gain_dbi
-
-    # Storage
-    uplink_prob = _np.zeros_like(lon_grid)  # Drone TX to infra RX
-    downlink_prob = _np.zeros_like(lon_grid)  # Infra TX to drone RX
-    snr_db_grid = _np.zeros_like(lon_grid)
-    rx_power_grid = _np.zeros_like(lon_grid)
-
-    # Compute for each grid cell
-    rx_alt_m = 61.0  # Drone altitude in meters (200 ft)
-    infra_alt_m = _estimate_elevation_simple(tx_lat, tx_lon)  # Ground elevation at station
-
-    for i in range(lat_count):
-        for j in range(lon_count):
-            grid_lat, grid_lon = lat_grid[i, j], lon_grid[i, j]
-
-            # Skip if outside boundary
-            if boundary_geom and not boundary_geom.is_empty:
-                pt = Point(grid_lon, grid_lat)
-                if not boundary_geom.contains(pt):
-                    continue
-
-            # Distance
-            lat_dist = (grid_lat - tx_lat) * 111000.0
-            lon_dist = (grid_lon - tx_lon) * 111000.0 * _m.cos(_m.radians((tx_lat + grid_lat) / 2))
-            horiz_dist = _m.sqrt(lat_dist**2 + lon_dist**2)
-
-            # Slant distances (assuming drone at rx_alt above grid point)
-            grid_elev = _estimate_elevation_simple(grid_lat, grid_lon)
-            drone_height = grid_elev + rx_alt_m
-            infra_height = infra_alt_m + tx_alt_m
-            slant_dist_uplink = _m.sqrt(horiz_dist**2 + (drone_height - infra_height)**2)
-            slant_dist_downlink = slant_dist_uplink  # Same path
-
-            # Path loss
-            pl_uplink = _path_loss_advanced(slant_dist_uplink, freq_mhz, tx_alt_m, rx_alt_m,
-                                           tx_lat, tx_lon, grid_lat, grid_lon, land_use)
-            pl_downlink = _path_loss_advanced(slant_dist_downlink, freq_mhz, rx_alt_m, tx_alt_m,
-                                             grid_lat, grid_lon, tx_lat, tx_lon, land_use)
-
-            # Received power (uplink: drone TX)
-            rx_pwr_uplink = eirp_dbm + rx_gain_dbi - pl_uplink
-            # Received power (downlink: infra TX)
-            rx_pwr_downlink = eirp_dbm + rx_gain_dbi - pl_downlink
-
-            # SNR
-            snr_uplink = rx_pwr_uplink - noise_floor_dbm
-            snr_downlink = rx_pwr_downlink - noise_floor_dbm
-
-            # Coverage probability (simple model: P = 1 / (1 + 10^(-SNR/10)))
-            # i.e., logistic CDF of SNR with threshold at 0 dB
-            snr_threshold = 3.0  # Need ≥3 dB for 50% link success
-            if snr_uplink > snr_threshold:
-                uplink_prob[i, j] = 1.0 / (1.0 + 10.0 ** (-(snr_uplink - snr_threshold) / 10.0))
-            if snr_downlink > snr_threshold:
-                downlink_prob[i, j] = 1.0 / (1.0 + 10.0 ** (-(snr_downlink - snr_threshold) / 10.0))
-
-            snr_db_grid[i, j] = min(snr_uplink, snr_downlink)  # Combined SNR
-            rx_power_grid[i, j] = max(rx_pwr_uplink, rx_pwr_downlink)
-
-    # Combined coverage = both uplink AND downlink must work
-    coverage_prob = uplink_prob * downlink_prob
-
-    return {
-        'lats': lats,
-        'lons': lons,
-        'coverage_prob': coverage_prob,
-        'uplink_prob': uplink_prob,
-        'downlink_prob': downlink_prob,
-        'snr_db': snr_db_grid,
-        'rx_power_dbm': rx_power_grid,
-    }
-
-def _plot_rf_coverage_heatmap(grid_data, station_name, center_lat, center_lon, zoom,
-                              layer_type='coverage_prob', link_type='combined',
-                              map_style="carto-darkmatter"):
-    """
-    Plot RF coverage as a Plotly heatmap overlay.
-
-    layer_type: 'coverage_prob', 'snr_db', 'rx_power_dbm'
-    link_type: 'uplink', 'downlink', 'combined'
-    """
-    lats = grid_data['lats']
-    lons = grid_data['lons']
-
-    if layer_type == 'coverage_prob':
-        if link_type == 'uplink':
-            z_data = grid_data['uplink_prob']
-            title = "Uplink Coverage Probability"
-            colorscale = "Viridis"
-        elif link_type == 'downlink':
-            z_data = grid_data['downlink_prob']
-            title = "Downlink Coverage Probability"
-            colorscale = "Viridis"
-        else:  # combined
-            z_data = grid_data['coverage_prob']
-            title = "Combined Coverage Probability"
-            colorscale = "Viridis"
-    elif layer_type == 'snr_db':
-        z_data = grid_data['snr_db']
-        title = "Signal to Noise Ratio (dB)"
-        colorscale = "RdYlGn"
-    else:  # rx_power_dbm
-        z_data = grid_data['rx_power_dbm']
-        title = "Received Power (dBm)"
-        colorscale = "Turbo"
-
-    fig = go.Figure()
-
-    # Add heatmap
-    fig.add_trace(go.Heatmap(
-        z=z_data,
-        x=lons,
-        y=lats,
-        colorscale=colorscale,
-        colorbar=dict(title=title.split('(')[0].strip()),
-        hovertemplate="Lat: %{y:.4f}<br>Lon: %{x:.4f}<br>Value: %{z:.2f}<extra></extra>",
-        name=title,
-    ))
-
-    fig.update_layout(
-        title=f"{station_name} · {title}",
-        xaxis_title="Longitude",
-        yaxis_title="Latitude",
-        height=500,
-        margin=dict(l=50, r=50, t=60, b=50),
-    )
-
-    return fig
 
 def calculate_zoom(min_lon, max_lon, min_lat, max_lat):
     lon_diff = max_lon - min_lon
@@ -4592,12 +3475,12 @@ def main():
 
         prog2 = st.sidebar.empty()
         prog2.caption(get_spatial_message())
-        calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls = optimization.precompute_spatial_data(
+        calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls = optimization.optimization.precompute_spatial_data(
             df_calls, df_calls_full, df_stations_all, city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash
         )
         if total_calls == 0 and len(df_calls) > 0:
             st.warning("No uploaded calls fell inside the selected jurisdiction boundary. Coverage rings can still render, but call coverage will be 0%. Check city/state selection or clean outlier coordinates in the CAD file.")
-        df_curve = optimization.compute_all_elbow_curves(
+        df_curve = optimization.optimization.compute_all_elbow_curves(
             total_calls, resp_matrix, guard_matrix,
             [s['clipped_2m'] for s in station_metadata],
             [s['clipped_guard'] for s in station_metadata],
@@ -4616,13 +3499,13 @@ def main():
             return int(df_curve.loc[idx_99 if idx_99 is not None else fallback, 'Drones'])
 
         with st.spinner(get_faa_message()):
-            faa_geojson = load_faa_parquet(minx, miny, maxx, maxy)
+            faa_geojson = faa_rf.load_faa_parquet(minx, miny, maxx, maxy)
             faa_feature_count = len(faa_geojson.get('features', [])) if isinstance(faa_geojson, dict) and faa_geojson.get('features') else 0
             # Debug FAA loading
             if faa_feature_count == 0:
                 st.sidebar.warning("FAA data not loading (0 zones). Check Display Options.")
         with st.spinner(get_airfield_message()):
-            airfields = fetch_airfields(minx, miny, maxx, maxy)
+            airfields = faa_rf.fetch_airfields(minx, miny, maxx, maxy)
 
         st.sidebar.markdown('<div class="sidebar-section-header">③ Budget & Downloads</div>', unsafe_allow_html=True)
 
@@ -4697,7 +3580,7 @@ def main():
                     if guard_strategy == "Maximize Call Coverage":
                         # solve_mclp returns (r_best, g_best, chrono_r, chrono_g)
                         # Pass 1 runs Guardians only (num_resp=0) so r_best=[] and g_best has the result
-                        _, g_best, _, chrono_g = optimization.solve_mclp(
+                        _, g_best, _, chrono_g = optimization.optimization.solve_mclp(
                             resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g,
                             0, k_guardian, True, incremental=incremental_build,
                             forced_r=[], forced_g=locked_g_pins
@@ -4731,7 +3614,7 @@ def main():
                     _excl = set(g_best) if not allow_redundancy else set()
 
                     if resp_strategy == "Maximize Call Coverage":
-                        r_best, _, chrono_r, _ = optimization.solve_mclp(
+                        r_best, _, chrono_r, _ = optimization.optimization.solve_mclp(
                             resp_matrix_eff, guard_matrix, dist_matrix_r_eff, dist_matrix_g,
                             k_responder, 0, allow_redundancy, incremental=incremental_build,
                             forced_r=locked_r_pins, forced_g=[]
@@ -4860,7 +3743,7 @@ def main():
                 annual_savings  = monthly_savings * 12
                 break_even_text = f"{fleet_capex / monthly_savings:.1f} MONTHS"
 
-        specialty_savings = html_reports.estimate_specialty_response_savings(
+        specialty_savings = html_reports.html_reports.estimate_specialty_response_savings(
             st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None else st.session_state.get('df_calls'),
             st.session_state.get('total_original_calls', total_calls),
             calls_covered_perc=calls_covered_perc
@@ -4900,8 +3783,8 @@ def main():
                 'pinned': _is_pinned,
                 'deploy_step': step if (idx in chrono_r or idx in chrono_g) else "MANUAL",
                 'avg_time_min': avg_time_min, 'speed_mph': speed_mph, 'radius_m': radius_m,
-                'faa_ceiling': get_station_faa_ceiling(d_lat, d_lon, faa_geojson),
-                'nearest_airport': get_nearest_airfield(d_lat, d_lon, airfields)
+                'faa_ceiling': faa_rf.get_station_faa_ceiling(d_lat, d_lon, faa_geojson),
+                'nearest_airport': faa_rf.get_nearest_airfield(d_lat, d_lon, airfields)
             }
 
             if total_calls > 0 and cumulative_mask is not None:
@@ -5254,7 +4137,7 @@ def main():
         # Calculate Date Range of CAD data (if available)
         date_range_str = "Simulated / Unknown"
         _date_src_df = df_calls_full if df_calls_full is not None else df_calls
-        _label_dt = html_reports._detect_datetime_series_for_labels(_date_src_df)
+        _label_dt = html_reports.html_reports._detect_datetime_series_for_labels(_date_src_df)
         if _label_dt is not None:
             try:
                 _label_dt = pd.to_datetime(_label_dt, errors='coerce').dropna()
@@ -5423,7 +4306,7 @@ def main():
             note_bits.append(full_daily_note)
         st.markdown(f"<div style='font-size:0.65rem;color:gray;margin-top:-10px;margin-bottom:12px;text-align:right;'>{' '.join(note_bits)}</div>", unsafe_allow_html=True)
 
-        overtime_stats = html_reports.estimate_high_activity_overtime(
+        overtime_stats = html_reports.html_reports.estimate_high_activity_overtime(
             df_calls_full if df_calls_full is not None else df_calls,
             st.session_state.get('active_state', 'TX'),
             calls_covered_perc,
@@ -5482,12 +4365,12 @@ def main():
 
             if show_faa and faa_geojson and faa_geojson.get("features"):
                 try:
-                    add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=not show_satellite)
+                    faa_rf.add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=not show_satellite)
                 except Exception as e:
                     st.sidebar.error(f"🔴 FAA render error: {str(e)[:100]}")
 
             if show_obstacles:
-                add_faa_obstacles_layer_to_plotly(fig, minx, miny, maxx, maxy)
+                faa_rf.add_faa_obstacles_layer_to_plotly(fig, minx, miny, maxx, maxy)
 
             if show_cell_towers:
                 add_cell_towers_layer_to_plotly(fig, st.session_state.get('active_state', 'CA'), minx, miny, maxx, maxy)
@@ -5677,7 +4560,7 @@ def main():
         )
         if active_drones:
             st.markdown(
-                html_reports._build_unit_cards_html(
+                html_reports.html_reports._build_unit_cards_html(
                     active_drones, text_main, text_muted, card_bg, card_border,
                     card_title, accent_color, columns_per_row=4,
                     simple=simple_cards, deflection_rate=deflection_rate
@@ -5824,7 +4707,7 @@ def main():
 
 
         # Resolve real incident datetime coverage for labels on the stations page
-        _label_dt_series = html_reports._detect_datetime_series_for_labels(df_calls_full if df_calls_full is not None else df_calls)
+        _label_dt_series = html_reports.html_reports._detect_datetime_series_for_labels(df_calls_full if df_calls_full is not None else df_calls)
         _label_has_real_dates = _label_dt_series is not None and getattr(_label_dt_series, "notna", lambda: pd.Series([], dtype=bool))().sum() > 0
 
         # ── CAD DATA CHARTS (moved into CAD Ingestion Analytics below) ───────────
@@ -6001,7 +4884,7 @@ def main():
         st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Temporal patterns derived from your uploaded CAD data — hourly volumes, day-of-week distribution, optimal DFR shift windows, and a higher-contrast 5-band call-volume calendar.</div>", unsafe_allow_html=True)
 
         _analytics_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
-        analytics_html_block = html_reports.generate_command_center_html(
+        analytics_html_block = html_reports.html_reports.generate_command_center_html(
             _analytics_df,
             total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls)
         )
@@ -6038,7 +4921,7 @@ def main():
         elif _has_real_calls and _analytics_df is not None and not _analytics_df.empty:
             # Collapse gap between components.html block and the plotly charts below
             st.markdown("<div style='margin-top:-80px;'></div>", unsafe_allow_html=True)
-            html_reports._build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
+            html_reports.html_reports._build_cad_charts(_analytics_df, text_main, text_muted, card_bg, card_border, accent_color)
 
         # ── COMMUNITY IMPACT DASHBOARD ────────────────────────────────────────────
         st.markdown("---")
@@ -6058,7 +4941,7 @@ def main():
         if 'type' in df_stations_all.columns:
             for _t in df_stations_all['type'].dropna().astype(str):
                 _cid_fac_counts[_t] = _cid_fac_counts.get(_t, 0) + 1
-        _cid_html = html_reports.generate_community_impact_dashboard_html(
+        _cid_html = html_reports.html_reports.generate_community_impact_dashboard_html(
             city=st.session_state.get('active_city', 'City'),
             state=st.session_state.get('active_state', 'TX'),
             population=int(st.session_state.get('estimated_pop', 65000) or 65000),
@@ -6456,7 +5339,7 @@ def main():
                 for _adv_idx, _adv_stn in enumerate(active_drones):
                     _adv_progress.progress(int(100 * _adv_idx / len(active_drones)))
 
-                    _adv_grid = _compute_rf_grid_coverage(
+                    _adv_grid = faa_rf._compute_rf_grid_coverage(
                         tx_lat=_adv_stn['lat'],
                         tx_lon=_adv_stn['lon'],
                         tx_alt_m=_adv_infra_ht * 0.3048,
@@ -6489,7 +5372,7 @@ def main():
                 # Display combined heatmap or individual station maps
                 for _stn_name, _stn_grid in _adv_all_grids:
                     st.markdown(f"**{_stn_name}** — {_adv_layer} ({_adv_link})")
-                    _adv_fig = _plot_rf_coverage_heatmap(
+                    _adv_fig = faa_rf._plot_rf_coverage_heatmap(
                         _stn_grid,
                         _stn_name,
                         center_lat=_adv_stn['lat'],
@@ -6541,7 +5424,7 @@ def main():
             _rf_infra_m     = _rf_infra_ht * 0.3048      # ft → m
             _rf_drone_m     = _rf_drone_alt * 0.3048
 
-            _rf_rings = _rf_range_rings_3390(
+            _rf_rings = faa_rf._rf_range_rings_3390(
                 infra_height_m=_rf_infra_m,
                 drone_alt_m=_rf_drone_m,
                 clutter_db=_rf_clutter_db,
@@ -6952,15 +5835,15 @@ def main():
                 "pinned_guard_names": list(pinned_guard_names),
                 "pinned_resp_names":  list(pinned_resp_names),
                 # Custom / pin-dropped stations (bypass OSM on reimport)
-                "custom_stations": html_reports._safe_df_to_records(st.session_state.get('custom_stations')),
+                "custom_stations": html_reports.html_reports._safe_df_to_records(st.session_state.get('custom_stations')),
                 # Whether fleet was manually built via pin-drop
                 "pin_drop_used": st.session_state.get('pin_drop_used', False),
                 # Call and station data
-                "calls_data": html_reports._safe_df_to_records(
+                "calls_data": html_reports.html_reports._safe_df_to_records(
                     st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None
                     else st.session_state.get('df_calls')
                 ),
-                "stations_data": html_reports._safe_df_to_records(st.session_state.get('df_stations')),
+                "stations_data": html_reports.html_reports._safe_df_to_records(st.session_state.get('df_stations')),
                 "faa_geojson": faa_geojson,
                 # Boundary / shapefile
                 "boundary_geojson": _boundary_geojson_export,
@@ -7149,8 +6032,8 @@ def main():
             dept_summary = ", ".join(dept_summary_parts) if dept_summary_parts else f"{len(active_drones)} municipal stations"
             police_names_str = (", ".join([n.replace('[Police] ','') for n in police_dept_names[:6]]) + ("..." if len(police_dept_names)>6 else "")) if police_dept_names else "municipal facilities"
             total_fleet = actual_k_responder + actual_k_guardian
-            analytics_html_export = html_reports.generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls), export_mode=True)
-            cad_charts_html_export = html_reports._build_cad_charts_html(df_calls_full if df_calls_full is not None else df_calls)
+            analytics_html_export = html_reports.html_reports.generate_command_center_html(df_calls_full if df_calls_full is not None else df_calls, total_orig_calls=st.session_state.get('total_original_calls', full_total_calls or total_calls), export_mode=True)
+            cad_charts_html_export = html_reports.html_reports._build_cad_charts_html(df_calls_full if df_calls_full is not None else df_calls)
             staffing_pressure_html_export = ""
 
             prepared_for_city = st.session_state.get('active_city', prop_city) or prop_city
@@ -8323,7 +7206,7 @@ def main():
             export_html = export_html.replace("[ANALYTICS_NAV]", _analytics_nav)
 
             # ── Community Impact section (light theme for print/export) ─────────
-            _cid_export_html = html_reports.generate_community_impact_dashboard_html(
+            _cid_export_html = html_reports.html_reports.generate_community_impact_dashboard_html(
                 city=prop_city,
                 state=prop_state,
                 population=int(pop_metric or 65000),
@@ -8442,7 +7325,7 @@ def main():
         # 3. Google Earth KML — only when drones are placed
         if active_drones:
             if st.sidebar.download_button("🌏 Google Earth Briefing File",
-                                          data=html_reports.generate_kml(active_gdf, active_drones, calls_in_city),
+                                          data=html_reports.html_reports.generate_kml(active_gdf, active_drones, calls_in_city),
                                           file_name="drone_deployment.kml",
                                           mime="application/vnd.google-earth.kml+xml",
                                           use_container_width=True):

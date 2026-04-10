@@ -51,7 +51,9 @@
       "Bash(wc -l /tmp/*.txt)",
       "Bash(echo \"\")",
       "Bash(cat)",
-      "Bash(sed -n '1580,2253p' app.py)"
+      "Bash(sed -n '1580,2253p' app.py)",
+      "Bash(sed -n '78,142p' app.py)",
+      "Bash(sed -n '759,1102p' app.py)"
     ]
   }
 }

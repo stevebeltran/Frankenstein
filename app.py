@@ -3217,7 +3217,7 @@ def main():
 
                 st.sidebar.markdown(
                     f"<div style='font-size:0.7rem; color:{text_muted}; margin:0 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>"
-                    "Add By Map</div>",
+                    "Add By Map <span class='tip' data-tip='Use the dropped map pin to add a custom station without typing an address.'>?</span></div>",
                     unsafe_allow_html=True
                 )
                 _pp_label = st.sidebar.text_input(
@@ -3236,11 +3236,18 @@ def main():
                     key="pp_type_select",
                     help="Category used to label the station and keep it grouped correctly in the model."
                 )
-                _pp_role = st.sidebar.radio(
+                _pp_role_row_label, _pp_role_row_picker = st.sidebar.columns([1.0, 2.2], gap="small")
+                _pp_role_row_label.markdown(
+                    f"<div style='font-size:0.78rem; color:{text_main}; font-weight:600; margin-top:6px;'>"
+                    "Assign To Fleet <span class='tip' data-tip='Choose whether this custom station is locked into the Guardian or Responder fleet after it is added.'>?</span></div>",
+                    unsafe_allow_html=True
+                )
+                _pp_role = _pp_role_row_picker.radio(
                     "Assign To Fleet",
                     ["Lock as Guardian", "Lock as Responder"],
                     index=0 if "Guardian" in st.session_state.get('pp_role_buf', "Lock as Guardian") else 1,
                     horizontal=True,
+                    label_visibility="collapsed",
                     key="pp_role_radio",
                     help="Choose which fleet this custom station is locked into after it is added."
                 )
@@ -3320,7 +3327,8 @@ def main():
             st.markdown(
                 f"<div style='font-size:0.7rem; color:{text_muted}; margin-bottom:8px;'>"
                 "Add a deployment location by address or by dropping a pin on the map. "
-                "Address suggestions use Census + OpenStreetMap lookup. Custom stations persist for this session only.</div>",
+                "Address suggestions use Census + OpenStreetMap lookup. Custom stations persist for this session only. "
+                "<span class='tip' data-tip='Custom stations are stored in session state for the current run only. They remain available until you refresh or clear them.'>?</span></div>",
                 unsafe_allow_html=True
             )
             if 'cs_addr_buf' not in st.session_state: st.session_state['cs_addr_buf'] = ""
@@ -3329,7 +3337,7 @@ def main():
 
             st.markdown(
                 f"<div style='font-size:0.7rem; color:{text_muted}; margin:0 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>"
-                "Add By Address</div>",
+                "Add By Address <span class='tip' data-tip='Type an address, confirm the best suggested match, then add the station into the selected fleet.'>?</span></div>",
                 unsafe_allow_html=True
             )
             _custom_addr = st.text_input(
@@ -3379,11 +3387,18 @@ def main():
             if 'cs_role_buf' not in st.session_state: st.session_state['cs_role_buf'] = "Lock as Guardian"
             _role_opts = ["Lock as Guardian", "Lock as Responder"]
             _role_idx = _role_opts.index(st.session_state['cs_role_buf']) if st.session_state['cs_role_buf'] in _role_opts else 0
-            _custom_role = st.radio(
+            _role_row_label, _role_row_picker = st.columns([1.0, 2.2], gap="small")
+            _role_row_label.markdown(
+                f"<div style='font-size:0.78rem; color:{text_main}; font-weight:600; margin-top:6px;'>"
+                "Assign To Fleet <span class='tip' data-tip='Choose whether this custom station is locked into the Guardian or Responder fleet after it is added.'>?</span></div>",
+                unsafe_allow_html=True
+            )
+            _custom_role = _role_row_picker.radio(
                 "Assign To Fleet",
                 _role_opts,
                 index=_role_idx,
                 horizontal=True,
+                label_visibility="collapsed",
                 key="custom_station_role",
                 help="Choose which fleet this custom station will be locked into after it is added."
             )
@@ -3396,7 +3411,7 @@ def main():
             st.markdown("---")
             st.markdown(
                 f"<div style='font-size:0.7rem; color:{text_muted}; margin:0 0 6px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>"
-                "Actions</div>",
+                "Actions <span class='tip' data-tip='Use Pin Drop to add from the map, Lock Stations to review forced assignments, or Geocode And Add Station to add the typed address.'>?</span></div>",
                 unsafe_allow_html=True
             )
             _action_col1, _action_col2 = st.columns(2)
@@ -3501,7 +3516,7 @@ def main():
             if _custom_added:
                 st.markdown(
                     f"<div style='font-size:0.65rem; color:{text_muted}; margin-top:8px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>"
-                    f"Custom Stations This Session ({len(_custom_added)})</div>",
+                    f"Custom Stations This Session ({len(_custom_added)}) <span class='tip' data-tip='These are the custom stations added during this session. The badge shows which fleet each one is pinned to.'>?</span></div>",
                     unsafe_allow_html=True
                 )
                 _pg_set = set(st.session_state.get('pinned_guard_names', []))
@@ -4640,43 +4655,6 @@ def main():
                         }
                         st.rerun()
 
-        locked_active_drones = [d for d in active_drones if d.get('pinned')]
-        if locked_active_drones:
-            st.markdown("---")
-            st.markdown(f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Locked Stations</h4>", unsafe_allow_html=True)
-            st.markdown(
-                f"<div style='font-size:0.72rem; color:{text_muted}; margin-bottom:10px;'>These stations are forced into the active fleet. Use <b>X Unlock</b> to release them back to the optimizer.</div>",
-                unsafe_allow_html=True
-            )
-            for _start in range(0, len(locked_active_drones), 4):
-                _row = locked_active_drones[_start:_start + 4]
-                _cols = st.columns(len(_row))
-                for _col, _locked in zip(_cols, _row):
-                    with _col:
-                        _fleet_color = '#FFD700' if _locked['type'] == 'GUARDIAN' else accent_color
-                        _fleet_label = 'Guardian' if _locked['type'] == 'GUARDIAN' else 'Responder'
-                        st.markdown(
-                            f"""
-                            <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid {_fleet_color};border-radius:8px;padding:10px 12px;margin-bottom:6px;min-height:112px;">
-                                <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
-                                    <div style="min-width:0;">
-                                        <div style="font-size:0.82rem;font-weight:700;color:{text_main};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">[LOCKED] {_locked['name']}</div>
-                                        <div style="font-size:0.66rem;color:{text_muted};margin-top:2px;">{_fleet_label} lock | Step {_locked['deploy_step']}</div>
-                                    </div>
-                                    <div style="font-size:0.62rem;color:{_fleet_color};font-weight:700;white-space:nowrap;">ACTIVE</div>
-                                </div>
-                                <div style="font-size:0.68rem;color:{text_muted};margin-top:8px;">Avg response {float(_locked.get('avg_time_min', 0) or 0):.1f} min</div>
-                                <div style="font-size:0.68rem;color:{text_muted};">FAA ceiling {_locked.get('faa_ceiling', 'N/A')}</div>
-                            </div>
-                            """,
-                            unsafe_allow_html=True
-                        )
-                        if st.button("X Unlock", key=f"unlock_locked_station_{_locked['type']}_{_locked['name']}", use_container_width=True):
-                            if _locked['type'] == 'GUARDIAN':
-                                _set_station_locks([x for x in pinned_guard_names if x != _locked['name']], pinned_resp_names, ensure_capacity=False)
-                            else:
-                                _set_station_locks(pinned_guard_names, [x for x in pinned_resp_names if x != _locked['name']], ensure_capacity=False)
-                            st.rerun()
 
         # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────
         st.markdown("---")
@@ -4727,6 +4705,44 @@ def main():
                 """,
                 unsafe_allow_html=True
             )
+
+        locked_active_drones = [d for d in active_drones if d.get('pinned')]
+        if locked_active_drones:
+            st.markdown("---")
+            st.markdown(f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Locked Stations</h4>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div style='font-size:0.72rem; color:{text_muted}; margin-bottom:10px;'>These stations are forced into the active fleet. Use <b>X Unlock</b> to release them back to the optimizer.</div>",
+                unsafe_allow_html=True
+            )
+            for _start in range(0, len(locked_active_drones), 4):
+                _row = locked_active_drones[_start:_start + 4]
+                _cols = st.columns(len(_row))
+                for _col, _locked in zip(_cols, _row):
+                    with _col:
+                        _fleet_color = '#FFD700' if _locked['type'] == 'GUARDIAN' else accent_color
+                        _fleet_label = 'Guardian' if _locked['type'] == 'GUARDIAN' else 'Responder'
+                        st.markdown(
+                            f"""
+                            <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid {_fleet_color};border-radius:8px;padding:10px 12px;margin-bottom:6px;min-height:112px;">
+                                <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+                                    <div style="min-width:0;">
+                                        <div style="font-size:0.82rem;font-weight:700;color:{text_main};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">[LOCKED] {_locked['name']}</div>
+                                        <div style="font-size:0.66rem;color:{text_muted};margin-top:2px;">{_fleet_label} lock | Step {_locked['deploy_step']}</div>
+                                    </div>
+                                    <div style="font-size:0.62rem;color:{_fleet_color};font-weight:700;white-space:nowrap;">ACTIVE</div>
+                                </div>
+                                <div style="font-size:0.68rem;color:{text_muted};margin-top:8px;">Avg response {float(_locked.get('avg_time_min', 0) or 0):.1f} min</div>
+                                <div style="font-size:0.68rem;color:{text_muted};">FAA ceiling {_locked.get('faa_ceiling', 'N/A')}</div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                        if st.button("X Unlock", key=f"unlock_locked_station_{_locked['type']}_{_locked['name']}", use_container_width=True):
+                            if _locked['type'] == 'GUARDIAN':
+                                _set_station_locks([x for x in pinned_guard_names if x != _locked['name']], pinned_resp_names, ensure_capacity=False)
+                            else:
+                                _set_station_locks(pinned_guard_names, [x for x in pinned_resp_names if x != _locked['name']], ensure_capacity=False)
+                            st.rerun()
 
         # ── COVERAGE CURVE + STATION RING CHART (side by side, directly below cards) ──
         st.markdown("---")

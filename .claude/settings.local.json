@@ -43,7 +43,8 @@
       "Bash(awk -F: 'NR>120 && NR<=200')",
       "Bash(awk -F: '$1 >= 6800 && $1 <= 12735')",
       "Bash(awk -F: '$1 >= 440 && $1 <= 700')",
-      "Bash(awk -F: '$1 >= 6800')"
+      "Bash(awk -F: '$1 >= 6800')",
+      "Bash(wc -l app.py modules/*.py)"
     ]
   }
 }

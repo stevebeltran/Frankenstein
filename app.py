@@ -32,47 +32,11 @@ from modules.config import (
     get_hero_message, get_faa_message, get_airfield_message,
     get_jurisdiction_message, get_spatial_message
 )
+from modules.versioning import __version__, _render_version_badge
+from modules.image_utils import (
+    get_base64_of_bin_file, get_themed_logo_base64, get_transparent_product_base64
+)
 
-_MONSTER_NAMES = ["prom", "behe", "quasi", "drac"]
-_BUILD_META_PATH = Path(".build_meta")
-
-
-def _compute_build_version():
-    _app_path = Path(__file__).resolve()
-    _mtime = _app_path.stat().st_mtime
-    _stored_ts = None
-    _iteration = 0
-
-    try:
-        if _BUILD_META_PATH.exists():
-            _raw_meta = _BUILD_META_PATH.read_text(encoding="utf-8").strip()
-            if _raw_meta:
-                _ts_str, _iter_str = _raw_meta.split("|", 1)
-                _stored_ts = float(_ts_str)
-                _iteration = int(_iter_str)
-    except (ValueError, OSError):
-        _stored_ts = None
-        _iteration = 0
-
-    if _stored_ts is None:
-        _iteration = 1
-    elif _mtime != _stored_ts:
-        _iteration += 1
-
-    try:
-        _BUILD_META_PATH.write_text(f"{_mtime}|{_iteration}", encoding="utf-8")
-    except OSError:
-        pass
-
-    _dt = datetime.datetime.fromtimestamp(_mtime)
-    _month_letter = chr(ord("A") + _dt.month - 1)
-    _monster_idx = min(max(_iteration - 1, 0) // 50, len(_MONSTER_NAMES) - 1)
-    _monster_name = _MONSTER_NAMES[_monster_idx]
-    return f"{_dt:%y}{_month_letter}{_dt:%d}-{_monster_name}-{_dt:%H%M}.{_iteration}"
-
-
-__version__ = _compute_build_version()
-print(f"\033[38;5;234m{__version__}\033[0m")
 
 
 def _load_uploaded_boundary_overlay(uploaded_files):
@@ -153,18 +117,6 @@ def _boundary_overlay_status(boundary_geom_4326, overlay_gdf, epsg_code):
         return {'status': _status, 'message': _message, 'pct_overlay_inside': _pct_overlay_inside, 'pct_boundary_covered': _pct_boundary_covered}
     except Exception:
         return None
-
-
-def _render_version_badge(position="top-right"):
-    _placement = "top: 12px; right: 16px;" if position == "top-right" else "bottom: 12px; right: 16px;"
-    st.markdown(
-        f"""
-        <div style="position:fixed; {_placement} z-index:9999; font-family:'IBM Plex Mono',monospace; font-size:0.62rem; letter-spacing:0.08em; color:rgba(160,175,190,0.72); background:rgba(7,10,18,0.72); border:1px solid rgba(120,140,160,0.18); border-radius:999px; padding:4px 10px; backdrop-filter: blur(6px); pointer-events:none;">
-            v {__version__}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 # --- MOBILE SUMMARY ROUTE (must run before set_page_config) ---
@@ -1205,46 +1157,6 @@ def _select_best_boundary_for_calls(df_calls, city_text, state_abbr, prefer_coun
 
     best_kind, best_gdf, best_hits = candidates[0]
     return True, best_gdf, best_kind, int(best_hits)
-
-def get_base64_of_bin_file(bin_file):
-    try:
-        with open(bin_file, 'rb') as f: return base64.b64encode(f.read()).decode()
-    except Exception: return None
-
-
-def get_themed_logo_base64(logo_file="logo.png", theme="dark"):
-    """Return a recolored transparent PNG logo as base64.
-
-    theme='dark'  -> white logo on transparent background
-    theme='light' -> black logo on transparent background
-    """
-    try:
-        target_rgb = (255, 255, 255) if str(theme).lower() == 'dark' else (0, 0, 0)
-        with Image.open(logo_file).convert('RGBA') as img:
-            alpha = img.getchannel('A')
-            recolored = Image.new('RGBA', img.size, target_rgb + (0,))
-            recolored.putalpha(alpha)
-            buf = io.BytesIO()
-            recolored.save(buf, format='PNG')
-            return base64.b64encode(buf.getvalue()).decode()
-    except Exception:
-        return get_base64_of_bin_file(logo_file)
-
-
-def get_transparent_product_base64(image_file="gigs.png", threshold=32):
-    """Return product image as transparent PNG by removing near-black background."""
-    try:
-        with Image.open(image_file).convert('RGBA') as img:
-            arr = np.array(img)
-            r, g, b, a = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2], arr[:, :, 3]
-            mask = (r <= threshold) & (g <= threshold) & (b <= threshold)
-            arr[:, :, 3] = np.where(mask, 0, a)
-            result = Image.fromarray(arr, 'RGBA')
-            buf = io.BytesIO()
-            result.save(buf, format='PNG')
-            return base64.b64encode(buf.getvalue()).decode()
-    except Exception:
-        return get_base64_of_bin_file(image_file)
 
 # ============================================================
 # COMMAND CENTER ANALYTICS GENERATOR

@@ -3587,11 +3587,42 @@ def main():
                     _n += 1
                 return f"{_label_with_coords} #{_n}"
 
+            def _next_custom_station_name():
+                """Return the next sequential default label for custom pin-drop stations."""
+                _cst = st.session_state.get('custom_stations', pd.DataFrame())
+                _used_numbers = set()
+                if not _cst.empty and 'name' in _cst.columns:
+                    for _name in _cst['name'].astype(str):
+                        _m = re.fullmatch(r"Custom Station (\d+)", _name.strip())
+                        if _m:
+                            _used_numbers.add(int(_m.group(1)))
+                _n = 1
+                while _n in _used_numbers:
+                    _n += 1
+                return f"Custom Station {_n}"
+
+            def _build_lock_lists(prefixed_label, lock_role):
+                """Return updated Guardian/Responder lock lists for one station."""
+                _guard = [x for x in st.session_state.get('pinned_guard_names', []) if x != prefixed_label]
+                _resp = [x for x in st.session_state.get('pinned_resp_names', []) if x != prefixed_label]
+                if lock_role == "Guardian":
+                    _guard.append(prefixed_label)
+                else:
+                    _resp.append(prefixed_label)
+                return _guard, _resp
+
             _station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
 
             def _set_station_locks(new_guard_names, new_resp_names, ensure_capacity=True):
-                _guard = [s for s in list(dict.fromkeys(new_guard_names)) if s in _station_names]
-                _resp = [s for s in list(dict.fromkeys(new_resp_names)) if s in _station_names and s not in _guard]
+                _valid_lock_names = set(_station_names)
+                _custom_existing = st.session_state.get('custom_stations', pd.DataFrame())
+                if not _custom_existing.empty and {'name', 'type'}.issubset(_custom_existing.columns):
+                    _valid_lock_names.update(
+                        f"[{row['type']}] {row['name']}"
+                        for _, row in _custom_existing[['name', 'type']].dropna().iterrows()
+                    )
+                _guard = [s for s in list(dict.fromkeys(new_guard_names)) if s in _valid_lock_names]
+                _resp = [s for s in list(dict.fromkeys(new_resp_names)) if s in _valid_lock_names and s not in _guard]
                 st.session_state['pinned_guard_names'] = list(_guard)
                 st.session_state['pinned_resp_names'] = list(_resp)
                 st.session_state['lock_guard_ms'] = list(_guard)
@@ -3718,7 +3749,7 @@ def main():
                     _pp_label = st.text_input(
                         "Dropped Pin Name",
                         value=st.session_state['pp_label_buf'],
-                        placeholder="Fire Station 4",
+                        placeholder=_next_custom_station_name(),
                         key="pp_label_input",
                         help="Optional station label for the dropped pin. Leave blank to use an auto-generated name."
                     )
@@ -3751,13 +3782,19 @@ def main():
                         type="primary",
                         help="Add the dropped pin as a custom station and lock it to the selected fleet."
                     ):
-                        _label = _make_unique_station_label(_pp_label, _pp_type, _pending['lat'], _pending['lon'])
+                        _default_name = _next_custom_station_name()
+                        _base_label = (_pp_label or "").strip() or _default_name
+                        _label = _make_unique_station_label(_base_label, _pp_type, _pending['lat'], _pending['lon'])
                         _prefixed_label = f"[{_pp_type}] {_label}"
+                        _pp_lock_role = "Guardian" if "Guardian" in _pp_role else "Responder"
+                        _nearest_addr = get_address_from_latlon(_pending['lat'], _pending['lon'])
                         _new_pin_row = pd.DataFrame([{
                             "name": _label,
                             "lat": _pending['lat'],
                             "lon": _pending['lon'],
                             "type": _pp_type,
+                            "lock_role": _pp_lock_role,
+                            "address": _nearest_addr,
                             "custom": True,
                         }])
                         _cst = st.session_state.get('custom_stations', pd.DataFrame())
@@ -3765,40 +3802,15 @@ def main():
                             pd.concat([_cst, _new_pin_row], ignore_index=True)
                             if not _cst.empty else _new_pin_row
                         )
-                        if "Guardian" in _pp_role:
-                            _pg = list(st.session_state.get('pinned_guard_names', []))
-                            if _prefixed_label not in _pg:
-                                _pg.append(_prefixed_label)
-                            st.session_state['pinned_resp_names'] = [
-                                x for x in st.session_state.get('pinned_resp_names', [])
-                                if x != _prefixed_label]
-                            st.session_state['pinned_guard_names'] = _pg
-                            _new_pin_g = len(_pg)
-                            _new_pin_r = len(st.session_state.get('pinned_resp_names', []))
-                            st.session_state['k_guard'] = max(st.session_state.get('k_guard', 0) + 1, _new_pin_g)
-                            st.session_state['k_resp'] = max(st.session_state.get('k_resp', 0), _new_pin_r)
-                        else:
-                            _pr = list(st.session_state.get('pinned_resp_names', []))
-                            if _prefixed_label not in _pr:
-                                _pr.append(_prefixed_label)
-                            st.session_state['pinned_guard_names'] = [
-                                x for x in st.session_state.get('pinned_guard_names', [])
-                                if x != _prefixed_label]
-                            st.session_state['pinned_resp_names'] = _pr
-                            _new_pin_r = len(_pr)
-                            _new_pin_g = len(st.session_state.get('pinned_guard_names', []))
-                            st.session_state['k_resp'] = max(st.session_state.get('k_resp', 0) + 1, _new_pin_r)
-                            st.session_state['k_guard'] = max(st.session_state.get('k_guard', 0), _new_pin_g)
+                        _new_g, _new_r = _build_lock_lists(_prefixed_label, _pp_lock_role)
+                        _set_station_locks(_new_g, _new_r, ensure_capacity=True)
                         st.session_state['pin_drop_used'] = True
-                        st.session_state.pop('_auto_minimums_sig', None)
-                        for _ck in ['_opt_cache_key', '_opt_best_combo', '_opt_chrono_r', '_opt_chrono_g']:
-                            st.session_state.pop(_ck, None)
                         st.session_state['pending_pin'] = None
                         st.session_state['pp_label_buf'] = ""
                         st.session_state['pin_drop_mode'] = False
-                        st.session_state['show_lock_stations'] = True
+                        st.session_state['show_lock_stations'] = False
                         st.session_state.pop('_pin_sel_hash', None)
-                        st.toast(f"{_label} pinned as {'Guardian' if 'Guardian' in _pp_role else 'Responder'}.")
+                        st.toast(f"{_label} pinned as {_pp_lock_role}.")
                         st.rerun()
                     if _pin_cols[1].button(
                         "Cancel Pin",
@@ -3906,6 +3918,8 @@ def main():
                                     "lat": _geo_lat,
                                     "lon": _geo_lon,
                                     "type": _custom_type,
+                                    "lock_role": "Guardian" if _custom_role == "Lock as Guardian" else "Responder",
+                                    "address": _matched_addr,
                                     "custom": True,
                                 }])
                                 _cst = st.session_state.get('custom_stations', pd.DataFrame())
@@ -3913,28 +3927,10 @@ def main():
                                     [_cst, _new_row], ignore_index=True
                                 ) if not _cst.empty else _new_row
 
-                                if _custom_role == "Lock as Guardian":
-                                    _pg = list(st.session_state.get('pinned_guard_names', []))
-                                    if _prefixed_label not in _pg:
-                                        _pg.append(_prefixed_label)
-                                    st.session_state['pinned_resp_names'] = [
-                                        x for x in st.session_state.get('pinned_resp_names', [])
-                                        if x != _prefixed_label]
-                                    st.session_state['pinned_guard_names'] = _pg
-                                    if st.session_state.get('k_guard', 0) < len(_pg):
-                                        st.session_state['k_guard'] = len(_pg)
-                                    _pin_note = "Pinned as Guardian."
-                                else:
-                                    _pr = list(st.session_state.get('pinned_resp_names', []))
-                                    if _prefixed_label not in _pr:
-                                        _pr.append(_prefixed_label)
-                                    st.session_state['pinned_guard_names'] = [
-                                        x for x in st.session_state.get('pinned_guard_names', [])
-                                        if x != _prefixed_label]
-                                    st.session_state['pinned_resp_names'] = _pr
-                                    if st.session_state.get('k_resp', 0) < len(_pr):
-                                        st.session_state['k_resp'] = len(_pr)
-                                    _pin_note = "Pinned as Responder."
+                                _custom_lock_role = "Guardian" if _custom_role == "Lock as Guardian" else "Responder"
+                                _new_g, _new_r = _build_lock_lists(_prefixed_label, _custom_lock_role)
+                                _set_station_locks(_new_g, _new_r, ensure_capacity=True)
+                                _pin_note = f"Pinned as {_custom_lock_role}."
 
                                 st.success(
                                     f"Added and locked: **{_label}** ({_geo_lat:.4f}, {_geo_lon:.4f})\n{_pin_note}"
@@ -3975,8 +3971,9 @@ def main():
                     for _idx, _cn in enumerate(_custom_added[:12]):
                         _cst_row = _cst_disp[_cst_disp['name'] == _cn].iloc[0] if not _cst_disp.empty and (_cst_disp['name'] == _cn).any() else None
                         _pfx = f"[{_cst_row['type']}] {_cn}" if _cst_row is not None else _cn
-                        _is_g = _pfx in _guard_set or _cn in _guard_set
-                        _is_r = _pfx in _resp_set or _cn in _resp_set
+                        _stored_lock_role = str(_cst_row.get('lock_role', '')).strip() if _cst_row is not None else ''
+                        _is_g = _stored_lock_role == "Guardian" or _pfx in _guard_set or _cn in _guard_set
+                        _is_r = _stored_lock_role == "Responder" or _pfx in _resp_set or _cn in _resp_set
                         _badge = "G" if _is_g else "R" if _is_r else "•"
                         _color = "#FFD700" if _is_g else "#00D2FF" if _is_r else "#9aa0b4"
                         _row_cols = st.columns([6, 1])
@@ -5170,48 +5167,6 @@ def main():
                     """,
                     unsafe_allow_html=True
                 )
-
-            locked_active_drones = [d for d in active_drones if d.get('pinned')]
-            if locked_active_drones:
-                st.markdown("---")
-                st.markdown(f"<h4 style='margin-top:2px; border-bottom:1px solid {card_border}; padding-bottom:8px; color:{text_main};'>Locked Stations</h4>", unsafe_allow_html=True)
-                st.markdown(
-                    f"<div style='font-size:0.72rem; color:{text_muted}; margin-bottom:10px;'>These stations are forced into the active fleet. Use <b>X Unlock</b> to release them back to the optimizer.</div>",
-                    unsafe_allow_html=True
-                )
-                for _start in range(0, len(locked_active_drones), 4):
-                    _row = locked_active_drones[_start:_start + 4]
-                    _cols = st.columns(len(_row))
-                    for _col, _locked in zip(_cols, _row):
-                        with _col:
-                            _fleet_color = '#FFD700' if _locked['type'] == 'GUARDIAN' else accent_color
-                            _fleet_label = 'Guardian' if _locked['type'] == 'GUARDIAN' else 'Responder'
-                            st.markdown(
-                                f"""
-                                <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid {_fleet_color};border-radius:8px;padding:10px 12px;margin-bottom:6px;min-height:112px;">
-                                    <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
-                                        <div style="min-width:0;">
-                                            <div style="font-size:0.82rem;font-weight:700;color:{text_main};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">[LOCKED] {_locked['name']}</div>
-                                            <div style="font-size:0.66rem;color:{text_muted};margin-top:2px;">{_fleet_label} lock | Step {_locked['deploy_step']}</div>
-                                        </div>
-                                        <div style="font-size:0.62rem;color:{_fleet_color};font-weight:700;white-space:nowrap;">ACTIVE</div>
-                                    </div>
-                                    <div style="font-size:0.68rem;color:{text_muted};margin-top:8px;">Avg response {float(_locked.get('avg_time_min', 0) or 0):.1f} min</div>
-                                    <div style="font-size:0.68rem;color:{text_muted};">FAA ceiling {_locked.get('faa_ceiling', 'N/A')}</div>
-                                </div>
-                                """,
-                                unsafe_allow_html=True
-                            )
-                            if st.button("X Unlock", key=f"unlock_locked_station_{_locked['type']}_{_locked['name']}", use_container_width=True):
-                                _locked_names = {str(_locked['name'])}
-                                _locked_station_type = str(_locked.get('station_type', '') or '').strip()
-                                if _locked_station_type:
-                                    _locked_names.add(f"[{_locked_station_type.title()}] {_locked['name']}")
-                                if _locked['type'] == 'GUARDIAN':
-                                    _set_station_locks([x for x in pinned_guard_names if x not in _locked_names], pinned_resp_names, ensure_capacity=False)
-                                else:
-                                    _set_station_locks(pinned_guard_names, [x for x in pinned_resp_names if x not in _locked_names], ensure_capacity=False)
-                                st.rerun()
 
             # ── COVERAGE CURVE + STATION RING CHART (side by side, directly below cards) ──
             st.markdown("---")

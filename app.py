@@ -6122,84 +6122,6 @@ def main():
             _qr_dept = str(_qr_dept).strip().title()
 
             # ── Public QR summary page (condensed, no login) ────────────────────────
-            # Match main page: go.Scattermap + carto-darkmatter.
-            # Load Plotly explicitly in <head> (pinned to installed version) so the
-            # map div script never runs before Plotly is defined.
-            import plotly as _plotly_pkg
-            _plotly_cdn = f"https://cdn.plot.ly/plotly-{_plotly_pkg.__version__}.min.js"
-            _public_map = go.Figure()
-            if city_boundary_geom is not None and not city_boundary_geom.is_empty:
-                _pub_geoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
-                              else list(city_boundary_geom.geoms))
-                for _gi, _geom in enumerate(_pub_geoms):
-                    _bx, _by = _geom.exterior.coords.xy
-                    _public_map.add_trace(go.Scattermap(
-                        mode="lines",
-                        lon=list(_bx),
-                        lat=list(_by),
-                        line=dict(color="#00D2FF", width=2),
-                        name="Boundary",
-                        hoverinfo="skip",
-                        showlegend=(_gi == 0),
-                    ))
-            # ── calls for service dots (rendered before stations so stations sit on top) ──
-            try:
-                _pub_calls_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
-                if _pub_calls_df is not None and not _pub_calls_df.empty and 'lat' in _pub_calls_df.columns and 'lon' in _pub_calls_df.columns:
-                    _pub_n = min(800, len(_pub_calls_df))
-                    _pub_samp = _pub_calls_df.sample(_pub_n, random_state=42).dropna(subset=['lat', 'lon'])
-                    if not _pub_samp.empty:
-                        _pub_pt_sz = 2 if len(_pub_samp) > 300 else 3
-                        _pub_pt_op = 0.25 if len(_pub_samp) > 300 else 0.38
-                        _pub_has_ag = 'agency' in _pub_samp.columns
-                        _pub_fire   = _pub_samp[_pub_samp['agency'].str.lower() == 'fire'] if _pub_has_ag else _pub_samp.iloc[:0]
-                        _pub_police = _pub_samp[_pub_samp['agency'].str.lower() != 'fire'] if _pub_has_ag else _pub_samp
-                        if not _pub_police.empty:
-                            _public_map.add_trace(go.Scattermap(
-                                lat=_pub_police['lat'].tolist(), lon=_pub_police['lon'].tolist(),
-                                mode='markers',
-                                marker=dict(size=_pub_pt_sz, color='#00D2FF', opacity=_pub_pt_op),
-                                name='Incidents', hoverinfo='skip',
-                            ))
-                        if not _pub_fire.empty:
-                            _public_map.add_trace(go.Scattermap(
-                                lat=_pub_fire['lat'].tolist(), lon=_pub_fire['lon'].tolist(),
-                                mode='markers',
-                                marker=dict(size=_pub_pt_sz, color='#ff3b3b', opacity=_pub_pt_op),
-                                name='Fire Incidents', hoverinfo='skip',
-                            ))
-            except Exception:
-                pass
-            if active_drones:
-                _public_map.add_trace(go.Scattermap(
-                    lat=[d['lat'] for d in active_drones],
-                    lon=[d['lon'] for d in active_drones],
-                    mode='markers+text',
-                    text=[d['name'] for d in active_drones],
-                    textposition='top center',
-                    marker=dict(
-                        size=14,
-                        color=[("#FFD700" if d['type'] == "GUARDIAN" else "#00D2FF") for d in active_drones],
-                        opacity=0.95,
-                    ),
-                    customdata=[[d['type'], round(float(d.get('avg_time_min', 0) or 0), 1)] for d in active_drones],
-                    hovertemplate="<b>%{text}</b><br>%{customdata[0]}<br>Avg response %{customdata[1]} min<extra></extra>",
-                    name="Stations",
-                ))
-            _public_map.update_layout(
-                map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
-                paper_bgcolor="#0c1828",
-                margin=dict(l=0, r=0, t=0, b=0),
-                height=420,
-                showlegend=False,
-            )
-            # include_plotlyjs=False — Plotly is loaded explicitly in <head> below
-            _public_map_html = _public_map.to_html(
-                full_html=False,
-                include_plotlyjs=False,
-                default_height='420px',
-                default_width='100%',
-            )
             _station_rows_html = "".join(
                 f"<div class='row'>"
                 f"<div><div class='sname'>{d['name']}</div>"
@@ -6214,8 +6136,6 @@ def main():
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>BRINC DFR — {_qr_city}, {_qr_state}</title>
-  <script src="{_plotly_cdn}"></script>
-  <link href="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.css" rel="stylesheet"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>
     *{{box-sizing:border-box;margin:0;padding:0}}
@@ -6243,10 +6163,8 @@ def main():
     .m-cov .k{{color:#00D2FF}}.m-cov .v{{color:#00D2FF}}
     .m-fleet{{background:rgba(168,139,250,.07);border-color:rgba(168,139,250,.3)}}
     .m-fleet .k{{color:#a78bfa}}.m-fleet .v{{color:#a78bfa}}
-    /* ── main grid ── */
-    .grid{{display:grid;grid-template-columns:minmax(0,1.5fr) 280px;gap:10px}}
-    .card{{background:#0c1828;border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:14px;overflow:visible}}
-    .card-list{{overflow:hidden}}
+    /* ── station card ── */
+    .card{{background:#0c1828;border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:14px;overflow:hidden;max-width:480px}}
     .card-title{{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:#00D2FF;margin-bottom:10px}}
     /* ── station list ── */
     .list{{display:flex;flex-direction:column;gap:0}}
@@ -6262,7 +6180,7 @@ def main():
     .contact .label{{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:#00D2FF;font-weight:700;margin-bottom:4px}}
     .contact .name{{font-size:16px;font-weight:800;margin-bottom:2px}}
     .contact a{{color:#00D2FF;text-decoration:none;font-size:13px}}
-    @media(max-width:720px){{.metrics{{grid-template-columns:repeat(2,1fr)}}.grid{{grid-template-columns:1fr}}}}
+    @media(max-width:720px){{.metrics{{grid-template-columns:repeat(2,1fr)}}.card{{max-width:100%}}}}
   </style>
 </head>
 <body>
@@ -6288,20 +6206,14 @@ def main():
     <div class="metric m-cov"><div class="k">Call Coverage</div><div class="v">{calls_covered_perc:.1f}%</div></div>
     <div class="metric m-fleet"><div class="k">Fleet</div><div class="v">{actual_k_responder}R / {actual_k_guardian}G</div></div>
   </div>
-  <!-- map + station list -->
-  <div class="grid">
-    <div class="card">
-      <div class="card-title">Station Placement Map</div>
-      {_public_map_html}
-    </div>
-    <div class="card card-list">
-      <div class="card-title">Stations</div>
-      <div class="list">{_station_rows_html}</div>
-      <div class="contact">
-        <div class="label">BRINC Representative</div>
-        <div class="name">{_qr_name}</div>
-        <a href="mailto:{_qr_email}">{_qr_email}</a>
-      </div>
+  <!-- station list -->
+  <div class="card">
+    <div class="card-title">Stations</div>
+    <div class="list">{_station_rows_html}</div>
+    <div class="contact">
+      <div class="label">BRINC Representative</div>
+      <div class="name">{_qr_name}</div>
+      <a href="mailto:{_qr_email}">{_qr_email}</a>
     </div>
   </div>
 </div>

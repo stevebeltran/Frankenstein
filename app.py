@@ -32,6 +32,9 @@ from modules.config import (
     get_hero_message, get_faa_message, get_airfield_message,
     get_jurisdiction_message, get_spatial_message
 )
+import importlib as _importlib
+import modules.versioning as _versioning_mod
+_importlib.reload(_versioning_mod)  # recompute on every Streamlit rerun so revision increments on each save
 from modules.versioning import (
     __version__,
     __build_revision__,

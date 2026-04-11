@@ -6118,6 +6118,134 @@ def main():
             _qr_dept = st.session_state.get('active_dept_name', '') or _qr_city or 'Jurisdiction'
             _qr_dept = str(_qr_dept).strip().title()
 
+            # ── Public QR summary page (condensed, no login) ────────────────────────
+            _public_map = go.Figure()
+            if city_boundary_geom is not None and not city_boundary_geom.is_empty:
+                _pub_geoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
+                              else list(city_boundary_geom.geoms))
+                for _gi, _geom in enumerate(_pub_geoms):
+                    _bx, _by = _geom.exterior.coords.xy
+                    _public_map.add_trace(go.Scattermap(
+                        mode="lines",
+                        lon=list(_bx),
+                        lat=list(_by),
+                        line=dict(color="#00D2FF", width=2),
+                        name="Boundary",
+                        hoverinfo="skip",
+                        showlegend=(_gi == 0),
+                    ))
+            if active_drones:
+                _public_map.add_trace(go.Scattermap(
+                    lat=[d['lat'] for d in active_drones],
+                    lon=[d['lon'] for d in active_drones],
+                    mode='markers+text',
+                    text=[d['name'] for d in active_drones],
+                    textposition='top center',
+                    marker=dict(
+                        size=15,
+                        color=[("#FFD700" if d['type'] == "GUARDIAN" else "#00D2FF") for d in active_drones],
+                        line=dict(color="#ffffff", width=1),
+                    ),
+                    customdata=[[d['type'], round(float(d.get('avg_time_min', 0) or 0), 1)] for d in active_drones],
+                    hovertemplate="<b>%{text}</b><br>%{customdata[0]}<br>Avg response %{customdata[1]} min<extra></extra>",
+                    name="Stations",
+                ))
+            _public_map.update_layout(
+                map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-positron"),
+                margin=dict(l=0, r=0, t=0, b=0),
+                height=420,
+                showlegend=False,
+            )
+            _public_map_html = _public_map.to_html(
+                full_html=False,
+                include_plotlyjs='cdn',
+                default_height='420px',
+                default_width='100%',
+            )
+            _public_summary_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>BRINC DFR Summary — {_qr_city}, {_qr_state}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    * {{ box-sizing:border-box; }}
+    body {{ margin:0; font-family:'Inter',sans-serif; background:#08101b; color:#eef6ff; }}
+    .wrap {{ max-width:1100px; margin:0 auto; padding:24px; }}
+    .hero {{ background:linear-gradient(135deg,#0b1423 0%,#0f2136 55%,#08101b 100%); border:1px solid rgba(0,210,255,0.22); border-radius:22px; padding:24px; }}
+    .eyebrow {{ color:#00D2FF; font-size:12px; letter-spacing:0.16em; text-transform:uppercase; font-weight:700; }}
+    .title {{ font-size:clamp(28px,4vw,44px); font-weight:800; line-height:1.05; margin:10px 0 8px; }}
+    .sub {{ color:#93a9bf; font-size:15px; }}
+    .metrics {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-top:18px; }}
+    .metric {{ background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:14px 16px; }}
+    .metric .k {{ color:#8aa0b6; font-size:11px; text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px; }}
+    .metric .v {{ font-size:26px; font-weight:800; }}
+    .grid {{ display:grid; grid-template-columns:minmax(0,1.45fr) minmax(300px,0.85fr); gap:16px; margin-top:16px; }}
+    .card {{ background:#0d1726; border:1px solid rgba(255,255,255,0.08); border-radius:18px; padding:18px; }}
+    .card h3 {{ margin:0 0 10px; font-size:16px; }}
+    .list {{ display:grid; gap:10px; }}
+    .row {{ display:flex; justify-content:space-between; gap:12px; align-items:flex-start; padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06); }}
+    .row:last-child {{ border-bottom:none; padding-bottom:0; }}
+    .station-name {{ font-weight:700; }}
+    .station-sub {{ color:#8aa0b6; font-size:13px; margin-top:2px; }}
+    .badge {{ display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:4px 10px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; }}
+    .badge.guard {{ background:rgba(255,215,0,0.14); color:#FFD700; border:1px solid rgba(255,215,0,0.32); }}
+    .badge.resp {{ background:rgba(0,210,255,0.14); color:#00D2FF; border:1px solid rgba(0,210,255,0.32); }}
+    a {{ color:#00D2FF; text-decoration:none; }}
+    @media (max-width: 820px) {{ .grid {{ grid-template-columns:1fr; }} .wrap {{ padding:14px; }} }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Public DFR Summary</div>
+      <div class="title">{_qr_dept}</div>
+      <div class="sub">{_qr_city}, {_qr_state} · condensed deployment snapshot for external viewing</div>
+      <div class="metrics">
+        <div class="metric"><div class="k">Fleet CapEx</div><div class="v">${fleet_capex:,.0f}</div></div>
+        <div class="metric"><div class="k">Annual Savings</div><div class="v">${annual_savings:,.0f}</div></div>
+        <div class="metric"><div class="k">Call Coverage</div><div class="v">{calls_covered_perc:.1f}%</div></div>
+        <div class="metric"><div class="k">Fleet</div><div class="v">{actual_k_responder}R / {actual_k_guardian}G</div></div>
+      </div>
+    </section>
+    <section class="grid">
+      <div class="card">
+        <h3>Station Placement Map</h3>
+        {_public_map_html}
+      </div>
+      <div class="card">
+        <h3>Station Placement</h3>
+        <div class="list">
+          {"".join(
+              f"<div class='row'><div><div class='station-name'>{d['name']}</div><div class='station-sub'>Avg response {float(d.get('avg_time_min', 0) or 0):.1f} min</div></div><div class='badge {'guard' if d['type']=='GUARDIAN' else 'resp'}'>{'Guardian' if d['type']=='GUARDIAN' else 'Responder'}</div></div>"
+              for d in active_drones[:12]
+          ) or "<div class='station-sub'>No active stations published.</div>"}
+        </div>
+        <div style="margin-top:18px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.08);">
+          <div class="eyebrow" style="font-size:11px;">BRINC Contact</div>
+          <div style="font-size:22px; font-weight:800; margin:8px 0 4px;">{_qr_name}</div>
+          <div class="sub"><a href="mailto:{_qr_email}">{_qr_email}</a></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>"""
+            st.session_state['_public_summary_html'] = _public_summary_html
+            _publish_public_report_html(
+                st.session_state.get('public_report_id', ''),
+                _public_summary_html,
+                metadata={
+                    "report_id": st.session_state.get('public_report_id', ''),
+                    "city": _qr_city,
+                    "state": _qr_state,
+                    "updated_at": datetime.datetime.now().isoformat(),
+                    "public_url": st.session_state.get('public_report_url', ''),
+                    "kind": "qr_summary",
+                },
+            )
+
 
             # ── Render full-width banner ───────────────────────────────────────────
             # Build as a variable (no leading indentation) to avoid Markdown treating
@@ -7872,22 +8000,6 @@ def main():
                         flags=_re.DOTALL,
                     )
 
-                _public_report_id = st.session_state.get('public_report_id', '')
-                if _public_report_id and export_html:
-                    _publish_public_report_html(
-                        _public_report_id,
-                        export_html,
-                        metadata={
-                            "report_id": _public_report_id,
-                            "city": prop_city,
-                            "state": prop_state,
-                            "updated_at": datetime.datetime.now().isoformat(),
-                            "public_url": st.session_state.get('public_report_url', ''),
-                            "session_id": st.session_state.get('session_id', ''),
-                            "version": __version__,
-                        },
-                    )
-    
         # ── Download buttons — always rendered so they're visible in the sidebar ──
         _safe_city   = _safe_city_base
         _ts          = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

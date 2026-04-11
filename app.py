@@ -32,7 +32,13 @@ from modules.config import (
     get_hero_message, get_faa_message, get_airfield_message,
     get_jurisdiction_message, get_spatial_message
 )
-from modules.versioning import __version__, _render_version_badge
+from modules.versioning import (
+    __version__,
+    __build_revision__,
+    __build_datetime__,
+    __build_line_count__,
+    _render_version_badge,
+)
 from modules.image_utils import (
     get_base64_of_bin_file, get_themed_logo_base64, get_transparent_product_base64
 )
@@ -1902,8 +1908,7 @@ for k, v in _defaults.items():
 if not st.session_state.get('public_report_id'):
     _pub_city_slug = _slugify(st.session_state.get('active_city', 'report'))
     st.session_state['public_report_id'] = f"{_pub_city_slug}-{st.session_state.get('session_id', str(uuid.uuid4())[:8])}"
-if not st.session_state.get('public_report_url'):
-    st.session_state['public_report_url'] = _build_public_report_url(st.session_state['public_report_id'])
+st.session_state['public_report_url'] = _build_public_report_url(st.session_state['public_report_id'])
 
 if 'target_cities' not in st.session_state:
     st.session_state['target_cities'] = [{"city": "", "state": st.session_state.get('active_state', 'IL')}]
@@ -6171,8 +6176,6 @@ def main():
                 '</div>'  # end banner
             )
             st.markdown(_qr_banner, unsafe_allow_html=True)
-            if st.session_state.get("public_report_url"):
-                st.markdown(f"Public report URL: <{st.session_state['public_report_url']}>")
         except Exception as _qr_err:
             st.caption(f"📱 QR code unavailable — install `qrcode` package. ({_qr_err})")
 
@@ -6284,6 +6287,11 @@ def main():
                 "total_exports_in_session": st.session_state.get('export_count', 0),
                 # File data matrix (populated by aggressive_parse_calls → _extract_file_meta)
                 "file_meta":             st.session_state.get('file_meta', {}),
+                # Build metadata
+                "app_version":          __version__,
+                "app_revision":         __build_revision__,
+                "build_datetime":       __build_datetime__,
+                "app_line_count":       __build_line_count__,
                 # Drones
                 "active_drones": [{
                     "name": d['name'], "type": d['type'],

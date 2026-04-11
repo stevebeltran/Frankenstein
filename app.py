@@ -6184,6 +6184,7 @@ def main():
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>BRINC DFR — {_qr_city}, {_qr_state}</title>
   <script src="{_plotly_cdn}"></script>
+  <link href="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.css" rel="stylesheet"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>
     *{{box-sizing:border-box;margin:0;padding:0}}

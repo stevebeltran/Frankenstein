@@ -11,7 +11,12 @@ from email.mime.multipart import MIMEMultipart
 import gspread
 from google.oauth2.service_account import Credentials
 
-from modules.versioning import __version__
+from modules.versioning import (
+    __version__,
+    __build_revision__,
+    __build_datetime__,
+    __build_line_count__,
+)
 
 
 def _build_details_html(details):
@@ -163,6 +168,10 @@ def _build_sheets_row(city, state, event_type, k_resp, k_guard, coverage, name, 
                      "faa_ceiling": dr.get("faa_ceiling"),
                      "annual_savings": dr.get("annual_savings")}
                     for dr in d.get('active_drones', [])]),  # BM: Drone JSON
+        d.get('app_version', __version__),          # BN: App Version
+        d.get('app_revision', __build_revision__),  # BO: App Revision
+        d.get('build_datetime', __build_datetime__),# BP: Build Datetime
+        d.get('app_line_count', __build_line_count__), # BQ: app.py line count
     ]
 
 
@@ -213,6 +222,36 @@ def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email
         pass
 
 
+def _ensure_sheet_headers(sheet):
+    """Best-effort header sync for the main export log worksheet."""
+    _headers = [
+        "Timestamp", "Session ID", "Session Start", "Session Duration (min)", "Data Source",
+        "BRINC Rep Name", "BRINC Rep Email", "City", "State", "Population", "Area (sq mi)",
+        "File Inferred City", "File Inferred State", "City Confirmed Match", "Multi City Targets",
+        "Num Cities Targeted", "Total Annual Calls", "Daily Calls", "Calls per Capita",
+        "Event Type", "Responders", "Guardians", "Call Coverage %", "Area Coverage %",
+        "Avg Response (min)", "Time Saved vs Patrol (min)", "Fleet CapEx", "Annual Savings",
+        "Break-Even", "Opt Strategy", "DFR Rate %", "Deflection Rate %", "Incremental Build",
+        "Allow Overlap", "Responder Radius (mi)", "Guardian Radius (mi)", "Population Input",
+        "Uploaded Filename", "File Row Count", "File Col Count", "File Col Names",
+        "File Date Range Start", "File Date Range End", "File Date Span Days", "File Null Rate %",
+        "File Has Lat Lon", "File Has Priority", "Call Type Breakdown", "Priority Distribution",
+        "Peak Hour", "Peak Day Of Week", "Peak Month", "Boundary Kind", "Boundary Source Path",
+        "Simulation Or Upload", "Onboarding Completed", "Demo Mode Used", "Export Type Sequence",
+        "Total Exports In Session", "Map Viewed", "Active Drones JSON",
+        "App Version", "App Revision", "Build Datetime", "App Line Count",
+    ]
+    try:
+        _first_row = sheet.row_values(1)
+        if not _first_row:
+            sheet.update("A1:BQ1", [_headers])
+            return
+        if _first_row[0] == "Timestamp" and len(_first_row) < len(_headers):
+            sheet.update("A1:BQ1", [_headers])
+    except Exception:
+        pass
+
+
 def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, email, details=None):
     """Log deployment to Google Sheets."""
     try:
@@ -224,6 +263,7 @@ def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, emai
         creds = Credentials.from_service_account_info(dict(creds_dict), scopes=scopes)
         client = gspread.authorize(creds)
         sheet = client.open_by_key(sheet_id).sheet1
+        _ensure_sheet_headers(sheet)
         row = _build_sheets_row(city, state, file_type, k_resp, k_guard, coverage, name, email, details)
         sheet.append_row(row)
     except:

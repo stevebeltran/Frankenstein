@@ -6144,7 +6144,7 @@ def main():
                     marker=dict(
                         size=15,
                         color=[("#FFD700" if d['type'] == "GUARDIAN" else "#00D2FF") for d in active_drones],
-                        line=dict(color="#ffffff", width=1),
+                        opacity=0.95,
                     ),
                     customdata=[[d['type'], round(float(d.get('avg_time_min', 0) or 0), 1)] for d in active_drones],
                     hovertemplate="<b>%{text}</b><br>%{customdata[0]}<br>Avg response %{customdata[1]} min<extra></extra>",

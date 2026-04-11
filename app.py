@@ -6119,14 +6119,18 @@ def main():
             _qr_dept = str(_qr_dept).strip().title()
 
             # ── Public QR summary page (condensed, no login) ────────────────────────
-            # Use Scattermapbox + open-street-map (no token, reliable in standalone HTML)
+            # Match main page: go.Scattermap + carto-darkmatter.
+            # Load Plotly explicitly in <head> (pinned to installed version) so the
+            # map div script never runs before Plotly is defined.
+            import plotly as _plotly_pkg
+            _plotly_cdn = f"https://cdn.plot.ly/plotly-{_plotly_pkg.__version__}.min.js"
             _public_map = go.Figure()
             if city_boundary_geom is not None and not city_boundary_geom.is_empty:
                 _pub_geoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
                               else list(city_boundary_geom.geoms))
                 for _gi, _geom in enumerate(_pub_geoms):
                     _bx, _by = _geom.exterior.coords.xy
-                    _public_map.add_trace(go.Scattermapbox(
+                    _public_map.add_trace(go.Scattermap(
                         mode="lines",
                         lon=list(_bx),
                         lat=list(_by),
@@ -6136,7 +6140,7 @@ def main():
                         showlegend=(_gi == 0),
                     ))
             if active_drones:
-                _public_map.add_trace(go.Scattermapbox(
+                _public_map.add_trace(go.Scattermap(
                     lat=[d['lat'] for d in active_drones],
                     lon=[d['lon'] for d in active_drones],
                     mode='markers+text',
@@ -6152,15 +6156,16 @@ def main():
                     name="Stations",
                 ))
             _public_map.update_layout(
-                mapbox=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="open-street-map"),
-                paper_bgcolor="#0d1726",
+                map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
+                paper_bgcolor="#0c1828",
                 margin=dict(l=0, r=0, t=0, b=0),
                 height=380,
                 showlegend=False,
             )
+            # include_plotlyjs=False — Plotly is loaded explicitly in <head> below
             _public_map_html = _public_map.to_html(
                 full_html=False,
-                include_plotlyjs='cdn',
+                include_plotlyjs=False,
                 default_height='380px',
                 default_width='100%',
             )
@@ -6178,6 +6183,7 @@ def main():
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>BRINC DFR — {_qr_city}, {_qr_state}</title>
+  <script src="{_plotly_cdn}"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>
     *{{box-sizing:border-box;margin:0;padding:0}}

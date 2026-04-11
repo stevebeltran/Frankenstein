@@ -6119,13 +6119,14 @@ def main():
             _qr_dept = str(_qr_dept).strip().title()
 
             # ── Public QR summary page (condensed, no login) ────────────────────────
+            # Use Scattermapbox + open-street-map (no token, reliable in standalone HTML)
             _public_map = go.Figure()
             if city_boundary_geom is not None and not city_boundary_geom.is_empty:
                 _pub_geoms = ([city_boundary_geom] if isinstance(city_boundary_geom, Polygon)
                               else list(city_boundary_geom.geoms))
                 for _gi, _geom in enumerate(_pub_geoms):
                     _bx, _by = _geom.exterior.coords.xy
-                    _public_map.add_trace(go.Scattermap(
+                    _public_map.add_trace(go.Scattermapbox(
                         mode="lines",
                         lon=list(_bx),
                         lat=list(_by),
@@ -6135,14 +6136,14 @@ def main():
                         showlegend=(_gi == 0),
                     ))
             if active_drones:
-                _public_map.add_trace(go.Scattermap(
+                _public_map.add_trace(go.Scattermapbox(
                     lat=[d['lat'] for d in active_drones],
                     lon=[d['lon'] for d in active_drones],
                     mode='markers+text',
                     text=[d['name'] for d in active_drones],
                     textposition='top center',
                     marker=dict(
-                        size=15,
+                        size=14,
                         color=[("#FFD700" if d['type'] == "GUARDIAN" else "#00D2FF") for d in active_drones],
                         opacity=0.95,
                     ),
@@ -6151,85 +6152,120 @@ def main():
                     name="Stations",
                 ))
             _public_map.update_layout(
-                map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-positron"),
+                mapbox=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="open-street-map"),
+                paper_bgcolor="#0d1726",
                 margin=dict(l=0, r=0, t=0, b=0),
-                height=420,
+                height=380,
                 showlegend=False,
             )
             _public_map_html = _public_map.to_html(
                 full_html=False,
                 include_plotlyjs='cdn',
-                default_height='420px',
+                default_height='380px',
                 default_width='100%',
             )
+            _station_rows_html = "".join(
+                f"<div class='row'>"
+                f"<div><div class='sname'>{d['name']}</div>"
+                f"<div class='ssub'>{float(d.get('avg_time_min', 0) or 0):.1f} min avg</div></div>"
+                f"<span class='badge {'guard' if d['type']=='GUARDIAN' else 'resp'}'>{'Guardian' if d['type']=='GUARDIAN' else 'Resp'}</span>"
+                f"</div>"
+                for d in active_drones[:8]
+            ) or "<div class='ssub'>No active stations.</div>"
             _public_summary_html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>BRINC DFR Summary — {_qr_city}, {_qr_state}</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <title>BRINC DFR — {_qr_city}, {_qr_state}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>
-    * {{ box-sizing:border-box; }}
-    body {{ margin:0; font-family:'Inter',sans-serif; background:#08101b; color:#eef6ff; }}
-    .wrap {{ max-width:1100px; margin:0 auto; padding:24px; }}
-    .hero {{ background:linear-gradient(135deg,#0b1423 0%,#0f2136 55%,#08101b 100%); border:1px solid rgba(0,210,255,0.22); border-radius:22px; padding:24px; }}
-    .eyebrow {{ color:#00D2FF; font-size:12px; letter-spacing:0.16em; text-transform:uppercase; font-weight:700; }}
-    .title {{ font-size:clamp(28px,4vw,44px); font-weight:800; line-height:1.05; margin:10px 0 8px; }}
-    .sub {{ color:#93a9bf; font-size:15px; }}
-    .metrics {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-top:18px; }}
-    .metric {{ background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:14px 16px; }}
-    .metric .k {{ color:#8aa0b6; font-size:11px; text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px; }}
-    .metric .v {{ font-size:26px; font-weight:800; }}
-    .grid {{ display:grid; grid-template-columns:minmax(0,1.45fr) minmax(300px,0.85fr); gap:16px; margin-top:16px; }}
-    .card {{ background:#0d1726; border:1px solid rgba(255,255,255,0.08); border-radius:18px; padding:18px; }}
-    .card h3 {{ margin:0 0 10px; font-size:16px; }}
-    .list {{ display:grid; gap:10px; }}
-    .row {{ display:flex; justify-content:space-between; gap:12px; align-items:flex-start; padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06); }}
-    .row:last-child {{ border-bottom:none; padding-bottom:0; }}
-    .station-name {{ font-weight:700; }}
-    .station-sub {{ color:#8aa0b6; font-size:13px; margin-top:2px; }}
-    .badge {{ display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:4px 10px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; }}
-    .badge.guard {{ background:rgba(255,215,0,0.14); color:#FFD700; border:1px solid rgba(255,215,0,0.32); }}
-    .badge.resp {{ background:rgba(0,210,255,0.14); color:#00D2FF; border:1px solid rgba(0,210,255,0.32); }}
-    a {{ color:#00D2FF; text-decoration:none; }}
-    @media (max-width: 820px) {{ .grid {{ grid-template-columns:1fr; }} .wrap {{ padding:14px; }} }}
+    *{{box-sizing:border-box;margin:0;padding:0}}
+    body{{font-family:'Inter',sans-serif;background:#07101c;color:#e8f2ff;min-height:100vh}}
+    .page{{max-width:1080px;margin:0 auto;padding:16px}}
+    /* ── header bar ── */
+    .hdr{{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;
+          background:linear-gradient(120deg,#0b1a2e 0%,#0d2240 60%,#091522 100%);
+          border:1px solid rgba(0,210,255,0.28);border-radius:16px;padding:14px 20px;margin-bottom:12px}}
+    .hdr-left .eyebrow{{color:#00D2FF;font-size:10px;letter-spacing:.18em;text-transform:uppercase;font-weight:700;margin-bottom:4px}}
+    .hdr-left .dept{{font-size:clamp(18px,3vw,28px);font-weight:800;line-height:1.1}}
+    .hdr-left .loc{{color:#7a9ab5;font-size:13px;margin-top:3px}}
+    .hdr-right{{display:flex;gap:6px;align-items:center;flex-wrap:wrap}}
+    .social{{font-size:11px;font-weight:700;border-radius:6px;padding:4px 9px;text-decoration:none;white-space:nowrap}}
+    /* ── metrics strip ── */
+    .metrics{{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}}
+    .metric{{border-radius:12px;padding:10px 14px;border:1px solid}}
+    .metric .k{{font-size:10px;text-transform:uppercase;letter-spacing:.12em;font-weight:700;margin-bottom:4px;opacity:.75}}
+    .metric .v{{font-size:clamp(18px,2.5vw,24px);font-weight:800}}
+    .m-capex{{background:rgba(0,255,136,.07);border-color:rgba(0,255,136,.3)}}
+    .m-capex .k{{color:#00ff88}}.m-capex .v{{color:#00ff88}}
+    .m-save{{background:rgba(255,215,0,.07);border-color:rgba(255,215,0,.3)}}
+    .m-save .k{{color:#FFD700}}.m-save .v{{color:#FFD700}}
+    .m-cov{{background:rgba(0,210,255,.07);border-color:rgba(0,210,255,.3)}}
+    .m-cov .k{{color:#00D2FF}}.m-cov .v{{color:#00D2FF}}
+    .m-fleet{{background:rgba(168,139,250,.07);border-color:rgba(168,139,250,.3)}}
+    .m-fleet .k{{color:#a78bfa}}.m-fleet .v{{color:#a78bfa}}
+    /* ── main grid ── */
+    .grid{{display:grid;grid-template-columns:minmax(0,1.5fr) 280px;gap:10px}}
+    .card{{background:#0c1828;border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:14px;overflow:hidden}}
+    .card-title{{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:#00D2FF;margin-bottom:10px}}
+    /* ── station list ── */
+    .list{{display:flex;flex-direction:column;gap:0}}
+    .row{{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)}}
+    .row:last-child{{border-bottom:none;padding-bottom:0}}
+    .sname{{font-weight:700;font-size:13px}}
+    .ssub{{color:#6a8aa5;font-size:11px;margin-top:1px}}
+    .badge{{border-radius:999px;padding:3px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}}
+    .guard{{background:rgba(255,215,0,.15);color:#FFD700;border:1px solid rgba(255,215,0,.35)}}
+    .resp{{background:rgba(0,210,255,.13);color:#00D2FF;border:1px solid rgba(0,210,255,.32)}}
+    /* ── contact block ── */
+    .contact{{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)}}
+    .contact .label{{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:#00D2FF;font-weight:700;margin-bottom:4px}}
+    .contact .name{{font-size:16px;font-weight:800;margin-bottom:2px}}
+    .contact a{{color:#00D2FF;text-decoration:none;font-size:13px}}
+    @media(max-width:720px){{.metrics{{grid-template-columns:repeat(2,1fr)}}.grid{{grid-template-columns:1fr}}}}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <section class="hero">
-      <div class="eyebrow">Public DFR Summary</div>
-      <div class="title">{_qr_dept}</div>
-      <div class="sub">{_qr_city}, {_qr_state} · condensed deployment snapshot for external viewing</div>
-      <div class="metrics">
-        <div class="metric"><div class="k">Fleet CapEx</div><div class="v">${fleet_capex:,.0f}</div></div>
-        <div class="metric"><div class="k">Annual Savings</div><div class="v">${annual_savings:,.0f}</div></div>
-        <div class="metric"><div class="k">Call Coverage</div><div class="v">{calls_covered_perc:.1f}%</div></div>
-        <div class="metric"><div class="k">Fleet</div><div class="v">{actual_k_responder}R / {actual_k_guardian}G</div></div>
-      </div>
-    </section>
-    <section class="grid">
-      <div class="card">
-        <h3>Station Placement Map</h3>
-        {_public_map_html}
-      </div>
-      <div class="card">
-        <h3>Station Placement</h3>
-        <div class="list">
-          {"".join(
-              f"<div class='row'><div><div class='station-name'>{d['name']}</div><div class='station-sub'>Avg response {float(d.get('avg_time_min', 0) or 0):.1f} min</div></div><div class='badge {'guard' if d['type']=='GUARDIAN' else 'resp'}'>{'Guardian' if d['type']=='GUARDIAN' else 'Responder'}</div></div>"
-              for d in active_drones[:12]
-          ) or "<div class='station-sub'>No active stations published.</div>"}
-        </div>
-        <div style="margin-top:18px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.08);">
-          <div class="eyebrow" style="font-size:11px;">BRINC Contact</div>
-          <div style="font-size:22px; font-weight:800; margin:8px 0 4px;">{_qr_name}</div>
-          <div class="sub"><a href="mailto:{_qr_email}">{_qr_email}</a></div>
-        </div>
-      </div>
-    </section>
+<div class="page">
+  <!-- header -->
+  <div class="hdr">
+    <div class="hdr-left">
+      <div class="eyebrow">BRINC DFR Deployment Proposal</div>
+      <div class="dept">{_qr_dept}</div>
+      <div class="loc">{_qr_city}, {_qr_state}</div>
+    </div>
+    <div class="hdr-right">
+      <a class="social" href="https://brincdrones.com" target="_blank" style="color:#00D2FF;background:rgba(0,210,255,.1);border:1px solid rgba(0,210,255,.35)">brincdrones.com</a>
+      <a class="social" href="https://linkedin.com/company/brinc" target="_blank" style="color:#0a66c2;background:rgba(10,102,194,.12);border:1px solid rgba(10,102,194,.35)">LinkedIn</a>
+      <a class="social" href="https://instagram.com/brincdrones" target="_blank" style="color:#e1306c;background:rgba(225,48,108,.1);border:1px solid rgba(225,48,108,.35)">Instagram</a>
+      <a class="social" href="https://x.com/BRINCDrones" target="_blank" style="color:#d0d0d0;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.22)">X</a>
+    </div>
   </div>
+  <!-- metrics -->
+  <div class="metrics">
+    <div class="metric m-capex"><div class="k">Fleet CapEx</div><div class="v">${fleet_capex:,.0f}</div></div>
+    <div class="metric m-save"><div class="k">Annual Savings</div><div class="v">${annual_savings:,.0f}</div></div>
+    <div class="metric m-cov"><div class="k">Call Coverage</div><div class="v">{calls_covered_perc:.1f}%</div></div>
+    <div class="metric m-fleet"><div class="k">Fleet</div><div class="v">{actual_k_responder}R / {actual_k_guardian}G</div></div>
+  </div>
+  <!-- map + station list -->
+  <div class="grid">
+    <div class="card">
+      <div class="card-title">Station Placement Map</div>
+      {_public_map_html}
+    </div>
+    <div class="card">
+      <div class="card-title">Stations</div>
+      <div class="list">{_station_rows_html}</div>
+      <div class="contact">
+        <div class="label">BRINC Representative</div>
+        <div class="name">{_qr_name}</div>
+        <a href="mailto:{_qr_email}">{_qr_email}</a>
+      </div>
+    </div>
+  </div>
+</div>
 </body>
 </html>"""
             st.session_state['_public_summary_html'] = _public_summary_html

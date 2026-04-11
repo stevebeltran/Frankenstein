@@ -6,7 +6,7 @@ import numpy as np
 import plotly.graph_objects as go
 from shapely.geometry import Point, Polygon, MultiPolygon, box, shape
 from shapely.ops import unary_union
-import os, itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib, uuid, traceback, tempfile
+import os, itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib, uuid, traceback, tempfile, hashlib, hmac
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import pulp
@@ -47,6 +47,105 @@ from modules.geospatial import (
     _count_points_within_boundary, find_jurisdictions_by_coordinates
 )
 from modules import faa_rf, optimization, html_reports
+
+PUBLIC_REPORTS_DIR = Path("public_reports")
+PUBLIC_REPORTS_DIR.mkdir(exist_ok=True)
+
+
+def _get_query_params_dict():
+    try:
+        return {str(k): str(v) for k, v in dict(st.query_params).items()}
+    except Exception:
+        try:
+            return {
+                str(k): (v[0] if isinstance(v, list) and v else str(v))
+                for k, v in st.experimental_get_query_params().items()
+            }
+        except Exception:
+            return {}
+
+
+def _slugify(value):
+    return re.sub(r'[^a-z0-9]+', '-', str(value or '').lower()).strip('-') or 'report'
+
+
+def _get_request_base_url():
+    try:
+        _host = st.context.headers.get("host", "") or st.context.headers.get("Host", "")
+        if _host:
+            _proto = "https" if ("streamlit.app" in _host or "share" in _host) else "http"
+            return f"{_proto}://{_host}"
+    except Exception:
+        pass
+    return "http://localhost:8501"
+
+
+def _get_public_report_secret():
+    try:
+        if "PUBLIC_REPORT_SECRET" in st.secrets:
+            return str(st.secrets["PUBLIC_REPORT_SECRET"])
+        if "auth" in st.secrets and isinstance(st.secrets["auth"], dict):
+            _cookie_secret = st.secrets["auth"].get("cookie_secret")
+            if _cookie_secret:
+                return str(_cookie_secret)
+    except Exception:
+        pass
+    return "brinc-public-report-dev-secret"
+
+
+def _sign_public_report_id(report_id):
+    return hmac.new(
+        _get_public_report_secret().encode("utf-8"),
+        str(report_id).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _build_public_report_url(report_id):
+    return f"{_get_request_base_url()}/?public_report={report_id}&sig={_sign_public_report_id(report_id)}"
+
+
+def _public_report_html_path(report_id):
+    return PUBLIC_REPORTS_DIR / f"{report_id}.html"
+
+
+def _publish_public_report_html(report_id, html_text, metadata=None):
+    _html_path = _public_report_html_path(report_id)
+    _html_path.write_text(str(html_text or ""), encoding="utf-8")
+    if metadata is not None:
+        (PUBLIC_REPORTS_DIR / f"{report_id}.json").write_text(
+            json.dumps(metadata, ensure_ascii=True, indent=2),
+            encoding="utf-8",
+        )
+    return _html_path
+
+
+def _render_public_report_route():
+    _params = _get_query_params_dict()
+    _report_id = str(_params.get("public_report", "")).strip()
+    _sig = str(_params.get("sig", "")).strip()
+    if not _report_id:
+        return False
+
+    if not _sig or not hmac.compare_digest(_sig, _sign_public_report_id(_report_id)):
+        st.error("Invalid public report link.")
+        st.stop()
+
+    _html_path = _public_report_html_path(_report_id)
+    if not _html_path.exists():
+        st.warning("This public report is not available yet.")
+        st.stop()
+
+    st.set_page_config(layout="wide", page_title="BRINC Public Report")
+    st.markdown(
+        "<style>section[data-testid='stSidebar'], header, footer, #MainMenu { display:none !important; }</style>",
+        unsafe_allow_html=True,
+    )
+    components.html(_html_path.read_text(encoding="utf-8"), height=9000, scrolling=True)
+    st.stop()
+
+
+_render_public_report_route()
 
 
 
@@ -1768,6 +1867,8 @@ _defaults = {
     'brinc_user': 'steven.beltran',
     'session_start': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
     'session_id': str(uuid.uuid4())[:8],
+    'public_report_id': '',
+    'public_report_url': '',
     'data_source': 'unknown',
     'map_build_logged': False,
     'boundary_kind': 'place',
@@ -1797,6 +1898,12 @@ _defaults = {
 for k, v in _defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+if not st.session_state.get('public_report_id'):
+    _pub_city_slug = _slugify(st.session_state.get('active_city', 'report'))
+    st.session_state['public_report_id'] = f"{_pub_city_slug}-{st.session_state.get('session_id', str(uuid.uuid4())[:8])}"
+if not st.session_state.get('public_report_url'):
+    st.session_state['public_report_url'] = _build_public_report_url(st.session_state['public_report_id'])
 
 if 'target_cities' not in st.session_state:
     st.session_state['target_cities'] = [{"city": "", "state": st.session_state.get('active_state', 'IL')}]
@@ -5957,7 +6064,8 @@ def main():
                 "s":     _stn_str,
                 "m_calls": _calls_str,
             })
-            _qr_url = f"{_qr_base}/?view=mobile&{_qr_params}"
+            _fallback_qr_url = f"{_qr_base}/?view=mobile&{_qr_params}"
+            _qr_url = st.session_state.get("public_report_url", "") or _fallback_qr_url
 
             # ── QR code image — high readability with BRINC logo overlay ──────────
             # Use highest error correction (H) for better phone scanning reliability
@@ -6063,6 +6171,8 @@ def main():
                 '</div>'  # end banner
             )
             st.markdown(_qr_banner, unsafe_allow_html=True)
+            if st.session_state.get("public_report_url"):
+                st.markdown(f"Public report URL: <{st.session_state['public_report_url']}>")
         except Exception as _qr_err:
             st.caption(f"📱 QR code unavailable — install `qrcode` package. ({_qr_err})")
 
@@ -7752,6 +7862,22 @@ def main():
                         export_html,
                         count=1,
                         flags=_re.DOTALL,
+                    )
+
+                _public_report_id = st.session_state.get('public_report_id', '')
+                if _public_report_id and export_html:
+                    _publish_public_report_html(
+                        _public_report_id,
+                        export_html,
+                        metadata={
+                            "report_id": _public_report_id,
+                            "city": prop_city,
+                            "state": prop_state,
+                            "updated_at": datetime.datetime.now().isoformat(),
+                            "public_url": st.session_state.get('public_report_url', ''),
+                            "session_id": st.session_state.get('session_id', ''),
+                            "version": __version__,
+                        },
                     )
     
         # ── Download buttons — always rendered so they're visible in the sidebar ──

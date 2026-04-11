@@ -1056,39 +1056,61 @@ def get_circle_coords(lat, lon, r_mi=2.0):
 
 # ── 4G LTE coverage overlay ───────────────────────────────────────────────────
 
-_COVERAGE_CACHE: dict = {}   # {state_abbr: GeoDataFrame or None}
+_COVERAGE_CACHE: dict = {}            # {state_abbr: raw GeoDataFrame or None}
+_COVERAGE_DISSOLVED_CACHE: dict = {}  # {state_abbr: dissolved-by-carrier GeoDataFrame or None}
+_COVERAGE_ANALYSIS_CACHE: dict = {}   # {(state_abbr, boundary_wkb_hex): list[dict]}
+
+
+def _coverage_geom_cache_key(geom):
+    if geom is None or geom.is_empty:
+        return None
+    try:
+        return geom.wkb_hex
+    except Exception:
+        try:
+            return geom.wkb.hex()
+        except Exception:
+            return str(geom.bounds)
+
+
+def _decode_coverage_geometry(value):
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    try:
+        from shapely.wkb import loads as wkb_loads
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            return wkb_loads(bytes(value))
+        return wkb_loads(bytes.fromhex(value))
+    except Exception:
+        return None
+
 
 def _load_coverage(state_abbr: str):
-    """Load cell_coverage/{STATE}.parquet; returns GeoDataFrame or None."""
+    """Load raw cell_coverage/{STATE}.parquet rows; returns GeoDataFrame or None."""
+    state_abbr = (state_abbr or '').strip().upper()
+    if not state_abbr:
+        return None
     if state_abbr in _COVERAGE_CACHE:
         return _COVERAGE_CACHE[state_abbr]
-    path = os.path.join("cell_coverage", f"{state_abbr}.parquet")
+    path = os.path.join('cell_coverage', f'{state_abbr}.parquet')
     if not os.path.exists(path):
         _COVERAGE_CACHE[state_abbr] = None
         return None
     try:
-        from shapely.wkb import loads as wkb_loads
         try:
             df = pd.read_parquet(path, columns=['carrier', 'color', 'geometry_wkb'])
         except Exception:
             df = pd.read_parquet(path)
 
         df = df[['carrier', 'color', 'geometry_wkb']].copy()
-        df['geometry'] = df['geometry_wkb'].apply(lambda h: wkb_loads(bytes.fromhex(h)) if h else None)
+        df['geometry'] = df['geometry_wkb'].apply(_decode_coverage_geometry)
         gdf = gpd.GeoDataFrame(df[['carrier', 'color']], geometry=df['geometry'], crs='EPSG:4326')
         gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].copy()
-        if not gdf.empty:
-            dissolved_rows = []
-            for (carrier, color), group in gdf.groupby(['carrier', 'color'], sort=False):
-                geom = unary_union(group.geometry.tolist())
-                if geom is None or geom.is_empty:
-                    continue
-                try:
-                    geom = geom.simplify(0.0008, preserve_topology=True)
-                except Exception:
-                    pass
-                dissolved_rows.append({'carrier': carrier, 'color': color, 'geometry': geom})
-            gdf = gpd.GeoDataFrame(dissolved_rows, geometry='geometry', crs='EPSG:4326')
         _COVERAGE_CACHE[state_abbr] = gdf
         return gdf
     except Exception:
@@ -1096,9 +1118,38 @@ def _load_coverage(state_abbr: str):
         return None
 
 
+def _load_dissolved_coverage(state_abbr: str):
+    """Load carrier-dissolved statewide coverage, used only for the full-map overlay."""
+    state_abbr = (state_abbr or '').strip().upper()
+    if not state_abbr:
+        return None
+    if state_abbr in _COVERAGE_DISSOLVED_CACHE:
+        return _COVERAGE_DISSOLVED_CACHE[state_abbr]
+
+    gdf = _load_coverage(state_abbr)
+    if gdf is None or gdf.empty:
+        _COVERAGE_DISSOLVED_CACHE[state_abbr] = gdf
+        return gdf
+
+    dissolved_rows = []
+    for (carrier, color), group in gdf.groupby(['carrier', 'color'], sort=False):
+        geom = unary_union(group.geometry.tolist())
+        if geom is None or geom.is_empty:
+            continue
+        try:
+            geom = geom.simplify(0.0008, preserve_topology=True)
+        except Exception:
+            pass
+        dissolved_rows.append({'carrier': carrier, 'color': color, 'geometry': geom})
+
+    dissolved = gpd.GeoDataFrame(dissolved_rows, geometry='geometry', crs='EPSG:4326')
+    _COVERAGE_DISSOLVED_CACHE[state_abbr] = dissolved
+    return dissolved
+
+
 def add_coverage_traces(fig, state_abbr: str, visible=True):
     """Add AT&T / T-Mobile / Verizon 4G LTE polygon traces."""
-    gdf = _load_coverage(state_abbr)
+    gdf = _load_dissolved_coverage(state_abbr)
     if gdf is None or gdf.empty:
         return
 
@@ -1136,12 +1187,17 @@ def add_coverage_traces(fig, state_abbr: str, visible=True):
 
 def _carrier_coverage_analysis(state_abbr: str, boundary_geom):
     """
-    Intersects each carrier's dissolved polygon with the jurisdiction boundary.
+    Intersects each carrier's coverage with the jurisdiction boundary.
     Returns list of dicts sorted by coverage % descending:
       {'carrier', 'color', 'pct', 'poly'}
     """
     if not state_abbr or boundary_geom is None or boundary_geom.is_empty:
         return []
+
+    cache_key = ((state_abbr or '').strip().upper(), _coverage_geom_cache_key(boundary_geom))
+    if cache_key in _COVERAGE_ANALYSIS_CACHE:
+        return _COVERAGE_ANALYSIS_CACHE[cache_key]
+
     gdf = _load_coverage(state_abbr)
     if gdf is None or gdf.empty:
         return []
@@ -1150,21 +1206,57 @@ def _carrier_coverage_analysis(state_abbr: str, boundary_geom):
     if boundary_area <= 0:
         return []
 
-    results = []
-    for _, row in gdf.iterrows():
+    try:
+        from shapely.geometry import box
+        from shapely.prepared import prep
+        bbox_geom = box(*boundary_geom.bounds)
+        try:
+            candidate_idx = gdf.sindex.query(bbox_geom, predicate='intersects')
+            candidate_gdf = gdf.iloc[candidate_idx]
+        except Exception:
+            candidate_gdf = gdf[gdf.geometry.intersects(bbox_geom)]
+        prepared_boundary = prep(boundary_geom)
+    except Exception:
+        candidate_gdf = gdf
+        prepared_boundary = None
+
+    carrier_meta = list(gdf[['carrier', 'color']].drop_duplicates().itertuples(index=False, name=None))
+    clipped_by_carrier = {carrier: [] for carrier, _ in carrier_meta}
+
+    for row in candidate_gdf.itertuples(index=False):
         poly = row.geometry
         if poly is None or poly.is_empty:
-            results.append({'carrier': row['carrier'], 'color': row['color'], 'pct': 0.0, 'poly': None})
             continue
         try:
+            if prepared_boundary is not None and not prepared_boundary.intersects(poly):
+                continue
             clipped = poly.intersection(boundary_geom)
+        except Exception:
+            continue
+        if clipped is not None and not clipped.is_empty:
+            clipped_by_carrier.setdefault(row.carrier, []).append(clipped)
+
+    results = []
+    for carrier, color in carrier_meta:
+        pieces = clipped_by_carrier.get(carrier) or []
+        if not pieces:
+            results.append({'carrier': carrier, 'color': color, 'pct': 0.0, 'poly': None})
+            continue
+        try:
+            clipped = unary_union(pieces) if len(pieces) > 1 else pieces[0]
+            try:
+                clipped = clipped.simplify(0.0005, preserve_topology=True)
+            except Exception:
+                pass
             pct = min(100.0, clipped.area / boundary_area * 100)
         except Exception:
             clipped = None
             pct = 0.0
-        results.append({'carrier': row['carrier'], 'color': row['color'], 'pct': pct, 'poly': clipped})
+        results.append({'carrier': carrier, 'color': color, 'pct': pct, 'poly': clipped})
 
-    return sorted(results, key=lambda x: x['pct'], reverse=True)
+    results = sorted(results, key=lambda x: x['pct'], reverse=True)
+    _COVERAGE_ANALYSIS_CACHE[cache_key] = results
+    return results
 
 
 def _build_carrier_mini_map(cinfo, boundary_geom, center_lat, center_lon, zoom, map_style):

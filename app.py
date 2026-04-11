@@ -6139,6 +6139,34 @@ def main():
                         hoverinfo="skip",
                         showlegend=(_gi == 0),
                     ))
+            # ── calls for service dots (rendered before stations so stations sit on top) ──
+            try:
+                _pub_calls_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
+                if _pub_calls_df is not None and not _pub_calls_df.empty and 'lat' in _pub_calls_df.columns and 'lon' in _pub_calls_df.columns:
+                    _pub_n = min(800, len(_pub_calls_df))
+                    _pub_samp = _pub_calls_df.sample(_pub_n, random_state=42).dropna(subset=['lat', 'lon'])
+                    if not _pub_samp.empty:
+                        _pub_pt_sz = 2 if len(_pub_samp) > 300 else 3
+                        _pub_pt_op = 0.25 if len(_pub_samp) > 300 else 0.38
+                        _pub_has_ag = 'agency' in _pub_samp.columns
+                        _pub_fire   = _pub_samp[_pub_samp['agency'].str.lower() == 'fire'] if _pub_has_ag else _pub_samp.iloc[:0]
+                        _pub_police = _pub_samp[_pub_samp['agency'].str.lower() != 'fire'] if _pub_has_ag else _pub_samp
+                        if not _pub_police.empty:
+                            _public_map.add_trace(go.Scattermap(
+                                lat=_pub_police['lat'].tolist(), lon=_pub_police['lon'].tolist(),
+                                mode='markers',
+                                marker=dict(size=_pub_pt_sz, color='#00D2FF', opacity=_pub_pt_op),
+                                name='Incidents', hoverinfo='skip',
+                            ))
+                        if not _pub_fire.empty:
+                            _public_map.add_trace(go.Scattermap(
+                                lat=_pub_fire['lat'].tolist(), lon=_pub_fire['lon'].tolist(),
+                                mode='markers',
+                                marker=dict(size=_pub_pt_sz, color='#ff3b3b', opacity=_pub_pt_op),
+                                name='Fire Incidents', hoverinfo='skip',
+                            ))
+            except Exception:
+                pass
             if active_drones:
                 _public_map.add_trace(go.Scattermap(
                     lat=[d['lat'] for d in active_drones],
@@ -6159,14 +6187,14 @@ def main():
                 map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style="carto-darkmatter"),
                 paper_bgcolor="#0c1828",
                 margin=dict(l=0, r=0, t=0, b=0),
-                height=380,
+                height=420,
                 showlegend=False,
             )
             # include_plotlyjs=False — Plotly is loaded explicitly in <head> below
             _public_map_html = _public_map.to_html(
                 full_html=False,
                 include_plotlyjs=False,
-                default_height='380px',
+                default_height='420px',
                 default_width='100%',
             )
             _station_rows_html = "".join(
@@ -6214,7 +6242,8 @@ def main():
     .m-fleet .k{{color:#a78bfa}}.m-fleet .v{{color:#a78bfa}}
     /* ── main grid ── */
     .grid{{display:grid;grid-template-columns:minmax(0,1.5fr) 280px;gap:10px}}
-    .card{{background:#0c1828;border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:14px;overflow:hidden}}
+    .card{{background:#0c1828;border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:14px;overflow:visible}}
+    .card-list{{overflow:hidden}}
     .card-title{{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:#00D2FF;margin-bottom:10px}}
     /* ── station list ── */
     .list{{display:flex;flex-direction:column;gap:0}}
@@ -6262,7 +6291,7 @@ def main():
       <div class="card-title">Station Placement Map</div>
       {_public_map_html}
     </div>
-    <div class="card">
+    <div class="card card-list">
       <div class="card-title">Stations</div>
       <div class="list">{_station_rows_html}</div>
       <div class="contact">

@@ -2666,7 +2666,7 @@ body{{background:transparent;overflow:hidden}}
   if(!mapSvg) return;
   mapSvg.setAttribute('id', 'fl-svg');
   var svgNS = mapSvg.namespaceURI || 'http://www.w3.org/2000/svg';
-  var vb = (mapSvg.getAttribute('viewBox') || '0 0 600 360').trim().split(/\s+/).map(Number);
+  var vb = (mapSvg.getAttribute('viewBox') || '0 0 600 360').trim().split(/\\s+/).map(Number);
   if(vb.length !== 4 || vb.some(function(v){{ return !isFinite(v); }})) vb = [0, 0, 600, 360];
   var vx = vb[0], vy = vb[1], vw = vb[2], vh = vb[3];
   var stateCode = '{_swarm_state_js}'.replace(/[^A-Z]/g, '');
@@ -3344,16 +3344,19 @@ body{{background:transparent;overflow:hidden}}
 
                 # Shared zone: calls covered by at least one OTHER active drone
                 all_cov = np.vstack([resp_matrix[i] for i in active_resp_idx] + [guard_matrix[i] for i in active_guard_idx]) if (active_resp_idx or active_guard_idx) else np.zeros((1, total_calls), dtype=bool)
-                shared_mask   = d['cov_array'] & (all_cov.sum(axis=0) > 1)
+                _cover_counts = all_cov.sum(axis=0)
+                shared_mask   = d['cov_array'] & (_cover_counts > 1)
                 _shared_calls = int(np.sum(shared_mask))
                 _excl_calls   = _raw_zone_calls - _shared_calls  # calls ONLY this drone covers
+                _weighted_zone_calls = float(np.sum(d['cov_array'] / np.maximum(_cover_counts, 1)))
+                _weighted_zone_perc  = (_weighted_zone_calls / total_calls) if total_calls > 0 else 0.0
 
-                # ── UTILIZATION: based on full zone call load, not marginal residual ─
-                # Responders should reflect how busy they truly are in their patrol zone.
-                # daily calls dispatched to this drone = zone calls × dispatch rate
+                # ── UTILIZATION: based on overlap-adjusted station load ───────────
+                # Shared calls are split across overlapping active drones so adding
+                # another station reduces the demand carried by already-maxed stations.
                 _is_guard    = (d_type == 'GUARDIAN')
                 _budget_min  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] if _is_guard else (CONFIG["RESPONDER_PATROL_HOURS"] * 60)
-                _zone_flights = _raw_zone_perc * calls_per_day * dfr_dispatch_rate
+                _zone_flights = _weighted_zone_perc * calls_per_day * dfr_dispatch_rate
 
                 # ── CAPACITY MODEL: 10-minute on-scene floor ──────────────────────
                 # Every sortie consumes travel_time + on_scene_time from the daily budget.
@@ -3397,7 +3400,7 @@ body{{background:transparent;overflow:hidden}}
                 # ── Auto-cap: clamp this station's effective DFR rate to its
                 #    physical capacity limit so it doesn't show a deficit while
                 #    leaving every other station's rate untouched.
-                _raw_demand = _raw_zone_perc * calls_per_day
+                _raw_demand = _weighted_zone_perc * calls_per_day
                 if auto_cap_dfr and _max_flights_cap > 0 and _raw_demand > 0:
                     _station_max_rate = _max_flights_cap / _raw_demand
                     _effective_dfr    = min(dfr_dispatch_rate, _station_max_rate)
@@ -3462,8 +3465,8 @@ body{{background:transparent;overflow:hidden}}
                 _best_annual   = _base_annual  + _concurrent_annual
 
                 # ── STORE — use best_case as primary display value ─────────────────
-                _assigned_daily_calls   = (marginal_historic / total_calls) * calls_per_day if total_calls > 0 else 0.0
-                _assigned_flights_day  = _assigned_daily_calls * dfr_dispatch_rate
+                _assigned_daily_calls   = _weighted_zone_perc * calls_per_day if total_calls > 0 else 0.0
+                _assigned_flights_day   = _assigned_daily_calls * _effective_dfr
                 d['marginal_perc']       = marginal_historic / total_calls
                 d['marginal_calls']      = marginal_historic
                 d['assigned_calls_day']  = _assigned_daily_calls
@@ -3473,7 +3476,8 @@ body{{background:transparent;overflow:hidden}}
                 d['marginal_deflected']  = _excl_deflected
                 d['shared_flights']      = _shared_dfr
                 d['zone_flights']        = _zone_flights
-                d['zone_calls_annual']   = _raw_zone_calls
+                d['zone_calls_annual']   = _weighted_zone_calls * 365.0 / 365.0
+                d['raw_zone_calls_annual'] = _raw_zone_calls
                 d['zone_flights_annual'] = _zone_flights * 365.0
                 d['utilization']         = _util
                 d['true_util']           = _true_util

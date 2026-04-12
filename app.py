@@ -3759,6 +3759,15 @@ body{{background:transparent;overflow:hidden}}
         </div>
         """
         st.markdown(header_html, unsafe_allow_html=True)
+        st.markdown(
+            """
+            <div style="margin:-4px 0 14px 0; padding:10px 12px; border:1px solid rgba(0,210,255,0.22); border-left:4px solid #00D2FF; border-radius:8px; background:rgba(0,210,255,0.05); color:#b8c7d9; font-size:0.78rem; line-height:1.45;">
+                <strong style="color:#ffffff;">Internal Copyright Notice</strong><br>
+                Copyright &copy; Steven Beltran. Created by Steven Beltran in partnership with BRINC Drones. Internal display only.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         # Cleanly evaluate dynamic CSS to avoid f-string syntax errors
         border_css = 'border-right: 1px solid #222; padding-right: 10px;' if gain_val is not None else ''

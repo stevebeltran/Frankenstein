@@ -19,6 +19,76 @@ from modules.versioning import (
 )
 
 
+EXPORT_HEADERS = [
+    "Timestamp",
+    "Session ID",
+    "Session Start",
+    "Session Duration (min)",
+    "Data Source",
+    "BRINC Rep Name",
+    "BRINC Rep Email",
+    "City",
+    "State",
+    "Population",
+    "Area (sq mi)",
+    "File Inferred City",
+    "File Inferred State",
+    "File City Matched Selection",
+    "Multi-City Targets (JSON)",
+    "Num Cities Targeted",
+    "Total Annual Calls",
+    "Daily Calls",
+    "Calls Per Capita",
+    "Event Type",
+    "Responders",
+    "Guardians",
+    "Call Coverage %",
+    "Area Coverage %",
+    "Avg Response Time (min)",
+    "Time Saved vs Patrol (min)",
+    "Fleet CapEx ($)",
+    "Annual Savings ($)",
+    "Break-Even",
+    "Optimization Strategy",
+    "DFR Dispatch Rate %",
+    "Deflection Rate %",
+    "Incremental Build",
+    "Allow Overlap",
+    "Responder Radius (mi)",
+    "Guardian Radius (mi)",
+    "Population Input by User",
+    "Uploaded Filename(s)",
+    "File Row Count",
+    "File Column Count",
+    "File Column Names (JSON)",
+    "File Date Range Start",
+    "File Date Range End",
+    "File Date Span (days)",
+    "Null Rate % (key fields)",
+    "Lat/Lon Detected",
+    "Priority Col Detected",
+    "Call Type Breakdown (JSON)",
+    "Priority Distribution (JSON)",
+    "Peak Hour (0-23)",
+    "Peak Day of Week (0=Mon)",
+    "Peak Month (1-12)",
+    "Boundary Kind",
+    "Boundary Source Path",
+    "Sim or Upload",
+    "Total Exports in Session",
+    "Drone Details (JSON)",
+]
+
+
+def _sheet_col_label(index):
+    """Convert a 1-based column index to an A1-style column label."""
+    label = ""
+    while index > 0:
+        index, remainder = divmod(index - 1, 26)
+        label = chr(65 + remainder) + label
+    return label
+
+
 def _build_details_html(details):
     """Shared HTML block for deployment details used in email notifications."""
     if not details:
@@ -91,87 +161,68 @@ def _build_sheets_row(city, state, event_type, k_resp, k_guard, coverage, name, 
         dur = ''
     fm = d.get('file_meta', {})
     return [
-        # ── Identity ────────────────────────────────────────────────────────
-        now,                                    # A: Timestamp
-        d.get('session_id', ''),               # B: Session ID
-        session_start,                          # C: Session Start
-        dur,                                    # D: Session Duration (min)
-        d.get('data_source', ''),              # E: Data Source
-        # ── Who ─────────────────────────────────────────────────────────────
-        name,                                   # F: BRINC Rep Name
-        email,                                  # G: BRINC Rep Email
-        # ── Where (user-selected) ────────────────────────────────────────────
-        city,                                   # H: City (user-selected)
-        state,                                  # I: State (user-selected)
-        d.get('population', ''),               # N: Population
-        d.get('area_sq_mi', ''),               # O: Area (sq mi)
-        # ── Where (file-inferred) ────────────────────────────────────────────
-        fm.get('file_inferred_city', ''),      # P: City inferred from uploaded file
-        fm.get('file_inferred_state', ''),     # Q: State inferred from uploaded file
-        d.get('city_confirmed_match', ''),     # R: File city matched user selection (True/False)
-        d.get('multi_city_targets', ''),       # S: All target cities JSON
-        d.get('num_cities_targeted', ''),      # T: Count of cities analyzed
-        # ── Calls ───────────────────────────────────────────────────────────
-        d.get('total_calls', ''),              # U: Total Annual Calls
-        d.get('daily_calls', ''),              # V: Daily Calls
-        d.get('calls_per_capita', ''),         # W: Calls per Capita
-        # ── Fleet ───────────────────────────────────────────────────────────
-        event_type,                             # X: Event Type
-        k_resp,                                 # Y: Responders
-        k_guard,                                # Z: Guardians
-        round(coverage, 1) if coverage else '', # AA: Call Coverage %
-        d.get('area_covered_pct', ''),         # AB: Area Coverage %
-        d.get('avg_response_min', ''),         # AC: Avg Response (min)
-        d.get('avg_time_saved_min', ''),       # AD: Time Saved vs Patrol (min)
-        # ── Financials ──────────────────────────────────────────────────────
-        d.get('fleet_capex', ''),              # AE: Fleet CapEx
-        d.get('annual_savings', ''),           # AF: Annual Savings
-        d.get('break_even', ''),               # AG: Break-Even
-        # ── Settings ────────────────────────────────────────────────────────
-        d.get('opt_strategy', ''),             # AH: Opt Strategy
-        d.get('dfr_rate', ''),                 # AI: DFR Rate %
-        d.get('deflect_rate', ''),             # AJ: Deflection Rate %
-        d.get('incremental_build', ''),        # AK: Incremental Build
-        d.get('allow_redundancy', ''),         # AL: Allow Overlap
-        d.get('r_resp_radius', ''),            # AM: Responder Radius (mi)
-        d.get('r_guard_radius', ''),           # AN: Guardian Radius (mi)
-        d.get('estimated_pop_input', ''),      # AO: Population input by user
-        # ── File Data Matrix ─────────────────────────────────────────────────
-        fm.get('uploaded_filename', ''),       # AP: Uploaded filename(s)
-        fm.get('file_row_count', ''),          # AQ: Raw file row count
-        fm.get('file_col_count', ''),          # AR: Column count
-        fm.get('file_col_names', ''),          # AS: Column names JSON
-        fm.get('file_date_range_start', ''),   # AT: Earliest date in data
-        fm.get('file_date_range_end', ''),     # AU: Latest date in data
-        fm.get('file_date_span_days', ''),     # AV: Days of history in file
-        fm.get('file_null_rate_pct', ''),      # AW: Null rate % across key fields
-        fm.get('file_has_lat_lon', ''),        # AX: Lat/lon detected (True/False)
-        fm.get('file_has_priority', ''),       # AY: Priority col detected (True/False)
-        fm.get('call_type_breakdown', ''),     # AZ: Top call types JSON
-        fm.get('priority_distribution', ''),   # BA: Priority counts JSON
-        fm.get('peak_hour', ''),               # BB: Peak hour of day (0-23)
-        fm.get('peak_day_of_week', ''),        # BC: Peak day of week (0=Mon)
-        fm.get('peak_month', ''),              # BD: Peak month (1-12)
-        # ── User Interaction Signals ─────────────────────────────────────────
-        d.get('boundary_kind', ''),            # BE: Boundary type (place/county)
-        d.get('boundary_source_path', ''),     # BF: Shapefile path used
-        d.get('sim_or_upload', ''),            # BG: simulation vs cad_upload
-        d.get('onboarding_completed', ''),     # BH: Onboarding finished (True/False)
-        d.get('demo_mode_used', ''),           # BI: Demo city loaded (True/False)
-        d.get('export_type_sequence', ''),     # BJ: Ordered export clicks (JSON list)
-        d.get('total_exports_in_session', ''),# BK: Total export clicks
-        d.get('map_viewed', ''),               # BL: Map rendered this session
-        # ── Drones detail (JSON) ─────────────────────────────────────────────
+        now,
+        d.get('session_id', ''),
+        session_start,
+        dur,
+        d.get('data_source', ''),
+        name,
+        email,
+        city,
+        state,
+        d.get('population', ''),
+        d.get('area_sq_mi', ''),
+        fm.get('file_inferred_city', ''),
+        fm.get('file_inferred_state', ''),
+        d.get('city_confirmed_match', ''),
+        d.get('multi_city_targets', ''),
+        d.get('num_cities_targeted', ''),
+        d.get('total_calls', ''),
+        d.get('daily_calls', ''),
+        d.get('calls_per_capita', ''),
+        event_type,
+        k_resp,
+        k_guard,
+        round(coverage, 1) if coverage else '',
+        d.get('area_covered_pct', ''),
+        d.get('avg_response_min', ''),
+        d.get('avg_time_saved_min', ''),
+        d.get('fleet_capex', ''),
+        d.get('annual_savings', ''),
+        d.get('break_even', ''),
+        d.get('opt_strategy', ''),
+        d.get('dfr_rate', ''),
+        d.get('deflect_rate', ''),
+        d.get('incremental_build', ''),
+        d.get('allow_redundancy', ''),
+        d.get('r_resp_radius', ''),
+        d.get('r_guard_radius', ''),
+        d.get('estimated_pop_input', ''),
+        fm.get('uploaded_filename', ''),
+        fm.get('file_row_count', ''),
+        fm.get('file_col_count', ''),
+        fm.get('file_col_names', ''),
+        fm.get('file_date_range_start', ''),
+        fm.get('file_date_range_end', ''),
+        fm.get('file_date_span_days', ''),
+        fm.get('file_null_rate_pct', ''),
+        fm.get('file_has_lat_lon', ''),
+        fm.get('file_has_priority', ''),
+        fm.get('call_type_breakdown', ''),
+        fm.get('priority_distribution', ''),
+        fm.get('peak_hour', ''),
+        fm.get('peak_day_of_week', ''),
+        fm.get('peak_month', ''),
+        d.get('boundary_kind', ''),
+        d.get('boundary_source_path', ''),
+        d.get('sim_or_upload', ''),
+        d.get('total_exports_in_session', ''),
         json.dumps([{"name": dr.get("name"), "type": dr.get("type"),
                      "lat": dr.get("lat"), "lon": dr.get("lon"),
                      "avg_time_min": dr.get("avg_time_min"),
                      "faa_ceiling": dr.get("faa_ceiling"),
                      "annual_savings": dr.get("annual_savings")}
-                    for dr in d.get('active_drones', [])]),  # BM: Drone JSON
-        d.get('app_version', __version__),          # BN: App Version
-        d.get('app_revision', __build_revision__),  # BO: App Revision
-        d.get('build_datetime', __build_datetime__),# BP: Build Datetime
-        d.get('app_line_count', __build_line_count__), # BQ: app.py line count
+                    for dr in d.get('active_drones', [])]),
     ]
 
 
@@ -224,30 +275,16 @@ def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email
 
 def _ensure_sheet_headers(sheet):
     """Best-effort header sync for the main export log worksheet."""
-    _headers = [
-        "Timestamp", "Session ID", "Session Start", "Session Duration (min)", "Data Source",
-        "BRINC Rep Name", "BRINC Rep Email", "City", "State", "Population", "Area (sq mi)",
-        "File Inferred City", "File Inferred State", "City Confirmed Match", "Multi City Targets",
-        "Num Cities Targeted", "Total Annual Calls", "Daily Calls", "Calls per Capita",
-        "Event Type", "Responders", "Guardians", "Call Coverage %", "Area Coverage %",
-        "Avg Response (min)", "Time Saved vs Patrol (min)", "Fleet CapEx", "Annual Savings",
-        "Break-Even", "Opt Strategy", "DFR Rate %", "Deflection Rate %", "Incremental Build",
-        "Allow Overlap", "Responder Radius (mi)", "Guardian Radius (mi)", "Population Input",
-        "Uploaded Filename", "File Row Count", "File Col Count", "File Col Names",
-        "File Date Range Start", "File Date Range End", "File Date Span Days", "File Null Rate %",
-        "File Has Lat Lon", "File Has Priority", "Call Type Breakdown", "Priority Distribution",
-        "Peak Hour", "Peak Day Of Week", "Peak Month", "Boundary Kind", "Boundary Source Path",
-        "Simulation Or Upload", "Onboarding Completed", "Demo Mode Used", "Export Type Sequence",
-        "Total Exports In Session", "Map Viewed", "Active Drones JSON",
-        "App Version", "App Revision", "Build Datetime", "App Line Count",
-    ]
     try:
-        _first_row = sheet.row_values(1)
-        if not _first_row:
-            sheet.update("A1:BQ1", [_headers])
+        first_row = sheet.row_values(1)
+        current_headers = [value.strip() if isinstance(value, str) else value for value in first_row]
+        desired_headers = EXPORT_HEADERS[:]
+        if current_headers == desired_headers:
             return
-        if _first_row[0] == "Timestamp" and len(_first_row) < len(_headers):
-            sheet.update("A1:BQ1", [_headers])
+        target_len = max(len(current_headers), len(desired_headers))
+        padded_headers = desired_headers + [""] * (target_len - len(desired_headers))
+        end_col = _sheet_col_label(target_len)
+        sheet.update(f"A1:{end_col}1", [padded_headers])
     except Exception:
         pass
 

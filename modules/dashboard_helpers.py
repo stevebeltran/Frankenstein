@@ -1244,19 +1244,22 @@ def optimize_fleet_selection(
                         forbidden.add(r_idx)
                 return forbidden
 
-            def build_guard_serviceable_mask(selected_guard_idx):
+            def build_guard_serviceable_claims(selected_guard_idx):
+                zero_mask = np.zeros(total_calls, dtype=bool)
+                zero_claims = {int(idx): zero_mask.copy() for idx in selected_guard_idx}
                 if not selected_guard_idx or total_calls <= 0 or calls_per_day <= 0 or dfr_dispatch_rate <= 0:
-                    return np.zeros(total_calls, dtype=bool)
+                    return zero_mask.copy(), zero_claims
 
                 demand_per_call = (calls_per_day * dfr_dispatch_rate) / max(total_calls, 1)
                 if demand_per_call <= 0:
-                    return np.zeros(total_calls, dtype=bool)
+                    return zero_mask.copy(), zero_claims
 
                 covered_calls = np.where(guard_matrix[selected_guard_idx].any(axis=0))[0]
                 if len(covered_calls) == 0:
-                    return np.zeros(total_calls, dtype=bool)
+                    return zero_mask.copy(), zero_claims
 
                 claimed_mask = np.zeros(total_calls, dtype=bool)
+                claims_by_guard = {int(idx): np.zeros(total_calls, dtype=bool) for idx in selected_guard_idx}
                 covered_dist = dist_matrix_g[np.ix_(selected_guard_idx, covered_calls)]
                 nearest_guard_pos = np.argmin(covered_dist, axis=0)
 
@@ -1282,12 +1285,14 @@ def optimize_fleet_selection(
                     if serviceable_calls <= 0:
                         continue
                     if serviceable_calls >= len(assigned_calls):
-                        claimed_mask[assigned_calls] = True
-                        continue
-                    assigned_dists = dist_matrix_g[guard_idx, assigned_calls]
-                    keep_order = np.argsort(assigned_dists)[:serviceable_calls]
-                    claimed_mask[assigned_calls[keep_order]] = True
-                return claimed_mask
+                        selected_calls = assigned_calls
+                    else:
+                        assigned_dists = dist_matrix_g[guard_idx, assigned_calls]
+                        keep_order = np.argsort(assigned_dists)[:serviceable_calls]
+                        selected_calls = assigned_calls[keep_order]
+                    claims_by_guard[int(guard_idx)][selected_calls] = True
+                    claimed_mask[selected_calls] = True
+                return claimed_mask, claims_by_guard
 
             def greedy_area(geo_list, k, forced, exclude_set, avoid_overlap=False, cross_geo_list=None):
                 chosen = list(forced)
@@ -1374,12 +1379,13 @@ def optimize_fleet_selection(
                 stage_bar.info('🚁 Optimising Responder fleet…')
                 if k_responder > 0:
                     if complement_mode and g_best and total_calls > 0:
-                        guard_claimed = build_guard_serviceable_mask(g_best)
+                        guard_claimed, guard_claims_by_idx = build_guard_serviceable_claims(g_best)
                         resp_matrix_eff = resp_matrix.copy()
                         resp_matrix_eff[:, guard_claimed] = False
                         dist_matrix_r_eff = dist_matrix_r.copy()
                         forbidden_resp = build_forbidden_candidates(cross_overlap_pairs, g_best, locked_r_pins)
                     else:
+                        guard_claims_by_idx = {}
                         resp_matrix_eff = resp_matrix
                         dist_matrix_r_eff = dist_matrix_r
                         forbidden_resp = set()
@@ -1415,6 +1421,8 @@ def optimize_fleet_selection(
                 else:
                     r_best, chrono_r = [], []
 
+            if not complement_mode:
+                guard_claims_by_idx = {}
             best_combo = (tuple(r_best), tuple(g_best))
             stage_bar.empty()
             if true_shared_call_mode:
@@ -1447,6 +1455,7 @@ def optimize_fleet_selection(
         'chrono_r': chrono_r,
         'chrono_g': chrono_g,
         'best_combo': best_combo,
+        'guard_claims_by_idx': guard_claims_by_idx if complement_mode else {},
     }
 
 

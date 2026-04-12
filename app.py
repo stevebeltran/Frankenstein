@@ -3130,6 +3130,7 @@ body{{background:transparent;overflow:hidden}}
         chrono_r = _opt_result['chrono_r']
         chrono_g = _opt_result['chrono_g']
         best_combo = _opt_result['best_combo']
+        guard_claims_by_idx = _opt_result.get('guard_claims_by_idx', {}) or {}
 
 
         # ── METRICS ───────────────────────────────────────────────────────
@@ -3261,10 +3262,15 @@ body{{background:transparent;overflow:hidden}}
 
             if total_calls > 0 and cumulative_mask is not None:
                 # ── DEDUPLICATION: track unique calls added for combined KPI totals ──
-                marginal_mask     = cov_array & ~cumulative_mask
+                effective_cov_array = cov_array
+                if complement_mode and d_type == 'GUARDIAN':
+                    _guard_claimed = guard_claims_by_idx.get(idx)
+                    if _guard_claimed is not None:
+                        effective_cov_array = _guard_claimed
+                marginal_mask     = effective_cov_array & ~cumulative_mask
                 marginal_historic = np.sum(marginal_mask)
                 d['assigned_indices'] = np.where(marginal_mask)[0]
-                cumulative_mask   = cumulative_mask | cov_array
+                cumulative_mask   = cumulative_mask | effective_cov_array
 
                 # ── RAW ZONE COVERAGE: how many calls fall in this drone's zone ───
                 # Used for per-unit economics. Independent of iteration order so

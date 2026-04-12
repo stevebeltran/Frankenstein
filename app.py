@@ -37,9 +37,11 @@ from modules.config import (
     get_hero_message, get_faa_message, get_airfield_message,
     get_jurisdiction_message, get_spatial_message
 )
-import importlib as _importlib
 import modules.versioning as _versioning_mod
-_importlib.reload(_versioning_mod)  # recompute on every Streamlit rerun so revision increments on each save
+# No importlib.reload needed here — Streamlit restarts the process on every
+# app.py save, so versioning._compute_build_info() already runs fresh each time.
+# Reloading on every rerun forced a full re-read of the 8 000-line app.py file
+# on every user interaction, for no benefit.
 from modules.versioning import (
     __version__,
     __build_revision__,
@@ -61,6 +63,15 @@ from modules.geospatial import (
     _count_points_within_boundary, find_jurisdictions_by_coordinates
 )
 from modules import faa_rf, optimization, html_reports
+from modules.session_state import init_session_state
+from modules.dashboard_helpers import log_map_build_event_once, resolve_master_boundary, render_sidebar_jurisdiction_selector, render_data_filters, render_display_options, render_deployment_strategy, prepare_station_candidates, manage_custom_stations, prepare_runtime_context, optimize_fleet_selection
+from modules.onboarding import (
+    detect_brinc_file, load_brinc_save_data, restore_brinc_session,
+    split_uploaded_files, load_station_file, detect_location_from_calls,
+    resolve_uploaded_boundaries, split_simulation_optional_files,
+    load_simulation_boundary_overlay, load_simulation_custom_stations,
+    build_demo_boundaries, build_demo_calls, resolve_demo_stations,
+)
 
 PUBLIC_REPORTS_DIR = Path("public_reports")
 PUBLIC_REPORTS_DIR.mkdir(exist_ok=True)
@@ -521,11 +532,13 @@ def generate_stations_from_calls(df_calls, max_stations=100):
         for name, fut in futures.items():
             if fut in not_done:
                 fut.cancel()
+                print(f"[BRINC] generate_stations_from_calls: {name} timed out")
                 continue
             try:
                 rows, note = fut.result()
-            except Exception:
+            except Exception as e:
                 rows, note = None, f"{name} unavailable"
+                print(f"[BRINC] generate_stations_from_calls: {name} raised {e}")
             if name == 'OSM':
                 osm_rows, osm_note = rows, note
             else:
@@ -911,11 +924,12 @@ def save_boundary_gdf(boundary_gdf, kind, name, state_abbr):
             if os.path.exists(fp):
                 try:
                     os.remove(fp)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[BRINC] Could not remove old shapefile {fp}: {e}")
         boundary_gdf.to_file(base + ".shp")
         return base + ".shp"
-    except Exception:
+    except Exception as e:
+        print(f"[BRINC] save_boundary_gdf failed for {kind}/{name}/{state_abbr}: {e}")
         return None
 
 def load_saved_boundary(kind, name, state_abbr):
@@ -927,8 +941,8 @@ def load_saved_boundary(kind, name, state_abbr):
             if gdf.crs is None:
                 gdf = gdf.set_crs(epsg=4269)
             return gdf.to_crs(epsg=4326)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[BRINC] load_saved_boundary failed for {kind}/{name}/{state_abbr}: {e}")
     return None
 
 @st.cache_data
@@ -989,7 +1003,8 @@ def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
         save_path = os.path.join(output_dir, f"{city_name.replace(' ', '_')}_{state_fips}.shp")
         city_gdf.to_file(save_path)
         return True, city_gdf
-    except Exception:
+    except Exception as e:
+        print(f"[BRINC] fetch_tiger_city_shapefile failed for {city_name}: {e}")
         return False, None
 
 def add_cell_towers_layer_to_plotly(fig, state_abbr, minx, miny, maxx, maxy):
@@ -1014,8 +1029,8 @@ def add_cell_towers_layer_to_plotly(fig, state_abbr, minx, miny, maxx, maxy):
                 hoverinfo='text',
                 showlegend=True,
             ))
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[BRINC] add_cell_towers_layer_to_plotly failed: {e}")
 
 def add_no_fly_zones_layer_to_plotly(fig, minx, miny, maxx, maxy):
     """Add no-fly zones (parks, water, restricted areas) to map."""
@@ -1043,8 +1058,8 @@ def add_no_fly_zones_layer_to_plotly(fig, minx, miny, maxx, maxy):
                         hoverinfo='text',
                         showlegend=False,
                     ))
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[BRINC] add_no_fly_zones_layer_to_plotly failed: {e}")
 
 def _prepare_sampling_polygon(polygon):
     if polygon is None:
@@ -1789,7 +1804,7 @@ try:
             </div>
             """, unsafe_allow_html=True)
             st.button("Sign in with Google", on_click=st.login, args=("google",),
-                      type="primary", use_container_width=False)
+                      type="primary", width="content")
             st.html("""
 <script>
 (function() {
@@ -1854,63 +1869,13 @@ except Exception:
 # SESSION STATE INITIALIZATION
 # ============================================================
 # This MUST run before any st.session_state checks to prevent KeyError
-_defaults = {
-    'csvs_ready': False, 'df_calls': None, 'df_calls_full': None, 'df_stations': None,
-    'active_city': "Rockford", 'active_state': "IL", 'estimated_pop': 65000,
-    'k_resp': 2, 'k_guard': 0, 'r_resp': 2.0, 'r_guard': 8.0,
-    'dfr_rate': 12, 'deflect_rate': 25, 'total_original_calls': 0, 'total_modeled_calls': 0,
-    'onboarding_done': False, 'trigger_sim': False, 'city_count': 1,
-    'brinc_user': '',
-    'session_start': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-    'session_id': str(uuid.uuid4())[:8],
-    'public_report_id': '',
-    'public_report_url': '',
-    'data_source': 'unknown',
-    'map_build_logged': False,
-    'boundary_kind': 'place',
-    'boundary_source_path': '',
-    'location_detection_source': '',
-    'boundary_detection_mode': '',
-    'master_gdf_override': None,
-    'boundary_overlay_gdf': None,
-    'boundary_overlay_name': '',
-    'boundary_overlay_file': '',
-    'file_meta': {},
-    'export_event_log': [],
-    'export_count': 0,
-    'demo_mode_used': False,
-    'sim_mode_used': False,
-    'pin_drop_mode': False,
-    'pending_pin': None,
-    'pin_drop_used': False,
-    'doc_custom_intro': '',
-    'doc_talking_pt_1': '',
-    'doc_talking_pt_2': '',
-    'doc_talking_pt_3': '',
-    'doc_custom_closing': '',
-    'doc_ae_phone': '',
-    'inferred_daily_calls_override': None,
-}
-for k, v in _defaults.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
-
-if not st.session_state.get('public_report_id'):
-    _pub_city_slug = _slugify(st.session_state.get('active_city', 'report'))
-    st.session_state['public_report_id'] = f"{_pub_city_slug}-{st.session_state.get('session_id', str(uuid.uuid4())[:8])}"
-st.session_state['public_report_url'] = _build_public_report_url(st.session_state['public_report_id'])
-
-if 'target_cities' not in st.session_state:
-    st.session_state['target_cities'] = [{"city": "", "state": st.session_state.get('active_state', 'IL')}]
+init_session_state(st.session_state, _slugify, _build_public_report_url)
 
 # ============================================================
 # APP FLOW
 # ============================================================
 
 def main():
-    if st.session_state.get('csvs_ready'):
-        _render_version_badge("bottom-right")
-
     if not st.session_state['csvs_ready']:
 
         # GRAB THE LOGO FOR THE UPLOAD PAGE
@@ -2146,12 +2111,30 @@ def main():
             st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
             # Move "+ City" and "Deploy" buttons up (before file uploader and download button)
+            st.markdown("""
+            <style>
+            [data-testid="stBaseButton-primary"], button[kind="primary"] {
+                background: #00D2FF !important;
+                background-color: #00D2FF !important;
+                border-color: #00D2FF !important;
+                color: #000 !important;
+                font-weight: 800 !important;
+            }
+            [data-testid="stBaseButton-primary"]:hover, button[kind="primary"]:hover {
+                background: #33DEFF !important;
+                background-color: #33DEFF !important;
+                border-color: #33DEFF !important;
+                color: #000 !important;
+            }
+            </style>
+            """, unsafe_allow_html=True)
             col_add, col_run = st.columns([1, 1])
             if st.session_state.city_count < 10:
-                if col_add.button("＋ City", use_container_width=True, key="add_city_btn"):
+                if col_add.button("＋ City", width="stretch", key="add_city_btn"):
                     st.session_state.city_count += 1
                     st.rerun()
-            submit_demo = col_run.button("Deploy", use_container_width=True, key="run_sim_btn",
+            submit_demo = col_run.button("Deploy", width="stretch", key="run_sim_btn",
+                                         type="primary",
                                          help="Fetch boundaries and launch the simulation.")
 
             st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
@@ -2303,137 +2286,16 @@ def main():
                 return Path(fname).suffix.lower() in {'.shp', '.shx', '.dbf', '.prj'}
 
             if uploaded_files and len(uploaded_files) >= 1:
-            
+
                 # --- 1. INTELLIGENTLY CHECK FOR .BRINC FILE ---
                 # Browsers sometimes append .json to .brinc files on download
-                brinc_file = None
-                for f in uploaded_files:
-                    fname = f.name.lower()
-                    if '.brinc' in fname or fname.endswith('.json'):
-                        try:
-                            # Quick peek inside to see if it has our save data keys
-                            f.seek(0)
-                            peek = json.loads(f.getvalue().decode('utf-8'))
-                            if 'k_resp' in peek and 'calls_data' in peek:
-                                brinc_file = f
-                                break
-                        except:
-                            pass
+                brinc_file = detect_brinc_file(uploaded_files)
 
                 if brinc_file:
                     with st.spinner("💾 Restoring saved deployment..."):
                         try:
-                            brinc_file.seek(0)
-                            save_data = json.loads(brinc_file.getvalue().decode('utf-8'))
-                        
-                            st.session_state['active_city']   = str(save_data.get('city', 'Unknown')).title()
-                            st.session_state['active_state']  = save_data.get('state', 'US')
-                            st.session_state['k_resp']        = save_data.get('k_resp', 2)
-                            st.session_state['k_guard']       = save_data.get('k_guard', 0)
-                            st.session_state['r_resp']        = save_data.get('r_resp', 2.0)
-                            st.session_state['r_guard']       = save_data.get('r_guard', 8.0)
-                            st.session_state['dfr_rate']      = save_data.get('dfr_rate', 12)
-                            st.session_state['deflect_rate']  = save_data.get('deflect_rate', 25)
-
-                            # Restore locked stations
-                            st.session_state['pinned_guard_names'] = save_data.get('pinned_guard_names', [])
-                            st.session_state['pinned_resp_names']  = save_data.get('pinned_resp_names',  [])
-                            st.session_state['lock_guard_ms'] = list(st.session_state['pinned_guard_names'])
-                            st.session_state['lock_resp_ms']  = [
-                                s for s in st.session_state['pinned_resp_names']
-                                if s not in st.session_state['pinned_guard_names']
-                            ]
-
-                            # Restore custom / pin-dropped stations
-                            _cs_records = save_data.get('custom_stations')
-                            if _cs_records:
-                                try:
-                                    _cs_df = pd.DataFrame(_cs_records)
-                                    if not _cs_df.empty and 'lat' in _cs_df.columns and 'lon' in _cs_df.columns:
-                                        st.session_state['custom_stations'] = _cs_df
-                                except Exception:
-                                    pass
-
-                            # Restore optimization strategy indices
-                            _rstr = save_data.get('resp_strategy', 'Call Coverage')
-                            _gstr = save_data.get('guard_strategy', 'Land Coverage')
-                            st.session_state['resp_strat_idx']  = 0 if _rstr == 'Call Coverage' else 1
-                            st.session_state['guard_strat_idx'] = 0 if _gstr == 'Call Coverage' else 1
-                            st.session_state['deployment_mode_idx'] = save_data.get('deployment_mode_idx', 1)
-                            st.session_state['incremental_build']   = save_data.get('incremental_build', True)
-                            st.session_state['auto_cap_dfr']        = save_data.get('auto_cap_dfr', True)
-
-                            # Restore boundary selection (county vs place)
-                            st.session_state['use_county_boundary'] = save_data.get('use_county_boundary', False)
-
-                            # Restore pin-drop mode flag
-                            st.session_state['pin_drop_used'] = save_data.get('pin_drop_used', False)
-
-                            # Prevent auto-minimums from overriding the restored k values.
-                            # _brinc_k_override tells the auto-minimums block to skip one cycle
-                            # and lock the sig so subsequent reruns also stay stable.
-                            st.session_state['_brinc_k_override'] = True
-                            st.session_state.pop('_auto_minimums_sig', None)
-
-                            # Clear optimizer caches so the restored fleet is recalculated fresh
-                            for _ck in ['_opt_cache_key', '_opt_best_combo',
-                                        '_opt_chrono_r', '_opt_chrono_g']:
-                                st.session_state.pop(_ck, None)
-                        
-                            if save_data.get('calls_data'):
-                                df_c = pd.DataFrame(save_data['calls_data'])
-                                if 'lat' not in df_c.columns or 'lon' not in df_c.columns:
-                                    st.error("❌ .brinc file is missing required 'lat'/'lon' columns in calls data.")
-                                    st.stop()
-                                df_c['lat'] = pd.to_numeric(df_c['lat'], errors='coerce')
-                                df_c['lon'] = pd.to_numeric(df_c['lon'], errors='coerce')
-                                df_c = df_c.dropna(subset=['lat', 'lon']).reset_index(drop=True)
-                                if df_c.empty:
-                                    st.error("❌ .brinc file contains no valid coordinate data after parsing.")
-                                    st.stop()
-                                st.session_state['df_calls'] = df_c
-                                st.session_state['df_calls_full'] = df_c.copy()
-                                st.session_state['total_original_calls'] = len(df_c)
-                                st.session_state['total_modeled_calls'] = len(df_c)
-
-                            if save_data.get('stations_data'):
-                                df_s = pd.DataFrame(save_data['stations_data'])
-                                if 'lat' not in df_s.columns or 'lon' not in df_s.columns:
-                                    st.warning("⚠️ .brinc stations data missing lat/lon — stations will be re-generated.")
-                                else:
-                                    df_s['lat'] = pd.to_numeric(df_s['lat'], errors='coerce')
-                                    df_s['lon'] = pd.to_numeric(df_s['lon'], errors='coerce')
-                                    df_s = df_s.dropna(subset=['lat', 'lon']).reset_index(drop=True)
-                                    st.session_state['df_stations'] = df_s
-
-                            if save_data.get('boundary_geojson'):
-                                try:
-                                    import io as _io
-                                    _bgdf = gpd.read_file(_io.StringIO(save_data['boundary_geojson']))
-                                    if not _bgdf.empty:
-                                        st.session_state['master_gdf_override'] = _bgdf
-                                except Exception:
-                                    pass
-                            st.session_state['boundary_kind'] = save_data.get('boundary_kind', 'place')
-                            st.session_state['boundary_source_path'] = save_data.get('boundary_source_path', '')
-                            st.session_state['boundary_overlay_gdf'] = None
-                            st.session_state['boundary_overlay_name'] = ''
-                            st.session_state['boundary_overlay_file'] = ''
-
-                            # Restore FAA LAANC airspace data (if present)
-                            if save_data.get('faa_geojson'):
-                                st.session_state['_faa_geojson_cache'] = save_data['faa_geojson']
-
-                            # Restore sidebar settings — BRINC rep info
-                            st.session_state['brinc_user'] = save_data.get('brinc_user', '')
-                            # Restore pricing tier selection
-                            st.session_state['pricing_tier'] = save_data.get('pricing_tier', 'Safe Guard')
-
-                            st.session_state['data_source'] = 'brinc_file'
-                            st.session_state['demo_mode_used'] = False
-                            st.session_state['sim_mode_used'] = False
-                            st.session_state['map_build_logged'] = False
-                            st.session_state['csvs_ready'] = True
+                            save_data = load_brinc_save_data(brinc_file)
+                            restore_brinc_session(st.session_state, save_data)
                             st.toast("✅ Deployment restored successfully!")
                             st.rerun()
                         except Exception as e:
@@ -2446,32 +2308,14 @@ def main():
                     st.session_state['active_state'] = ""
                     st.session_state['target_cities'] = []
 
-                    f_list = list(uploaded_files)
-                    call_files = []
-                    station_file = None
-                    boundary_files = []
+                    call_files, station_file, boundary_files = split_uploaded_files(
+                        uploaded_files,
+                        _is_boundary_sidecar,
+                        _looks_like_stations,
+                    )
                     st.session_state['boundary_overlay_gdf'] = None
                     st.session_state['boundary_overlay_name'] = ''
                     st.session_state['boundary_overlay_file'] = ''
-
-                    for f in f_list:
-                        if _is_boundary_sidecar(f.name):
-                            boundary_files.append(f)
-                        elif _looks_like_stations(f.name):
-                            station_file = f
-                        else:
-                            call_files.append(f)
-                
-                    if len(call_files) == 2 and not station_file:
-                        f0, f1 = call_files
-                        f0.seek(0); sz0 = len(f0.read()); f0.seek(0)
-                        f1.seek(0); sz1 = len(f1.read()); f1.seek(0)
-                        if sz0 >= sz1:
-                            call_files = [f0]
-                            station_file = f1
-                        else:
-                            call_files = [f1]
-                            station_file = f0
 
                     if call_files:
                         with st.spinner("🔍 Detecting column types in CAD export…"):
@@ -2497,45 +2341,7 @@ def main():
                         if station_file is not None:
                             with st.spinner("🔍 Reading stations file…"):
                                 try:
-                                    sfname = station_file.name.lower()
-                                    if sfname.endswith(('.xlsx', '.xls', '.xlsm', '.xlsb')):
-                                        engine = 'xlrd' if sfname.endswith('.xls') else 'pyxlsb' if sfname.endswith('.xlsb') else 'openpyxl'
-                                        df_s = pd.read_excel(io.BytesIO(station_file.getvalue()), engine=engine)
-                                    else:
-                                        df_s = pd.read_csv(station_file)
-                                    df_s.columns = [str(c).lower().strip() for c in df_s.columns]
-                                    if 'latitude' in df_s.columns: df_s = df_s.rename(columns={'latitude':'lat'})
-                                    if 'longitude' in df_s.columns: df_s = df_s.rename(columns={'longitude':'lon'})
-                                    if 'station_name' in df_s.columns: df_s = df_s.rename(columns={'station_name':'name'})
-                                    if 'station_type' in df_s.columns: df_s = df_s.rename(columns={'station_type':'type'})
-                                
-                                    if 'lat' in df_s.columns and 'lon' in df_s.columns:
-                                        df_s['lat'] = pd.to_numeric(df_s['lat'], errors='coerce')
-                                        df_s['lon'] = pd.to_numeric(df_s['lon'], errors='coerce')
-                                    else:
-                                        raise ValueError("Could not find lat/lon columns.")
-
-                                    if 'name' not in df_s.columns: 
-                                        df_s['name'] = [f"Site {i+1}" for i in range(len(df_s))]
-                                    else:
-                                        df_s['name'] = df_s['name'].fillna('').astype(str).str.strip()
-                                        df_s['name'] = df_s['name'].replace(r'(?i)^(null|<null>|nan|none)$', '', regex=True)
-                                        df_s['name'] = [n if n else f"Site {i+1}" for i, n in enumerate(df_s['name'])]
-
-                                    counts = {}
-                                    new_names = []
-                                    for n in df_s['name']:
-                                        if n in counts:
-                                            counts[n] += 1
-                                            new_names.append(f"{n} ({counts[n]})")
-                                        else:
-                                            counts[n] = 0
-                                            new_names.append(n)
-                                    df_s['name'] = new_names
-
-                                    if 'type' not in df_s.columns: df_s['type'] = 'Police'
-                                    df_s = df_s.dropna(subset=['lat', 'lon']).reset_index(drop=True)
-                                    osm_note = "Loaded stations from file."
+                                    df_s, osm_note = load_station_file(station_file)
                                     st.session_state['stations_user_uploaded'] = True
                                 except Exception as e:
                                     df_s, osm_note = None, f"Failed: {e}"
@@ -2557,153 +2363,13 @@ def main():
                         if len(df_s) > 100:
                             df_s = df_s.sample(100, random_state=42).reset_index(drop=True)
 
-                        detected_city = None
-                        detected_state = None
-                        detection_source = 'unknown'
-
                         with st.spinner(get_jurisdiction_message()):
-                            # Priority 1: city/state extracted directly from the CAD export
-                            if '_csv_city' in df_c.columns:
-                                city_val = str(df_c['_csv_city'].iloc[0]).strip().title()
-                                if city_val and city_val.lower() not in ('nan', 'none', ''):
-                                    detected_city = city_val
-                                    detection_source = 'file'
-
-                            if '_csv_state' in df_c.columns:
-                                state_val = str(df_c['_csv_state'].iloc[0]).strip().upper()
-                                if state_val in STATE_FIPS:
-                                    detected_state = state_val
-                                    detection_source = 'file'
-                                elif state_val.title() in US_STATES_ABBR:
-                                    detected_state = US_STATES_ABBR[state_val.title()]
-                                    detection_source = 'file'
-
-                            # If the export gives us a city but not a state, forward-geocode the city name.
-                            if detected_city and not detected_state:
-                                try:
-                                    geo_url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(detected_city)}&limit=1&countrycodes=us"
-                                    req_geo = urllib.request.Request(geo_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
-                                    with urllib.request.urlopen(req_geo, timeout=8) as resp_geo:
-                                        geo_result = json.loads(resp_geo.read().decode('utf-8'))
-                                    if geo_result:
-                                        display_name = geo_result[0].get('display_name', '')
-                                        parts = [p.strip() for p in display_name.split(',')]
-                                        state_full = parts[2] if len(parts) >= 3 else ''
-                                        if state_full in US_STATES_ABBR:
-                                            detected_state = US_STATES_ABBR[state_full]
-                                            detection_source = 'file'
-                                except Exception:
-                                    pass
-
-                            # Priority 2: reverse-geocode the centroid of the calls, not the first row.
-                            if not detected_city or not detected_state:
-                                try:
-                                    cen_lat = float(df_c['lat'].median())
-                                    cen_lon = float(df_c['lon'].median())
-                                    detected_state_full, detected_city_rg = reverse_geocode_state(cen_lat, cen_lon)
-                                    if detected_state_full and detected_state_full in US_STATES_ABBR:
-                                        if not detected_state:
-                                            detected_state = US_STATES_ABBR[detected_state_full]
-                                        if not detected_city and detected_city_rg and detected_city_rg != 'Unknown City':
-                                            detected_city = detected_city_rg
-                                        detection_source = 'centroid'
-                                except Exception:
-                                    pass
-
-                            # ── Fallback: derive city/state from coordinate centroid bbox ──
-                            # If Nominatim failed or returned nothing, try the Census FCC API
-                            # which is reliable and returns county + state from a lat/lon.
-                            if not detected_city or not detected_state:
-                                try:
-                                    cen_lat_fb = float(df_c['lat'].median())
-                                    cen_lon_fb = float(df_c['lon'].median())
-                                    _fcc_url = (
-                                        f"https://geo.fcc.gov/api/census/block/find"
-                                        f"?latitude={cen_lat_fb}&longitude={cen_lon_fb}"
-                                        f"&format=json&showall=false"
-                                    )
-                                    _fcc_req = urllib.request.Request(
-                                        _fcc_url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"}
-                                    )
-                                    with urllib.request.urlopen(_fcc_req, timeout=8) as _fcc_resp:
-                                        _fcc_data = json.loads(_fcc_resp.read().decode("utf-8"))
-                                    _fcc_county = _fcc_data.get("County", {}).get("name", "")
-                                    _fcc_state  = _fcc_data.get("State", {}).get("code", "")
-                                    if _fcc_county and _fcc_state and _fcc_state in STATE_FIPS:
-                                        if not detected_state:
-                                            detected_state = _fcc_state
-                                        if not detected_city:
-                                            # Use "County Name County" so fetch_county_boundary_local can find it
-                                            detected_city = _fcc_county
-                                        detection_source = "fcc_centroid"
-                                except Exception:
-                                    pass
-
-                            # Last resort: derive state from coordinate range alone
-                            # (FL: lat 24-31, lon -87 to -80; this catches most US states uniquely)
-                            if not detected_state:
-                                try:
-                                    _cen_lat = float(df_c['lat'].median())
-                                    _cen_lon = float(df_c['lon'].median())
-                                    _BBOX_STATES = [
-                                        ("FL", 24.5, 31.0, -87.6, -79.9),
-                                        ("CA", 32.5, 42.0, -124.5, -114.1),
-                                        ("TX", 25.8, 36.5, -106.6, -93.5),
-                                        ("NY", 40.5, 45.0, -79.8, -71.9),
-                                        ("IL", 36.9, 42.5, -91.5, -87.0),
-                                        ("GA", 30.4, 35.0, -85.6, -80.8),
-                                        ("NC", 33.8, 36.6, -84.3, -75.5),
-                                        ("OH", 38.4, 42.0, -84.8, -80.5),
-                                        ("PA", 39.7, 42.3, -80.5, -74.7),
-                                        ("WA", 45.5, 49.0, -124.7, -116.9),
-                                        ("AZ", 31.3, 37.0, -114.8, -109.0),
-                                        ("CO", 36.9, 41.0, -109.1, -102.0),
-                                        ("MO", 35.9, 40.6, -95.8, -89.1),
-                                        ("NM", 31.3, 37.0, -109.1, -103.0),
-                                        ("OR", 41.9, 46.2, -124.6, -116.5),
-                                        ("TN", 34.9, 36.7, -90.3, -81.6),
-                                        ("VA", 36.5, 39.5, -83.7, -75.2),
-                                        ("SC", 32.0, 35.2, -83.4, -78.5),
-                                        ("MI", 41.7, 48.3, -90.4, -82.4),
-                                        ("WI", 42.5, 47.1, -92.9, -86.2),
-                                        ("MN", 43.5, 49.4, -97.2, -89.5),
-                                        ("IA", 40.4, 43.5, -96.6, -90.1),
-                                        ("KS", 36.9, 40.0, -102.1, -94.6),
-                                        ("NE", 40.0, 43.0, -104.1, -95.3),
-                                        ("OK", 33.6, 37.0, -103.0, -94.4),
-                                        ("AR", 33.0, 36.5, -94.6, -89.6),
-                                        ("LA", 28.9, 33.0, -94.0, -88.8),
-                                        ("MS", 30.2, 35.0, -91.7, -88.1),
-                                        ("AL", 30.2, 35.0, -88.5, -84.9),
-                                        ("IN", 37.8, 41.8, -88.1, -84.8),
-                                        ("KY", 36.5, 39.1, -89.6, -81.9),
-                                        ("WV", 37.2, 40.6, -82.6, -77.7),
-                                        ("MD", 37.9, 39.7, -79.5, -75.0),
-                                        ("DE", 38.4, 39.8, -75.8, -75.0),
-                                        ("NJ", 38.9, 41.4, -75.6, -73.9),
-                                        ("CT", 41.0, 42.1, -73.7, -71.8),
-                                        ("RI", 41.1, 42.0, -71.9, -71.1),
-                                        ("MA", 41.2, 42.9, -73.5, -69.9),
-                                        ("VT", 42.7, 45.0, -73.4, -71.5),
-                                        ("NH", 42.7, 45.3, -72.6, -70.7),
-                                        ("ME", 43.1, 47.5, -71.1, -66.9),
-                                        ("NV", 35.0, 42.0, -120.0, -114.0),
-                                        ("UT", 36.9, 42.0, -114.1, -109.0),
-                                        ("ID", 41.9, 49.0, -117.2, -111.0),
-                                        ("MT", 44.4, 49.0, -116.1, -104.0),
-                                        ("WY", 40.9, 45.0, -111.1, -104.0),
-                                        ("ND", 45.9, 49.0, -104.1, -96.6),
-                                        ("SD", 42.5, 45.9, -104.1, -96.4),
-                                        ("AK", 54.0, 71.5, -168.0, -130.0),
-                                        ("HI", 18.9, 22.2, -160.2, -154.8),
-                                    ]
-                                    for _st, _lat0, _lat1, _lon0, _lon1 in _BBOX_STATES:
-                                        if _lat0 <= _cen_lat <= _lat1 and _lon0 <= _cen_lon <= _lon1:
-                                            detected_state = _st
-                                            detection_source = "coord_bbox"
-                                            break
-                                except Exception:
-                                    pass
+                            detected_city, detected_state, detection_source = detect_location_from_calls(
+                                df_c,
+                                STATE_FIPS,
+                                US_STATES_ABBR,
+                                reverse_geocode_state,
+                            )
 
                             if detected_city and detected_state:
                                 st.session_state['active_city'] = str(detected_city).title()
@@ -2718,64 +2384,22 @@ def main():
                                 st.session_state['location_detection_source'] = detection_source
 
                         # Keep uploaded calls intact here. Boundary validation should be the first real geographic filter.
-                        st.session_state['df_calls']             = df_c
-                        st.session_state['df_calls_full']        = df_c_full
-                        st.session_state['df_stations']          = df_s
+                        st.session_state['df_calls'] = df_c
+                        st.session_state['df_calls_full'] = df_c_full
+                        st.session_state['df_stations'] = df_s
                         st.session_state['total_original_calls'] = len(df_c_full)
-                        st.session_state['total_modeled_calls']  = len(df_c)
-
-                        # ── Clear stale shapefiles from previous sessions ──────────────
-                        # Old .shp files from prior cities (e.g. Bernalillo) would otherwise
-                        # be picked up by find_relevant_jurisdictions when no fresh boundary
-                        # is saved, causing completely wrong jurisdiction boundaries.
-                        try:
-                            import glob as _glob
-                            for _stale in _glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp")):
-                                for _ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
-                                    _f = _stale.replace(".shp", _ext)
-                                    try:
-                                        if os.path.exists(_f): os.remove(_f)
-                                    except Exception:
-                                        pass
-                        except Exception:
-                            pass
-                        st.session_state['boundary_source_path'] = ''
-                        st.session_state['master_gdf_override'] = None
+                        st.session_state['total_modeled_calls'] = len(df_c)
 
                         with st.spinner(get_jurisdiction_message()):
-                            _calls_for_boundary = df_c_full if df_c_full is not None and len(df_c_full) > 0 else df_c
-
-                            # ── PRIMARY: pure coordinate spatial join against local parquets ──
-                            # Works for any file regardless of whether city/state was detected.
-                            # Returns ALL jurisdictions that contain ≥1% of calls.
-                            coord_gdf = find_jurisdictions_by_coordinates(_calls_for_boundary)
-
-                            if coord_gdf is not None and not coord_gdf.empty:
-                                # Store the GeoDataFrame directly in session state — no disk
-                                # round-trip needed. The render pass reads it back directly.
-                                st.session_state['master_gdf_override'] = coord_gdf
-                                st.session_state['boundary_source_path'] = 'local_parquet'
-                                st.session_state['boundary_kind'] = 'place'
-                                st.session_state['active_city'] = str(coord_gdf.iloc[0]['DISPLAY_NAME']).title()
-
-                            else:
-                                st.session_state['master_gdf_override'] = None
-                                # ── FALLBACK: name-based lookup (original path) ──
-                                detected_city_for_boundary = st.session_state.get('active_city', '')
-                                detected_state_for_boundary = st.session_state.get('active_state', '')
-                                if detected_city_for_boundary and detected_state_for_boundary and detected_state_for_boundary in STATE_FIPS:
-                                    city_text = str(detected_city_for_boundary or '').strip()
-                                    prefer_county = str(st.session_state.get('location_detection_source', '')) == 'centroid'
-                                    b_success, b_gdf, b_kind, b_hits = _select_best_boundary_for_calls(
-                                        _calls_for_boundary,
-                                        city_text,
-                                        detected_state_for_boundary,
-                                        prefer_county=prefer_county
-                                    )
-                                    st.session_state['boundary_kind'] = b_kind
-                                    if b_success and b_gdf is not None:
-                                        _saved = save_boundary_gdf(b_gdf, b_kind, city_text, detected_state_for_boundary)
-                                        st.session_state['boundary_source_path'] = _saved or ''
+                            resolve_uploaded_boundaries(
+                                st.session_state,
+                                df_c,
+                                df_c_full,
+                                STATE_FIPS,
+                                find_jurisdictions_by_coordinates,
+                                _select_best_boundary_for_calls,
+                                save_boundary_gdf,
+                            )
 
                         st.session_state['data_source'] = 'cad_upload'
                         st.session_state['demo_mode_used'] = False
@@ -2796,7 +2420,7 @@ def main():
 
             st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-            if st.button("⚡ Launch Random Demo City", use_container_width=True, key="demo_btn"):
+            if st.button("⚡ Launch Random Demo City", width="stretch", key="demo_btn"):
                 random.seed(datetime.datetime.now().microsecond + os.getpid())
                 already_used = st.session_state.get('_last_demo_city', '')
                 candidates = [c for c in FAST_DEMO_CITIES if c[0] != already_used]
@@ -2857,39 +2481,319 @@ def main():
                 st.session_state['active_city']  = f"{str(active_targets[0]['city']).title()} & {len(active_targets)-1} others"
                 st.session_state['active_state'] = active_targets[0]['state']
 
+            # ── Flight-path loading overlay ───────────────────────────────────────
+            _swarm_city = str(active_targets[0]['city']).title() if active_targets else "Jurisdiction"
+            _swarm_logo_b64 = get_themed_logo_base64("logo.png", theme="dark") or ""
+            _swarm_gigs_b64 = get_transparent_product_base64("gigs.png") or ""
+            _swarm_city_js  = _swarm_city.upper().replace('"', '').replace("'", '')
+            _swarm_state_js = str(active_targets[0].get('state', 'US')).upper().replace('"', '').replace("'", '') if active_targets else "US"
+            _swarm_map_svg = '<svg id="fl-svg" viewBox="0 0 600 360" xmlns="http://www.w3.org/2000/svg"></svg>'
+            try:
+                _swarm_map_svg = Path('usa.svg').read_text(encoding='utf-8')
+                _swarm_map_svg = re.sub(r'^\s*<\?xml[^>]*>\s*', '', _swarm_map_svg, count=1)
+                _swarm_map_svg = re.sub(r'^\s*<!--.*?-->\s*', '', _swarm_map_svg, count=1, flags=re.S)
+                _swarm_map_svg = re.sub(r'<svg\b', '<svg id="fl-svg" class="fl-us-map" preserveAspectRatio="xMidYMid meet"', _swarm_map_svg, count=1)
+            except Exception:
+                pass
+            components.html(f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:transparent;overflow:hidden}}
+#flo{{
+  position:fixed;top:0;left:0;width:100vw;height:100vh;
+  background:rgba(4,7,16,0.97);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  z-index:2147483647;font-family:'IBM Plex Mono',monospace;
+}}
+.fl-panels{{display:flex;align-items:center;justify-content:center;width:100%;max-width:940px;gap:24px;padding:0 24px}}
+.fl-side{{width:150px;flex-shrink:0;display:flex;align-items:center;justify-content:center}}
+.fl-side img{{max-width:140px;max-height:90px;object-fit:contain;opacity:0.92}}
+.fl-map{{flex:1;min-width:0}}
+.fl-map svg{{width:100%;height:auto;display:block}}
+.fl-footer{{margin-top:20px;text-align:center;max-width:760px;padding:0 18px}}
+.fl-city{{font-size:20px;font-weight:900;letter-spacing:3px;color:#fff}}
+.fl-stline{{font-size:10px;letter-spacing:2px;color:rgba(0,210,255,0.7);text-transform:uppercase;margin-top:7px}}
+.fl-made{{margin-top:12px;font-size:11px;font-weight:800;letter-spacing:2.6px;color:rgba(255,255,255,0.92);text-transform:uppercase}}
+.fl-copy{{margin-top:8px;font-size:11px;line-height:1.55;color:rgba(255,255,255,0.62)}}
+.fl-tribute-tag{{margin-top:14px;font-size:10px;font-weight:700;letter-spacing:2.8px;color:rgba(255,255,255,0.72);text-transform:uppercase}}
+.fl-tribute-line{{margin-top:7px;font-size:10px;line-height:1.5;color:rgba(255,255,255,0.5);min-height:15px;transition:opacity 0.5s ease}}
+.fl-dots::after{{content:'';animation:dots 1.4s steps(4,end) infinite}}
+@keyframes dots{{0%{{content:''}}25%{{content:'.'}}50%{{content:'..'}}75%{{content:'...'}}}}
+</style>
+</head><body>
+<div id="flo">
+  <div class="fl-panels">
+    <div class="fl-side"><img src="data:image/png;base64,{_swarm_logo_b64}" alt="BRINC"></div>
+    <div class="fl-map">
+      {_swarm_map_svg}
+    </div>
+    <div class="fl-side"><img src="data:image/png;base64,{_swarm_gigs_b64}" alt="Fleet"></div>
+  </div>
+  <div class="fl-footer">
+    <div class="fl-city">{_swarm_city_js}</div>
+    <div class="fl-stline" id="fl-stl">DEPLOYING FLEET<span class="fl-dots"></span></div>
+    <div class="fl-made">MADE IN THE USA</div>
+    <div class="fl-copy">American-built drone infrastructure supporting domestic jobs, resilient supply chains, and the communities they protect.</div>
+    <div class="fl-tribute-tag">ONE OCTOBER</div>
+    <div class="fl-tribute-line" id="fl-tribute">For those we remember. For those we can still protect.</div>
+  </div>
+</div>
+<script>
+(function(){{
+  var doc = parent.document;
+  /* clean up any previous overlay + injected styles */
+  var _old = doc.getElementById('brinc-flo');
+  if(_old && _old.parentNode) _old.parentNode.removeChild(_old);
+  var _olds = doc.getElementById('brinc-flo-css');
+  if(_olds && _olds.parentNode) _olds.parentNode.removeChild(_olds);
+  /* inject CSS into parent document — iframe <style> rules don't transfer on cloneNode */
+  var _css = doc.createElement('style');
+  _css.id = 'brinc-flo-css';
+  _css.textContent =
+    '#brinc-flo{{position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;'
+    +'background:rgba(4,7,16,0.97)!important;display:flex!important;flex-direction:column!important;'
+    +'align-items:center!important;justify-content:center!important;'
+    +'z-index:2147483647!important;font-family:"IBM Plex Mono",monospace!important}}'
+    +'#brinc-flo .fl-panels{{display:flex;align-items:center;justify-content:center;width:100%;max-width:940px;gap:24px;padding:0 24px}}'
+    +'#brinc-flo .fl-side{{width:150px;flex-shrink:0;display:flex;align-items:center;justify-content:center}}'
+    +'#brinc-flo .fl-side img{{max-width:140px;max-height:90px;object-fit:contain;opacity:0.92}}'
+    +'#brinc-flo .fl-map{{flex:1;min-width:0}}'
+    +'#brinc-flo .fl-map svg{{width:100%;height:auto;display:block}}'
+    +'#brinc-flo .fl-footer{{margin-top:20px;text-align:center;max-width:760px;padding:0 18px}}'
+    +'#brinc-flo .fl-city{{font-size:20px;font-weight:900;letter-spacing:3px;color:#fff}}'
+    +'#brinc-flo .fl-stline{{font-size:10px;letter-spacing:2px;color:rgba(0,210,255,0.7);text-transform:uppercase;margin-top:7px}}'
+    +'#brinc-flo .fl-made{{margin-top:12px;font-size:11px;font-weight:800;letter-spacing:2.6px;color:rgba(255,255,255,0.92);text-transform:uppercase}}'
+    +'#brinc-flo .fl-copy{{margin-top:8px;font-size:11px;line-height:1.55;color:rgba(255,255,255,0.62)}}'
+    +'#brinc-flo .fl-tribute-tag{{margin-top:14px;font-size:10px;font-weight:700;letter-spacing:2.8px;color:rgba(255,255,255,0.72);text-transform:uppercase}}'
+    +'#brinc-flo .fl-tribute-line{{margin-top:7px;font-size:10px;line-height:1.5;color:rgba(255,255,255,0.5);min-height:15px;transition:opacity 0.5s ease}}'
+    +'#brinc-flo .fl-us-map{{width:100%;height:auto;display:block}}'
+    +'#brinc-flo .fl-state{{fill:rgba(255,255,255,0.03);stroke:rgba(255,255,255,0.15);stroke-width:1.1;transition:fill .25s ease,stroke .25s ease,filter .25s ease}}'
+    +'#brinc-flo .fl-state-active{{fill:rgba(0,210,255,0.18)!important;stroke:rgba(0,210,255,0.95)!important;stroke-width:2.1!important;filter:url(#brinc-state-glow)}}'
+    +'#brinc-flo .fl-dots::after{{content:"";animation:brinc-flo-dots 1.4s steps(4,end) infinite}}'
+    +'@keyframes brinc-flo-dots{{0%{{content:""}}25%{{content:"."}}50%{{content:".."}}75%{{content:"..."}}}}';
+  (doc.head || doc.body).appendChild(_css);
+  var el = document.getElementById('flo');
+  var clone = el.cloneNode(true);
+  clone.id = 'brinc-flo';
+  doc.body.appendChild(clone);
+  el.style.display = 'none';
+  var P = doc.getElementById('brinc-flo');
+  if(!P) return;
+  var pStatus = P.querySelector('#fl-stl');
+  var pTribute = P.querySelector('#fl-tribute');
+  var TRIBUTES = [
+    'For those we remember. For those we can still protect.',
+    'In memory, and in service to lives still depending on time.',
+    'Built for the moments when faster response can save a life.',
+    'A quiet promise to protect more families, officers, and communities.'
+  ];
+  if(pTribute){{
+    var tributeIdx = 0;
+    parent.setInterval(function(){{
+      tributeIdx = (tributeIdx + 1) % TRIBUTES.length;
+      pTribute.style.opacity = '0';
+      parent.setTimeout(function(){{
+        pTribute.textContent = TRIBUTES[tributeIdx];
+        pTribute.style.opacity = '1';
+      }}, 260);
+    }}, 4200);
+  }}
+  var mapSvg = P.querySelector('#fl-svg') || P.querySelector('svg');
+  if(!mapSvg) return;
+  mapSvg.setAttribute('id', 'fl-svg');
+  var svgNS = mapSvg.namespaceURI || 'http://www.w3.org/2000/svg';
+  var vb = (mapSvg.getAttribute('viewBox') || '0 0 600 360').trim().split(/\s+/).map(Number);
+  if(vb.length !== 4 || vb.some(function(v){{ return !isFinite(v); }})) vb = [0, 0, 600, 360];
+  var vx = vb[0], vy = vb[1], vw = vb[2], vh = vb[3];
+  var stateCode = '{_swarm_state_js}'.replace(/[^A-Z]/g, '');
+  var stateId = stateCode ? 'US-' + stateCode : '';
+  var statePaths = Array.from(mapSvg.querySelectorAll('path[id^="US-"]'));
+  function addSvgEl(tag, attrs, parent){{
+    var el = doc.createElementNS(svgNS, tag);
+    Object.keys(attrs || {{}}).forEach(function(k){{ el.setAttribute(k, attrs[k]); }});
+    if(parent) parent.appendChild(el);
+    return el;
+  }}
+  var defs = mapSvg.querySelector('defs') || addSvgEl('defs', {{}}, mapSvg);
+  var oldClip = mapSvg.querySelector('#brinc-us-clip');
+  if(oldClip && oldClip.parentNode) oldClip.parentNode.removeChild(oldClip);
+  var oldGlow = mapSvg.querySelector('#brinc-state-glow');
+  if(oldGlow && oldGlow.parentNode) oldGlow.parentNode.removeChild(oldGlow);
+  var clip = addSvgEl('clipPath', {{id:'brinc-us-clip'}}, defs);
+  statePaths.forEach(function(path){{
+    clip.appendChild(path.cloneNode(true));
+    path.classList.add('fl-state');
+  }});
+  var glow = addSvgEl('filter', {{id:'brinc-state-glow', x:'-30%', y:'-30%', width:'160%', height:'160%'}}, defs);
+  addSvgEl('feGaussianBlur', {{stdDeviation:'4.5', result:'blur'}}, glow);
+  addSvgEl('feColorMatrix', {{type:'matrix', values:'0 0 0 0 0  0 0 0 0 0.82  0 0 0 0 1  0 0 0 0.9 0'}}, glow);
+  var merge = addSvgEl('feMerge', {{}}, glow);
+  addSvgEl('feMergeNode', {{in:'blur'}}, merge);
+  addSvgEl('feMergeNode', {{in:'SourceGraphic'}}, merge);
+  var flagLayer = mapSvg.querySelector('#brinc-flag-layer');
+  if(flagLayer && flagLayer.parentNode) flagLayer.parentNode.removeChild(flagLayer);
+  flagLayer = addSvgEl('g', {{id:'brinc-flag-layer', 'clip-path':'url(#brinc-us-clip)', opacity:'0.18'}}, mapSvg);
+  mapSvg.insertBefore(flagLayer, mapSvg.firstChild);
+  addSvgEl('rect', {{x:vx, y:vy, width:vw, height:vh, fill:'rgba(255,255,255,0.045)'}}, flagLayer);
+  var stripeH = vh / 13;
+  for (var si = 0; si < 13; si++) {{
+    addSvgEl('rect', {{x:vx, y:(vy + si * stripeH), width:vw, height:stripeH, fill:(si % 2 === 0 ? 'rgba(191,10,48,0.55)' : 'rgba(255,255,255,0.05)')}}, flagLayer);
+  }}
+  var cantonW = vw * 0.42, cantonH = stripeH * 7;
+  addSvgEl('rect', {{x:vx, y:vy, width:cantonW, height:cantonH, fill:'rgba(0,40,104,0.72)'}}, flagLayer);
+  for (var row = 0; row < 4; row++) {{
+    for (var col = 0; col < 5; col++) {{
+      addSvgEl('circle', {{cx:(vx + 18 + col * (cantonW / 5.8)), cy:(vy + 16 + row * (cantonH / 4.7)), r:'2.1', fill:'rgba(255,255,255,0.78)'}}, flagLayer);
+    }}
+  }}
+  var gridLayer = mapSvg.querySelector('#brinc-grid-layer');
+  if(gridLayer && gridLayer.parentNode) gridLayer.parentNode.removeChild(gridLayer);
+  gridLayer = addSvgEl('g', {{id:'brinc-grid-layer', opacity:'0.18'}}, mapSvg);
+  mapSvg.insertBefore(gridLayer, flagLayer.nextSibling);
+  for (var gy = 1; gy < 5; gy++) addSvgEl('line', {{x1:vx, y1:(vy + gy * vh / 5), x2:(vx + vw), y2:(vy + gy * vh / 5), stroke:'rgba(0,210,255,0.22)', 'stroke-width':'0.6'}}, gridLayer);
+  for (var gx = 1; gx < 6; gx++) addSvgEl('line', {{x1:(vx + gx * vw / 6), y1:vy, x2:(vx + gx * vw / 6), y2:(vy + vh), stroke:'rgba(0,210,255,0.16)', 'stroke-width':'0.6'}}, gridLayer);
+  var targetState = statePaths.find(function(path){{ return path.id === stateId; }}) || null;
+  if(targetState) targetState.classList.add('fl-state-active');
+  var arcLayer = mapSvg.querySelector('#fl-arc');
+  if(arcLayer && arcLayer.parentNode) arcLayer.parentNode.removeChild(arcLayer);
+  var dronesLayer = mapSvg.querySelector('#fl-drones');
+  if(dronesLayer && dronesLayer.parentNode) dronesLayer.parentNode.removeChild(dronesLayer);
+  var markerLayer = mapSvg.querySelector('#fl-markers');
+  if(markerLayer && markerLayer.parentNode) markerLayer.parentNode.removeChild(markerLayer);
+  var pArc = addSvgEl('path', {{id:'fl-arc', fill:'none', stroke:'rgba(0,210,255,0.26)', 'stroke-width':'1.8', 'stroke-dasharray':'5 4'}}, mapSvg);
+  var pDrones = addSvgEl('g', {{id:'fl-drones'}}, mapSvg);
+  var startX = vx + vw * 0.12;
+  var startY = vy + vh * 0.28;
+  var tx = vx + vw * 0.68;
+  var ty = vy + vh * 0.48;
+  if(targetState) {{
+    var bbox = targetState.getBBox();
+    tx = bbox.x + bbox.width / 2;
+    ty = bbox.y + bbox.height / 2;
+  }}
+  tx = Math.max(vx + 18, Math.min(vx + vw - 18, tx));
+  ty = Math.max(vy + 18, Math.min(vy + vh - 18, ty));
+  var cpx = startX + (tx - startX) * 0.52;
+  var cpy = Math.min(startY, ty) - vh * 0.18;
+  pArc.setAttribute('d', 'M ' + startX + ',' + startY + ' Q ' + cpx + ',' + cpy + ' ' + tx + ',' + ty);
+  function bPt(t,x0,y0,x1,y1,x2,y2){{
+    var m=1-t; return [m*m*x0+2*m*t*x1+t*t*x2, m*m*y0+2*m*t*y1+t*t*y2];
+  }}
+  function bAng(t,x0,y0,x1,y1,x2,y2){{
+    var m=1-t, dx=2*(m*(x1-x0)+t*(x2-x1)), dy=2*(m*(y1-y0)+t*(y2-y1));
+    return Math.atan2(dy,dx)*180/Math.PI;
+  }}
+  function eio(t){{ return t<0.5?2*t*t:-1+(4-2*t)*t; }}
+  var NS = svgNS;
+  var NDRONES=4, STAGGER=1800, FLY=9000;
+  var drones=[];
+  function makeDrone(col){{
+    var g=doc.createElementNS(NS,'g');
+    var bg=doc.createElementNS(NS,'circle');
+    bg.setAttribute('r','7'); bg.setAttribute('fill','rgba(0,210,255,0.08)');
+    g.appendChild(bg);
+    [[-3,-3,-8,-8],[3,-3,8,-8],[-3,3,-8,8],[3,3,8,8]].forEach(function(a){{
+      var ln=doc.createElementNS(NS,'line');
+      ln.setAttribute('x1',a[0]); ln.setAttribute('y1',a[1]);
+      ln.setAttribute('x2',a[2]); ln.setAttribute('y2',a[3]);
+      ln.setAttribute('stroke',col); ln.setAttribute('stroke-width','1.5');
+      ln.setAttribute('stroke-linecap','round'); g.appendChild(ln);
+    }});
+    [[-8,-8],[8,-8],[-8,8],[8,8]].forEach(function(r){{
+      var ci=doc.createElementNS(NS,'circle');
+      ci.setAttribute('cx',r[0]); ci.setAttribute('cy',r[1]); ci.setAttribute('r','2.5');
+      ci.setAttribute('stroke',col); ci.setAttribute('stroke-width','1');
+      ci.setAttribute('fill','rgba(0,210,255,0.2)'); g.appendChild(ci);
+    }});
+    var rect=doc.createElementNS(NS,'rect');
+    rect.setAttribute('x','-3'); rect.setAttribute('y','-3');
+    rect.setAttribute('width','6'); rect.setAttribute('height','6');
+    rect.setAttribute('rx','1'); rect.setAttribute('fill',col); g.appendChild(rect);
+    return g;
+  }}
+  for(var i=0;i<NDRONES;i++){{
+    var dEl=makeDrone('#00D2FF');
+    pDrones.appendChild(dEl);
+    drones.push({{el:dEl,arrived:false,delay:i*STAGGER,arrT:0}});
+  }}
+  var arrivedN=0, allDone=false, t0=null;
+  var MSGS=['INITIALIZING MISSION BRIEF','FETCHING BOUNDARY DATA','MODELING 911 CALLS','OPTIMIZING STATION GRID','DEPLOYING FLEET'];
+  var mi=0;
+  function nextMsg(){{ if(mi<MSGS.length && pStatus) pStatus.innerHTML=MSGS[mi++]+'<span class="fl-dots"></span>'; }}
+  /* All timers run in parent window context — they survive iframe replacement on Streamlit rerender */
+  nextMsg(); parent.setInterval(nextMsg,3000);
+  function frame(now){{
+    if(!t0) t0=now;
+    var elapsed=now-t0;
+    drones.forEach(function(d,i){{
+      var e=elapsed-d.delay;
+      if(e<0){{ d.el.setAttribute('transform','translate('+startX+','+startY+')'); return; }}
+      if(d.arrived){{
+        var ht=(now-d.arrT)/900;
+        var hx=tx+Math.cos(ht+i*1.6)*4, hy=ty+Math.sin(ht*1.3+i)*3-5;
+        d.el.setAttribute('transform','translate('+hx+','+hy+')'); return;
+      }}
+      var t=Math.min(e/FLY,1), te=eio(t);
+      var pt=bPt(te,startX,startY,cpx,cpy,tx,ty);
+      var ang=bAng(te,startX,startY,cpx,cpy,tx,ty);
+      d.el.setAttribute('transform','translate('+pt[0]+','+pt[1]+') rotate('+ang+',0,0)');
+      if(t>=1 && !d.arrived){{
+        d.arrived=true; d.arrT=now; arrivedN++;
+        var bgEl=d.el.querySelector('circle');
+        if(bgEl){{ bgEl.setAttribute('r','12'); bgEl.setAttribute('fill','rgba(0,210,255,0.4)'); }}
+        parent.setTimeout(function(dd){{
+          var b=dd.el.querySelector('circle');
+          if(b){{ b.setAttribute('r','7'); b.setAttribute('fill','rgba(0,210,255,0.08)'); }}
+        }}.bind(null,d), 350);
+        if(arrivedN===NDRONES && pStatus)
+          pStatus.innerHTML='<span style="color:#00D2FF;font-weight:900">&#10003; FLEET DEPLOYED &#8212; LAUNCHING</span>';
+      }}
+    }});
+    if(!allDone) parent.requestAnimationFrame(frame);
+  }}
+  parent.requestAnimationFrame(frame);
+  /* watchdog runs in parent context — survives iframe teardown on Streamlit rerender */
+  if(parent._brincFloWd) parent.clearInterval(parent._brincFloWd);
+  parent._brincFloWd = null;
+  function removeFlo(){{
+    allDone=true;
+    if(parent._brincFloWd){{ parent.clearInterval(parent._brincFloWd); parent._brincFloWd=null; }}
+    var el=doc.getElementById('brinc-flo');
+    if(el){{ el.style.transition='opacity 0.5s ease'; el.style.opacity='0'; }}
+    parent.setTimeout(function(){{
+      var el2=doc.getElementById('brinc-flo'); if(el2&&el2.parentNode) el2.parentNode.removeChild(el2);
+      var s=doc.getElementById('brinc-flo-css'); if(s&&s.parentNode) s.parentNode.removeChild(s);
+    }},520);
+  }}
+  parent.setTimeout(function(){{
+    parent._brincFloWd=parent.setInterval(function(){{
+      var hasChart=doc.querySelector('[data-testid="stPlotlyChart"]')||doc.querySelector('.js-plotly-plot');
+      if(hasChart) removeFlo();
+    }},500);
+  }},5000);
+  /* safety net: hard-remove after 90s */
+  parent.setTimeout(removeFlo, 90000);
+}})();
+</script>
+</body></html>
+""", height=0, scrolling=False)
             prog = st.progress(0, text="🫡 Preparing tools worthy of those who serve…")
             all_gdfs = []
             total_estimated_pop = 0
-            st.session_state['boundary_overlay_gdf'] = None
-            st.session_state['boundary_overlay_name'] = ''
-            st.session_state['boundary_overlay_file'] = ''
-            _sim_optional_files = list(st.session_state.get('sim_optional_uploader') or [])
-            _sim_station_file = None
-            _sim_boundary_files = []
-            _sim_non_boundary_files = []
-            for _sim_file in _sim_optional_files:
-                if _is_boundary_sidecar(_sim_file.name):
-                    _sim_boundary_files.append(_sim_file)
-                else:
-                    _sim_non_boundary_files.append(_sim_file)
-            for _sim_file in _sim_non_boundary_files:
-                if _looks_like_stations(_sim_file.name):
-                    _sim_station_file = _sim_file
-                    break
-            if _sim_station_file is None and len(_sim_non_boundary_files) == 1:
-                _sim_station_file = _sim_non_boundary_files[0]
-            _sim_unused_files = [
-                _sim_file.name for _sim_file in _sim_non_boundary_files
-                if _sim_station_file is None or _sim_file.name != _sim_station_file.name
-            ]
+            _sim_station_file, _sim_boundary_files, _sim_unused_files = split_simulation_optional_files(
+                st.session_state.get('sim_optional_uploader') or [],
+                _is_boundary_sidecar,
+                _looks_like_stations,
+            )
             if _sim_unused_files:
                 st.info("Path 01 ignored non-station files: " + ", ".join(_sim_unused_files))
             if _sim_boundary_files:
                 try:
-                    _overlay_gdf, _overlay_name, _overlay_file = _load_uploaded_boundary_overlay(_sim_boundary_files)
-                    st.session_state['boundary_overlay_gdf'] = _overlay_gdf
-                    st.session_state['boundary_overlay_name'] = _overlay_name
-                    st.session_state['boundary_overlay_file'] = _overlay_file
+                    _overlay_file = load_simulation_boundary_overlay(
+                        st.session_state,
+                        _sim_boundary_files,
+                        _load_uploaded_boundary_overlay,
+                    )
                     st.toast(f"Custom boundary overlay loaded: {_overlay_file}")
                 except Exception as _overlay_exc:
                     prog.empty()
@@ -2899,68 +2803,29 @@ def main():
 
 
 
-            for i, loc in enumerate(active_targets):
-                c_name = loc['city'].strip()
-                s_name = loc['state']
-                is_county = c_name.lower().endswith(" county")
-                boundary_kind = 'county' if is_county else 'place'
-            
-                prog.progress(10 + int((i / len(active_targets)) * 20),
-                              text=f"🗺️ Mapping {c_name}, {s_name} — because every block they patrol matters…")
-            
-                if is_county:
-                    success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
-                    if not success:
-                        success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
-                    if success:
-                        boundary_kind = 'county'
-                else:
-                    # Try place first, auto-fall back to county if not found
-                    success, temp_gdf = fetch_place_boundary_local(s_name, c_name)
-                    if success:
-                        boundary_kind = 'place'
-                    else:
-                        success, temp_gdf = fetch_county_boundary_local(s_name, c_name)
-                        if not success:
-                            success, temp_gdf = fetch_county_boundary_local(s_name, c_name + " County")
-                        if success:
-                            boundary_kind = 'county'
-                is_county = (boundary_kind == 'county')
-                st.session_state['boundary_kind'] = boundary_kind
-
-                # County boundaries come from the parquet, not from TIGER, so they are
-                # never written to SHAPEFILE_DIR. find_relevant_jurisdictions() only scans
-                # that directory, so without this save it always falls back to
-                # "Auto-Generated Boundary". Save any successfully loaded county GDF now.
-                if success and temp_gdf is not None:
-                    _saved = save_boundary_gdf(temp_gdf, boundary_kind, c_name, s_name)
-                    if i == 0:
-                        st.session_state['boundary_source_path'] = _saved or ''
-
-                if success:
-                    all_gdfs.append(temp_gdf)
-                    pop = fetch_census_population(STATE_FIPS[s_name], c_name, is_county=is_county)
-                    if pop:
-                        total_estimated_pop += pop
-                        st.toast(f"✅ {c_name} population verified: {pop:,}")
-                    else:
-                        gdf_proj   = temp_gdf.to_crs(epsg=3857)
-                        area_sq_mi = gdf_proj.geometry.area.sum() / 2589988.11
-                        est = KNOWN_POPULATIONS.get(c_name, int(area_sq_mi * 3500))
-                        total_estimated_pop += est
-                        st.toast(f"⚠️ {c_name} population estimated: {est:,}")
-                else:
-                    st.warning(f"⚠️ Could not find a boundary for {c_name}, {s_name}. Try another city.")
-                    if st.session_state.get('_last_demo_city') == c_name:
-                        random.seed(datetime.datetime.now().microsecond + os.getpid())
-                        candidates = [c for c in DEMO_CITIES if c[0] != c_name]
-                        rcity, rstate = random.choice(candidates)
-                        st.session_state['_last_demo_city'] = rcity
-                        st.session_state['target_cities'] = [{"city": rcity, "state": rstate}]
-                        for j in range(10):
-                            st.session_state.pop(f"c_{j}", None)
-                            st.session_state.pop(f"s_{j}", None)
-                        st.rerun()
+            all_gdfs, total_estimated_pop, boundary_messages, boundary_warnings, rerun_demo_target = build_demo_boundaries(
+                st.session_state,
+                active_targets,
+                STATE_FIPS,
+                KNOWN_POPULATIONS,
+                DEMO_CITIES,
+                fetch_county_boundary_local,
+                fetch_place_boundary_local,
+                save_boundary_gdf,
+                fetch_census_population,
+            )
+            for _msg in boundary_messages:
+                st.toast(_msg)
+            for _warn in boundary_warnings:
+                st.warning(_warn)
+            if rerun_demo_target is not None:
+                rcity, rstate = rerun_demo_target
+                st.session_state['_last_demo_city'] = rcity
+                st.session_state['target_cities'] = [{"city": rcity, "state": rstate}]
+                for j in range(10):
+                    st.session_state.pop(f"c_{j}", None)
+                    st.session_state.pop(f"s_{j}", None)
+                st.rerun()
 
             if not all_gdfs:
                 prog.empty()
@@ -2972,108 +2837,29 @@ def main():
             city_poly = active_city_gdf.geometry.union_all()
             st.session_state['estimated_pop'] = total_estimated_pop
 
-            annual_cfs = int(total_estimated_pop * 0.6)
-            st.session_state['total_original_calls'] = annual_cfs
-            simulated_points_count = min(max(int(annual_cfs), 365), 36500)
-
             prog.progress(55, text="🚔 Modeling 911 calls — every one represents someone who needed help…")
-            np.random.seed(42)
-            random.seed(42)
-            call_points = generate_clustered_calls(city_poly, simulated_points_count)
-        
-            base_date = datetime.datetime.now() - datetime.timedelta(days=364)
-            fake_dts = [(base_date + datetime.timedelta(days=random.randint(0, 364), hours=random.randint(0, 23), minutes=random.randint(0, 59))) for _ in range(simulated_points_count)]
-        
-            df_demo = pd.DataFrame({
-                'lat':      [p[0] for p in call_points],
-                'lon':      [p[1] for p in call_points],
-                'priority': np.random.choice([1, 2, 3], simulated_points_count, p=[0.15, 0.35, 0.50]),
-                'date':     [d.strftime('%Y-%m-%d') for d in fake_dts],
-                'time':     [d.strftime('%H:%M:%S') for d in fake_dts]
-            })
+            df_demo, annual_cfs, simulated_points_count = build_demo_calls(city_poly, total_estimated_pop, generate_clustered_calls)
+            st.session_state['total_original_calls'] = annual_cfs
             st.session_state['df_calls'] = df_demo
             st.session_state['df_calls_full'] = df_demo.copy()
             st.session_state['total_modeled_calls'] = len(df_demo)
 
-            # --- PROCESS OPTIONAL CUSTOM STATIONS ---
-            custom_stations_used = False
-            sim_uploader = _sim_station_file
-        
-            if sim_uploader is not None:
-                prog.progress(80, text="Geocoding custom stations from file...")
-                try:
-                    sfname = sim_uploader.name.lower()
-                    if sfname.endswith(('.xlsx', '.xls', '.xlsm', '.xlsb')):
-                        engine = 'xlrd' if sfname.endswith('.xls') else 'pyxlsb' if sfname.endswith('.xlsb') else 'openpyxl'
-                        s_df = pd.read_excel(io.BytesIO(sim_uploader.getvalue()), engine=engine)
-                    else:
-                        sim_uploader.seek(0)
-                        s_df = pd.read_csv(sim_uploader)
-                    s_df.columns = [str(c).lower().strip() for c in s_df.columns]
-
-                    lat_col = next((c for c in s_df.columns if c in ['lat', 'latitude', 'y']), None)
-                    lon_col = next((c for c in s_df.columns if c in ['lon', 'long', 'longitude', 'x']), None)
-                    addr_col = next((c for c in s_df.columns if any(a in c for a in ['address', 'street', 'location'])), None)
-                    name_col = next((c for c in s_df.columns if any(n in c for n in ['name', 'station', 'facility', 'dept'])), None)
-                    type_col = next((c for c in s_df.columns if any(t in c for t in ['type', 'category'])), None)
-
-                    parsed_stations = []
-                    for idx, row in s_df.iterrows():
-                        s_name = str(row[name_col]) if name_col and pd.notna(row[name_col]) else f"Custom Station {idx+1}"
-                        s_type = str(row[type_col]) if type_col and pd.notna(row[type_col]) else 'Custom'
-                        s_lat, s_lon = None, None
-
-                        if lat_col and lon_col and pd.notna(row[lat_col]) and pd.notna(row[lon_col]):
-                            s_lat, s_lon = float(row[lat_col]), float(row[lon_col])
-                        elif addr_col and pd.notna(row[addr_col]):
-                            addr_str = str(row[addr_col])
-                            s_lat, s_lon = forward_geocode(addr_str)
-                            if s_lat is None:
-                                s_lat, s_lon = forward_geocode(f"{addr_str}, {active_targets[0]['city']}, {active_targets[0]['state']}")
-                            if s_lat is None:
-                                st.toast(f"Could not geocode: {addr_str}")
-                            time.sleep(1)
-
-                        if s_lat and s_lon:
-                            parsed_stations.append({
-                                'name': s_name,
-                                'lat': s_lat,
-                                'lon': s_lon,
-                                'type': s_type
-                            })
-
-                    if parsed_stations:
-                        st.session_state['df_stations'] = pd.DataFrame(parsed_stations)
-                        st.session_state['stations_user_uploaded'] = True
-                        custom_stations_used = True
-                    else:
-                        st.warning("Could not geocode or parse your custom stations. Falling back to generated stations.")
-                except Exception as e:
-                    st.session_state['stations_user_uploaded'] = False
-                    st.warning(f"Error reading custom stations: {e}. Falling back to generated stations.")
-
-            if not custom_stations_used:
-                st.session_state['stations_user_uploaded'] = False
-                prog.progress(80, text="Querying OpenStreetMap for real police, fire, and school stations...")
-
-                try:
-                    df_s, osm_note = generate_stations_from_calls(st.session_state['df_calls'])
-                except Exception as e:
-                    df_s, osm_note = None, f"Remote station lookup failed: {e}"
-
-                if df_s is not None and not df_s.empty:
-                    st.session_state['df_stations'] = df_s
-                    st.toast(osm_note)
-                else:
-                    st.warning(f"{osm_note}. Falling back to random placements.")
-                    station_points = generate_random_points_in_polygon(city_poly, 100)
-                    types = ['Police', 'Fire', 'EMS'] * 34
-                    st.session_state['df_stations'] = pd.DataFrame({
-                        'name': [f'Station {i+1}' for i in range(len(station_points))],
-                        'lat':  [p[0] for p in station_points],
-                        'lon':  [p[1] for p in station_points],
-                        'type': types[:len(station_points)]
-                    })
+            prog.progress(80, text="Loading simulation stations...")
+            stations_df, stations_user_uploaded, station_notices, station_warnings = resolve_demo_stations(
+                st.session_state['df_calls'],
+                city_poly,
+                _sim_station_file,
+                active_targets,
+                forward_geocode,
+                generate_stations_from_calls,
+                generate_random_points_in_polygon,
+            )
+            for _notice in station_notices:
+                st.toast(_notice)
+            for _warning in station_warnings:
+                st.warning(_warning)
+            st.session_state['df_stations'] = stations_df
+            st.session_state['stations_user_uploaded'] = stations_user_uploaded
 
             prog.progress(100, text="✅ Ready — built for the communities they protect and serve.")
             st.session_state['inferred_daily_calls_override'] = int(annual_cfs / 365)
@@ -3091,7 +2877,34 @@ def main():
     # MAIN MAP INTERFACE
     # ============================================================
     if st.session_state['csvs_ready']:
-        components.html("<script>window._brincHasData = true;</script>", height=0)
+        components.html("""
+        <script>
+        (function() {
+            try {
+                window._brincHasData = true;
+                var doc = window.parent.document;
+                if (window.parent._brincFloWd) {
+                    window.parent.clearInterval(window.parent._brincFloWd);
+                    window.parent._brincFloWd = null;
+                }
+                var overlay = doc.getElementById('brinc-flo');
+                if (overlay) {
+                    overlay.style.transition = 'opacity 0.35s ease';
+                    overlay.style.opacity = '0';
+                    window.parent.setTimeout(function() {
+                        var el = doc.getElementById('brinc-flo');
+                        if (el && el.parentNode) el.parentNode.removeChild(el);
+                        var css = doc.getElementById('brinc-flo-css');
+                        if (css && css.parentNode) css.parentNode.removeChild(css);
+                    }, 380);
+                } else {
+                    var css = doc.getElementById('brinc-flo-css');
+                    if (css && css.parentNode) css.parentNode.removeChild(css);
+                }
+            } catch (e) {}
+        })();
+        </script>
+        """, height=0)
 
         df_calls = st.session_state['df_calls'].copy()
         df_calls_full = st.session_state.get('df_calls_full')
@@ -3104,1250 +2917,217 @@ def main():
         full_daily_calls = max(1, int(full_total_calls / 365)) if full_total_calls else 1
 
         # ── MAP BUILD EVENT: log to sheets once per session ──────────────────────
-        if not st.session_state.get('map_build_logged', False):
-            try:
-                _map_city  = st.session_state.get('active_city', '')
-                _map_state = st.session_state.get('active_state', '')
-                _brinc_raw = st.session_state.get('brinc_user', '').strip()
-                if not _brinc_raw: _brinc_raw = 'unknown'
-                _map_name  = " ".join([w.capitalize() for w in _brinc_raw.split('.')])
-                _map_email = f"{_brinc_raw}@brincdrones.com" if _brinc_raw != 'unknown' else ''
-                _map_pop   = st.session_state.get('estimated_pop', 0)
-                _map_calls = st.session_state.get('total_original_calls', 0)
-                _map_daily = max(1, int(_map_calls / 365))
-                _session_start = st.session_state.get('session_start', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-                try:
-                    _start_dt = datetime.datetime.strptime(_session_start, '%Y-%m-%d %H:%M:%S')
-                    _dur_min  = round((datetime.datetime.now() - _start_dt).total_seconds() / 60, 1)
-                except Exception:
-                    _dur_min = ''
-                _map_details = {
-                    'session_id':       st.session_state.get('session_id', ''),
-                    'session_start':    _session_start,
-                    'session_duration_min': _dur_min,
-                    'data_source':      st.session_state.get('data_source', 'unknown'),
-                    'population':       _map_pop,
-                    'total_calls':      _map_calls,
-                    'daily_calls':      _map_daily,
-                    'area_sq_mi':       0,
-                    'fleet_capex':      0,
-                    'annual_savings':   0,
-                    'break_even':       'N/A',
-                    'opt_strategy':     '',
-                    'dfr_rate':         st.session_state.get('dfr_rate', 0),
-                    'deflect_rate':     st.session_state.get('deflect_rate', 0),
-                    'incremental_build': False,
-                    'allow_redundancy': False,
-                    'avg_response_min': 0,
-                    'avg_time_saved_min': 0,
-                    'area_covered_pct': 0,
-                    'active_drones':    [],
-                }
-                _log_to_sheets(_map_city, _map_state, 'MAP_BUILD', 0, 0, 0.0,
-                               _map_name, _map_email, _map_details)
-                st.session_state['map_build_logged'] = True
-            except Exception:
-                pass
+        log_map_build_event_once(st.session_state, _log_to_sheets)
 
-        # ── Jurisdiction boundary: use coordinate-lookup result if available,
-        #    otherwise fall back to shapefile scan (demo/brinc restore paths) ──
-        #    When the user enables "County Boundary" in Display Options, swap in the
-        #    county-level polygon for the active city/state instead.
-        _use_county    = st.session_state.get('use_county_boundary', False)
-        _master_override = st.session_state.get('master_gdf_override')
 
-        if _use_county:
-            _active_state = st.session_state.get('active_state', '')
-            _county_cache_key = f"{_active_state}|county"
-            if (st.session_state.get('_county_boundary_cache_key') == _county_cache_key
-                    and st.session_state.get('_county_boundary_gdf') is not None):
-                master_gdf = st.session_state['_county_boundary_gdf'].copy()
-            else:
-                with st.spinner("Loading county boundary…"):
-                    _ok, _cgdf = fetch_county_by_centroid(df_calls, _active_state)
-                if _ok and _cgdf is not None:
-                    _cgdf = _cgdf.copy()
-                    _cgdf['DISPLAY_NAME'] = _cgdf['NAME'].astype(str)
-                    _cgdf['data_count']   = len(df_calls)
-                    st.session_state['_county_boundary_gdf'] = _cgdf.copy()
-                    st.session_state['_county_boundary_cache_key'] = _county_cache_key
-                    master_gdf = _cgdf.copy()
-                else:
-                    st.warning("County boundary not found — check that counties_lite.parquet is present.")
-                    if _master_override is not None and not _master_override.empty:
-                        master_gdf = _master_override.copy()
-                    else:
-                        with st.spinner(get_jurisdiction_message()):
-                            _preferred_shp = st.session_state.get('boundary_source_path', '') or None
-                            master_gdf = get_relevant_jurisdictions_cached(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
-        elif _master_override is not None and not _master_override.empty:
-            master_gdf = _master_override.copy()
-        else:
-            with st.spinner(get_jurisdiction_message()):
-                _preferred_shp = st.session_state.get('boundary_source_path', '') or None
-                master_gdf = get_relevant_jurisdictions_cached(df_calls, df_stations_all, SHAPEFILE_DIR, preferred_shp=_preferred_shp)
-
-        _boundary_kind_note = st.session_state.get('boundary_kind', 'place')
-        _boundary_src_note = st.session_state.get('boundary_source_path', '')
-
-        if master_gdf is None or master_gdf.empty:
-            # ── Fallback 1: load any saved shapefile directly (spatial join may have
-            #    failed if coordinate conversion was imperfect, but the shapefile exists) ──
-            shp_files = glob.glob(os.path.join(SHAPEFILE_DIR, "*.shp"))
-            if shp_files:
-                try:
-                    preferred_kind = st.session_state.get('boundary_kind', 'place')
-                    active_city = st.session_state.get('active_city', '')
-                    active_state = st.session_state.get('active_state', '')
-                    best = st.session_state.get('boundary_source_path', '') or None
-
-                    # Prefer exact typed boundary path first
-                    if not best:
-                        exact = _boundary_shp_base(preferred_kind, active_city, active_state) + ".shp"
-                        if os.path.exists(exact):
-                            best = exact
-
-                    # Then prefer typed files whose basename matches the active city
-                    if not best:
-                        city_key = _sanitize_boundary_token(active_city).lower()
-                        typed = []
-                        other = []
-                        for sf in shp_files:
-                            base = os.path.basename(sf).lower()
-                            if base.startswith(preferred_kind + "__"):
-                                typed.append(sf)
-                            else:
-                                other.append(sf)
-                        for sf in typed + other:
-                            if city_key and city_key in os.path.basename(sf).lower():
-                                best = sf
-                                break
-
-                    if best is None:
-                        # Before falling back to shp_files[0], verify it overlaps
-                        # the call coordinate bounding box — skip stale files from
-                        # prior sessions that are geographically unrelated
-                        _fb_lat_min = df_calls['lat'].min()
-                        _fb_lat_max = df_calls['lat'].max()
-                        _fb_lon_min = df_calls['lon'].min()
-                        _fb_lon_max = df_calls['lon'].max()
-                        _overlap_pad = 2.0  # degrees
-                        try:
-                            import fiona as _fiona
-                            _fiona_available = True
-                        except ImportError:
-                            _fiona_available = False
-                        for _sf_cand in shp_files:
-                            try:
-                                if not _fiona_available:
-                                    raise ImportError("fiona not available")
-                                with _fiona.open(_sf_cand) as _sc:
-                                    _sb = _sc.bounds
-                                _overlaps = not (
-                                    _sb[2] < _fb_lon_min - _overlap_pad or
-                                    _sb[0] > _fb_lon_max + _overlap_pad or
-                                    _sb[3] < _fb_lat_min - _overlap_pad or
-                                    _sb[1] > _fb_lat_max + _overlap_pad
-                                )
-                                if _overlaps:
-                                    best = _sf_cand
-                                    break
-                            except Exception:
-                                best = _sf_cand
-                                break
-                        # If every file failed the overlap check, skip loading —
-                        # let Fallback 2 (bbox polygon) handle it cleanly
-                        if best is None:
-                            master_gdf = None
-                            raise ValueError("No overlapping shapefiles found")
-
-                    fallback_gdf = gpd.read_file(best)
-                    if fallback_gdf.crs is None:
-                        fallback_gdf = fallback_gdf.set_crs(epsg=4269)
-                    fallback_gdf = fallback_gdf.to_crs(epsg=4326)
-                    name_col = next((c for c in ['NAME', 'DISTRICT', 'NAMELSAD'] if c in fallback_gdf.columns), fallback_gdf.columns[0])
-                    fallback_gdf['DISPLAY_NAME'] = fallback_gdf[name_col].astype(str)
-                    fallback_gdf['data_count'] = len(df_calls)
-                    master_gdf = fallback_gdf[['DISPLAY_NAME', 'data_count', 'geometry']]
-                    st.session_state['boundary_source_path'] = best
-                except Exception:
-                    master_gdf = None
-
-        if master_gdf is None or master_gdf.empty:
-            # ── Fallback 2: bounding box around call points ──
-            min_lon, min_lat = df_calls['lon'].min(), df_calls['lat'].min()
-            max_lon, max_lat = df_calls['lon'].max(), df_calls['lat'].max()
-            lon_pad = (max_lon - min_lon) * 0.1
-            lat_pad = (max_lat - min_lat) * 0.1
-            poly = box(min_lon-lon_pad, min_lat-lat_pad, max_lon+lon_pad, max_lat+lat_pad)
-            master_gdf = gpd.GeoDataFrame({'DISPLAY_NAME':['Auto-Generated Boundary'],'data_count':[len(df_calls)]}, geometry=[poly], crs="EPSG:4326")
-
-        # --- DRAW SIDEBAR LOGO FIRST SO IT IS AT THE ABSOLUTE TOP ---
-        logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
-        if logo_b64:
-            st.sidebar.markdown(f"""
-            <div style="background-color: transparent; padding: 40px 20px 10px 20px; margin: -60px -20px 20px -20px; text-align: center; pointer-events: none;">
-                <img src="data:image/png;base64,{logo_b64}" style="height: 60px;">
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.sidebar.markdown(f"""
-            <div style="background-color: transparent; padding: 40px 20px 10px 20px; margin: -60px -20px 20px -20px; text-align: center; pointer-events: none;">
-                <div style="font-size:26px; font-weight:900; letter-spacing:3px; color:#ffffff;">BRINC</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.sidebar.markdown('<div class="sidebar-section-header">① Configure</div>', unsafe_allow_html=True)
-        _jur_src_file = st.session_state.get('_jur_source_file', '')
-        _boundary_src_display = (
-            _jur_src_file if _boundary_src_note == 'local_parquet' and _jur_src_file
-            else 'local_parquet' if _boundary_src_note == 'local_parquet'
-            else (_boundary_src_note.split(chr(47))[-1].split(chr(92))[-1] if _boundary_src_note else 'live lookup')
+        master_gdf, _boundary_kind_note, _boundary_src_note = resolve_master_boundary(
+            st,
+            st.session_state,
+            df_calls,
+            df_stations_all,
+            SHAPEFILE_DIR,
+            fetch_county_by_centroid,
+            get_jurisdiction_message,
+            get_relevant_jurisdictions_cached,
+            _boundary_shp_base,
+            _sanitize_boundary_token,
         )
-        st.sidebar.caption(f"Boundary: {_boundary_kind_note} - {_boundary_src_display}")
-        _sidebar_overlay_gdf = st.session_state.get('boundary_overlay_gdf')
-        if _sidebar_overlay_gdf is not None and not _sidebar_overlay_gdf.empty:
-            _overlay_file = st.session_state.get('boundary_overlay_file', '') or st.session_state.get('boundary_overlay_name', 'uploaded boundary')
-            st.sidebar.caption(f"Overlay: {_overlay_file} (display only)")
-            _sidebar_overlay_status = None
-            if 'city_boundary_geom' in locals() and city_boundary_geom is not None and not city_boundary_geom.is_empty and 'epsg_code' in locals():
-                _sidebar_overlay_status = _boundary_overlay_status(city_boundary_geom, _sidebar_overlay_gdf, epsg_code)
-            if _sidebar_overlay_status:
-                if _sidebar_overlay_status['status'] == 'inside':
-                    st.sidebar.info(_sidebar_overlay_status['message'])
-                else:
-                    st.sidebar.warning(_sidebar_overlay_status['message'])
 
-        total_pts = master_gdf['data_count'].sum()
-        master_gdf['LABEL'] = master_gdf['DISPLAY_NAME'] + " (" + (master_gdf['data_count']/total_pts*100).round(1).astype(str) + "%)"
-        options_map = dict(zip(master_gdf['LABEL'], master_gdf['DISPLAY_NAME']))
-        all_options = master_gdf['LABEL'].tolist()
 
-        default_selection = [all_options[0]] if all_options else []
-        selected_labels = st.sidebar.multiselect("Jurisdictions", options=all_options, default=default_selection,
-                                                 key='jurisdictions_multiselect',
-                                                 help="Select which geographic areas to include in coverage analysis.")
+        master_gdf, active_gdf, selected_names = render_sidebar_jurisdiction_selector(
+            st,
+            st.session_state,
+            master_gdf,
+            _boundary_kind_note,
+            _boundary_src_note,
+            get_themed_logo_base64,
+            _boundary_overlay_status,
+            city_boundary_geom if 'city_boundary_geom' in locals() else None,
+            epsg_code if 'epsg_code' in locals() else None,
+        )
 
-        _jur_debug = st.session_state.get('_jur_debug', [])
-        _jur_source = next((m.split(': ')[1].split(' ')[0] for m in _jur_debug if 'parquet exists' in m and 'True' in m), None)
-        if _jur_source:
-            st.session_state['_jur_source_file'] = _jur_source
 
-        if not selected_labels:
-            st.warning("Please select at least one jurisdiction from the sidebar.")
-            st.stop()
-    
-        selected_names = [options_map[l] for l in selected_labels]
-        active_gdf = master_gdf[master_gdf['DISPLAY_NAME'].isin(selected_names)]
-        if selected_names and st.session_state.get('active_city') == "Orlando":
-            st.session_state['active_city'] = str(selected_names[0]).title()
+        df_stations_all, df_calls, df_calls_full = render_data_filters(
+            st,
+            df_stations_all,
+            df_calls,
+            df_calls_full,
+        )
 
-        filter_expander = st.sidebar.expander("⚙️ Data Filters", expanded=False)
-        with filter_expander:
-            if 'type' in df_stations_all.columns:
-                all_types = sorted(df_stations_all['type'].dropna().astype(str).unique().tolist())
-                if all_types:
-                    selected_types = st.multiselect("Facility Type", options=all_types, default=all_types,
-                                                    key='facility_type_multiselect_b',
-                                                    help="Filter which station types are eligible for drone deployment.")
-                    if not selected_types:
-                        st.warning("Select at least one facility type.")
-                        st.stop()
-                    df_stations_all = df_stations_all[df_stations_all['type'].astype(str).isin(selected_types)].copy().reset_index(drop=True)
-                    df_stations_all['name'] = "[" + df_stations_all['type'].astype(str) + "] " + df_stations_all['name'].astype(str)
-            priority_source = df_calls_full if (df_calls_full is not None and 'priority' in df_calls_full.columns) else df_calls
-            if 'priority' in priority_source.columns:
-                all_priorities = sorted(pd.Series(priority_source['priority']).dropna().astype(int).unique().tolist())
-                if all_priorities:
-                    selected_priorities = st.multiselect("Incident Priority", options=all_priorities, default=all_priorities,
-                                                         key='incident_priority_multiselect_b',
-                                                         help="Filter which call priorities to include in coverage scoring.")
-                    if not selected_priorities:
-                        st.warning("Select at least one priority level.")
-                        st.stop()
-                    df_calls = df_calls[df_calls['priority'].isin(selected_priorities)].copy().reset_index(drop=True)
-                    if df_calls_full is not None and 'priority' in df_calls_full.columns:
-                        df_calls_full = df_calls_full[df_calls_full['priority'].isin(selected_priorities)].copy().reset_index(drop=True)
+        _display_opts = render_display_options(st)
+        show_satellite = _display_opts['show_satellite']
+        show_boundaries = _display_opts['show_boundaries']
+        show_faa = _display_opts['show_faa']
+        show_no_fly = _display_opts['show_no_fly']
+        show_obstacles = _display_opts['show_obstacles']
+        show_coverage = _display_opts['show_coverage']
+        show_cell_towers = _display_opts['show_cell_towers']
+        show_heatmap = _display_opts['show_heatmap']
+        show_dots = _display_opts['show_dots']
+        simulate_traffic = _display_opts['simulate_traffic']
+        show_health = _display_opts['show_health']
+        show_financials = _display_opts['show_financials']
+        show_cards = _display_opts['show_cards']
+        simple_cards = _display_opts['simple_cards']
+        traffic_level = _display_opts['traffic_level']
 
-        if len(df_stations_all) == 0:
-            st.error("No stations match the selected filters."); st.stop()
-        if len(df_calls) == 0:
-            st.error("No calls match the selected filters."); st.stop()
 
-        disp_expander = st.sidebar.expander("👁️ Display Options", expanded=False)
-        with disp_expander:
-            show_satellite  = st.toggle("Satellite Imagery", value=False, key='show_satellite_b',
-                                        help="Switch the basemap from the default street view to satellite imagery.")
-            show_boundaries = st.toggle("Jurisdiction Boundaries", value=True, key='show_boundaries_b',
-                                        help="Show the selected city or place boundary used for deployment analysis.")
-            st.toggle("County Boundary", value=False, key='use_county_boundary',
-                      help="Redraw the map using the county boundary instead of the city/place boundary.")
-
-            # Regulatory overlays (stacked vertically)
-            show_faa        = st.toggle("FAA LAANC Airspace", value=False, key='show_faa_b',
-                                       help="Show FAA-authorized flight ceilings by area (LAANC). Lighter = higher altitude allowed.")
-            show_no_fly = st.toggle("No-Fly Zones", value=False, key='show_no_fly_b',
-                                   help="Parks, protected areas, and water. Reference for deployment planning.")
-            show_obstacles  = st.toggle("Flight Hazards", value=False, key='show_obstacles_b',
-                                       help="FAA Digital Obstacle File ? obstacles > 200 ft AGL. Diamond markers.")
-            show_coverage   = st.toggle("4G LTE Coverage", value=False, key='show_coverage_b',
-                                        help="Show AT&T, T-Mobile, and Verizon 4G LTE coverage polygons. Toggle individual carriers in the map legend.")
-            show_cell_towers = st.toggle("Cell Towers", value=False, key='show_cell_towers_b',
-                                        help="OpenCelliD cell tower locations. Useful for data-link RF validation.")
-
-            show_heatmap    = st.toggle("911 Call Heatmap", value=False, key='show_heatmap_b',
-                                        help="Show a density heatmap of 911 call locations to highlight incident concentration.")
-            show_dots       = st.toggle("Incident Dots", value=True, key='show_dots_b',
-                                        help="Show individual 911 call locations as dots on the map.")
-            simulate_traffic = st.toggle("Simulate Ground Traffic", value=False, key='simulate_traffic_b',
-                                         help="Apply traffic-based travel delays to ground response estimates and related metrics.")
-            show_health     = st.toggle("Health Score", value=False, key='show_health_b',
-                                        help="Show the department health score summary based on current deployment coverage and utilization.")
-            show_financials = st.toggle("Show Financials", value=True, key='show_financials_b',
-                                        help="Show or hide all financial figures (CapEx, annual savings, ROI, break-even, specialty values) on the cards and in the sidebar.")
-            show_cards      = True
-            simple_cards    = st.toggle("Simple Cards", value=False, key='simple_cards_b',
-                                        help="Show a compact card with just the key numbers ? name, type, response time, annual savings, and CapEx.")
-            traffic_level   = st.slider("Traffic Congestion", 0, 100, 40) if simulate_traffic else 40
-
-        strat_expander = st.sidebar.expander("⚙️ Deployment Strategy", expanded=False)
-        with strat_expander:
-            # ── PRICING TIER SELECTOR ──────────────────────────────────────────────────
-            st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:0 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Pricing Plan</div>", unsafe_allow_html=True)
-            pricing_tier = st.radio(
-                "Pricing Plan",
-                ("Safe Guard", "Safe Guard Lite"),
-                index=0 if st.session_state.get('pricing_tier', 'Safe Guard') == 'Safe Guard' else 1,
-                label_visibility="collapsed",
-                help="Safe Guard (Responder $79,999 | Guardian $159,999): Advanced custom features and add-ons. Safe Guard Lite (Responder $59,999 | Guardian $119,999): Core functionality. See DFR Safeguard Option Comparison Sheet for feature breakdown."
-            )
-            st.session_state['pricing_tier'] = pricing_tier
-
-            # Update CONFIG with tier-specific pricing
-            if pricing_tier == "Safe Guard":
-                CONFIG["RESPONDER_COST"] = 79999
-                CONFIG["GUARDIAN_COST"] = 159999
-                _tier_badge = "🛡️ Safe Guard"
-                _tier_desc = "Advanced Custom Features"
-            else:
-                CONFIG["RESPONDER_COST"] = 59999
-                CONFIG["GUARDIAN_COST"] = 119999
-                _tier_badge = "🛡️ Safe Guard Lite"
-                _tier_desc = "Core Functionality"
-
-            st.markdown("---")
-
-            incremental_build = st.toggle("Phased Rollout", value=st.session_state.get('incremental_build', True),
-                key='incremental_build',
-                help="Place drones one at a time in priority order. Disable to find the global optimum in a single pass.")
-            auto_cap_dfr = st.toggle("Auto-cap over-utilized stations", value=True,
-                key='auto_cap_dfr',
-                help="When on, each station's DFR rate is clamped to its own physical capacity limit — "
-                     "over-utilized stations run at their personal max without reducing the rate for all other stations.")
-
-            st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:8px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Deployment Mode</div>", unsafe_allow_html=True)
-            deployment_mode = st.radio(
-                "Deployment Mode", 
-                ("Complement — push apart", "Independent — each maximises own area", "Shared — allow full overlap"),
-                index=st.session_state.get('deployment_mode_idx', 1),
-                label_visibility="collapsed",
-                help=(
-                    "Complement: Responders fill gaps left by Guardians — no wasted overlap. "
-                    "Independent: each fleet optimises on its own objective; overlap allowed but not forced. "
-                    "Shared: both fleets optimise together against the same call set — hotspot stacking."
-                )
-            )
-            _mode_map = {"Complement — push apart": 0, "Independent — each maximises own area": 1, "Shared — allow full overlap": 2}
-            st.session_state['deployment_mode_idx'] = _mode_map.get(deployment_mode, 1)
-
-            # Derived flags used by the optimizer
-            allow_redundancy  = (deployment_mode != "Complement — push apart")
-            complement_mode   = (deployment_mode == "Complement — push apart")
-            shared_mode       = (deployment_mode == "Shared — allow full overlap")
-
-            st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Guardian Objective</div>", unsafe_allow_html=True)
-            guard_strategy_raw = st.radio(
-                "Guardian Objective",
-                ("Call Coverage", "Land Coverage"),
-                index=st.session_state.get('guard_strat_idx', 1),
-                horizontal=True,
-                label_visibility="collapsed",
-                help="What the Guardian optimizer maximises. Land Coverage = wide area patrol. Call Coverage = respond to highest-volume locations."
-            )
-            st.session_state['guard_strat_idx'] = 0 if guard_strategy_raw == "Call Coverage" else 1
-            guard_strategy = "Maximize Call Coverage" if guard_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
-
-            st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Responder Objective</div>", unsafe_allow_html=True)
-            resp_strategy_raw = st.radio(
-                "Responder Objective",
-                ("Call Coverage", "Land Coverage"),
-                index=st.session_state.get('resp_strat_idx', 1),
-                horizontal=True,
-                label_visibility="collapsed",
-                help="What the Responder optimizer maximises. Call Coverage = densest incident areas. Land Coverage = broadest geographic reach."
-            )
-            st.session_state['resp_strat_idx'] = 0 if resp_strategy_raw == "Call Coverage" else 1
-            resp_strategy = "Maximize Call Coverage" if resp_strategy_raw == "Call Coverage" else "Maximize Land Coverage"
-
-            st.markdown(f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Coverage Ranges</div>", unsafe_allow_html=True)
-            resp_radius_mi  = st.slider("🚁 Responder Range (mi)", 2.0, 3.0, float(st.session_state.get('r_resp', 2.0)), step=0.5)
-            guard_radius_mi = st.slider("🦅 Guardian Range (mi) [⚡ 5mi Rapid]", 1, 8, int(st.session_state.get('r_guard', 8)), help="The 5-mile rapid response focus zone will automatically be highlighted inside the maximum perimeter.")
+        _strategy_opts = render_deployment_strategy(st, st.session_state, CONFIG, text_muted)
+        pricing_tier = _strategy_opts['pricing_tier']
+        _tier_badge = _strategy_opts['tier_badge']
+        _tier_desc = _strategy_opts['tier_desc']
+        incremental_build = _strategy_opts['incremental_build']
+        auto_cap_dfr = _strategy_opts['auto_cap_dfr']
+        deployment_mode = _strategy_opts['deployment_mode']
+        allow_redundancy = _strategy_opts['allow_redundancy']
+        complement_mode = _strategy_opts['complement_mode']
+        shared_mode = _strategy_opts['shared_mode']
+        guard_strategy_raw = _strategy_opts['guard_strategy_raw']
+        resp_strategy_raw = _strategy_opts['resp_strategy_raw']
+        guard_strategy = _strategy_opts['guard_strategy']
+        resp_strategy = _strategy_opts['resp_strategy']
+        resp_radius_mi = _strategy_opts['resp_radius_mi']
+        guard_radius_mi = _strategy_opts['guard_radius_mi']
 
         # Keep opt_strategy for any code that still references it (used in export/logs)
         opt_strategy = guard_strategy  # primary strategy label for reporting
 
+
         st.sidebar.markdown('<div class="sidebar-section-header">② Optimize Fleet</div>', unsafe_allow_html=True)
 
-        minx, miny, maxx, maxy = active_gdf.to_crs(epsg=4326).total_bounds
-        center_lon = (minx + maxx) / 2
-        center_lat = (miny + maxy) / 2
-        dynamic_zoom = calculate_zoom(minx, maxx, miny, maxy)
-        utm_zone = int((center_lon + 180) / 6) + 1
-        epsg_code = int(f"326{utm_zone}") if center_lat > 0 else int(f"327{utm_zone}")
+        _station_prep = prepare_station_candidates(
+            st,
+            st.session_state,
+            active_gdf,
+            df_calls,
+            df_stations_all,
+            calculate_zoom,
+            _boundary_overlay_status,
+            _make_random_stations,
+        )
+        minx = _station_prep['minx']
+        miny = _station_prep['miny']
+        maxx = _station_prep['maxx']
+        maxy = _station_prep['maxy']
+        center_lon = _station_prep['center_lon']
+        center_lat = _station_prep['center_lat']
+        dynamic_zoom = _station_prep['dynamic_zoom']
+        epsg_code = _station_prep['epsg_code']
+        city_m = _station_prep['city_m']
+        city_boundary_geom = _station_prep['city_boundary_geom']
+        boundary_overlay_status = _station_prep['boundary_overlay_status']
+        df_stations_all = _station_prep['df_stations_all']
+        area_sq_mi = _station_prep['area_sq_mi']
+        n = _station_prep['station_count']
 
-        city_m = None
-        city_boundary_geom = None
-        try:
-            active_utm = active_gdf.to_crs(epsg=epsg_code)
-            raw_union = (active_utm.geometry.union_all() if hasattr(active_utm.geometry, 'union_all')
-                         else active_utm.geometry.unary_union)
-            # buffer(0.1).buffer(-0.1) cleans self-intersections but can collapse thin geometries.
-            # Use a larger initial buffer and validate before shrinking.
-            clean_geom = raw_union.buffer(1.0).buffer(-1.0)
-            if clean_geom.is_empty or not clean_geom.is_valid:
-                clean_geom = raw_union.buffer(0)  # zero-buffer repair only
-            if clean_geom.is_empty:
-                clean_geom = raw_union          # use as-is if still empty
-            city_m = clean_geom
-            city_boundary_geom = gpd.GeoSeries([clean_geom], crs=epsg_code).to_crs(epsg=4326).iloc[0]
-        except Exception as e:
-            st.error(f"Geometry Error: {e}"); st.stop()
-
-        boundary_overlay_gdf = st.session_state.get('boundary_overlay_gdf')
-        boundary_overlay_status = _boundary_overlay_status(city_boundary_geom, boundary_overlay_gdf, epsg_code)
-
-        # --- GEOGRAPHIC FILTERING FOR STATIONS ---
-        # Keep stations inside city boundary + generous buffer.
-        # If OSM found nothing inside the boundary (e.g. small cities with few public
-        # buildings tagged), fall back to call-density-derived synthetic stations so
-        # the tool never dead-ends on legitimate data.
-        # User-uploaded station files are never silently replaced — they are trusted as-is.
-        _stations_user_uploaded = st.session_state.get('stations_user_uploaded', False)
-        if not df_stations_all.empty and city_m is not None:
-            st_gdf = gpd.GeoDataFrame(df_stations_all,
-                                       geometry=gpd.points_from_xy(df_stations_all.lon, df_stations_all.lat),
-                                       crs="EPSG:4326")
-            st_gdf_utm = st_gdf.to_crs(epsg=epsg_code)
-
-            # Keep candidate sites strictly inside the jurisdiction whenever possible.
-            mask = st_gdf_utm.within(city_m)
-            df_inside = df_stations_all[mask].reset_index(drop=True)
-
-            if df_inside.empty:
-                if _stations_user_uploaded:
-                    # Try a 5 km buffer before giving up — handles county-boundary
-                    # mode where the active polygon differs from the original city extent.
-                    mask_buf = st_gdf_utm.within(city_m.buffer(5000))
-                    df_inside_buf = df_stations_all[mask_buf].reset_index(drop=True)
-                    if not df_inside_buf.empty:
-                        df_stations_all = df_inside_buf
-                    # else: keep all uploaded stations — user knows their data
-                else:
-                    st.info(
-                        "ℹ️ No OSM public buildings were found inside the jurisdiction boundary. "
-                        "Using call-density station placement — stations are snapped to incident "
-                        "locations that fall inside the city limits."
-                    )
-                try:
-                    if not _stations_user_uploaded:
-                        df_stations_all = _make_random_stations(df_calls, n=60, boundary_geom=city_m, epsg_code=epsg_code)
-                except Exception:
-                    df_stations_all = pd.DataFrame()
-
-                # Absolute last resort: build a simple grid from call quantiles
-                if df_stations_all.empty:
-                    try:
-                        _lats = df_calls['lat'].dropna()
-                        _lons = df_calls['lon'].dropna()
-                        _grid_lats = np.linspace(_lats.quantile(0.1), _lats.quantile(0.9), 8)
-                        _grid_lons = np.linspace(_lons.quantile(0.1), _lons.quantile(0.9), 8)
-                        _glat, _glon = np.meshgrid(_grid_lats, _grid_lons)
-                        df_stations_all = pd.DataFrame({
-                            'name':  [f'Station {i+1}' for i in range(len(_glat.ravel()))],
-                            'lat':   _glat.ravel(),
-                            'lon':   _glon.ravel(),
-                            'type':  (['Police', 'Fire', 'School'] * 30)[:len(_glat.ravel())],
-                        })
-                    except Exception:
-                        df_stations_all = pd.DataFrame()
-            else:
-                df_stations_all = df_inside
-
-            if not df_stations_all.empty and not _stations_user_uploaded:
-                try:
-                    _final_st_gdf = gpd.GeoDataFrame(df_stations_all, geometry=gpd.points_from_xy(df_stations_all.lon, df_stations_all.lat), crs="EPSG:4326").to_crs(epsg=epsg_code)
-                    _final_mask = _final_st_gdf.within(city_m)
-                    if _final_mask.any():
-                        df_stations_all = df_stations_all[_final_mask].reset_index(drop=True)
-                except Exception:
-                    pass
-
-            if df_stations_all.empty:
-                st.error(
-                    "⚠️ No station candidates could be generated. Please upload a CAD file "
-                    "with valid coordinates, or switch to Simulation mode."
-                )
-                st.stop()
-
-        # ── Inject custom stations (bypass boundary clip & type filter) ──────────
-        _custom_st = st.session_state.get('custom_stations', pd.DataFrame())
-        if not _custom_st.empty:
-            # Apply the same type-prefix rename the filter block uses, so pin lookups match
-            _cst_renamed = _custom_st.copy()
-            _cst_renamed['name'] = "[" + _cst_renamed['type'].astype(str) + "] " + _cst_renamed['name'].astype(str)
-            # Drop columns that might not exist in df_stations_all to avoid concat issues
-            _keep_cols = [c for c in _cst_renamed.columns if c in list(df_stations_all.columns) + ['name','lat','lon','type','custom']]
-            _cst_renamed = _cst_renamed[_keep_cols]
-            df_stations_all = pd.concat([df_stations_all, _cst_renamed], ignore_index=True)
-
-        n = len(df_stations_all)
-
-        # Dynamic Sliders based on Area Size
-        area_sq_mi = city_m.area / 2589988.11 if city_m and not city_m.is_empty else 100.0
         r_resp_est = st.session_state.get('r_resp', 2.0)
         r_guard_est = st.session_state.get('r_guard', 8.0)
-
-        max_resp_calc = min(n, int(math.ceil(area_sq_mi / (math.pi * (r_resp_est**2)))) + 5)
-        max_guard_calc = min(n, int(math.ceil(area_sq_mi / (math.pi * (r_guard_est**2)))) + 5)
-
-        # Default minimum fleet: 1 Guardian and enough Responders to reach 85% responder call coverage (minimum 2).
-        try:
-            _pin_r_count = len(st.session_state.get('pinned_resp_names',  []))
-            _pin_g_count = len(st.session_state.get('pinned_guard_names', []))
-            _pin_drop_used = st.session_state.get('pin_drop_used', False)
-            _auto_sig = (
-                f"{st.session_state.get('active_city','')}|{st.session_state.get('active_state','')}|"
-                f"{round(area_sq_mi,1)}|{n}|{round(r_resp_est,1)}|{round(r_guard_est,1)}|"
-                f"{_pin_r_count}|{_pin_g_count}|{int(_pin_drop_used)}"
-            )
-            if st.session_state.get('_auto_minimums_sig') != _auto_sig:
-                if st.session_state.pop('_brinc_k_override', False):
-                    # BRINC import: k_resp/k_guard were already restored from the file —
-                    # just lock the sig so this block doesn't fire again on the next render.
-                    pass
-                elif _pin_drop_used:
-                    # Pin-drop mode: preserve what the user had on screen; only raise
-                    # if the locked-pin count now exceeds the current slider value.
-                    st.session_state['k_resp']  = max(st.session_state.get('k_resp',  _pin_r_count), _pin_r_count)
-                    st.session_state['k_guard'] = max(st.session_state.get('k_guard', _pin_g_count), _pin_g_count)
-                else:
-                    _resp_default = 2
-                    try:
-                        _resp_curve = df_curve[['Drones', 'Responder (Calls)']].dropna()
-                        _hit = _resp_curve[_resp_curve['Responder (Calls)'] >= 85.0]
-                        if not _hit.empty:
-                            _resp_default = int(_hit.iloc[0]['Drones'])
-                    except Exception:
-                        pass
-                    _resp_default = max(2, min(int(_resp_default), max(1, max_resp_calc)))
-                    _guard_default = max(1, min(1, max(1, max_guard_calc)))
-                    st.session_state['k_resp']  = max(_resp_default, _pin_r_count)
-                    st.session_state['k_guard'] = max(_guard_default, _pin_g_count)
-                st.session_state['_auto_minimums_sig'] = _auto_sig
-        except Exception:
-            pass
+        df_curve = pd.DataFrame()
 
 
-        # Safely pull the default values without exceeding the allowed maximums
-        val_r = min(st.session_state.get('k_resp', 2), max_resp_calc)
-        val_g = min(st.session_state.get('k_guard', 0), max_guard_calc)
-
-        k_responder = st.sidebar.slider("🚁 Responder Count", 0, max(1, max_resp_calc), val_r, help="Short-range tactical drones (2-3mi radius).")
-        k_guardian  = st.sidebar.slider("🦅 Guardian Count", 0, max(1, max_guard_calc), val_g, help="Long-range overwatch drones (5-8mi radius).")
-
-        st.session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
-
-        # ── LOCK STATIONS (sidebar multiselect) ──────────────────────────────────
-        def _make_unique_station_label(raw_label, station_type, lat, lon):
-            """Return a stable, unique custom-station label."""
-            _label = (raw_label or "").strip() or f"{lat:.5f}, {lon:.5f}"
-            _existing_prefixed = set(df_stations_all['name'].astype(str).tolist())
-            _custom_existing = st.session_state.get('custom_stations', pd.DataFrame())
-            if not _custom_existing.empty and {'name', 'type'}.issubset(_custom_existing.columns):
-                _existing_prefixed.update(
-                    f"[{row['type']}] {row['name']}"
-                    for _, row in _custom_existing[['name', 'type']].dropna().iterrows()
-                )
-            _prefixed = f"[{station_type}] {_label}"
-            if _prefixed not in _existing_prefixed:
-                return _label
-
-            _coord_suffix = f" ({lat:.5f}, {lon:.5f})"
-            _label_with_coords = f"{_label}{_coord_suffix}"
-            _prefixed_with_coords = f"[{station_type}] {_label_with_coords}"
-            if _prefixed_with_coords not in _existing_prefixed:
-                return _label_with_coords
-
-            _n = 2
-            while f"[{station_type}] {_label_with_coords} #{_n}" in _existing_prefixed:
-                _n += 1
-            return f"{_label_with_coords} #{_n}"
-
-        def _next_custom_station_name():
-            """Return the next sequential default label for custom pin-drop stations."""
-            _cst = st.session_state.get('custom_stations', pd.DataFrame())
-            _used_numbers = set()
-            if not _cst.empty and 'name' in _cst.columns:
-                for _name in _cst['name'].astype(str):
-                    _m = re.fullmatch(r"Custom Station (\d+)", _name.strip())
-                    if _m:
-                        _used_numbers.add(int(_m.group(1)))
-            _n = 1
-            while _n in _used_numbers:
-                _n += 1
-            return f"Custom Station {_n}"
-
-        def _build_lock_lists(prefixed_label, lock_role):
-            """Return updated Guardian/Responder lock lists for one station."""
-            _guard = [x for x in st.session_state.get('pinned_guard_names', []) if x != prefixed_label]
-            _resp = [x for x in st.session_state.get('pinned_resp_names', []) if x != prefixed_label]
-            if lock_role == "Guardian":
-                _guard.append(prefixed_label)
-            else:
-                _resp.append(prefixed_label)
-            return _guard, _resp
-
-        _station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
-
-        def _set_station_locks(new_guard_names, new_resp_names, ensure_capacity=True):
-            _valid_lock_names = set(_station_names)
-            _custom_existing = st.session_state.get('custom_stations', pd.DataFrame())
-            if not _custom_existing.empty and {'name', 'type'}.issubset(_custom_existing.columns):
-                _valid_lock_names.update(
-                    f"[{row['type']}] {row['name']}"
-                    for _, row in _custom_existing[['name', 'type']].dropna().iterrows()
-                )
-            _guard = [s for s in list(dict.fromkeys(new_guard_names)) if s in _valid_lock_names]
-            _resp = [s for s in list(dict.fromkeys(new_resp_names)) if s in _valid_lock_names and s not in _guard]
-            st.session_state['pinned_guard_names'] = list(_guard)
-            st.session_state['pinned_resp_names'] = list(_resp)
-            st.session_state['lock_guard_ms'] = list(_guard)
-            st.session_state['lock_resp_ms'] = list(_resp)
-            if ensure_capacity:
-                st.session_state['k_guard'] = max(st.session_state.get('k_guard', 0), len(_guard))
-                st.session_state['k_resp'] = max(st.session_state.get('k_resp', 0), len(_resp))
-            st.session_state.pop('_auto_minimums_sig', None)
-            for _ck in ['_opt_cache_key', '_opt_best_combo', '_opt_chrono_r', '_opt_chrono_g']:
-                st.session_state.pop(_ck, None)
-
-        def _remove_custom_station(station_name, station_type=None):
-            """Remove one custom station and clear any matching lock entries."""
-            _cst = st.session_state.get('custom_stations', pd.DataFrame())
-            _match_type = station_type
-            if _match_type is None and not _cst.empty and {'name', 'type'}.issubset(_cst.columns):
-                _match = _cst[_cst['name'].astype(str) == str(station_name)]
-                if not _match.empty:
-                    _match_type = str(_match.iloc[0]['type'])
-
-            _names_to_remove = {str(station_name)}
-            if _match_type:
-                _names_to_remove.add(f"[{_match_type}] {station_name}")
-
-            if not _cst.empty and 'name' in _cst.columns:
-                _mask = _cst['name'].astype(str) != str(station_name)
-                if _match_type and 'type' in _cst.columns:
-                    _mask |= _cst['type'].astype(str) != str(_match_type)
-                st.session_state['custom_stations'] = _cst.loc[_mask].reset_index(drop=True)
-            else:
-                st.session_state['custom_stations'] = pd.DataFrame()
-
-            _set_station_locks(
-                [x for x in st.session_state.get('pinned_guard_names', []) if x not in _names_to_remove],
-                [x for x in st.session_state.get('pinned_resp_names', []) if x not in _names_to_remove],
-                ensure_capacity=False,
-            )
-
-            _remaining_custom = st.session_state.get('custom_stations', pd.DataFrame())
-            if _remaining_custom.empty and not st.session_state.get('pinned_guard_names') and not st.session_state.get('pinned_resp_names'):
-                st.session_state['pin_drop_used'] = False
-
-        _saved_g = [s for s in st.session_state.get('pinned_guard_names', []) if s in _station_names]
-        _saved_r = [s for s in st.session_state.get('pinned_resp_names', []) if s in _station_names and s not in _saved_g]
-        _set_station_locks(_saved_g, _saved_r, ensure_capacity=False)
-
-        pinned_guard_names = list(st.session_state.get('pinned_guard_names', []))
-        pinned_resp_names = list(st.session_state.get('pinned_resp_names', []))
-
-        # ── MAP-CLICK PIN DROP ─────────────────────────────────────────────────────
-        _pin_mode = bool(st.session_state.get('pin_drop_mode', False))
-
-        if _pin_mode:
-            st.sidebar.markdown(
-                "<div style='background:rgba(0,210,255,0.08);border:1px solid rgba(0,210,255,0.35);"
-                "border-radius:6px;padding:8px 10px;margin-bottom:8px;font-size:0.72rem;color:#e0e0f0;'>"
-                "<b>Drop Pin Mode Active</b><br>Click-and-drag a small box on the map to place a station."
-                "</div>",
-                unsafe_allow_html=True
-            )
-            if st.sidebar.button("Cancel Drop Pin", use_container_width=True, key="cancel_drop_pin_mode_btn"):
-                st.session_state['pin_drop_mode'] = False
-                st.session_state['pending_pin'] = None
-                st.rerun()
-        # If pin mode was just turned off, clear any pending pin
-        if not _pin_mode and st.session_state.get('pending_pin') is not None:
-            st.session_state['pending_pin'] = None
-
-        _pending = st.session_state.get('pending_pin')
-
-        # ADD CUSTOM STATION BY ADDRESS
-        st.sidebar.markdown(
-            """
-            <style>
-            @keyframes pinDropPulse {
-                0% { box-shadow: 0 0 0 0 rgba(0, 210, 255, 0.55); transform: scale(1); }
-                70% { box-shadow: 0 0 0 10px rgba(0, 210, 255, 0); transform: scale(1.02); }
-                100% { box-shadow: 0 0 0 0 rgba(0, 210, 255, 0); transform: scale(1); }
-            }
-            .pin-drop-cta {
-                background: rgba(0, 210, 255, 0.10);
-                border: 1px solid rgba(0, 210, 255, 0.45);
-                border-radius: 8px;
-                padding: 10px 12px;
-                margin: 0 0 10px 0;
-                color: #e0e0f0;
-                animation: pinDropPulse 1.2s ease-in-out infinite;
-            }
-            .pin-drop-hint {
-                font-size: 0.72rem;
-                line-height: 1.35;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
+        _custom_station_state = manage_custom_stations(
+            st,
+            st.session_state,
+            df_stations_all,
+            area_sq_mi,
+            r_resp_est,
+            r_guard_est,
+            resp_radius_mi,
+            guard_radius_mi,
+            df_curve,
+            get_address_from_latlon,
+            search_address_candidates,
         )
+        k_responder = _custom_station_state['k_responder']
+        k_guardian = _custom_station_state['k_guardian']
+        pinned_guard_names = _custom_station_state['pinned_guard_names']
+        pinned_resp_names = _custom_station_state['pinned_resp_names']
+        _station_names = _custom_station_state['station_names']
 
-        _cst_display = st.session_state.get('custom_stations', pd.DataFrame())
-        _add_expanded = bool(_pin_mode or _pending is not None or not _cst_display.empty)
-        add_expander = st.sidebar.expander("Add Custom Station", expanded=_add_expanded)
-        with add_expander:
-            if _pin_mode and _pending is not None:
-                st.markdown(
-                    (
-                        "<div class='pin-drop-cta'><div class='pin-drop-hint'>"
-                        f"<b>Pin selected.</b> Review the station details below, then click <b>Add Station</b> "
-                        f"to place it at {_pending['lat']:.5f}, {_pending['lon']:.5f}."
-                        "</div></div>"
-                    ),
-                    unsafe_allow_html=True,
-                )
-            elif _pin_mode:
-                st.info("Pin Drop is active. Click and drag a small box on the map, then return here to add the station.")
-
-            if 'cs_addr_buf' not in st.session_state: st.session_state['cs_addr_buf'] = ""
-            if 'cs_label_buf' not in st.session_state: st.session_state['cs_label_buf'] = ""
-            if 'cs_type_buf' not in st.session_state: st.session_state['cs_type_buf'] = "Police"
-            if 'cs_role_buf' not in st.session_state: st.session_state['cs_role_buf'] = "Lock as Guardian"
-            if 'pp_label_buf' not in st.session_state: st.session_state['pp_label_buf'] = ""
-            if 'pp_type_buf' not in st.session_state: st.session_state['pp_type_buf'] = "Police"
-            if 'pp_role_buf' not in st.session_state: st.session_state['pp_role_buf'] = "Lock as Guardian"
-
-            if _pin_mode and _pending is not None:
-                _pp_label = st.text_input(
-                    "Dropped Pin Name",
-                    value=st.session_state['pp_label_buf'],
-                    placeholder=_next_custom_station_name(),
-                    key="pp_label_input",
-                    help="Optional station label for the dropped pin. Leave blank to use an auto-generated name."
-                )
-                _pp_type = st.selectbox(
-                    "Dropped Pin Type",
-                    ["Police", "Fire", "School", "Government", "Hospital", "Library", "Other"],
-                    index=["Police", "Fire", "School", "Government", "Hospital", "Library", "Other"].index(
-                        st.session_state['pp_type_buf']) if st.session_state['pp_type_buf'] in
-                        ["Police", "Fire", "School", "Government", "Hospital", "Library", "Other"] else 0,
-                    key="pp_type_select",
-                    help="Category used to label the station and keep it grouped correctly in the model."
-                )
-                _pp_role = st.radio(
-                    "Dropped Pin Fleet",
-                    ["Lock as Guardian", "Lock as Responder"],
-                    index=0 if "Guardian" in st.session_state.get('pp_role_buf', "Lock as Guardian") else 1,
-                    horizontal=True,
-                    key="pp_role_radio",
-                    help="Choose which fleet this custom station is locked into after it is added."
-                )
-                st.session_state['pp_label_buf'] = _pp_label
-                st.session_state['pp_type_buf'] = _pp_type
-                st.session_state['pp_role_buf'] = _pp_role
-
-                _pin_cols = st.columns(2)
-                if _pin_cols[0].button(
-                    "Add Station",
-                    use_container_width=True,
-                    key="pp_confirm_btn",
-                    type="primary",
-                    help="Add the dropped pin as a custom station and lock it to the selected fleet."
-                ):
-                    _default_name = _next_custom_station_name()
-                    _base_label = (_pp_label or "").strip() or _default_name
-                    _label = _make_unique_station_label(_base_label, _pp_type, _pending['lat'], _pending['lon'])
-                    _prefixed_label = f"[{_pp_type}] {_label}"
-                    _pp_lock_role = "Guardian" if "Guardian" in _pp_role else "Responder"
-                    _nearest_addr = get_address_from_latlon(_pending['lat'], _pending['lon'])
-                    _new_pin_row = pd.DataFrame([{
-                        "name": _label,
-                        "lat": _pending['lat'],
-                        "lon": _pending['lon'],
-                        "type": _pp_type,
-                        "lock_role": _pp_lock_role,
-                        "address": _nearest_addr,
-                        "custom": True,
-                    }])
-                    _cst = st.session_state.get('custom_stations', pd.DataFrame())
-                    st.session_state['custom_stations'] = (
-                        pd.concat([_cst, _new_pin_row], ignore_index=True)
-                        if not _cst.empty else _new_pin_row
-                    )
-                    _new_g, _new_r = _build_lock_lists(_prefixed_label, _pp_lock_role)
-                    _set_station_locks(_new_g, _new_r, ensure_capacity=True)
-                    st.session_state['pin_drop_used'] = True
-                    st.session_state['pending_pin'] = None
-                    st.session_state['pp_label_buf'] = ""
-                    st.session_state['pin_drop_mode'] = False
-                    st.session_state['show_lock_stations'] = False
-                    st.session_state.pop('_pin_sel_hash', None)
-                    st.toast(f"{_label} pinned as {_pp_lock_role}.")
-                    st.rerun()
-                if _pin_cols[1].button(
-                    "Cancel Pin",
-                    use_container_width=True,
-                    key="pp_cancel_btn",
-                    help="Discard the dropped pin and exit map-add mode."
-                ):
-                    st.session_state['pending_pin'] = None
-                    st.session_state['pin_drop_mode'] = False
-                    st.session_state.pop('_pin_sel_hash', None)
-                    st.rerun()
-
-                st.markdown("---")
-
-            # ── Address + details ────────────────────────────────────────
-            _custom_addr = st.text_input(
-                "Address",
-                value=st.session_state['cs_addr_buf'],
-                placeholder="123 Main St, Mobile, AL",
-                key="custom_station_addr",
-                help="Street address to geocode into a custom station. Include city and state for the best match."
-            )
-            _custom_label = st.text_input(
-                "Station Name",
-                value=st.session_state['cs_label_buf'],
-                placeholder="Fire Station 7",
-                key="custom_station_label",
-                help="Optional display name. Leave blank to use the matched address."
-            )
-            _type_opts = ["Police", "Fire", "School", "Government", "Hospital", "Library", "Other"]
-            _type_idx = _type_opts.index(st.session_state['cs_type_buf']) if st.session_state['cs_type_buf'] in _type_opts else 0
-            _custom_type = st.selectbox(
-                "Station Type",
-                _type_opts,
-                index=_type_idx,
-                key="custom_station_type",
-                help="Category used to label the station and keep it grouped correctly in the model."
-            )
-
-            # ── Address suggestion picker ────────────────────────────────
-            _addr_query = _custom_addr.strip()
-            _addr_matches = search_address_candidates(_addr_query, limit=6) if len(_addr_query) >= 4 else []
-            _addr_options = [f"{m['matched_address']} [{m['source']}]" for m in _addr_matches]
-            if _addr_options:
-                _addr_pick = st.selectbox(
-                    "Suggested Match",
-                    options=_addr_options,
-                    index=0,
-                    key="custom_station_match",
-                    help="Suggestions refresh from Census and OpenStreetMap as you type."
-                )
-                _selected_match = _addr_matches[_addr_options.index(_addr_pick)]
-                st.caption(f"Using: {_selected_match['matched_address']} | {_selected_match['lat']:.5f}, {_selected_match['lon']:.5f}")
-            elif len(_addr_query) >= 4:
-                _selected_match = None
-                st.caption("No suggestions yet — you can still try the add button for fallback matching.")
-            else:
-                _selected_match = None
-
-            # ── Fleet assignment ─────────────────────────────────────────
-            _role_opts = ["Lock as Guardian", "Lock as Responder"]
-            _role_idx = _role_opts.index(st.session_state['cs_role_buf']) if st.session_state['cs_role_buf'] in _role_opts else 0
-            _custom_role = st.radio(
-                "Assign To Fleet",
-                _role_opts,
-                index=_role_idx,
-                horizontal=True,
-                key="custom_station_role",
-                help="Choose which fleet this custom station will be locked into after it is added."
-            )
-
-            st.session_state['cs_addr_buf'] = _custom_addr
-            st.session_state['cs_label_buf'] = _custom_label
-            st.session_state['cs_type_buf'] = _custom_type
-            st.session_state['cs_role_buf'] = _custom_role
-
-            # ── Primary action: geocode + add ────────────────────────────
-            if st.button(
-                "Geocode And Add Station",
-                use_container_width=True,
-                key="geocode_btn",
-                help="Geocode the address, add the station, and lock it to the selected fleet.",
-                type="primary"
-            ):
-                _addr_to_geocode = _custom_addr.strip()
-                if _addr_to_geocode:
-                    try:
-                        _match = _selected_match
-                        if not _match:
-                            _fallback_matches = search_address_candidates(_addr_to_geocode, limit=1)
-                            _match = _fallback_matches[0] if _fallback_matches else None
-                        if _match:
-                            _geo_lat = float(_match['lat'])
-                            _geo_lon = float(_match['lon'])
-                            _matched_addr = _match.get('matched_address', _addr_to_geocode)
-                            _label = _make_unique_station_label(
-                                _custom_label.strip() or _matched_addr,
-                                _custom_type,
-                                _geo_lat,
-                                _geo_lon,
-                            )
-                            _prefixed_label = f"[{_custom_type}] {_label}"
-                            _new_row = pd.DataFrame([{
-                                "name": _label,
-                                "lat": _geo_lat,
-                                "lon": _geo_lon,
-                                "type": _custom_type,
-                                "lock_role": "Guardian" if _custom_role == "Lock as Guardian" else "Responder",
-                                "address": _matched_addr,
-                                "custom": True,
-                            }])
-                            _cst = st.session_state.get('custom_stations', pd.DataFrame())
-                            st.session_state['custom_stations'] = pd.concat(
-                                [_cst, _new_row], ignore_index=True
-                            ) if not _cst.empty else _new_row
-
-                            _custom_lock_role = "Guardian" if _custom_role == "Lock as Guardian" else "Responder"
-                            _new_g, _new_r = _build_lock_lists(_prefixed_label, _custom_lock_role)
-                            _set_station_locks(_new_g, _new_r, ensure_capacity=True)
-                            _pin_note = f"Pinned as {_custom_lock_role}."
-
-                            st.success(
-                                f"Added and locked: **{_label}** ({_geo_lat:.4f}, {_geo_lon:.4f})\n{_pin_note}"
-                            )
-                            st.caption(f"Matched address: {_matched_addr} [{_match.get('source', 'lookup')}]")
-                            st.session_state['cs_addr_buf'] = ""
-                            st.session_state['cs_label_buf'] = ""
-                            for _ck in ['_opt_cache_key', '_opt_best_combo', '_opt_chrono_r', '_opt_chrono_g']:
-                                st.session_state.pop(_ck, None)
-                            st.rerun()
-                        else:
-                            st.warning("Address not found. Try selecting a suggested match or include city and state.")
-                    except Exception as _ge:
-                        st.error(f"Geocoding failed: {_ge}")
-                else:
-                    st.warning("Enter an address first.")
-
-            # ── Secondary actions: pin drop + lock stations ──────────────
-            st.markdown("---")
-            if st.button(
-                "Pin Drop",
-                use_container_width=True,
-                key="drop_pin_btn",
-                help="Click on the map to add a custom station by location instead of by address."
-            ):
-                st.session_state['pin_drop_mode'] = True
-                st.session_state['show_lock_stations'] = False
-                st.rerun()
-
-            # ── Session custom station list ───────────────────────────────
-            _custom_added = _cst_display['name'].tolist() if not _cst_display.empty else []
-            if _custom_added:
-                st.markdown("---")
-                st.caption(f"Custom Stations This Session ({len(_custom_added)})")
-                _cst_disp = st.session_state.get('custom_stations', pd.DataFrame())
-                _guard_set = set(st.session_state.get('pinned_guard_names', []))
-                _resp_set = set(st.session_state.get('pinned_resp_names', []))
-                for _idx, _cn in enumerate(_custom_added[:12]):
-                    _cst_row = _cst_disp[_cst_disp['name'] == _cn].iloc[0] if not _cst_disp.empty and (_cst_disp['name'] == _cn).any() else None
-                    _pfx = f"[{_cst_row['type']}] {_cn}" if _cst_row is not None else _cn
-                    _stored_lock_role = str(_cst_row.get('lock_role', '')).strip() if _cst_row is not None else ''
-                    _is_g = _stored_lock_role == "Guardian" or _pfx in _guard_set or _cn in _guard_set
-                    _is_r = _stored_lock_role == "Responder" or _pfx in _resp_set or _cn in _resp_set
-                    _badge = "G" if _is_g else "R" if _is_r else "•"
-                    _color = "#FFD700" if _is_g else "#00D2FF" if _is_r else "#9aa0b4"
-                    _row_cols = st.columns([6, 1])
-                    _row_cols[0].markdown(
-                        f"<div style='font-size:0.68rem; color:{_color}; padding:4px 0;'>{_badge} {_pfx}</div>",
-                        unsafe_allow_html=True
-                    )
-                    if _row_cols[1].button("X", key=f"remove_custom_station_{_idx}_{_cn}", help="Remove this custom station.", use_container_width=True):
-                        _remove_custom_station(_cn, None if _cst_row is None else str(_cst_row['type']))
-                        st.rerun()
-                if st.button(
-                    "Remove all custom stations",
-                    key="remove_custom",
-                    use_container_width=True,
-                    help="Clear every custom station added in this session and remove their fleet locks."
-                ):
-                    _cst_to_rm = st.session_state.get('custom_stations', pd.DataFrame())
-                    _rm_names = set()
-                    if not _cst_to_rm.empty:
-                        for _, _row in _cst_to_rm.iterrows():
-                            _rm_names.add(str(_row['name']))
-                            _rm_names.add(f"[{_row['type']}] {_row['name']}")
-                    st.session_state['custom_stations'] = pd.DataFrame()
-                    st.session_state['pinned_guard_names'] = [
-                        x for x in st.session_state.get('pinned_guard_names', []) if x not in _rm_names]
-                    st.session_state['pinned_resp_names'] = [
-                        x for x in st.session_state.get('pinned_resp_names', []) if x not in _rm_names]
-                    if not st.session_state.get('pinned_guard_names') and not st.session_state.get('pinned_resp_names'):
-                        st.session_state['pin_drop_used'] = False
-                    st.session_state.pop('_auto_minimums_sig', None)
-                    if '_opt_cache_key' in st.session_state:
-                        del st.session_state['_opt_cache_key']
-                    st.rerun()
-
-        _lock_expanded = bool(
-            st.session_state.get('show_lock_stations', False) or pinned_guard_names or pinned_resp_names
-        )
-        _lock_sync_sig = (
-            tuple(pinned_guard_names),
-            tuple(pinned_resp_names),
-            len(_station_names),
-        )
-        if st.session_state.get('_lock_widget_sync_sig') != _lock_sync_sig:
-            st.session_state['lock_guard_ms_widget_b'] = list(pinned_guard_names)
-            st.session_state['lock_resp_ms_widget_b'] = list(pinned_resp_names)
-            st.session_state['_lock_widget_sync_sig'] = _lock_sync_sig
-        lock_expander = st.sidebar.expander("Lock Stations", expanded=_lock_expanded)
-        with lock_expander:
-            st.caption("Assign specific stations to Guardian or Responder and force them into the deployed fleet.")
-            _new_g = st.multiselect(
-                "Lock as Guardian",
-                options=_station_names,
-                key="lock_guard_ms_widget_b",
-                help="These stations will always be assigned a Guardian drone and deployed into Unit Economics."
-            )
-            _new_r = st.multiselect(
-                "Lock as Responder",
-                options=[s for s in _station_names if s not in _new_g],
-                key="lock_resp_ms_widget_b",
-                help="These stations will always be assigned a Responder drone and deployed into Unit Economics."
-            )
-            if _new_g != pinned_guard_names or _new_r != pinned_resp_names:
-                _set_station_locks(_new_g, _new_r, ensure_capacity=True)
-                st.session_state['show_lock_stations'] = True
-                st.rerun()
-
-        pinned_guard_names = list(st.session_state.get('pinned_guard_names', []))
-        pinned_resp_names = list(st.session_state.get('pinned_resp_names', []))
-        st.session_state['show_lock_stations'] = False
-
-        if len(pinned_guard_names) > k_guardian:
-            st.sidebar.warning(f"Guardian Count was raised to honor {len(pinned_guard_names)} locked Guardian station(s).")
-        if len(pinned_resp_names) > k_responder:
-            st.sidebar.warning(f"Responder Count was raised to honor {len(pinned_resp_names)} locked Responder station(s).")
 
         # Convert pin names → station indices for the optimizer
         _name_to_idx = {row['name']: i for i, row in df_stations_all.iterrows()}
         locked_g_pins = [_name_to_idx[n] for n in pinned_guard_names if n in _name_to_idx]
-        locked_r_pins = [_name_to_idx[n] for n in pinned_resp_names  if n in _name_to_idx]
+        locked_r_pins = [_name_to_idx[n] for n in pinned_resp_names if n in _name_to_idx]
 
         bounds_hash = f"{minx}_{miny}_{maxx}_{maxy}_{n}_{resp_radius_mi}_{guard_radius_mi}"
 
-        prog2 = st.sidebar.empty()
-        prog2.caption(get_spatial_message())
-        calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls = optimization.precompute_spatial_data(
-            df_calls, df_calls_full, df_stations_all, city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash
+        _runtime_ctx = prepare_runtime_context(
+            st,
+            st.session_state,
+            optimization,
+            faa_rf,
+            html_reports,
+            CONFIG,
+            df_calls,
+            df_calls_full,
+            df_stations_all,
+            city_m,
+            epsg_code,
+            resp_radius_mi,
+            guard_radius_mi,
+            center_lat,
+            center_lon,
+            bounds_hash,
+            minx,
+            miny,
+            maxx,
+            maxy,
+            full_daily_calls,
+            full_total_calls,
+            text_muted,
+            get_spatial_message,
+            get_faa_message,
+            get_airfield_message,
         )
-        if total_calls == 0 and len(df_calls) > 0:
-            st.warning("No uploaded calls fell inside the selected jurisdiction boundary. Coverage rings can still render, but call coverage will be 0%. Check city/state selection or clean outlier coordinates in the CAD file.")
-        df_curve = optimization.compute_all_elbow_curves(
-            total_calls, resp_matrix, guard_matrix,
-            [s['clipped_2m'] for s in station_metadata],
-            [s['clipped_guard'] for s in station_metadata],
-            city_m.area if city_m else 1.0, bounds_hash,
-            max_stations=100
-        )
-        prog2.empty()
-
-        # (Scored station table removed — station scores shown in Add Custom Station expander)
-
-        def get_max_drones(col_name):
-            series = df_curve[col_name].dropna()
-            if len(series) == 0: return 1
-            idx_99 = series[series >= 99.0].first_valid_index()
-            fallback = series.index[-1]
-            return int(df_curve.loc[idx_99 if idx_99 is not None else fallback, 'Drones'])
-
-        with st.spinner(get_faa_message()):
-            faa_geojson = faa_rf.load_faa_parquet(minx, miny, maxx, maxy)
-            faa_feature_count = len(faa_geojson.get('features', [])) if isinstance(faa_geojson, dict) and faa_geojson.get('features') else 0
-            # Debug FAA loading
-            if faa_feature_count == 0:
-                st.sidebar.warning("FAA data not loading (0 zones). Check Display Options.")
-        with st.spinner(get_airfield_message()):
-            airfields = faa_rf.fetch_airfields(minx, miny, maxx, maxy)
-
-        st.sidebar.markdown('<div class="sidebar-section-header">③ Budget & Downloads</div>', unsafe_allow_html=True)
-
-        # We use the strat_expander we defined earlier in the sidebar to inject the sliders
-        with strat_expander:
-            st.markdown("---")
-            inferred_daily = st.session_state.get('inferred_daily_calls_override') or full_daily_calls or 1
-            inferred_daily = max(1, int(inferred_daily))
-            calls_per_day = st.slider("Total Daily Calls (citywide)", 1, max(100, inferred_daily*3), inferred_daily)
-            st.caption(f"Derived from the full uploaded CAD total ({full_total_calls:,} incidents), not the optimization sample.")
-
-            st.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>DFR Dispatch Rate (%)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>What % of in-range calls will the drone be sent to?</div>", unsafe_allow_html=True)
-            dfr_dispatch_rate = st.slider("DFR Dispatch Rate", 1, 100, st.session_state.get('dfr_rate',12), label_visibility="collapsed") / 100.0
-
-            st.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>Calls Resolved Without Officer Dispatch (%)</div>", unsafe_allow_html=True)
-            st.markdown(f"<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>Of drone-attended calls, what % close without a patrol car?</div>", unsafe_allow_html=True)
-            deflection_rate = st.slider("Resolution Rate", 0, 100, st.session_state.get('deflect_rate',25), label_visibility="collapsed") / 100.0
-
-            st.session_state['dfr_rate']    = int(dfr_dispatch_rate * 100)
-            st.session_state['deflect_rate'] = int(deflection_rate * 100)
-
+        calls_in_city = _runtime_ctx['calls_in_city']
+        display_calls = _runtime_ctx['display_calls']
+        resp_matrix = _runtime_ctx['resp_matrix']
+        guard_matrix = _runtime_ctx['guard_matrix']
+        dist_matrix_r = _runtime_ctx['dist_matrix_r']
+        dist_matrix_g = _runtime_ctx['dist_matrix_g']
+        station_metadata = _runtime_ctx['station_metadata']
+        total_calls = _runtime_ctx['total_calls']
+        df_curve = _runtime_ctx['df_curve']
+        faa_geojson = _runtime_ctx['faa_geojson']
+        airfields = _runtime_ctx['airfields']
+        calls_per_day = _runtime_ctx['calls_per_day']
+        dfr_dispatch_rate = _runtime_ctx['dfr_dispatch_rate']
+        deflection_rate = _runtime_ctx['deflection_rate']
         # ── OPTIMIZATION ──────────────────────────────────────────────────
-        active_resp_names, active_guard_names = [], []
-        active_resp_idx, active_guard_idx = [], []  
-        chrono_r, chrono_g = [], []
-        best_combo = None
-
         _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
         opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{guard_strategy}_{resp_strategy}_{deployment_mode}_{incremental_build}_{bounds_hash}_{_pins_key}"
+        _opt_result = optimize_fleet_selection(
+            st,
+            st.session_state,
+            optimization,
+            station_metadata,
+            resp_matrix,
+            guard_matrix,
+            dist_matrix_r,
+            dist_matrix_g,
+            total_calls,
+            k_responder,
+            k_guardian,
+            allow_redundancy,
+            complement_mode,
+            shared_mode,
+            incremental_build,
+            guard_strategy,
+            resp_strategy,
+            locked_g_pins,
+            locked_r_pins,
+            n,
+            opt_cache_key,
+        )
+        active_resp_names = _opt_result['active_resp_names']
+        active_guard_names = _opt_result['active_guard_names']
+        active_resp_idx = _opt_result['active_resp_idx']
+        active_guard_idx = _opt_result['active_guard_idx']
+        chrono_r = _opt_result['chrono_r']
+        chrono_g = _opt_result['chrono_g']
+        best_combo = _opt_result['best_combo']
 
-        if k_responder + k_guardian > n:
-            st.error("⚠️ Over-Deployment: Total drones exceed available stations.")
-            active_resp_names, active_guard_names = [], []
-            chrono_r, chrono_g = [], []
-            best_combo = None
-        elif k_responder == 0 and k_guardian == 0:
-            active_resp_names, active_guard_names = [], []
-            chrono_r, chrono_g = [], []
-            best_combo = None
-        else:
-            if st.session_state.get('_opt_cache_key') != opt_cache_key:
-                stage_bar = st.empty()
-
-                # ── HELPER: greedy area-coverage for one fleet ───────────────────
-                def _greedy_area(matrix, geo_list, k, forced, exclude_set):
-                    """Greedily pick k stations maximising unary_union area,
-                    starting from forced pins and skipping exclude_set."""
-                    chosen = list(forced)
-                    chrono  = list(forced)
-                    current_union = unary_union([geo_list[i] for i in chosen]) if chosen else None
-                    for _ in range(k - len(forced)):
-                        best_s, best_gain = -1, -1.0
-                        for s in range(len(geo_list)):
-                            if s in chosen or s in exclude_set:
-                                continue
-                            g = geo_list[s]
-                            new_area = current_union.union(g).area if current_union else g.area
-                            gain = new_area - (current_union.area if current_union else 0)
-                            if gain > best_gain:
-                                best_gain, best_s = gain, s
-                        if best_s != -1:
-                            chosen.append(best_s)
-                            chrono.append(best_s)
-                            g = geo_list[best_s]
-                            current_union = current_union.union(g) if current_union else g
-                    return chosen, chrono
-
-                # ── PASS 1: Optimise Guardians independently ─────────────────────
-                stage_bar.info("🦅 Optimising Guardian fleet…")
-                if k_guardian > 0:
-                    if guard_strategy == "Maximize Call Coverage":
-                        # solve_mclp returns (r_best, g_best, chrono_r, chrono_g)
-                        # Pass 1 runs Guardians only (num_resp=0) so r_best=[] and g_best has the result
-                        _, g_best, _, chrono_g = optimization.solve_mclp(
-                            resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g,
-                            0, k_guardian, True, incremental=incremental_build,
-                            forced_r=[], forced_g=locked_g_pins
-                        )
-                    else:
-                        g_best, chrono_g = _greedy_area(
-                            guard_matrix,
-                            [station_metadata[i]['clipped_guard'] for i in range(len(station_metadata))],
-                            k_guardian, locked_g_pins, set()
-                        )
-                    g_best = list(g_best)
-                else:
-                    g_best, chrono_g = [], []
-
-                # ── PASS 2: Optimise Responders around Guardian result ────────────
-                stage_bar.info("🚁 Optimising Responder fleet…")
-                if k_responder > 0:
-                    # In complement mode, mask out calls already covered by Guardians
-                    # so Responders fill the gaps rather than stacking on the same calls.
-                    if complement_mode and g_best and total_calls > 0:
-                        guard_covered = guard_matrix[g_best].any(axis=0)
-                        # Build a reduced matrix: zero out already-covered calls for Responders
-                        resp_matrix_eff = resp_matrix.copy()
-                        resp_matrix_eff[:, guard_covered] = False
-                        dist_matrix_r_eff = dist_matrix_r.copy()
-                    else:
-                        resp_matrix_eff    = resp_matrix
-                        dist_matrix_r_eff  = dist_matrix_r
-
-                    # In complement mode, Responders also can't reuse Guardian stations
-                    _excl = set(g_best) if not allow_redundancy else set()
-
-                    if resp_strategy == "Maximize Call Coverage":
-                        r_best, _, chrono_r, _ = optimization.solve_mclp(
-                            resp_matrix_eff, guard_matrix, dist_matrix_r_eff, dist_matrix_g,
-                            k_responder, 0, allow_redundancy, incremental=incremental_build,
-                            forced_r=locked_r_pins, forced_g=[]
-                        )
-                        # Filter out Guardian stations if complement mode
-                        if complement_mode:
-                            r_best = [s for s in r_best if s not in set(g_best)]
-                            # Pad back to k_responder if exclusion removed some
-                            if len(r_best) < k_responder:
-                                remaining = [s for s in range(n)
-                                             if s not in r_best and s not in set(g_best)]
-                                r_best += remaining[:k_responder - len(r_best)]
-                    else:
-                        _excl_resp = set(g_best) if complement_mode else set()
-                        r_best, chrono_r = _greedy_area(
-                            resp_matrix_eff,
-                            [station_metadata[i]['clipped_2m'] for i in range(len(station_metadata))],
-                            k_responder, locked_r_pins, _excl_resp
-                        )
-                else:
-                    r_best, chrono_r = [], []
-
-                best_combo = (tuple(r_best), tuple(g_best))
-                stage_bar.empty()
-                st.toast("✅ Independent optimisation complete!", icon="✅")
-
-                st.session_state['_opt_cache_key']  = opt_cache_key
-                st.session_state['_opt_best_combo'] = best_combo
-                st.session_state['_opt_chrono_r']   = chrono_r
-                st.session_state['_opt_chrono_g']   = chrono_g
-            else:
-                best_combo = st.session_state.get('_opt_best_combo')
-                chrono_r   = st.session_state.get('_opt_chrono_r', [])
-                chrono_g   = st.session_state.get('_opt_chrono_g', [])
-
-            if best_combo is not None:
-                r_best, g_best = best_combo
-                active_resp_names  = [station_metadata[i]['name'] for i in r_best]
-                active_guard_names = [station_metadata[i]['name'] for i in g_best]
-                active_resp_idx  = list(r_best)
-                active_guard_idx = list(g_best)
-            else:
-                active_resp_names, active_guard_names = [], []
-                active_resp_idx, active_guard_idx = [], []
 
         # ── METRICS ───────────────────────────────────────────────────────
         # ── SPLIT METRICS: Guardian and Responder computed independently ─────────
@@ -4518,28 +3298,28 @@ def main():
                 _alt_max_single  = CONFIG["GUARDIAN_FLIGHT_MIN"] if _alt_is_guard else CONFIG["RESPONDER_FLIGHT_MIN"]
 
                 # Capacity of THIS drone type (flights/day with 10-min scene floor)
-                # Guardian is continuously airborne — a response costs round-trip travel
-                # (fly TO scene + on-scene + fly BACK to patrol), so use 2×avg_time.
-                # Guardian is also bounded by its duty cycle: 22.857 sorties/day,
-                # each sortie fitting floor(60 / response_cost) responses max.
+                # Guardian responses include outbound travel, on-scene time, and return-to-patrol travel.
+                # Responder responses include one-way travel plus the on-scene floor.
                 _SORTIES_PER_DAY = (24 * 60) / (CONFIG["GUARDIAN_FLIGHT_MIN"] + CONFIG["GUARDIAN_CHARGE_MIN"])
+                _travel_cost     = (2 * avg_time_min) if _is_guard else avg_time_min
+                _response_cost   = _travel_cost + _MIN_SCENE_MIN
                 if _is_guard:
-                    _response_cost_g  = 2 * avg_time_min + _MIN_SCENE_MIN  # round-trip + scene
-                    _airtime_cap_g    = _budget_min / _response_cost_g
-                    _per_sortie_g     = max(1, math.floor(CONFIG["GUARDIAN_FLIGHT_MIN"] / _response_cost_g))
+                    _airtime_cap_g    = _budget_min / _response_cost
+                    _per_sortie_g     = max(1, math.floor(CONFIG["GUARDIAN_FLIGHT_MIN"] / _response_cost))
                     _duty_cap_g       = _SORTIES_PER_DAY * _per_sortie_g
                     _max_flights_cap  = min(_airtime_cap_g, _duty_cap_g)
                 else:
-                    _max_flights_cap  = _budget_min / (avg_time_min + _MIN_SCENE_MIN)
+                    _max_flights_cap  = _budget_min / _response_cost
                 # Alternate type cap (for cross-type deficit recommendation)
+                _alt_travel_cost = (2 * avg_time_min) if _alt_is_guard else avg_time_min
+                _alt_response_cost = _alt_travel_cost + _MIN_SCENE_MIN
                 if _alt_is_guard:
-                    _response_cost_ag = 2 * avg_time_min + _MIN_SCENE_MIN
-                    _airtime_cap_ag   = _alt_budget / _response_cost_ag
-                    _per_sortie_ag    = max(1, math.floor(CONFIG["GUARDIAN_FLIGHT_MIN"] / _response_cost_ag))
+                    _airtime_cap_ag   = _alt_budget / _alt_response_cost
+                    _per_sortie_ag    = max(1, math.floor(CONFIG["GUARDIAN_FLIGHT_MIN"] / _alt_response_cost))
                     _duty_cap_ag      = _SORTIES_PER_DAY * _per_sortie_ag
                     _alt_max_flights  = min(_airtime_cap_ag, _duty_cap_ag)
                 else:
-                    _alt_max_flights  = _alt_budget / (avg_time_min + _MIN_SCENE_MIN)
+                    _alt_max_flights  = _alt_budget / _alt_response_cost
 
                 # ── Auto-cap: clamp this station's effective DFR rate to its
                 #    physical capacity limit so it doesn't show a deficit while
@@ -4552,11 +3332,13 @@ def main():
                 else:
                     _effective_dfr = dfr_dispatch_rate
 
-                # On-scene minutes available per flight given current demand
-                _on_scene_min = (_budget_min / max(_zone_flights, 0.001)) - avg_time_min if _zone_flights > 0 else 99.0
+                # On-scene minutes available per flight given current demand.
+                # This uses the same travel-cost assumption as the capacity model,
+                # so Guardians no longer overstate spare time by ignoring the return leg.
+                _on_scene_min = (_budget_min / max(_zone_flights, 0.001)) - _travel_cost if _zone_flights > 0 else 99.0
 
-                # True (uncapped) utilization using scene-inclusive budget
-                _true_util = (_zone_flights * (avg_time_min + _MIN_SCENE_MIN)) / max(1.0, _budget_min)
+                # True (uncapped) utilization using the same scene-inclusive response cost.
+                _true_util = (_zone_flights * _response_cost) / max(1.0, _budget_min)
                 # Display util capped at 1.0 (100%) for progress bars; deficit shown separately
                 _util = min(1.0, _true_util)
 
@@ -4607,7 +3389,13 @@ def main():
                 _best_annual   = _base_annual  + _concurrent_annual
 
                 # ── STORE — use best_case as primary display value ─────────────────
+                _assigned_daily_calls   = (marginal_historic / total_calls) * calls_per_day if total_calls > 0 else 0.0
+                _assigned_flights_day  = _assigned_daily_calls * dfr_dispatch_rate
                 d['marginal_perc']       = marginal_historic / total_calls
+                d['marginal_calls']      = marginal_historic
+                d['assigned_calls_day']  = _assigned_daily_calls
+                d['assigned_flights_day']= _assigned_flights_day
+                d['assigned_flights_yr'] = _assigned_flights_day * 365.0
                 d['marginal_flights']    = _excl_flights
                 d['marginal_deflected']  = _excl_deflected
                 d['shared_flights']      = _shared_dfr
@@ -5015,6 +3803,7 @@ def main():
                         line=dict(color=map_boundary_color, width=2), name="Jurisdiction Boundary",
                         hoverinfo='skip', showlegend=(gi==0)))
 
+            boundary_overlay_gdf = st.session_state.get('boundary_overlay_gdf')
             if show_boundaries and boundary_overlay_gdf is not None and not boundary_overlay_gdf.empty:
                 _overlay_parts = []
                 for _overlay_geom in boundary_overlay_gdf.geometry:
@@ -5130,6 +3919,41 @@ def main():
                             fill='toself', fillcolor=t_fill,
                             name=f"Ground ({t_label})", hoverinfo='skip'))
 
+            custom_station_df = st.session_state.get('custom_stations', pd.DataFrame())
+            if not custom_station_df.empty:
+                _active_custom_keys = {
+                    (str(d.get('name', '')), str(d.get('type', '')))
+                    for d in active_drones
+                }
+                _inactive_custom = custom_station_df.copy()
+                _inactive_custom['_active_key'] = list(zip(
+                    _inactive_custom['name'].astype(str),
+                    _inactive_custom['type'].astype(str),
+                ))
+                _inactive_custom = _inactive_custom[~_inactive_custom['_active_key'].isin(_active_custom_keys)]
+                if not _inactive_custom.empty:
+                    _custom_lat = _inactive_custom['lat'].astype(float).tolist()
+                    _custom_lon = _inactive_custom['lon'].astype(float).tolist()
+                    _custom_text = []
+                    _custom_color = []
+                    for _, _crow in _inactive_custom.iterrows():
+                        _role = str(_crow.get('lock_role', '') or '')
+                        _is_guard = 'Guardian' in _role
+                        _custom_color.append('#FFD700' if _is_guard else '#00D2FF')
+                        _custom_text.append(
+                            f"<b>Custom Station</b><br>{_crow['name']}<br>{_crow.get('type', 'Custom')}"
+                            + (f"<br>Locked as {_role}" if _role else '')
+                        )
+                    fig.add_trace(go.Scattermap(
+                        lat=_custom_lat,
+                        lon=_custom_lon,
+                        mode='markers',
+                        marker=dict(size=13, color=_custom_color, symbol='diamond'),
+                        name='Custom Stations',
+                        hovertemplate='%{text}<extra></extra>',
+                        text=_custom_text,
+                    ))
+
             map_cfg = dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style=map_style)
             if show_satellite:
                 map_cfg["style"] = "carto-positron"
@@ -5178,7 +4002,7 @@ def main():
                 )
 
             _map_event = st.plotly_chart(
-                fig, use_container_width=True,
+                fig, width="stretch",
                 config={"scrollZoom": not _pin_drop_active, "displayModeBar": _pin_drop_active},
                 on_select="rerun" if _pin_drop_active else "ignore",
                 key="main_map_chart",
@@ -5307,7 +4131,7 @@ def main():
                     paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                     hoverlabel=dict(bgcolor=card_bg, font_size=13, font_color=text_main, bordercolor=accent_color)
                 )
-                st.plotly_chart(fig_curve, use_container_width=True, config={'displayModeBar':False})
+                st.plotly_chart(fig_curve, width="stretch", config={'displayModeBar':False})
             else:
                 st.info("Run optimization to generate coverage curve.")
 
@@ -5378,12 +4202,12 @@ def main():
                         paper_bgcolor='rgba(0,0,0,0)',
                         hoverlabel=dict(bgcolor=card_bg, font_size=12, font_color=text_main),
                     )
-                    st.plotly_chart(fig_ring, use_container_width=True, config={'displayModeBar':False})
+                    st.plotly_chart(fig_ring, width="stretch", config={'displayModeBar':False})
 
                     # Mode legend below the ring
                     _mode_label = {
                         "Complement — push apart": "▶◀ Complement — Responders fill Guardian gaps",
-                        "Independent — each maximises own area": "⊕ Independent — each fleet optimised separately",
+                        "Independent — each uses its own objective": "⊕ Independent — each fleet follows its own objective",
                         "Shared — allow full overlap": "↔ Shared — both fleets maximise same call set",
                     }.get(deployment_mode, "")
                     st.markdown(
@@ -5956,7 +4780,7 @@ def main():
                             _cr, _cov_boundary, center_lat, center_lon,
                             dynamic_zoom, map_style
                         )
-                        st.plotly_chart(_mini_fig, use_container_width=True, config={"displayModeBar": False})
+                        st.plotly_chart(_mini_fig, width="stretch", config={"displayModeBar": False})
 
                 # Rank line
                 if len(_carrier_results) > 1:
@@ -6312,6 +5136,45 @@ def main():
         prop_city  = st.session_state.get('active_city', 'City')
         prop_state = st.session_state.get('active_state', 'FL')
         _safe_city_base = prop_city.replace(" ", "_").replace("/", "_")
+        export_details = {}
+        export_html = None
+        export_dict = {
+            "city": prop_city,
+            "state": prop_state,
+            "_disclaimer": (
+                "SIMULATION TOOL: All figures in this file are model estimates based on user-provided inputs. "
+                "Real-world results will vary. This is not a legal recommendation, binding proposal, contract, "
+                "or guarantee of any product, service, or financial outcome."
+            ),
+            "k_resp": 0,
+            "k_guard": 0,
+            "r_resp": st.session_state.get('r_resp', ''),
+            "r_guard": st.session_state.get('r_guard', ''),
+            "dfr_rate": int(st.session_state.get('dfr_rate', 0) or 0),
+            "deflect_rate": int(st.session_state.get('deflect_rate', 0) or 0),
+            "resp_strategy": '',
+            "guard_strategy": '',
+            "deployment_mode_idx": st.session_state.get('deployment_mode_idx', 1),
+            "incremental_build": st.session_state.get('incremental_build', True),
+            "auto_cap_dfr": st.session_state.get('auto_cap_dfr', True),
+            "use_county_boundary": st.session_state.get('use_county_boundary', False),
+            "pinned_guard_names": [],
+            "pinned_resp_names": [],
+            "custom_stations": html_reports._safe_df_to_records(st.session_state.get('custom_stations')),
+            "pin_drop_used": st.session_state.get('pin_drop_used', False),
+            "calls_data": html_reports._safe_df_to_records(
+                st.session_state.get('df_calls_full') if st.session_state.get('df_calls_full') is not None
+                else st.session_state.get('df_calls')
+            ),
+            "stations_data": html_reports._safe_df_to_records(st.session_state.get('df_stations')),
+            "faa_geojson": faa_geojson,
+            "boundary_geojson": None,
+            "boundary_kind": st.session_state.get('boundary_kind', 'place'),
+            "boundary_source_path": st.session_state.get('boundary_source_path', ''),
+            "brinc_user": st.session_state.get('brinc_user', ''),
+            "pricing_tier": st.session_state.get('pricing_tier', 'Safe Guard'),
+            "app_version": __version__,
+        }
 
         if fleet_capex > 0:
 
@@ -6725,7 +5588,7 @@ def main():
                         _ebadge = "#22c55e" if _ecr['pct'] >= 90 else "#f59e0b" if _ecr['pct'] >= 70 else "#ef4444"
                         _emfig = _build_carrier_mini_map(
                             _ecr, city_boundary_geom, center_lat, center_lon,
-                            dynamic_zoom, 'carto-darkmatter'
+                            dynamic_zoom, 'carto-positron'
                         )
                         _inc_plotlyjs = 'cdn' if _eci == 0 else False
                         _emap_div = _emfig.to_html(
@@ -6767,7 +5630,13 @@ def main():
                     _tier_badge = "🛡️ Safe Guard Lite"
                     _tier_desc = "Core Functionality"
     
-                _selected_labels_str = ', '.join(selected_labels) if selected_labels else prop_city
+                _jur_source_file = st.session_state.get('_jur_source_file', '')
+                _boundary_src_display = (
+                    _jur_source_file if _boundary_src_note == 'local_parquet' and _jur_source_file
+                    else 'local_parquet' if _boundary_src_note == 'local_parquet'
+                    else (_boundary_src_note.split('/')[-1].split('\\')[-1] if _boundary_src_note else 'live lookup')
+                )
+                _selected_labels_str = ', '.join(selected_names) if selected_names else prop_city
     
                 export_html = f"""<!DOCTYPE html>
         <html lang="en"><head>
@@ -7245,7 +6114,14 @@ def main():
           <div class="section-eyebrow"><span class="pg-num">03</span><span class="pg-title">Coverage Map</span><span class="src" data-src="Map tiles: © OpenStreetMap contributors (ODbL license). FAA airspace data: Federal Aviation Administration LAANC UAS Facility Maps. Incident dots: uploaded CAD data (up to 40K sampled). Coverage rings are operational radius estimates; actual deployment requires FAA LAANC authorization or Part 107 waiver.">ⓘ</span></div>
           <div class="map-wrap">{map_html_str}</div>
         </section>
-    
+
+        <!-- ── 03b: 4G LTE CELL COVERAGE ─────────────────────────────── -->
+        <section class="doc-section" id="cell-coverage">
+          <div class="section-eyebrow"><span class="pg-num">03b</span><span class="pg-title">4G LTE Cell Coverage</span><span class="src" data-src="Source: FCC National Broadband Map (broadbandmap.fcc.gov). Coverage reflects carrier-reported FCC BDC data for 4G LTE (tech code 300) at ≥25 Mbps download. Displayed carriers include AT&T, T-Mobile, and Verizon. Coverage data may not reflect actual field conditions.">ⓘ</span></div>
+          <p style="font-size:0.78rem;color:#8899aa;margin:0 0 8px;">FCC-reported 4G LTE carrier availability across the deployment jurisdiction — critical for drone data-link connectivity planning. Coverage sorted highest to lowest.</p>
+          {_exp_lte_content}
+        </section>
+
         <!-- ── 04: INCIDENT ANALYSIS ─────────────────────────────────── -->
         <section class="doc-section" id="incident-data">
           <div class="section-eyebrow"><span class="pg-num">04</span><span class="pg-title">Incident Data Analysis</span><span class="src" data-src="Source: Uploaded CAD export data. Call type classification, priority distribution, and temporal patterns are derived from the incident records provided. BRINC applies no external normalization — charts reflect your jurisdiction's raw CAD data.">ⓘ</span></div>
@@ -7747,13 +6623,6 @@ def main():
             <!-- ── CUSTOM CLOSING (AE-authored, optional) ──────────────────── -->
         {_custom_closing_html}
     
-        <!-- ── 03b: 4G LTE CELL COVERAGE ─────────────────────────────── -->
-        <section class="doc-section" id="cell-coverage">
-          <div class="section-eyebrow"><span class="pg-num">03b</span><span class="pg-title">4G LTE Cell Coverage</span><span class="src" data-src="Source: FCC National Broadband Map (broadbandmap.fcc.gov). Coverage reflects carrier-reported FCC BDC data for 4G LTE (tech code 300) at ≥25 Mbps download. Displayed carriers include AT&T, T-Mobile, and Verizon. Coverage data may not reflect actual field conditions.">ⓘ</span></div>
-          <p style="font-size:0.78rem;color:#8899aa;margin:0 0 8px;">FCC-reported 4G LTE carrier availability across the deployment jurisdiction — critical for drone data-link connectivity planning. Coverage sorted highest to lowest.</p>
-          {_exp_lte_content}
-        </section>
-    
     
     
         <!-- ── DISCLAIMER ─────────────────────────────────────────────── -->
@@ -7834,23 +6703,12 @@ def main():
         </script>
         </body></html>"""
     
-                # ── Analytics section — use the light-themed export charts, not the dark command center ──
-                # cad_charts_html_export uses light backgrounds (#111 text, white/gray),
-                # while analytics_html_export (generate_command_center_html) uses background:#000 which
-                # creates a large black gap in the white export document.
-                if cad_charts_html_export:
-                    _analytics_section_html = (
-                        '\n<!-- \u2500\u2500 09: ANALYTICS DASHBOARD \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->\n'
-                        '<section class="doc-section" id="analytics">\n'
-                        '  <div class="section-eyebrow"><span class="pg-num">09</span><span class="pg-title">Analytics Dashboard</span>'
-                        '<span class="src" data-src="Source: Uploaded CAD export data. All charts \u2014 call type distribution, priority breakdown, hourly heat map, and month-over-month trends \u2014 are derived directly from incident records provided. No external data normalization is applied.">\u24d8</span></div>\n'
-                        f'  {cad_charts_html_export}\n'
-                        '</section>'
-                    )
-                    _analytics_nav = '<a href="#analytics"><span class="nav-num">09</span>Analytics Dashboard</a>'
-                else:
-                    _analytics_section_html = ''
-                    _analytics_nav = ''
+                # Section 09 (Analytics Dashboard) removed — its content (cad_charts_html_export)
+                # is already rendered in Section 04 (Incident Data Analysis). Duplicating it
+                # caused "Top Call Types" to appear twice and broke the Chart.js canvas binding
+                # because both instances shared the same element id="expTypeChart".
+                _analytics_section_html = ''
+                _analytics_nav = ''
                 export_html = export_html.replace("[ANALYTICS_SECTION]", _analytics_section_html)
                 export_html = export_html.replace("[ANALYTICS_NAV]", _analytics_nav)
     
@@ -7989,7 +6847,7 @@ def main():
         _user_name_safe = user_clean.replace(" ", "_")
         if st.sidebar.download_button("💾 Save Deployment Plan", data=_brinc_data,
                                       file_name=f"{_user_name_safe}_BRINC_DFR_{_safe_city}_{_version_slug}_{_ts}.brinc",
-                                      mime="application/json", use_container_width=True):
+                                      mime="application/json", width="stretch"):
             # ── Track export event ───────────────────────────────────────────────
             st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['BRINC']
             st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
@@ -8006,7 +6864,7 @@ def main():
                                           data=export_html,
                                           file_name=f"BRINC_Executive_Summary_{_safe_city}_{_version_slug}_{_ts}.html",
                                           mime="text/html",
-                                          use_container_width=True):
+                                          width="stretch"):
                 # ── Track export event ───────────────────────────────────────────
                 st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['HTML']
                 st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
@@ -8024,7 +6882,7 @@ def main():
                                           data=html_reports.generate_kml(active_gdf, active_drones, calls_in_city),
                                           file_name="drone_deployment.kml",
                                           mime="application/vnd.google-earth.kml+xml",
-                                          use_container_width=True):
+                                          width="stretch"):
                 # ── Track export event ───────────────────────────────────────────
                 st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['KML']
                 st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
@@ -8036,7 +6894,7 @@ def main():
                                prop_name, prop_email, details=export_details)
         else:
             st.sidebar.button("🌏 Google Earth Briefing File", disabled=True,
-                              use_container_width=True,
+                              width="stretch",
                               help="Deploy at least one drone to generate the KML file.")
 
 
@@ -8046,5 +6904,20 @@ def main():
 
 
 main()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

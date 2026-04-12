@@ -75,13 +75,42 @@ def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, e
 
     return calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls
 
-def solve_mclp(resp_matrix, guard_matrix, dist_r, dist_g, num_resp, num_guard, allow_redundancy, incremental=True, forced_r=None, forced_g=None):
-    """MCLP optimizer. forced_r / forced_g are lists of station indices that must
-    be included as Responders / Guardians regardless of coverage score."""
+def solve_mclp(
+    resp_matrix,
+    guard_matrix,
+    dist_r,
+    dist_g,
+    num_resp,
+    num_guard,
+    allow_redundancy,
+    incremental=True,
+    forced_r=None,
+    forced_g=None,
+    forbidden_r=None,
+    forbidden_g=None,
+    incompatible_rr=None,
+    incompatible_gg=None,
+    incompatible_rg=None,
+):
+    """MCLP optimizer.
+
+    forced_r / forced_g are station indices that must be included.
+    forbidden_r / forbidden_g are station indices that cannot be selected.
+    incompatible_* hold station-index pairs that may not be active together.
+    """
     forced_r = list(forced_r or [])
     forced_g = list(forced_g or [])
+    forbidden_r = set(forbidden_r or []) - set(forced_r)
+    forbidden_g = set(forbidden_g or []) - set(forced_g)
+    incompatible_rr = list(incompatible_rr or [])
+    incompatible_gg = list(incompatible_gg or [])
+    incompatible_rg = list(incompatible_rg or [])
+    forced_r_set = set(forced_r)
+    forced_g_set = set(forced_g)
     n_stations, n_calls = resp_matrix.shape
-    if n_calls == 0 or (num_resp == 0 and num_guard == 0): return [], [], [], []
+    if n_calls == 0 or (num_resp == 0 and num_guard == 0):
+        return [], [], [], []
+
     df_profiles = pd.DataFrame(resp_matrix.T).astype(int).astype(str)
     df_profiles['g'] = pd.DataFrame(guard_matrix.T).astype(int).astype(str).agg(''.join, axis=1)
     df_profiles['r'] = df_profiles.drop(columns='g').agg(''.join, axis=1)
@@ -100,37 +129,59 @@ def solve_mclp(resp_matrix, guard_matrix, dist_r, dist_g, num_resp, num_guard, a
         x_g = pulp.LpVariable.dicts("g_st", range(n_stations), 0, 1, pulp.LpBinary)
         model += pulp.lpSum(x_r[i] for i in range(n_stations)) == target_r
         model += pulp.lpSum(x_g[i] for i in range(n_stations)) == target_g
-        for r in locked_r: model += x_r[r] == 1
-        for g in locked_g: model += x_g[g] == 1
+        for r in locked_r:
+            model += x_r[r] == 1
+        for g in locked_g:
+            model += x_g[g] == 1
+        for r in forbidden_r:
+            model += x_r[r] == 0
+        for g in forbidden_g:
+            model += x_g[g] == 0
         if not allow_redundancy:
-            for s in range(n_stations): model += x_r[s] + x_g[s] <= 1
+            for s in range(n_stations):
+                model += x_r[s] + x_g[s] <= 1
+        for a, b in incompatible_rr:
+            if a in forced_r_set and b in forced_r_set:
+                continue
+            model += x_r[a] + x_r[b] <= 1
+        for a, b in incompatible_gg:
+            if a in forced_g_set and b in forced_g_set:
+                continue
+            model += x_g[a] + x_g[b] <= 1
+        for r_idx, g_idx in incompatible_rg:
+            if r_idx in forced_r_set and g_idx in forced_g_set:
+                continue
+            model += x_r[r_idx] + x_g[g_idx] <= 1
         y = pulp.LpVariable.dicts("cl", range(n_u), 0, 1, pulp.LpBinary)
         penalty = 0.00001
-        model += pulp.lpSum(y[i]*weights[i] for i in range(n_u)) - pulp.lpSum(
-            x_r[s]*np.sum(u_dist_r[s,:])*penalty + x_g[s]*np.sum(u_dist_g[s,:])*penalty
-            for s in range(n_stations))
+        model += pulp.lpSum(y[i] * weights[i] for i in range(n_u)) - pulp.lpSum(
+            x_r[s] * np.sum(u_dist_r[s, :]) * penalty + x_g[s] * np.sum(u_dist_g[s, :]) * penalty
+            for s in range(n_stations)
+        )
         for i in range(n_u):
-            cover = [x_r[s] for s in range(n_stations) if u_resp[s,i]] + [x_g[s] for s in range(n_stations) if u_guard[s,i]]
-            if cover: model += y[i] <= pulp.lpSum(cover)
-            else: model += y[i] == 0
+            cover = [x_r[s] for s in range(n_stations) if u_resp[s, i]] + [x_g[s] for s in range(n_stations) if u_guard[s, i]]
+            if cover:
+                model += y[i] <= pulp.lpSum(cover)
+            else:
+                model += y[i] == 0
         model.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=10, gapRel=0.0))
+        if pulp.LpStatus.get(model.status) not in {"Optimal", "Feasible"}:
+            return list(locked_r), list(locked_g)
         return (
             [i for i in range(n_stations) if (pulp.value(x_r[i]) or 0) > 0.5],
-            [i for i in range(n_stations) if (pulp.value(x_g[i]) or 0) > 0.5]
+            [i for i in range(n_stations) if (pulp.value(x_g[i]) or 0) > 0.5],
         )
 
     if not incremental:
         res_r, res_g = run_lp(num_resp, num_guard, forced_r, forced_g)
         return res_r, res_g, res_r, res_g
-    # Start with forced pins already locked in
+
     curr_r, curr_g = list(forced_r), list(forced_g)
     chrono_r, chrono_g = list(forced_r), list(forced_g)
-    # Add remaining Guardians one at a time (incremental)
     for tg in range(len(forced_g) + 1, num_guard + 1):
         next_r, next_g = run_lp(0, tg, curr_r, curr_g)
         chrono_g.extend([x for x in next_g if x not in curr_g])
         curr_r, curr_g = next_r, next_g
-    # Add remaining Responders one at a time
     for tr in range(len(forced_r) + 1, num_resp + 1):
         next_r, next_g = run_lp(tr, num_guard, curr_r, curr_g)
         chrono_r.extend([x for x in next_r if x not in curr_r])

@@ -58,7 +58,7 @@ def estimate_high_activity_overtime(df_calls_full, state_abbr, calls_covered_per
             return None
 
         work['_month'] = work['_dt'].dt.to_period('M').astype(str)
-        work['_hour_key'] = work['_dt'].dt.floor('H')
+        work['_hour_key'] = work['_dt'].dt.floor('h')
         hourly = work.groupby('_hour_key').size().rename('calls').reset_index()
         hourly['_month'] = hourly['_hour_key'].dt.to_period('M').astype(str)
 
@@ -1026,7 +1026,7 @@ def _build_cad_charts(df_calls, text_main, text_muted, card_bg, card_border, acc
                 yaxis=dict(showgrid=False, autorange='reversed'),
                 showlegend=False,
             )
-            st.plotly_chart(fig_types, use_container_width=True, config={'displayModeBar': False})
+            st.plotly_chart(fig_types, width="stretch", config={'displayModeBar': False})
 
 
 
@@ -1132,7 +1132,11 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
         total_daily_flights = d_flights + d_shared
         d_zone_calls = float(d.get("zone_calls_annual", 0) or 0)
-        d_zone_flights_annual = float(d.get("zone_flights_annual", total_daily_flights * 365.0) or 0)
+        d_assigned_calls_day = float(d.get('assigned_calls_day', 0) or 0)
+        d_assigned_flights_day = float(d.get('assigned_flights_day', d_flights) or 0)
+        d_assigned_flights_annual = float(d.get('assigned_flights_yr', d_assigned_flights_day * 365.0) or 0)
+        d_zone_flights_day = float(d.get('zone_flights', d_flights + d_shared) or 0)
+        d_zone_flights_annual = float(d.get("zone_flights_annual", d_zone_flights_day * 365.0) or 0)
         # Cap thermal/K9 base to physically serviceable flights (max_flights_cap * 365)
         # zone_flights_annual is raw DEMANDED flights — thermal/K9 assists can only
         # happen on flights actually flown within the 10-min scene-floor capacity.
@@ -1146,36 +1150,17 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_thermal = d_thermal_calls * _THERMAL_PER_CALL
         d_k9      = d_k9_calls      * _K9_PER_CALL
         d_fire    = d_fire_calls    * _FIRE_PER_CALL
-        patrol_time_line = ""
-        if total_daily_flights > 0:
-            # Raw calculation: patrol budget / flights = available min per flight
-            raw_mins_per_flight = max_patrol_mins / total_daily_flights
-            # Cap at drone's physical max flight time
-            max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
-            mins_per_flight = min(raw_mins_per_flight, max_single_flight)
-            capped = raw_mins_per_flight > max_single_flight
-            # Always show the line so low-volume Responders display correctly
-            patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= max_single_flight * 0.9 else "#00D2FF"
-            cap_note = f" (max {max_single_flight}min)" if capped else ""
-            _annual_flights = total_daily_flights * 365
-            patrol_time_line = (
-                f'<div style="font-size:0.65rem; color:{text_muted}; text-align:right; line-height:1.2;" '
-                f'title="{uptime_tooltip}">'
-                f'<span style="font-weight:800; color:{patrol_color};">{total_daily_flights:.1f} flights/day</span> '
-                f'<span style="font-weight:400; color:{text_muted}; font-size:0.60rem;">({_annual_flights:,.0f}/yr)</span><br>'
-                f'<span style="font-weight:600; color:{patrol_color};">{mins_per_flight:.1f} min/flight{cap_note}</span></div>'
-            )
 
         # Concurrency / value breakdown
         d_util         = d.get('utilization', 0)
         d_true_util    = d.get('true_util', d_util)
         d_on_scene     = d.get('on_scene_min', 99.0)
-        d_max_cap      = d.get('max_flights_cap', 0)
+        d_max_cap      = float(d.get('max_flights_cap', 0) or 0)
         d_has_deficit  = d.get('has_deficit', False)
         d_deficit_f    = d.get('deficit_flights', 0)
         d_unserv_day   = d.get('unserv_calls_day', 0)
         d_unserv_yr    = d.get('unserv_calls_yr', 0)
-        d_total_flights_possible_yr = max(0.0, float(d_max_cap or 0) * 365.0)
+        d_total_flights_possible_yr = max(0.0, d_max_cap * 365.0)
         d_total_uncovered_flights_yr = max(0.0, float(d_zone_flights_annual or 0) - d_total_flights_possible_yr)
         d_extra_same   = d.get('extra_same', 0)
         d_extra_alt    = d.get('extra_alt', 0)
@@ -1183,21 +1168,53 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_extra_alt_capex  = d.get('extra_alt_capex', 0)
         d_same_lbl     = d.get('same_type_label', d_type.title())
         d_alt_lbl      = d.get('alt_type_label', 'Guardian' if d_type == 'RESPONDER' else 'Responder')
-        d_blocked      = d.get('blocked_per_day', 0)
+        d_blocked      = float(d.get('blocked_per_day', 0) or 0)
         d_base_annual  = d.get('base_annual', d_savings)
         d_conc_annual  = d.get('concurrent_annual', 0)
         d_best         = d.get('best_case_annual', d_savings)
         d_best_be      = d.get('best_be_text', d_be)
-        # True utilization display — uncapped so it can show > 100% in deficit
-        util_pct       = f"{d_true_util*100:.1f}%"
-        util_color     = "#dc3545" if d_has_deficit or d_true_util > 0.75 else "#F0B429" if d_true_util > 0.4 else "#2ecc71"
+        d_serviceable_day = min(d_assigned_flights_day, d_max_cap) if d_max_cap > 0 else d_assigned_flights_day
+        d_actual_resolved_day = max(0.0, (float(d_flights or 0) + d_blocked) * deflection_rate)
+        d_capacity_limited = bool(
+            d_has_deficit
+            or d_true_util >= 0.999
+            or d_on_scene <= 10.01
+            or (d_max_cap > 0 and d_assigned_flights_day > d_max_cap + 0.01)
+        )
+        util_pct = "100%" if d_capacity_limited else f"{d_true_util*100:.1f}%"
+        util_color = "#dc3545" if d_capacity_limited or d_true_util > 0.75 else "#F0B429" if d_true_util > 0.4 else "#2ecc71"
         # On-scene time color coding
-        if d_on_scene < 10.0:
+        if d_capacity_limited or d_on_scene < 10.0:
             scene_color = "#dc3545"
         elif d_on_scene < 20.0:
             scene_color = "#F0B429"
         else:
             scene_color = "#2ecc71"
+
+        patrol_time_line = ""
+        if d_assigned_flights_day > 0:
+            max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
+            raw_mins_per_flight = max_patrol_mins / max(d_assigned_flights_day, 0.001)
+            mins_per_flight = min(raw_mins_per_flight, max_single_flight)
+            capped = raw_mins_per_flight > max_single_flight
+            if d_capacity_limited:
+                patrol_color = "#dc3545"
+                flights_label = f"{d_max_cap:.1f} max flights/day"
+                annual_label = f"({d_total_flights_possible_yr:,.0f}/yr)"
+                mins_label = "10.0 min minimum on-scene"
+            else:
+                patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= max_single_flight * 0.9 else "#00D2FF"
+                flights_label = f"{d_assigned_flights_day:.1f} assigned flights/day"
+                annual_label = f"({d_assigned_flights_annual:,.0f}/yr)"
+                cap_note = f" (max {max_single_flight}min)" if capped else ""
+                mins_label = f"{mins_per_flight:.1f} min/flight{cap_note}"
+            patrol_time_line = (
+                f'<div style="font-size:0.65rem; color:{text_muted}; text-align:right; line-height:1.2;" '
+                f'title="{uptime_tooltip}">'
+                f'<span style="font-weight:800; color:{patrol_color};">{flights_label}</span> '
+                f'<span style="font-weight:400; color:{text_muted}; font-size:0.60rem;">{annual_label}</span><br>'
+                f'<span style="font-weight:600; color:{patrol_color};">{mins_label}</span></div>'
+            )
         has_concurrent = d_shared > 0.1 and d_conc_annual > 0
         if has_concurrent:
             _excl_str = f"${d_base_annual:,.0f} exclusive"
@@ -1207,8 +1224,8 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             _conc_str = ""
 
         # ── DEFICIT FOOTER (compact strip at card bottom) ─────────────────────────────
-        _sc_fmt = f"${d_extra_same_capex:,}" if d_has_deficit else ""
-        _ac_fmt = f"${d_extra_alt_capex:,}" if d_has_deficit else ""
+        _sc_fmt = f"${d_extra_same_capex:,}" if d_capacity_limited else ""
+        _ac_fmt = f"${d_extra_alt_capex:,}" if d_capacity_limited else ""
 
         # ── Pre-build financial HTML blocks (conditionally included) ─────────
         _specialty_total = d_thermal + d_k9 + d_fire
@@ -1252,7 +1269,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         _full_fin_annual_cap = (
             f'<div style="background:rgba(0,210,255,0.07); border:1px solid rgba(0,210,255,0.15); border-radius:6px; padding:8px 10px; margin-bottom:6px;"'
             f'     title="Annual Capacity Value is based on calls handled without sending a squad.">'
-            f'  <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Annual Capacity Value<span class="tip" data-tip="Estimated annual savings from calls this drone resolves without sending a ground unit. Capped at physical flight capacity.">?</span>{"  ⚠️ capped at physical max" if d_has_deficit else ""}</div>'
+            f'  <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Annual Capacity Value<span class="tip" data-tip="Estimated annual savings from calls this drone resolves without sending a ground unit. Capped at physical flight capacity.">?</span>{"  ⚠️ capped at physical max" if d_capacity_limited else ""}</div>'
             f'  <div style="display:flex; align-items:baseline; justify-content:space-between; gap:6px;">'
             f'    <div>'
             f'      <div style="font-size:1.3rem; font-weight:900; color:{accent_color}; line-height:1.1;">${d_best:,.0f}</div>'
@@ -1299,7 +1316,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             f'      <div style="color:{text_muted}; font-size:0.63rem;">concurrent</div>'
             f'    </div>'
             f'  </div>'
-            f'  <div style="font-size:0.65rem; color:{text_muted}; opacity:0.8; border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px; text-align:center;">{util_pct} utilization{"  ·  ⚠️ over capacity" if d_has_deficit else ""} · ROI {d_best_be}</div>'
+            f'  <div style="font-size:0.65rem; color:{text_muted}; opacity:0.8; border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px; text-align:center;">{util_pct} utilization{"  ·  ⚠️ maxed capacity" if d_capacity_limited else ""} · ROI {d_best_be}</div>'
             f'</div>'
         ) if show_financials else ''
 
@@ -1320,21 +1337,17 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
                 f'<span style="font-size:0.55rem;background:rgba(0,210,255,0.15);color:#00D2FF;border:1px solid rgba(0,210,255,0.4);border-radius:3px;padding:1px 5px;margin-left:4px;">🔒 Responder</span>'
                 if (d.get("pinned") and d_type == "RESPONDER") else ""
             )
-            _deficit_strip = (
-                f'<div style="font-size:0.60rem;color:#dc3545;font-weight:700;margin-top:6px;padding-top:5px;border-top:1px solid rgba(220,53,69,0.3);">⚠️ Capacity deficit — {d_on_scene:.1f} min on-scene</div>'
-                if d_has_deficit else ""
-            )
             _cap_strip = (
                 f'<div style="display:flex;align-items:center;gap:5px;margin-top:6px;padding-top:5px;border-top:1px solid rgba(220,53,69,0.3);">'
-                f'<span style="font-size:0.60rem;color:#dc3545;font-weight:700;">⚠️ Over capacity</span>'
+                f'<span style="font-size:0.60rem;color:#dc3545;font-weight:700;">⚠️ Maxed capacity</span>'
                 f'<span style="font-size:0.59rem;color:{text_muted};">· {d_unserv_day:.0f} calls/day unserviceable</span></div>'
-                if d_has_deficit else
+                if d_capacity_limited else
                 f'<div style="display:flex;align-items:center;gap:5px;margin-top:6px;padding-top:5px;border-top:1px solid rgba(34,197,94,0.2);">'
                 f'<span style="font-size:0.60rem;color:#2ecc71;font-weight:700;">✓ Within capacity</span>'
                 f'<span style="font-size:0.59rem;color:{text_muted};">· {d_on_scene:.1f} min on-scene</span></div>'
             )
             cards_html.append(f'''
-<div class="unit-card" style="background:{card_bg};border:1px solid {"#dc3545" if d_has_deficit else card_border};border-top:3px solid {d_color};border-radius:8px;padding:10px 12px;box-sizing:border-box;">
+<div class="unit-card" style="background:{card_bg};border:1px solid {"#dc3545" if d_capacity_limited else card_border};border-top:3px solid {d_color};border-radius:8px;padding:10px 12px;box-sizing:border-box;">
   <div style="display:flex;align-items:baseline;justify-content:space-between;gap:4px;margin-bottom:2px;">
     <span style="font-weight:700;font-size:0.78rem;color:{card_title};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">{"🔒 " if d.get("pinned") else ""}{d["name"]}</span>
     <span style="font-size:0.58rem;color:#666;text-transform:uppercase;white-space:nowrap;flex-shrink:0;">{d_type} · #{d_step}</span>
@@ -1352,7 +1365,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     {_sim_fin_breakeven_cell}
     <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
       <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Resolved/day<span class="tip" data-tip="Calls per day closed without dispatching an officer: total station flights/day (exclusive + shared zone) × deflection rate. Drone arrived, assessed, and dispatch stood down.">?</span></div>
-      <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{d_deflected:.1f} calls</div>
+      <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{d_actual_resolved_day:.1f} calls</div>
     </div>
     <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
       <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Zone Calls/yr<span class="tip" data-tip="Total historical calls for service within this drone's patrol radius. Used as the ceiling for thermal, K-9, and fire assist estimates.">?</span></div>
@@ -1366,7 +1379,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             continue
 
         cards_html.append(f'''
-<div class="unit-card" style="background:{card_bg}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-top:3px solid {d_color}; border-radius:8px; padding:10px 12px; display:flex; flex-direction:column; box-sizing:border-box;">
+<div class="unit-card" style="background:{card_bg}; border:1px solid {"#dc3545" if d_capacity_limited else card_border}; border-top:3px solid {d_color}; border-radius:8px; padding:10px 12px; display:flex; flex-direction:column; box-sizing:border-box;">
   <!-- Header: single compact row -->
   <div style="margin-bottom:5px; flex-shrink:0;">
     <div style="display:flex; align-items:baseline; gap:5px; overflow:hidden;">
@@ -1381,25 +1394,25 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   {_full_fin_value_breakdown}
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.68rem; flex:1; margin-bottom:8px; align-content:start;">
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Zone Flights/day<span class="tip" data-tip="Flights demanded per day in this zone: zone_pct x daily_calls x DFR_rate. This is demand, not actual flights flown.">?</span></div>
-      <div style="font-weight:800; color:{accent_color}; font-size:0.82rem;">{d.get("zone_flights",d_flights):.1f}/day</div>
-      <div style="font-size:0.59rem; color:{text_muted};">({d.get("zone_flights",d_flights)*365:,.0f}/yr)</div>
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Assigned Flights/day<span class="tip" data-tip="Marginal flights/day assigned to this drone in deployment order. Under call-coverage optimization, this is the order-consistent demand added by placing this unit at its step.">?</span></div>
+      <div style="font-weight:800; color:{accent_color}; font-size:0.82rem;">{d_assigned_flights_day:.1f}/day</div>
+      <div style="font-size:0.59rem; color:{text_muted};">({d_assigned_flights_annual:,.0f}/yr)</div>
     </div>
-    <div style="background:{"rgba(220,53,69,0.08)" if d_has_deficit else "rgba(255,255,255,0.04)"}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-radius:5px; padding:5px 7px;">
+    <div style="background:{"rgba(220,53,69,0.08)" if d_capacity_limited else "rgba(255,255,255,0.04)"}; border:1px solid {"#dc3545" if d_capacity_limited else card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">{"Effective" if d.get("effective_dfr_rate", dfr_dispatch_rate) < dfr_dispatch_rate - 0.001 else "Max"} DFR Rate<span class="tip" data-tip="The DFR dispatch rate at which this drone hits exactly 100% utilization. Enable Auto-cap in Deployment Strategy to apply this limit per-station without affecting others. Formula: max_flights_cap / (zone_perc × daily_calls).">?</span></div>
-      <div style="font-weight:800; color:{"#dc3545" if d_has_deficit else "#2ecc71"}; font-size:0.82rem;">{(d_max_cap / max(d.get("zone_flights", d_flights+d_shared), 0.001)) * dfr_dispatch_rate * 100:.1f}%</div>
-      <div style="font-size:0.59rem; color:{text_muted};">{"▼ reduce to clear" if d_has_deficit else ("⚡ auto-capped" if d.get("effective_dfr_rate", dfr_dispatch_rate) < dfr_dispatch_rate - 0.001 else "✓ current rate ok")}</div>
+      <div style="font-weight:800; color:{"#dc3545" if d_capacity_limited else "#2ecc71"}; font-size:0.82rem;">{(min(d_max_cap / max(d_assigned_flights_day, 0.001), 1.0) * dfr_dispatch_rate * 100):.1f}%</div>
+      <div style="font-size:0.59rem; color:{text_muted};">{"▼ reduce to clear" if d_capacity_limited else ("⚡ auto-capped" if d.get("effective_dfr_rate", dfr_dispatch_rate) < dfr_dispatch_rate - 0.001 else "✓ current rate ok")}</div>
     </div>
-    <div style="background:{"rgba(220,53,69,0.08)" if d_has_deficit else "rgba(255,255,255,0.04)"}; border:1px solid {"#dc3545" if d_has_deficit else card_border}; border-radius:5px; padding:5px 7px;">
+    <div style="background:{"rgba(220,53,69,0.08)" if d_capacity_limited else "rgba(255,255,255,0.04)"}; border:1px solid {"#dc3545" if d_capacity_limited else card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Utilization<span class="tip" data-tip="Flight time demanded as % of daily capacity using the 10-min on-scene floor model. Over 100% means this drone cannot serve all calls in its zone.">?</span></div>
       <div style="font-weight:800; color:{util_color}; font-size:0.82rem;">{util_pct}</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Resolved/day<span class="tip" data-tip="Calls per day closed without dispatching an officer: total station flights/day (exclusive + shared zone) × deflection rate. Drone arrived, assessed, and dispatch stood down.">?</span></div>
-      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_deflected:.1f}</div>
+      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_actual_resolved_day:.1f}</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Avg Response<span class="tip" data-tip="Average travel time from this station to incidents in its zone, based on drone speed and straight-line distance with a 1.4x routing factor.">?</span></div>
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Avg Travel<span class="tip" data-tip="Pure travel time from this station to incidents in its zone. Capacity limits are shown separately in the utilization and on-scene status fields.">?</span></div>
       <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_time:.1f} min</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
@@ -1420,7 +1433,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   {_full_fin_capex_roi}
 
   { (f'<div style="border-top:1px solid rgba(220,53,69,0.35);margin-top:4px;padding-top:5px;">'  
-       f'<div style="font-size:0.62rem;font-weight:800;color:#dc3545;margin-bottom:3px;">⚠️ CAPACITY DEFICIT · {d_on_scene:.1f} min on-scene (min 10)</div>'  
+       f'<div style="font-size:0.62rem;font-weight:800;color:#dc3545;margin-bottom:3px;">⚠️ MAXED CAPACITY · {min(d_on_scene, 10.0):.1f} min on-scene floor</div>'  
        f'<div style="font-size:0.59rem;color:{text_muted};margin-bottom:4px;">{d_unserv_day:.0f} calls/day unserviceable · {d_unserv_yr:,.0f}/yr</div>'  
        f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:4px;">'  
        f'<div style="background:rgba(220,53,69,0.08);border:1px solid rgba(220,53,69,0.2);border-radius:4px;padding:3px 6px;font-size:0.59rem;">'  
@@ -1438,7 +1451,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
        f'<div style="color:{text_muted};">+{d_extra_alt} {d_alt_lbl}</div>'  
        f'<div style="font-weight:700;color:#F0B429;">{_ac_fmt}</div></div>'  
        f'</div></div>')  
-    if d_has_deficit else  
+    if d_capacity_limited else  
     (f'<div style="border-top:1px solid rgba(34,197,94,0.2);margin-top:4px;padding-top:4px;display:flex;align-items:center;gap:5px;">'  
      f'<span style="font-size:0.60rem;color:#2ecc71;font-weight:700;">✓ WITHIN CAPACITY</span>'  
      f'<span style="font-size:0.60rem;color:{scene_color};font-weight:600;">· {d_on_scene:.1f} min on-scene</span>'  

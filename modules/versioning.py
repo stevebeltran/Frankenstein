@@ -49,6 +49,11 @@ def _sync_build_meta():
     _stored_mtime, _stored_revision = _read_build_meta()
 
     if _stored_mtime <= 0:
+        _write_build_meta(_app_mtime, 1)
+        return _app_mtime, 1
+
+    # Preserve the highest revision even if app.py is restored with an older mtime.
+    if _app_mtime < (_stored_mtime - 1e-9):
         _write_build_meta(_app_mtime, _stored_revision)
         return _app_mtime, _stored_revision
 
@@ -108,3 +113,4 @@ def _render_version_badge(position="top-right"):
         """,
         unsafe_allow_html=True,
     )
+

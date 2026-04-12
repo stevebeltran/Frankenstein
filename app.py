@@ -5211,7 +5211,6 @@ body{{background:transparent;overflow:hidden}}
             f"<div style='font-size:0.8rem;color:#aabbcc;margin-bottom:8px;'>{_google_email}</div>",
             unsafe_allow_html=True
         )
-        st.sidebar.caption("*(Authenticated via Google OAuth)*")
 
         # Use Google auth data for exports
         user_clean = _google_name_raw.replace('.', ' ').title()
@@ -6960,7 +6959,6 @@ body{{background:transparent;overflow:hidden}}
                 _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                                "HTML", k_responder, k_guardian, calls_covered_perc,
                                prop_name, prop_email, details=export_details)
-            st.sidebar.caption("HTML export reflects the current on-screen proposal and section toggles.")
 
         # 3. Google Earth KML — only when drones are placed
         if active_drones:

@@ -2286,6 +2286,70 @@ def main():
                 return Path(fname).suffix.lower() in {'.shp', '.shx', '.dbf', '.prj'}
 
             if uploaded_files and len(uploaded_files) >= 1:
+                _upload_logo_b64 = get_themed_logo_base64("logo.png", theme="dark") or ""
+                _upload_gigs_b64 = get_transparent_product_base64("gigs.png") or ""
+                components.html(f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+<script>
+(function(){{
+  var doc = parent.document;
+  var old = doc.getElementById('brinc-flo');
+  if(old && old.parentNode) old.parentNode.removeChild(old);
+  var oldCss = doc.getElementById('brinc-flo-css');
+  if(oldCss && oldCss.parentNode) oldCss.parentNode.removeChild(oldCss);
+  var css = doc.createElement('style');
+  css.id = 'brinc-flo-css';
+  css.textContent =
+    '#brinc-flo{{position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;background:rgba(4,7,16,0.97)!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;z-index:2147483647!important;font-family:"IBM Plex Mono",monospace!important}}'
+    +'#brinc-flo .fl-panels{{display:flex;align-items:center;justify-content:center;width:100%;max-width:940px;gap:24px;padding:0 24px}}'
+    +'#brinc-flo .fl-side{{width:150px;flex-shrink:0;display:flex;align-items:center;justify-content:center}}'
+    +'#brinc-flo .fl-side img{{max-width:140px;max-height:90px;object-fit:contain;opacity:0.92}}'
+    +'#brinc-flo .fl-map{{flex:1;min-width:0;display:flex;align-items:center;justify-content:center}}'
+    +'#brinc-flo .fl-footer{{margin-top:20px;text-align:center;max-width:760px;padding:0 18px}}'
+    +'#brinc-flo .fl-city{{font-size:20px;font-weight:900;letter-spacing:3px;color:#fff}}'
+    +'#brinc-flo .fl-stline{{font-size:10px;letter-spacing:2px;color:rgba(0,210,255,0.7);text-transform:uppercase;margin-top:7px}}'
+    +'#brinc-flo .fl-made{{margin-top:12px;font-size:11px;font-weight:800;letter-spacing:2.6px;color:rgba(255,255,255,0.92);text-transform:uppercase}}'
+    +'#brinc-flo .fl-copy{{margin-top:8px;font-size:11px;line-height:1.55;color:rgba(255,255,255,0.62)}}'
+    +'#brinc-flo .fl-loader{{position:relative;width:280px;height:180px}}'
+    +'#brinc-flo .fl-radar{{position:absolute;inset:18px;border:1px solid rgba(0,210,255,0.22);border-radius:50%}}'
+    +'#brinc-flo .fl-radar::before,#brinc-flo .fl-radar::after{{content:"";position:absolute;border:1px solid rgba(0,210,255,0.18);border-radius:50%}}'
+    +'#brinc-flo .fl-radar::before{{inset:22px}}'
+    +'#brinc-flo .fl-radar::after{{inset:44px}}'
+    +'#brinc-flo .fl-sweep{{position:absolute;left:50%;top:50%;width:120px;height:2px;transform-origin:left center;background:linear-gradient(90deg,rgba(0,210,255,0.95),rgba(0,210,255,0));animation:brinc-upload-spin 2.2s linear infinite}}'
+    +'#brinc-flo .fl-core{{position:absolute;left:50%;top:50%;width:12px;height:12px;margin-left:-6px;margin-top:-6px;border-radius:50%;background:#00D2FF;box-shadow:0 0 20px rgba(0,210,255,0.65)}}'
+    +'#brinc-flo .fl-blip{{position:absolute;width:10px;height:10px;border-radius:50%;background:rgba(0,210,255,0.85);box-shadow:0 0 14px rgba(0,210,255,0.5);animation:brinc-upload-blip 1.8s ease-in-out infinite alternate}}'
+    +'#brinc-flo .fl-blip.b1{{left:58px;top:42px;animation-delay:0.1s}}'
+    +'#brinc-flo .fl-blip.b2{{right:64px;top:58px;animation-delay:0.5s}}'
+    +'#brinc-flo .fl-blip.b3{{left:96px;bottom:38px;animation-delay:0.9s}}'
+    +'#brinc-flo .fl-dots::after{{content:"";animation:brinc-flo-dots 1.4s steps(4,end) infinite}}'
+    +'@keyframes brinc-flo-dots{{0%{{content:""}}25%{{content:"."}}50%{{content:".."}}75%{{content:"..."}}}}'
+    +'@keyframes brinc-upload-spin{{from{{transform:rotate(0deg)}}to{{transform:rotate(360deg)}}}}'
+    +'@keyframes brinc-upload-blip{{from{{transform:scale(0.7);opacity:0.45}}to{{transform:scale(1.15);opacity:1}}}}';
+  (doc.head || doc.body).appendChild(css);
+  var wrap = doc.createElement('div');
+  wrap.id = 'brinc-flo';
+  wrap.innerHTML = '<div class="fl-panels">'
+    + '<div class="fl-side"><img src="data:image/png;base64,{_upload_logo_b64}" alt="BRINC"></div>'
+    + '<div class="fl-map"><div class="fl-loader"><div class="fl-radar"></div><div class="fl-sweep"></div><div class="fl-core"></div><div class="fl-blip b1"></div><div class="fl-blip b2"></div><div class="fl-blip b3"></div></div></div>'
+    + '<div class="fl-side"><img src="data:image/png;base64,{_upload_gigs_b64}" alt="Fleet"></div>'
+    + '</div>'
+    + '<div class="fl-footer">'
+    + '<div class="fl-city">CAD UPLOAD</div>'
+    + '<div class="fl-stline" id="fl-stl">INGESTING INCIDENT DATA<span class="fl-dots"></span></div>'
+    + '<div class="fl-made">MADE IN THE USA</div>'
+    + '<div class="fl-copy">Parsing calls, resolving boundaries, and preparing deployment analysis.</div>'
+    + '</div>';
+  doc.body.appendChild(wrap);
+  var statusEl = wrap.querySelector('#fl-stl');
+  var msgs = ['INGESTING INCIDENT DATA','DETECTING COLUMN TYPES','RESOLVING JURISDICTION','BUILDING STATION GRID','PREPARING ANALYSIS'];
+  var mi = 0;
+  if(parent._brincFloMsgs) parent.clearInterval(parent._brincFloMsgs);
+  parent._brincFloMsgs = parent.setInterval(function(){{
+    mi = (mi + 1) % msgs.length;
+    if(statusEl) statusEl.innerHTML = msgs[mi] + '<span class="fl-dots"></span>';
+  }}, 2400);
+}})();
+</script>
+</body></html>""", height=0, scrolling=False)
 
                 # --- 1. INTELLIGENTLY CHECK FOR .BRINC FILE ---
                 # Browsers sometimes append .json to .brinc files on download

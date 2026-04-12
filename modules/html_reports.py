@@ -1233,9 +1233,14 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         # Simple card financial blocks
         _sim_fin_hero = (
             f'<!-- Annual Value hero -->'
-            f'<div style="background:rgba(0,210,255,0.07);border:1px solid rgba(0,210,255,0.25);border-radius:6px;padding:7px 10px;text-align:center;margin-bottom:6px;">'
-            f'<div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:1px;">Annual Value<span class="tip" data-tip="Best-case annual savings from calls this drone resolves without sending a ground unit. Includes both exclusive and concurrent zone coverage.">?</span></div>'
+            f'<div style="background:rgba(0,210,255,0.07);border:1px solid rgba(0,210,255,0.25);border-radius:6px;padding:7px 10px;margin-bottom:6px;">'
+            f'<div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:3px;text-align:center;">Annual Value<span class="tip" data-tip="Best-case annual savings from calls this drone resolves without sending a ground unit. Includes both exclusive and concurrent zone coverage.">?</span></div>'
+            f'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">'
+            f'<div style="flex:1;min-width:0;text-align:center;">'
             f'<div style="font-size:1.6rem;font-weight:900;color:{accent_color};line-height:1.1;">${d_best:,.0f}</div>'
+            f'</div>'
+            f'<div style="flex-shrink:0;min-width:118px;">{patrol_time_line}</div>'
+            f'</div>'
             f'</div>'
         ) if show_financials else ''
 

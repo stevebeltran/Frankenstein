@@ -1191,10 +1191,13 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         else:
             scene_color = "#2ecc71"
 
+        _display_flights_day = d_assigned_flights_day if d_assigned_flights_day > 0 else d_zone_flights_day
+        _display_flights_annual = d_assigned_flights_annual if d_assigned_flights_day > 0 else d_zone_flights_annual
+        _display_flights_label = "assigned flights/day" if d_assigned_flights_day > 0 else "zone flights/day"
         patrol_time_line = ""
-        if d_assigned_flights_day > 0:
+        if _display_flights_day > 0:
             max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
-            raw_mins_per_flight = max_patrol_mins / max(d_assigned_flights_day, 0.001)
+            raw_mins_per_flight = max_patrol_mins / max(_display_flights_day, 0.001)
             mins_per_flight = min(raw_mins_per_flight, max_single_flight)
             capped = raw_mins_per_flight > max_single_flight
             if d_capacity_limited:
@@ -1204,8 +1207,8 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
                 mins_label = "10.0 min minimum on-scene"
             else:
                 patrol_color = "#F0B429" if mins_per_flight < 15 else "#2ecc71" if mins_per_flight >= max_single_flight * 0.9 else "#00D2FF"
-                flights_label = f"{d_assigned_flights_day:.1f} assigned flights/day"
-                annual_label = f"({d_assigned_flights_annual:,.0f}/yr)"
+                flights_label = f"{_display_flights_day:.1f} {_display_flights_label}"
+                annual_label = f"({_display_flights_annual:,.0f}/yr)"
                 cap_note = f" (max {max_single_flight}min)" if capped else ""
                 mins_label = f"{mins_per_flight:.1f} min/flight{cap_note}"
             patrol_time_line = (

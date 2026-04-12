@@ -789,6 +789,12 @@ def manage_custom_stations(
             resp.append(prefixed_label)
         return guard, resp
 
+    def increment_fleet_count(lock_role):
+        if lock_role == 'Guardian':
+            session_state['k_guard'] = int(session_state.get('k_guard', 0) or 0) + 1
+        else:
+            session_state['k_resp'] = int(session_state.get('k_resp', 0) or 0) + 1
+
     def set_station_locks(new_guard_names, new_resp_names, ensure_capacity=True):
         valid_lock_names = set(station_names)
         custom_existing = session_state.get('custom_stations', pd.DataFrame())
@@ -932,6 +938,7 @@ def manage_custom_stations(
                 new_pin_row = pd.DataFrame([{'name': label, 'lat': pending_pin['lat'], 'lon': pending_pin['lon'], 'type': pp_type, 'lock_role': pp_lock_role, 'address': nearest_addr, 'custom': True}])
                 custom_stations = session_state.get('custom_stations', pd.DataFrame())
                 session_state['custom_stations'] = pd.concat([custom_stations, new_pin_row], ignore_index=True) if not custom_stations.empty else new_pin_row
+                increment_fleet_count(pp_lock_role)
                 new_g, new_r = build_lock_lists(prefixed_label, pp_lock_role)
                 set_station_locks(new_g, new_r, ensure_capacity=True)
                 session_state['pin_drop_used'] = True
@@ -994,6 +1001,7 @@ def manage_custom_stations(
                         custom_stations = session_state.get('custom_stations', pd.DataFrame())
                         session_state['custom_stations'] = pd.concat([custom_stations, new_row], ignore_index=True) if not custom_stations.empty else new_row
                         custom_lock_role = 'Guardian' if custom_role == 'Lock as Guardian' else 'Responder'
+                        increment_fleet_count(custom_lock_role)
                         new_g, new_r = build_lock_lists(prefixed_label, custom_lock_role)
                         set_station_locks(new_g, new_r, ensure_capacity=True)
                         st.success(f'Added and locked: **{label}** ({geo_lat:.4f}, {geo_lon:.4f})\nPinned as {custom_lock_role}.')

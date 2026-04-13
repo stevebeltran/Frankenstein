@@ -5,6 +5,7 @@ Email and Google Sheets notification system for BRINC app.
 import datetime
 import json
 import smtplib
+from pathlib import Path
 import streamlit as st
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -20,6 +21,7 @@ from modules.versioning import (
 
 
 EXPORT_HEADERS = [
+    "Source App",
     "Timestamp",
     "Session ID",
     "Session Start",
@@ -160,7 +162,12 @@ def _build_sheets_row(city, state, event_type, k_resp, k_guard, coverage, name, 
     except Exception:
         dur = ''
     fm = d.get('file_meta', {})
+    try:
+        source_app = st.secrets.get("SOURCE_APP", "") or Path(__file__).resolve().parent.parent.name
+    except Exception:
+        source_app = ""
     return [
+        source_app,
         now,
         d.get('session_id', ''),
         session_start,

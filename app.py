@@ -203,11 +203,21 @@ def _render_public_report_route():
     except Exception:
         pass
 
-    st.set_page_config(layout="wide", page_title="BRINC Public Report")
-    st.markdown(
-        "<style>section[data-testid='stSidebar'], header, footer, #MainMenu { display:none !important; }</style>",
-        unsafe_allow_html=True,
-    )
+    st.set_page_config(layout="wide", page_title="BRINC DFR")
+    st.markdown("""
+        <style>
+            header, footer, #MainMenu,
+            [data-testid="stToolbar"],
+            [data-testid="stDecoration"],
+            [data-testid="stStatusWidget"],
+            [data-testid="stSidebar"],
+            .stDeployButton,
+            #stDecoration,
+            iframe[title="streamlit_analytics"] { display: none !important; }
+            .main .block-container { padding: 0 !important; max-width: 100% !important; }
+            .stApp { background: #07101c !important; }
+        </style>
+    """, unsafe_allow_html=True)
     components.html(_html_path.read_text(encoding="utf-8"), height=9000, scrolling=True)
     st.stop()
 
@@ -5075,7 +5085,9 @@ body{{background:transparent;overflow:hidden}}
                 "m_calls": _calls_str,
             })
             _fallback_qr_url = f"{_qr_base}/?view=mobile&{_qr_params}"
-            _qr_url = st.session_state.get("public_report_url", "") or _fallback_qr_url
+            _tracked_report_id = str(st.session_state.get("public_report_id", "")).strip()
+            _tracked_qr_url = _build_public_report_url(_tracked_report_id) if _tracked_report_id else ""
+            _qr_url = _tracked_qr_url or st.session_state.get("public_report_url", "") or _fallback_qr_url
 
             # ── QR code image — high readability with BRINC logo overlay ──────────
             # Use highest error correction (H) for better phone scanning reliability

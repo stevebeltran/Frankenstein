@@ -51,6 +51,23 @@ SESSION_HEADERS = [
     "Sim or Upload",
 ]
 
+PUBLIC_REPORT_HEADERS = [
+    "Report ID",
+    "Updated At",
+    "Source App",
+    "Department",
+    "City",
+    "State",
+    "Rep Name",
+    "Rep Email",
+    "Fleet CapEx",
+    "Annual Savings",
+    "Call Coverage",
+    "Fleet Summary",
+    "Stations JSON",
+    "Public HTML",
+]
+
 
 def _sheet_col_label(index):
     """Convert a 1-based column index to an A1-style column label."""
@@ -414,5 +431,70 @@ def _log_qr_scan_to_sheets(report_id, city, state, rep_name, rep_email,
             city, state, rep_name, rep_email,
             device, language, ip, user_agent,
         ])
+    except:
+        pass
+
+
+def _publish_public_report_to_sheets(report_id, department, city, state, rep_name, rep_email,
+                                     fleet_capex, annual_savings, call_coverage,
+                                     fleet_summary, stations_json, public_html):
+    """Upsert one public-facing report row into a dedicated public spreadsheet."""
+    try:
+        sheet_id = st.secrets.get("PUBLIC_REPORTS_SHEET_ID", "")
+        creds_dict = st.secrets.get("gcp_service_account", {})
+        if not sheet_id or not creds_dict:
+            return
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_info(dict(creds_dict), scopes=scopes)
+        client = gspread.authorize(creds)
+        spreadsheet = client.open_by_key(sheet_id)
+        worksheet_name = str(st.secrets.get("PUBLIC_REPORTS_WORKSHEET", "Public Reports") or "Public Reports")
+
+        try:
+            sheet = spreadsheet.worksheet(worksheet_name)
+        except gspread.exceptions.WorksheetNotFound:
+            sheet = spreadsheet.add_worksheet(title=worksheet_name, rows=1000, cols=max(20, len(PUBLIC_REPORT_HEADERS)))
+            sheet.append_row(PUBLIC_REPORT_HEADERS)
+
+        first_row = sheet.row_values(1)
+        if [str(v).strip() for v in first_row] != PUBLIC_REPORT_HEADERS:
+            end_col = _sheet_col_label(len(PUBLIC_REPORT_HEADERS))
+            sheet.update(f"A1:{end_col}1", [PUBLIC_REPORT_HEADERS])
+
+        try:
+            source_app = st.secrets.get("SOURCE_APP", "") or Path(__file__).resolve().parent.parent.name
+        except Exception:
+            source_app = ""
+
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        row = [
+            report_id,
+            timestamp,
+            source_app,
+            department,
+            city,
+            state,
+            rep_name,
+            rep_email,
+            fleet_capex,
+            annual_savings,
+            call_coverage,
+            fleet_summary,
+            stations_json,
+            public_html,
+        ]
+
+        values = sheet.get_all_values()
+        row_idx = None
+        for i, existing in enumerate(values[1:], start=2):
+            if existing and existing[0] == report_id:
+                row_idx = i
+                break
+
+        end_col = _sheet_col_label(len(PUBLIC_REPORT_HEADERS))
+        if row_idx is None:
+            sheet.append_row(row)
+        else:
+            sheet.update(f"A{row_idx}:{end_col}{row_idx}", [row])
     except:
         pass

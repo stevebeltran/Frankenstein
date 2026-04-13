@@ -5356,51 +5356,31 @@ body{{background:transparent;overflow:hidden}}
             # Build as a variable (no leading indentation) to avoid Markdown treating
             # 4+ leading spaces as a code block, which renders HTML as raw text.
             _qr_banner = (
+                '<div style="display:flex;justify-content:center;margin-top:12px;">'
                 '<div style="background:linear-gradient(135deg,#0a1220 0%,#0d1630 50%,#080d18 100%);'
-                'border:2px solid #00D2FF;border-radius:18px;padding:24px;margin-top:12px;overflow:hidden;max-width:920px;">'
+                'border:2px solid #00D2FF;border-radius:18px;padding:28px;overflow:hidden;max-width:1120px;width:100%;text-align:center;">'
 
                 # Header with department name and info
-                '<div style="margin-bottom:18px;">'
-                '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;">'
+                f'<div style="font-size:2rem;font-weight:900;color:#ffffff;line-height:1.12;margin-bottom:6px;">{_qr_dept}</div>'
+                f'<div style="font-size:0.95rem;color:#00D2FF;font-weight:700;letter-spacing:0.4px;margin-bottom:4px;">DFR Deployment Proposal</div>'
+                f'<div style="font-size:0.82rem;color:#889aaa;margin-bottom:20px;">{_qr_city}, {_qr_state}</div>'
 
-                # Left side: Department info
-                '<div style="flex:1;min-width:260px;">'
-                f'<div style="font-size:1.8rem;font-weight:900;color:#ffffff;line-height:1.15;margin-bottom:6px;">{_qr_dept}</div>'
-                f'<div style="font-size:0.9rem;color:#00D2FF;font-weight:700;letter-spacing:0.4px;margin-bottom:3px;">DFR Deployment Proposal</div>'
-                f'<div style="font-size:0.8rem;color:#889aaa;">{_qr_city}, {_qr_state}</div>'
-                '</div>'
-
-                # Right side: BRINC contact
-                '<div style="flex:0 0 auto;text-align:right;">'
-                '<div style="font-size:0.72rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.2px;font-weight:700;margin-bottom:6px;">BRINC Drones</div>'
-                '<div style="font-size:0.82rem;color:#aabbcc;">'
-                '<div><a href="https://brincdrones.com" target="_blank" style="color:#00D2FF;text-decoration:none;font-weight:600;">brincdrones.com</a></div>'
-                '<div><a href="mailto:info@brincdrones.com" style="color:#00D2FF;text-decoration:none;">info@brincdrones.com</a></div>'
-                '</div>'
-                '</div>'
-
-                '</div>'  # end flex row
-                '</div>'  # end header
-
-                # QR code section — large and centered with white background for readability
-                '<div style="display:flex;flex-direction:column;align-items:center;gap:10px;margin:16px 0 18px;">'
-                f'<div style="background:#ffffff;border-radius:16px;padding:14px;display:inline-block;box-shadow:0 10px 24px rgba(0,210,255,0.2);">'
-                f'<img src="data:image/png;base64,{_qr_b64}" style="width:300px;height:300px;display:block;border-radius:12px;" alt="BRINC Mobile Summary QR"/>'
-                '</div>'
-                '<div style="text-align:center;">'
-                '<div style="font-size:0.98rem;font-weight:800;color:#00D2FF;letter-spacing:0.2px;margin-bottom:4px;">Scan with any smartphone</div>'
-                '<div style="font-size:0.76rem;color:#889aaa;">No login required</div>'
+                # QR code section — centered and much larger for distance scanning
+                '<div style="display:flex;justify-content:center;align-items:center;margin:8px 0 22px;">'
+                f'<div style="background:#ffffff;border-radius:22px;padding:22px;display:inline-block;box-shadow:0 14px 36px rgba(0,210,255,0.24);">'
+                f'<img src="data:image/png;base64,{_qr_b64}" style="width:min(78vw,560px);height:min(78vw,560px);min-width:420px;min-height:420px;display:block;border-radius:16px;" alt="BRINC Mobile Summary QR"/>'
                 '</div>'
                 '</div>'
 
                 # Footer: Rep info
-                '<div style="border-top:1px solid rgba(0,210,255,0.15);padding-top:14px;">'
+                '<div style="border-top:1px solid rgba(0,210,255,0.15);padding-top:16px;">'
                 '<div style="font-size:0.68rem;color:#00D2FF;text-transform:uppercase;letter-spacing:1.3px;font-weight:700;margin-bottom:5px;">Your BRINC Representative</div>'
                 f'<div style="font-size:1.02rem;font-weight:800;color:#ffffff;margin-bottom:3px;">{_qr_name}</div>'
                 f'<div style="font-size:0.82rem;color:#00D2FF;"><a href="mailto:{_qr_email}" style="color:#00D2FF;text-decoration:none;">{_qr_email}</a></div>'
                 '</div>'
 
-                '</div>'  # end banner
+                '</div>'
+                '</div>'
             )
             st.markdown(_qr_banner, unsafe_allow_html=True)
         except Exception as _qr_err:

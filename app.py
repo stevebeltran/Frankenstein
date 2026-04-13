@@ -5226,75 +5226,88 @@ body{{background:transparent;overflow:hidden}}
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>BRINC DFR — {_qr_city}, {_qr_state}</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>
+    :root{{
+      --bg:#07101c;
+      --panel:#0c1828;
+      --panel-2:#0f2136;
+      --line:rgba(255,255,255,.08);
+      --text:#e8f2ff;
+      --muted:#87a1ba;
+      --cyan:#00D2FF;
+      --green:#00ff88;
+      --gold:#FFD700;
+      --violet:#a78bfa;
+    }}
     *{{box-sizing:border-box;margin:0;padding:0}}
-    body{{font-family:'Inter',sans-serif;background:#07101c;color:#e8f2ff;min-height:100vh}}
-    .page{{max-width:920px;margin:0 auto;padding:12px}}
-    .hdr{{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:linear-gradient(120deg,#0b1a2e 0%,#0d2240 60%,#091522 100%);border:1px solid rgba(0,210,255,0.24);border-radius:14px;padding:12px 16px;margin-bottom:10px}}
-    .hdr-left .eyebrow{{color:#00D2FF;font-size:10px;letter-spacing:.16em;text-transform:uppercase;font-weight:700;margin-bottom:3px}}
-    .hdr-left .dept{{font-size:clamp(17px,2.5vw,24px);font-weight:800;line-height:1.1}}
-    .hdr-left .loc{{color:#7a9ab5;font-size:12px;margin-top:2px}}
-    .hdr-right{{display:flex;gap:6px;align-items:center;flex-wrap:wrap}}
-    .social{{font-size:11px;font-weight:700;border-radius:999px;padding:4px 9px;text-decoration:none;white-space:nowrap}}
-    .metrics{{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}}
-    .metric{{border-radius:12px;padding:9px 12px;border:1px solid}}
-    .metric .k{{font-size:10px;text-transform:uppercase;letter-spacing:.12em;font-weight:700;margin-bottom:3px;opacity:.75}}
-    .metric .v{{font-size:clamp(16px,2.2vw,21px);font-weight:800}}
-    .m-capex{{background:rgba(0,255,136,.07);border-color:rgba(0,255,136,.3)}}
-    .m-capex .k{{color:#00ff88}}.m-capex .v{{color:#00ff88}}
-    .m-save{{background:rgba(255,215,0,.07);border-color:rgba(255,215,0,.3)}}
-    .m-save .k{{color:#FFD700}}.m-save .v{{color:#FFD700}}
-    .m-cov{{background:rgba(0,210,255,.07);border-color:rgba(0,210,255,.3)}}
-    .m-cov .k{{color:#00D2FF}}.m-cov .v{{color:#00D2FF}}
-    .m-fleet{{background:rgba(168,139,250,.07);border-color:rgba(168,139,250,.3)}}
-    .m-fleet .k{{color:#a78bfa}}.m-fleet .v{{color:#a78bfa}}
-    .card{{background:#0c1828;border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:12px;overflow:hidden;max-width:520px}}
-    .card-title{{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:#00D2FF;margin-bottom:8px}}
+    body{{font-family:'Inter',sans-serif;background:radial-gradient(circle at top,#12253d 0%,#07101c 48%,#040914 100%);color:var(--text);min-height:100vh}}
+    .page{{max-width:560px;margin:0 auto;padding:14px}}
+    .hero{{background:linear-gradient(160deg,#0d2137 0%,#0a1626 100%);border:1px solid rgba(0,210,255,.22);border-radius:18px;padding:16px 16px 14px;margin-bottom:12px;box-shadow:0 14px 34px rgba(0,0,0,.28)}}
+    .eyebrow{{color:var(--cyan);font-size:10px;letter-spacing:.18em;text-transform:uppercase;font-weight:800;margin-bottom:6px}}
+    .dept{{font-size:clamp(24px,7vw,34px);font-weight:800;line-height:1.05}}
+    .loc{{color:var(--muted);font-size:13px;margin-top:6px}}
+    .site{{display:inline-flex;align-items:center;justify-content:center;margin-top:12px;padding:7px 10px;border-radius:999px;border:1px solid rgba(0,210,255,.28);background:rgba(0,210,255,.08);color:var(--cyan);text-decoration:none;font-size:12px;font-weight:700}}
+    .metrics{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:12px}}
+    .metric{{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:11px 12px;min-width:0}}
+    .metric .k{{font-size:10px;text-transform:uppercase;letter-spacing:.12em;font-weight:700;margin-bottom:4px;opacity:.82}}
+    .metric .v{{font-size:clamp(16px,5vw,22px);font-weight:800;line-height:1.1;word-break:break-word}}
+    .m-capex .k,.m-capex .v{{color:var(--green)}}
+    .m-save .k,.m-save .v{{color:var(--gold)}}
+    .m-cov .k,.m-cov .v{{color:var(--cyan)}}
+    .m-fleet .k,.m-fleet .v{{color:var(--violet)}}
+    .section{{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px}}
+    .section + .section{{margin-top:10px}}
+    .section-title{{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.14em;color:var(--cyan);margin-bottom:10px}}
     .list{{display:flex;flex-direction:column;gap:0}}
-    .row{{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06)}}
+    .row{{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.06)}}
     .row:last-child{{border-bottom:none;padding-bottom:0}}
-    .sname{{font-weight:700;font-size:13px}}
-    .ssub{{color:#6a8aa5;font-size:11px;margin-top:1px}}
-    .badge{{border-radius:999px;padding:3px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}}
-    .guard{{background:rgba(255,215,0,.15);color:#FFD700;border:1px solid rgba(255,215,0,.35)}}
-    .resp{{background:rgba(0,210,255,.13);color:#00D2FF;border:1px solid rgba(0,210,255,.32)}}
-    .contact{{margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.08)}}
-    .contact .label{{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:#00D2FF;font-weight:700;margin-bottom:4px}}
-    .contact .name{{font-size:15px;font-weight:800;margin-bottom:2px}}
-    .contact a{{color:#00D2FF;text-decoration:none;font-size:13px}}
-    @media(max-width:720px){{.metrics{{grid-template-columns:repeat(2,1fr)}}.card{{max-width:100%}}}}
+    .sname{{font-weight:700;font-size:14px;line-height:1.2}}
+    .ssub{{color:var(--muted);font-size:11px;margin-top:3px}}
+    .badge{{flex:0 0 auto;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}}
+    .guard{{background:rgba(255,215,0,.14);color:var(--gold);border:1px solid rgba(255,215,0,.30)}}
+    .resp{{background:rgba(0,210,255,.13);color:var(--cyan);border:1px solid rgba(0,210,255,.28)}}
+    .contact-label{{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--cyan);font-weight:800;margin-bottom:6px}}
+    .contact-name{{font-size:18px;font-weight:800;line-height:1.1;margin-bottom:4px}}
+    .contact a{{color:var(--cyan);text-decoration:none;font-size:14px;word-break:break-word}}
+    @media(max-width:420px){{
+      .page{{padding:10px}}
+      .hero{{padding:14px 14px 12px}}
+      .metrics{{gap:7px}}
+      .metric{{padding:10px}}
+      .metric .v{{font-size:15px}}
+      .row{{flex-direction:column;align-items:flex-start}}
+    }}
   </style>
 </head>
 <body>
 <div class="page">
-  <div class="hdr">
-    <div class="hdr-left">
-      <div class="eyebrow">BRINC DFR Deployment Proposal</div>
-      <div class="dept">{_qr_dept}</div>
-      <div class="loc">{_qr_city}, {_qr_state}</div>
-    </div>
-    <div class="hdr-right">
-      <a class="social" href="https://brincdrones.com" target="_blank" style="color:#00D2FF;background:rgba(0,210,255,.1);border:1px solid rgba(0,210,255,.35)">brincdrones.com</a>
-    </div>
-  </div>
-  <div class="metrics">
+  <section class="hero">
+    <div class="eyebrow">BRINC DFR Deployment Proposal</div>
+    <div class="dept">{_qr_dept}</div>
+    <div class="loc">{_qr_city}, {_qr_state}</div>
+    <a class="site" href="https://brincdrones.com" target="_blank">brincdrones.com</a>
+  </section>
+
+  <section class="metrics">
     <div class="metric m-capex"><div class="k">Fleet CapEx</div><div class="v">${fleet_capex:,.0f}</div></div>
     <div class="metric m-save"><div class="k">Annual Savings</div><div class="v">${annual_savings:,.0f}</div></div>
     <div class="metric m-cov"><div class="k">Call Coverage</div><div class="v">{calls_covered_perc:.1f}%</div></div>
     <div class="metric m-fleet"><div class="k">Fleet</div><div class="v">{actual_k_responder}R / {actual_k_guardian}G</div></div>
-  </div>
-  <div class="card">
-    <div class="card-title">Stations</div>
+  </section>
+
+  <section class="section">
+    <div class="section-title">Stations</div>
     <div class="list">{_station_rows_html}</div>
-    <div class="contact">
-      <div class="label">BRINC Representative</div>
-      <div class="name">{_qr_name}</div>
-      <a href="mailto:{_qr_email}">{_qr_email}</a>
-    </div>
-  </div>
+  </section>
+
+  <section class="section">
+    <div class="contact-label">BRINC Representative</div>
+    <div class="contact-name">{_qr_name}</div>
+    <a href="mailto:{_qr_email}">{_qr_email}</a>
+  </section>
 </div>
 </body>
 </html>"""

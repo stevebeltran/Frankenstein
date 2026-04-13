@@ -211,8 +211,14 @@ def _render_public_report_route():
             [data-testid="stDecoration"],
             [data-testid="stStatusWidget"],
             [data-testid="stSidebar"],
+            [data-testid="stGithubButton"],
+            [data-testid="stActionButton"],
+            [data-testid="stBaseButton-header"],
             .stDeployButton,
             #stDecoration,
+            a[href*="github.com"],
+            [aria-label*="GitHub"],
+            [aria-label*="github"],
             iframe[title="streamlit_analytics"] { display: none !important; }
             .main .block-container { padding: 0 !important; max-width: 100% !important; }
             .stApp { background: #07101c !important; }

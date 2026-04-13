@@ -214,15 +214,73 @@ def _render_public_report_route():
             [data-testid="stGithubButton"],
             [data-testid="stActionButton"],
             [data-testid="stBaseButton-header"],
+            [data-testid*="github"],
+            [data-testid*="Github"],
             .stDeployButton,
+            .viewerBadge_container__,
+            .viewerBadge_link__,
+            .viewerBadge_text__,
             #stDecoration,
             a[href*="github.com"],
+            a[href*="streamlit.io"],
             [aria-label*="GitHub"],
             [aria-label*="github"],
+            [title*="GitHub"],
+            [title*="github"],
             iframe[title="streamlit_analytics"] { display: none !important; }
             .main .block-container { padding: 0 !important; max-width: 100% !important; }
             .stApp { background: #07101c !important; }
         </style>
+        <script>
+            (function () {
+                const selectors = [
+                    'header',
+                    'footer',
+                    '#MainMenu',
+                    '[data-testid="stToolbar"]',
+                    '[data-testid="stDecoration"]',
+                    '[data-testid="stStatusWidget"]',
+                    '[data-testid="stSidebar"]',
+                    '[data-testid="stGithubButton"]',
+                    '[data-testid="stActionButton"]',
+                    '[data-testid="stBaseButton-header"]',
+                    '[data-testid*="github"]',
+                    '[data-testid*="Github"]',
+                    '.stDeployButton',
+                    '.viewerBadge_container__',
+                    '.viewerBadge_link__',
+                    '.viewerBadge_text__',
+                    'a[href*="github.com"]',
+                    'a[href*="streamlit.io"]',
+                    '[aria-label*="GitHub"]',
+                    '[aria-label*="github"]',
+                    '[title*="GitHub"]',
+                    '[title*="github"]'
+                ];
+
+                function stripChrome(root) {
+                    selectors.forEach(function (selector) {
+                        root.querySelectorAll(selector).forEach(function (node) {
+                            node.remove();
+                        });
+                    });
+                }
+
+                function run() {
+                    stripChrome(document);
+                    if (window.parent && window.parent !== window) {
+                        try {
+                            stripChrome(window.parent.document);
+                        } catch (e) {}
+                    }
+                }
+
+                run();
+                new MutationObserver(run).observe(document.documentElement, { childList: true, subtree: true });
+                window.addEventListener('load', run);
+                setInterval(run, 1000);
+            })();
+        </script>
     """, unsafe_allow_html=True)
     components.html(_html_path.read_text(encoding="utf-8"), height=9000, scrolling=True)
     st.stop()

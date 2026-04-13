@@ -164,12 +164,41 @@ def _render_public_report_route():
         if _meta_path.exists():
             import json as _json
             _scan_meta = _json.loads(_meta_path.read_text(encoding="utf-8"))
+
+        # Harvest device/network info from HTTP headers
+        try:
+            _headers = dict(st.context.headers)
+        except Exception:
+            _headers = {}
+        _ua        = _headers.get("User-Agent", _headers.get("user-agent", ""))
+        _lang      = _headers.get("Accept-Language", _headers.get("accept-language", ""))
+        _ip        = (_headers.get("X-Forwarded-For", "") or
+                      _headers.get("x-forwarded-for", "") or
+                      _headers.get("Remote-Addr", "")).split(",")[0].strip()
+
+        # Parse device type from User-Agent
+        _ua_lower = _ua.lower()
+        if "iphone" in _ua_lower or "ipad" in _ua_lower:
+            _device = "iOS"
+        elif "android" in _ua_lower:
+            _device = "Android"
+        elif "mobile" in _ua_lower:
+            _device = "Mobile"
+        elif _ua:
+            _device = "Desktop"
+        else:
+            _device = ""
+
         _log_qr_scan_to_sheets(
             report_id=_report_id,
             city=_scan_meta.get("city", ""),
             state=_scan_meta.get("state", ""),
             rep_name=_scan_meta.get("rep_name", ""),
             rep_email=_scan_meta.get("rep_email", ""),
+            device=_device,
+            user_agent=_ua,
+            language=_lang,
+            ip=_ip,
         )
     except Exception:
         pass

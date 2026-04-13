@@ -683,7 +683,7 @@ def aggressive_parse_calls(uploaded_files):
             for _cand in _agency_candidates:
                 try:
                     _vals = raw_df[_cand].astype(str).str.strip().str.lower()
-                    if _vals.str.contains(r'\b(fire|police|ems|sheriff)\b', regex=True, na=False).any():
+                    if _vals.str.contains(r'\b(?:fire|police|ems|sheriff)\b', regex=True, na=False).any():
                         _agency_col = _cand
                         break
                 except Exception:

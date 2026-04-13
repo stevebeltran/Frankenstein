@@ -156,6 +156,24 @@ def _render_public_report_route():
         st.warning("This public report is not available yet.")
         st.stop()
 
+    # ── Log QR scan to Google Sheets ─────────────────────────────────────────
+    try:
+        from modules.notifications import _log_qr_scan_to_sheets
+        _meta_path = PUBLIC_REPORTS_DIR / f"{_report_id}.json"
+        _scan_meta = {}
+        if _meta_path.exists():
+            import json as _json
+            _scan_meta = _json.loads(_meta_path.read_text(encoding="utf-8"))
+        _log_qr_scan_to_sheets(
+            report_id=_report_id,
+            city=_scan_meta.get("city", ""),
+            state=_scan_meta.get("state", ""),
+            rep_name=_scan_meta.get("rep_name", ""),
+            rep_email=_scan_meta.get("rep_email", ""),
+        )
+    except Exception:
+        pass
+
     st.set_page_config(layout="wide", page_title="BRINC Public Report")
     st.markdown(
         "<style>section[data-testid='stSidebar'], header, footer, #MainMenu { display:none !important; }</style>",
@@ -5182,6 +5200,8 @@ body{{background:transparent;overflow:hidden}}
                     "report_id": st.session_state.get('public_report_id', ''),
                     "city": _qr_city,
                     "state": _qr_state,
+                    "rep_name": _qr_name,
+                    "rep_email": _qr_email,
                     "updated_at": datetime.datetime.now().isoformat(),
                     "public_url": st.session_state.get('public_report_url', ''),
                     "kind": "qr_summary",

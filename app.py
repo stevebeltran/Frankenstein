@@ -3302,6 +3302,12 @@ body{{background:transparent;overflow:hidden}}
   var pDrones = addSvgEl('g', {{id:'fl-drones'}}, mapSvg);
   var startX = vx + vw * 0.12;
   var startY = vy + vh * 0.28;
+  var launchState = statePaths.find(function(path){{ return path.id === 'US-WA'; }}) || null;
+  if(launchState) {{
+    var launchBox = launchState.getBBox();
+    startX = launchBox.x + launchBox.width * 0.30;
+    startY = launchBox.y + launchBox.height * 0.36;
+  }}
   var tx = vx + vw * 0.68;
   var ty = vy + vh * 0.48;
   if(targetState) {{
@@ -4826,23 +4832,27 @@ body{{background:transparent;overflow:hidden}}
                 _r_drones = [d for d in active_drones if d['type'] == 'RESPONDER']
 
                 def _fleet_ring_slices(drones, fleet_label):
-                    """Ring slices sized as station_calls/total_calls so each slice's
-                    visual proportion equals its share of the total area call load."""
+                    """Ring slices sized as marginal_assigned_calls/total_calls.
+                    This preserves percent-of-total semantics without overlap double-counting."""
                     labels, values, colors, hovers, texts = [], [], [], [], []
-                    _sum_raw = 0
+                    _sum_assigned = 0
                     for d in drones:
-                        raw = int(np.sum(d['cov_array']))  # calls from dataset inside this station's radius
-                        pct = raw / total_calls * 100 if total_calls > 0 else 0.0
+                        assigned = int(len(d.get('assigned_indices', [])))
+                        pct = assigned / total_calls * 100 if total_calls > 0 else 0.0
                         name = d['name'].split(',')[0][:18]
                         labels.append(name)
-                        values.append(max(raw, 1))
+                        values.append(max(assigned, 1))
                         colors.append(d['color'])
                         texts.append(f'{pct:.1f}%')
-                        _label = f'{raw:,} calls in radius ({pct:.1f}% of {total_calls:,} total)' if raw > 0 else '0 calls in radius'
+                        _label = (
+                            f'{assigned:,} marginal assigned calls ({pct:.1f}% of {total_calls:,} total)'
+                            if assigned > 0 else
+                            '0 marginal assigned calls'
+                        )
                         hovers.append(f'<b>{name}</b> [{fleet_label}]<br>{_label}<extra></extra>')
-                        _sum_raw += raw
-                    # Uncovered = remainder so ring sums to total_calls → each slice = raw/total_calls
-                    _uncov = max(0, total_calls - _sum_raw)
+                        _sum_assigned += assigned
+                    # Uncovered = remainder so ring sums to total_calls → each slice = assigned/total_calls
+                    _uncov = max(0, total_calls - _sum_assigned)
                     if _uncov > 0:
                         _uncov_pct = _uncov / total_calls * 100 if total_calls > 0 else 0.0
                         labels.append(f'Uncovered ({fleet_label})')

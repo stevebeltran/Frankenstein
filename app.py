@@ -5618,8 +5618,8 @@ body{{background:transparent;overflow:hidden}}
             _fallback_qr_url = f"{_qr_base}/?view=mobile&{_qr_params}"
             _tracked_report_id = str(st.session_state.get("public_report_id", "")).strip()
             _stored_public_url = str(st.session_state.get("public_report_url", "")).strip()
-            _tracked_qr_url = _build_public_report_url(_tracked_report_id) if (_tracked_report_id and not _stored_public_url) else ""
-            _qr_url = _stored_public_url or _tracked_qr_url or _fallback_qr_url
+            _tracked_qr_url = _build_public_report_url(_tracked_report_id) if _tracked_report_id else ""
+            _qr_url = _tracked_qr_url or _stored_public_url or _fallback_qr_url
 
             # ── QR code image — high readability with BRINC logo overlay ──────────
             # Use highest error correction (H) for better phone scanning reliability

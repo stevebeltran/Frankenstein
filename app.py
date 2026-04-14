@@ -5711,13 +5711,11 @@ body{{background:transparent;overflow:hidden}}
                 f"<tr>"
                 f"<td>{idx + 1}</td>"
                 f"<td>{_h(d.get('name', 'Unnamed Station'))}</td>"
-                f"<td>{_h(d.get('type', ''))}</td>"
                 f"<td>{_rank_station_role(d.get('type', ''))}</td>"
                 f"<td>{float(d.get('avg_time_min', 0) or 0):.1f} min</td>"
-                f"<td>{_coverage_band(idx, len(active_drones[:8]))}</td>"
                 f"</tr>"
-                for idx, d in enumerate(active_drones[:8])
-            ) or "<tr><td colspan='6'>No active stations available for this scenario.</td></tr>"
+                for idx, d in enumerate(active_drones[:6])
+            ) or "<tr><td colspan='4'>No active stations available for this scenario.</td></tr>"
 
             _why_sites_html = "".join([
                 "<li>Selected from jurisdiction-specific call density and travel geometry</li>",
@@ -5825,8 +5823,8 @@ body{{background:transparent;overflow:hidden}}
     .headline{{font-size:clamp(34px,10vw,58px);font-weight:900;line-height:.96;letter-spacing:-.04em;max-width:12ch}}
     .hero-copy{{font-size:17px;color:var(--muted);line-height:1.55;max-width:38rem;margin-top:12px}}
     .hero-meta{{color:var(--cyan);font-size:15px;font-weight:700;margin-top:14px}}
-    .cta-row{{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}}
-    .cta{{display:inline-flex;align-items:center;justify-content:center;padding:13px 18px;border-radius:999px;text-decoration:none;font-size:15px;font-weight:800}}
+    .cta-row{{display:flex;gap:10px;margin-top:18px}}
+    .cta{{display:inline-flex;align-items:center;justify-content:center;flex:1 1 0;min-width:0;min-height:58px;padding:13px 16px;border-radius:16px;text-decoration:none;font-size:16px;font-weight:800;text-align:center}}
     .cta-primary{{background:var(--cta);color:var(--ink)}}
     .cta-secondary{{border:1px solid rgba(110,231,255,.22);background:rgba(110,231,255,.09);color:var(--cyan)}}
     .metrics{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px}}
@@ -5842,37 +5840,31 @@ body{{background:transparent;overflow:hidden}}
     .section{{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:18px 16px;box-shadow:0 10px 20px rgba(0,0,0,.14)}}
     .section + .section{{margin-top:12px}}
     .section-kicker{{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.13em;color:var(--cyan);margin-bottom:10px}}
-    .section-title{{font-size:28px;font-weight:900;line-height:1.02;letter-spacing:-.03em;margin-bottom:10px}}
-    .section-text{{font-size:16px;line-height:1.65;color:var(--muted)}}
-    .map-shell{{display:flex;flex-direction:column;gap:12px}}
-    .map-head{{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}}
-    .map-title{{font-size:24px;font-weight:800;letter-spacing:-.03em}}
-    .map-caption{{font-size:14px;color:var(--muted);max-width:17rem;text-align:right}}
-    .map-stage{{border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,.06);background:radial-gradient(circle at top right,rgba(110,231,255,.12),transparent 30%),linear-gradient(180deg,#09121e 0%,#0d1827 100%);min-height:280px}}
-    .map-stage svg{{display:block;width:100%;height:320px}}
+    .section-title{{font-size:32px;font-weight:900;line-height:1.02;letter-spacing:-.03em;margin-bottom:10px}}
+    .section-text{{font-size:18px;line-height:1.7;color:var(--muted)}}
     .compare{{display:grid;grid-template-columns:1fr;gap:10px}}
-    .compare-card{{background:var(--panel-soft);border:1px solid rgba(255,255,255,.06);border-radius:18px;padding:16px}}
+    .compare-card{{background:var(--panel-soft);border:1px solid rgba(255,255,255,.06);border-radius:18px;padding:18px}}
     .compare-card.after{{border-color:rgba(110,231,255,.18)}}
     .compare-card .label{{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.12em;margin-bottom:8px;color:var(--cyan)}}
     .compare-card.after .label{{color:var(--gold)}}
-    .compare-card h4{{font-size:20px;font-weight:800;margin-bottom:8px}}
-    .compare-card p{{font-size:15px;color:var(--muted);line-height:1.6}}
+    .compare-card h4{{font-size:24px;font-weight:800;margin-bottom:10px}}
+    .compare-card p{{font-size:17px;color:var(--muted);line-height:1.7}}
     .delta-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}}
     .delta{{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:14px 12px}}
-    .delta .k{{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:8px}}
-    .delta .v{{font-size:20px;font-weight:900}}
-    .bullet-list{{display:grid;gap:10px;margin-top:12px;padding-left:18px}}
-    .bullet-list li{{color:var(--muted);font-size:15px;line-height:1.6}}
-    .stations-table{{width:100%;border-collapse:collapse;font-size:14px;margin-top:10px}}
-    .stations-table th,.stations-table td{{padding:12px 10px;text-align:left;border-bottom:1px solid rgba(255,255,255,.06)}}
-    .stations-table th{{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:800}}
+    .delta .k{{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:8px}}
+    .delta .v{{font-size:24px;font-weight:900}}
+    .bullet-list{{display:grid;gap:12px;margin-top:12px;padding-left:22px}}
+    .bullet-list li{{color:var(--muted);font-size:17px;line-height:1.7}}
+    .stations-table{{width:100%;border-collapse:collapse;font-size:18px;margin-top:12px}}
+    .stations-table th,.stations-table td{{padding:16px 12px;text-align:left;border-bottom:1px solid rgba(255,255,255,.06)}}
+    .stations-table th{{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:800}}
     .stations-table td{{color:var(--text)}}
     .stations-table tbody tr:last-child td{{border-bottom:none}}
     .split{{display:grid;grid-template-columns:1fr;gap:12px}}
     .contact-card{{background:linear-gradient(180deg,var(--panel-soft) 0%,var(--panel) 100%);border:1px solid rgba(110,231,255,.12)}}
     .contact-label{{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--cyan);font-weight:800;margin-bottom:10px}}
-    .contact-name{{font-size:28px;font-weight:900;line-height:1.05;margin-bottom:12px}}
-    .contact-email{{display:block;width:100%;padding:16px 18px;border-radius:16px;background:var(--cta);color:var(--ink)!important;text-decoration:none;font-size:18px;font-weight:800;word-break:break-word}}
+    .contact-name{{font-size:32px;font-weight:900;line-height:1.05;margin-bottom:12px}}
+    .contact-email{{display:block;width:100%;padding:18px 18px;border-radius:16px;background:var(--cta);color:var(--ink)!important;text-decoration:none;font-size:20px;font-weight:800;word-break:break-word;text-align:center}}
     .assumptions{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}}
     .assumption{{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:12px 12px}}
     .assumption .k{{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:800;margin-bottom:7px}}
@@ -5880,7 +5872,6 @@ body{{background:transparent;overflow:hidden}}
     @media (min-width: 860px){{
       .metrics{{grid-template-columns:repeat(3,minmax(0,1fr))}}
       .compare{{grid-template-columns:1fr 1fr}}
-      .split{{grid-template-columns:1.1fr .9fr}}
     }}
   </style>
 </head>
@@ -5892,8 +5883,8 @@ body{{background:transparent;overflow:hidden}}
     <div class="hero-copy">Reduce response times, expand effective coverage, and justify deployment with jurisdiction-specific data.</div>
     <div class="hero-meta">Built for {_h(_qr_dept)} in {_h(_qr_city)}, {_h(_qr_state)}</div>
     <div class="cta-row">
-      <a class="cta cta-primary" href="mailto:{_qr_email}?subject=Full Deployment Analysis - {_h(_qr_loc)}">Request Full Deployment Analysis</a>
-      <a class="cta cta-secondary" href="https://brincdrones.com" target="_blank" rel="noopener noreferrer">Book a 15-Minute Demo</a>
+      <a class="cta cta-primary" href="mailto:{_qr_email}?subject=Full Deployment Analysis - {_h(_qr_loc)}">Request Full Analysis</a>
+      <a class="cta cta-secondary" href="mailto:{_qr_email}?subject=Book 15-Minute Demo - {_h(_qr_loc)}">Book 15-Min Demo</a>
     </div>
   </section>
 
@@ -5904,10 +5895,6 @@ body{{background:transparent;overflow:hidden}}
     <div class="metric m-calls"><div class="k">Annual Calls Covered</div><div class="v">{_qr_covered_calls:,}</div></div>
     <div class="metric m-fleet"><div class="k">Recommended Fleet</div><div class="v">{actual_k_responder}R / {actual_k_guardian}G</div></div>
     <div class="metric m-roi"><div class="k">Annual Savings</div><div class="v">${float(annual_savings or 0):,.0f}</div></div>
-  </section>
-
-  <section class="section">
-    {_map_visual_html}
   </section>
 
   <section class="section">
@@ -5938,17 +5925,10 @@ body{{background:transparent;overflow:hidden}}
     </div>
   </section>
 
-  <section class="section split">
-    <div>
-      <div class="section-kicker">Why These Sites</div>
-      <div class="section-title">Why these station sites were selected</div>
-      <ul class="bullet-list">{_why_sites_html}</ul>
-    </div>
-    <div>
-      <div class="section-kicker">Operational Impact</div>
-      <div class="section-title">What leadership gets</div>
-      <ul class="bullet-list">{_impact_html}</ul>
-    </div>
+  <section class="section">
+    <div class="section-kicker">Why It Matters</div>
+    <div class="section-title">A quick operational teaser</div>
+    <ul class="bullet-list">{_impact_html}</ul>
   </section>
 
   <section class="section">
@@ -5959,33 +5939,23 @@ body{{background:transparent;overflow:hidden}}
         <tr>
           <th>#</th>
           <th>Station</th>
-          <th>Type</th>
           <th>Fleet Role</th>
           <th>Avg Response Time</th>
-          <th>Coverage Contribution</th>
         </tr>
       </thead>
       <tbody>{_station_table_rows_html}</tbody>
     </table>
   </section>
 
-  <section class="section">
-    <div class="section-kicker">Methodology</div>
-    <div class="section-title">How this was modeled</div>
-    <div class="section-text">This deployment model uses jurisdiction-specific geography, uploaded or simulated incident demand, and candidate station locations to estimate drone response performance. Station recommendations are generated to maximize operational coverage and improve first-arrival speed under the assumptions used in this scenario.</div>
-    <div class="assumptions">
-      <div class="assumption"><div class="k">Jurisdiction</div><div class="v">{_h(_qr_loc)}</div></div>
-      <div class="assumption"><div class="k">Modeled Annual Calls</div><div class="v">{_qr_total_calls:,}</div></div>
-      <div class="assumption"><div class="k">Responder Range</div><div class="v">{float(resp_radius_mi or 0):.1f} mi</div></div>
-      <div class="assumption"><div class="k">Guardian Range</div><div class="v">{float(guard_radius_mi or 0):.1f} mi</div></div>
-    </div>
-  </section>
-
   <section class="section contact-card">
     <div class="contact-label">Next Step</div>
     <div class="contact-name">{_h(_qr_name)}</div>
-    <div class="section-text" style="margin-bottom:14px;">Request the full deployment analysis for your jurisdiction, including station options, coverage tradeoffs, and implementation planning.</div>
-    <a class="contact-email" href="mailto:{_qr_email}?subject=Full Deployment Analysis - {_h(_qr_loc)}">{_h(_qr_email)}</a>
+    <div class="section-text" style="margin-bottom:16px;">Email {_h(_qr_name)} to schedule a 15-minute walkthrough or request the full deployment analysis for {_h(_qr_loc)}.</div>
+    <div class="cta-row" style="margin-top:0;margin-bottom:14px;">
+      <a class="cta cta-primary" href="mailto:{_qr_email}?subject=Book 15-Minute Demo - {_h(_qr_loc)}">Book 15-Min Demo</a>
+      <a class="cta cta-secondary" href="mailto:{_qr_email}?subject=Full Deployment Analysis - {_h(_qr_loc)}">Request Full Analysis</a>
+    </div>
+    <a class="contact-email" href="mailto:{_qr_email}?subject=Book 15-Minute Demo - {_h(_qr_loc)}">{_h(_qr_email)}</a>
   </section>
 </div>
 </body>

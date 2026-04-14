@@ -3869,15 +3869,19 @@ body{{background:transparent;overflow:hidden}}
                         _metric_cov_g |= _mask
                         _station_city_masks[('GUARDIAN', _idx)] = _mask
                         _station_city_call_counts[('GUARDIAN', _idx)] = int(_mask.sum())
-                _assigned_seen = np.zeros(_metric_total_calls, dtype=bool)
-                for _idx, _d_type in ordered_deployments_raw:
-                    _station_key = (_d_type, _idx)
-                    _mask = _station_city_masks.get(_station_key)
-                    if _mask is None:
-                        continue
-                    _assigned_mask = _mask & ~_assigned_seen
-                    _station_city_assigned_counts[_station_key] = int(_assigned_mask.sum())
-                    _assigned_seen |= _mask
+                for _fleet_type, _fleet_order in (
+                    ('GUARDIAN', [idx for idx, d_type in ordered_deployments_raw if d_type == 'GUARDIAN']),
+                    ('RESPONDER', [idx for idx, d_type in ordered_deployments_raw if d_type == 'RESPONDER']),
+                ):
+                    _assigned_seen = np.zeros(_metric_total_calls, dtype=bool)
+                    for _idx in _fleet_order:
+                        _station_key = (_fleet_type, _idx)
+                        _mask = _station_city_masks.get(_station_key)
+                        if _mask is None:
+                            continue
+                        _assigned_mask = _mask & ~_assigned_seen
+                        _station_city_assigned_counts[_station_key] = int(_assigned_mask.sum())
+                        _assigned_seen |= _mask
 
         # Guardian-only metrics
         if guard_geos:

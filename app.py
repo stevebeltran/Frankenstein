@@ -4055,7 +4055,11 @@ body{{background:transparent;overflow:hidden}}
                         _metric_cov_g |= _mask
                         _station_city_masks[('GUARDIAN', _idx)] = _mask
                         _station_city_call_counts[('GUARDIAN', _idx)] = int(_mask.sum())
-                for _fleet_type, _fleet_order in (
+        if _metric_cov_r.shape[0] != _metric_total_calls:
+            _metric_cov_r = np.zeros(_metric_total_calls, dtype=bool)
+        if _metric_cov_g.shape[0] != _metric_total_calls:
+            _metric_cov_g = np.zeros(_metric_total_calls, dtype=bool)
+        for _fleet_type, _fleet_order in (
                     ('GUARDIAN', [idx for idx, d_type in ordered_deployments_raw if d_type == 'GUARDIAN']),
                     ('RESPONDER', [idx for idx, d_type in ordered_deployments_raw if d_type == 'RESPONDER']),
                 ):

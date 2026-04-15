@@ -1216,6 +1216,17 @@ def get_address_from_latlon(lat, lon):
 def search_address_candidates(address_str, limit=6, preferred_city="", preferred_state=""):
     address_str = str(address_str or '').strip()
     if not address_str:
+        try:
+            st.session_state['_last_geocode_trace'] = {
+                'input': '',
+                'preferred_city': str(preferred_city or '').strip(),
+                'preferred_state': str(preferred_state or '').strip().upper(),
+                'queries': [],
+                'providers': [],
+                'candidate_count': 0,
+            }
+        except Exception:
+            pass
         return []
 
     limit = max(1, min(int(limit or 6), 10))
@@ -1240,14 +1251,91 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
     def _normalize_text(value):
         return str(value or "").strip().lower()
 
+    def _normalize_address_variants(raw_value):
+        raw_value = str(raw_value or '').strip()
+        if not raw_value:
+            return []
+        variants = [raw_value]
+        compact = re.sub(r'\s+', ' ', raw_value).strip()
+        if compact and compact.lower() != raw_value.lower():
+            variants.append(compact)
+
+        word_to_num = {
+            'one': '1', 'two': '2', 'three': '3', 'four': '4', 'five': '5',
+            'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10',
+        }
+        street_suffix_map = {
+            'street': 'st',
+            'avenue': 'ave',
+            'boulevard': 'blvd',
+            'road': 'rd',
+            'drive': 'dr',
+            'lane': 'ln',
+            'court': 'ct',
+            'place': 'pl',
+            'parkway': 'pkwy',
+            'circle': 'cir',
+            'terrace': 'ter',
+        }
+
+        def _transform_variant(text):
+            text = re.sub(r'\s+', ' ', str(text or '').strip())
+            if not text:
+                return []
+            out = [text]
+            parts = text.split(' ', 1)
+            if parts:
+                first = parts[0].lower().rstrip('.,')
+                if first in word_to_num and len(parts) > 1:
+                    out.append(f"{word_to_num[first]} {parts[1]}")
+            replaced = text
+            for suffix, abbr in street_suffix_map.items():
+                replaced = re.sub(rf'\b{suffix}\b', abbr, replaced, flags=re.IGNORECASE)
+            if replaced.lower() != text.lower():
+                out.append(replaced)
+            out2 = []
+            for candidate in out:
+                parts2 = candidate.split(' ', 1)
+                if parts2:
+                    first2 = parts2[0].lower().rstrip('.,')
+                    if first2 in word_to_num and len(parts2) > 1:
+                        candidate = f"{word_to_num[first2]} {parts2[1]}"
+                replaced2 = candidate
+                for suffix, abbr in street_suffix_map.items():
+                    replaced2 = re.sub(rf'\b{suffix}\b', abbr, replaced2, flags=re.IGNORECASE)
+                out2.append(candidate)
+                if replaced2.lower() != candidate.lower():
+                    out2.append(replaced2)
+            deduped = []
+            seen_local = set()
+            for candidate in out2:
+                cleaned = re.sub(r'\s+', ' ', str(candidate or '').strip())
+                key = cleaned.lower()
+                if cleaned and key not in seen_local:
+                    seen_local.add(key)
+                    deduped.append(cleaned)
+            return deduped
+
+        expanded = []
+        seen_expanded = set()
+        for variant in variants:
+            for candidate in _transform_variant(variant):
+                key = candidate.lower()
+                if candidate and key not in seen_expanded:
+                    seen_expanded.add(key)
+                    expanded.append(candidate)
+        return expanded
+
     def _query_variants():
-        _variants = [address_str]
-        _has_city = preferred_city and preferred_city.lower() in address_str.lower()
-        _has_state = preferred_state and preferred_state.lower() in address_str.lower()
-        if preferred_city and preferred_state and (not _has_city or not _has_state):
-            _variants.append(f"{address_str}, {preferred_city}, {preferred_state}")
-        if preferred_state and not _has_state:
-            _variants.append(f"{address_str}, {preferred_state}")
+        _variants = []
+        for _base_variant in _normalize_address_variants(address_str):
+            _variants.append(_base_variant)
+            _has_city = preferred_city and preferred_city.lower() in _base_variant.lower()
+            _has_state = preferred_state and preferred_state.lower() in _base_variant.lower()
+            if preferred_city and preferred_state and (not _has_city or not _has_state):
+                _variants.append(f"{_base_variant}, {preferred_city}, {preferred_state}")
+            if preferred_state and not _has_state:
+                _variants.append(f"{_base_variant}, {preferred_state}")
         ordered = []
         seen_variants = set()
         for _variant in _variants:
@@ -1317,7 +1405,10 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
     def _mapbox_api_key():
         return _lookup_secret("MAPBOX_ACCESS_TOKEN", "MAPBOX_API_KEY")
 
-    for _query in _query_variants():
+    _queries = _query_variants()
+    _provider_trace = []
+
+    for _query in _queries:
         try:
             _params = urllib.parse.urlencode({
                 'address': _query,
@@ -1328,7 +1419,9 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
             _req = urllib.request.Request(_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
             with urllib.request.urlopen(_req, timeout=8) as _resp:
                 _data = json.loads(_resp.read().decode('utf-8'))
-            for _match in _data.get('result', {}).get('addressMatches', [])[:limit]:
+            _matches = _data.get('result', {}).get('addressMatches', [])[:limit]
+            _provider_trace.append({'provider': 'Census', 'query': _query, 'used': True, 'match_count': len(_matches), 'status': 'ok'})
+            for _match in _matches:
                 _coords = _match.get('coordinates', {})
                 _add_candidate(
                     _match.get('matchedAddress', _query),
@@ -1338,11 +1431,11 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
                     raw_match=_match.get('matchedAddress', _query),
                 )
         except Exception:
-            pass
+            _provider_trace.append({'provider': 'Census', 'query': _query, 'used': True, 'match_count': 0, 'status': 'error'})
 
     _google_api_key = _google_maps_api_key()
     if _google_api_key:
-        for _query in _query_variants():
+        for _query in _queries:
             try:
                 _params = urllib.parse.urlencode({
                     'address': _query,
@@ -1353,16 +1446,20 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
                 _req = urllib.request.Request(_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
                 with urllib.request.urlopen(_req, timeout=8) as _resp:
                     _data = json.loads(_resp.read().decode('utf-8'))
-                for _match in _data.get('results', [])[:limit]:
+                _matches = _data.get('results', [])[:limit]
+                _provider_trace.append({'provider': 'Google', 'query': _query, 'used': True, 'match_count': len(_matches), 'status': _data.get('status', 'ok')})
+                for _match in _matches:
                     _geometry = _match.get('geometry', {}).get('location', {})
                     _label = _match.get('formatted_address', _query)
                     _add_candidate(_label, _geometry.get('lat'), _geometry.get('lng'), 'Google', raw_match=_label)
             except Exception:
-                pass
+                _provider_trace.append({'provider': 'Google', 'query': _query, 'used': True, 'match_count': 0, 'status': 'error'})
+    else:
+        _provider_trace.append({'provider': 'Google', 'query': '', 'used': False, 'match_count': 0, 'status': 'missing_api_key'})
 
     _mapbox_key = _mapbox_api_key()
     if _mapbox_key:
-        for _query in _query_variants():
+        for _query in _queries:
             try:
                 _params = urllib.parse.urlencode({
                     'q': _query,
@@ -1376,7 +1473,9 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
                 _req = urllib.request.Request(_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
                 with urllib.request.urlopen(_req, timeout=8) as _resp:
                     _data = json.loads(_resp.read().decode('utf-8'))
-                for _match in _data.get('features', [])[:limit]:
+                _matches = _data.get('features', [])[:limit]
+                _provider_trace.append({'provider': 'Mapbox', 'query': _query, 'used': True, 'match_count': len(_matches), 'status': 'ok'})
+                for _match in _matches:
                     _coords = (_match.get('geometry') or {}).get('coordinates') or [None, None]
                     _props = _match.get('properties') or {}
                     _label = (
@@ -1387,9 +1486,11 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
                     )
                     _add_candidate(_label, _coords[1], _coords[0], 'Mapbox', raw_match=_label)
             except Exception:
-                pass
+                _provider_trace.append({'provider': 'Mapbox', 'query': _query, 'used': True, 'match_count': 0, 'status': 'error'})
+    else:
+        _provider_trace.append({'provider': 'Mapbox', 'query': '', 'used': False, 'match_count': 0, 'status': 'missing_api_key'})
 
-    for _query in _query_variants():
+    for _query in _queries:
         try:
             _params = urllib.parse.urlencode({
                 'format': 'jsonv2',
@@ -1402,15 +1503,29 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
             _req = urllib.request.Request(_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
             with urllib.request.urlopen(_req, timeout=8) as _resp:
                 _data = json.loads(_resp.read().decode('utf-8'))
-            for _match in _data[:limit]:
+            _matches = _data[:limit]
+            _provider_trace.append({'provider': 'OSM', 'query': _query, 'used': True, 'match_count': len(_matches), 'status': 'ok'})
+            for _match in _matches:
                 _label = _match.get('display_name', _query)
                 _add_candidate(_label, _match.get('lat'), _match.get('lon'), 'OSM', raw_match=_label)
         except Exception:
-            pass
+            _provider_trace.append({'provider': 'OSM', 'query': _query, 'used': True, 'match_count': 0, 'status': 'error'})
 
     for _candidate in candidates:
         _candidate['_score'] = _candidate_score(_candidate)
     candidates.sort(key=lambda _item: (-_item.get('_score', 0), _item.get('matched_address', '')))
+    try:
+        st.session_state['_last_geocode_trace'] = {
+            'input': address_str,
+            'preferred_city': preferred_city,
+            'preferred_state': preferred_state,
+            'queries': _queries,
+            'providers': _provider_trace,
+            'candidate_count': len(candidates),
+            'top_candidate': candidates[0]['matched_address'] if candidates else '',
+        }
+    except Exception:
+        pass
     return [{k: v for k, v in _candidate.items() if k != '_score'} for _candidate in candidates[:limit]]
 
 @st.cache_data(show_spinner=False)

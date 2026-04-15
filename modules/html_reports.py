@@ -1072,12 +1072,12 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     if not active_drones:
         return ""
     # Per-type daily airtime budgets derived from CONFIG duty cycles:
-    #   Guardian: 60 min flight + 3 min charge → (24*60/63)*60 = 1371.4 min = 22.86 hr
-    #   Responder: patrol-unit model, 11.6 hr shift equivalent
+    #   Guardian: 60 min flight + 3 min swap → (24*60/63)*60 = 1371.4 min = 22.86 hr
+    #   Responder: 30 min flight + 30 min recharge → 720 min = 12.0 hr
     _GUARDIAN_DAILY_MINS  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]   # ~1371.4
     _GUARDIAN_DAILY_HOURS = CONFIG["GUARDIAN_PATROL_HOURS"]        # ~22.86
-    _RESPONDER_DAILY_MINS  = CONFIG["RESPONDER_PATROL_HOURS"] * 60 # 11.6 * 60 = 696
-    _RESPONDER_DAILY_HOURS = CONFIG["RESPONDER_PATROL_HOURS"]      # 11.6
+    _RESPONDER_DAILY_MINS  = CONFIG["RESPONDER_DAILY_FLIGHT_MIN"]  # 720
+    _RESPONDER_DAILY_HOURS = CONFIG["RESPONDER_PATROL_HOURS"]      # 12.0
     columns_per_row = max(1, int(columns_per_row))
 
     # Specialty-response values are independent from Annual Capacity Value.
@@ -1132,6 +1132,9 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
         total_daily_flights = d_flights + d_shared
         d_zone_calls = float(d.get("zone_calls_annual", 0) or 0)
+        d_calls_in_range_yr = float(d.get("calls_in_range_yr", d_zone_calls) or 0)
+        d_calls_handle_yr = float(d.get("calls_handle_yr", 0) or 0)
+        d_calls_unanswered_yr = float(d.get("calls_unanswered_yr", 0) or 0)
         d_assigned_calls_day = float(d.get('assigned_calls_day', 0) or 0)
         d_assigned_flights_day = float(d.get('assigned_flights_day', d_flights) or 0)
         d_assigned_flights_annual = float(d.get('assigned_flights_yr', d_assigned_flights_day * 365.0) or 0)
@@ -1191,9 +1194,9 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         else:
             scene_color = "#2ecc71"
 
-        _display_flights_day = d_assigned_flights_day if d_assigned_flights_day > 0 else d_zone_flights_day
-        _display_flights_annual = d_assigned_flights_annual if d_assigned_flights_day > 0 else d_zone_flights_annual
-        _display_flights_label = "assigned flights/day" if d_assigned_flights_day > 0 else "zone flights/day"
+        _display_flights_day = d_max_cap if d_max_cap > 0 else d_zone_flights_day
+        _display_flights_annual = d_total_flights_possible_yr if d_total_flights_possible_yr > 0 else d_zone_flights_annual
+        _display_flights_label = "calls/day capacity" if d_max_cap > 0 else "zone flights/day"
         patrol_time_line = ""
         if _display_flights_day > 0:
             max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
@@ -1376,8 +1379,16 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
       <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{d_actual_resolved_day:.1f} calls</div>
     </div>
     <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
-      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Zone Calls/yr<span class="tip" data-tip="Total historical calls for service within this drone's patrol radius. Used as the ceiling for thermal, K-9, and fire assist estimates.">?</span></div>
-      <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{int(d_zone_calls):,}</div>
+      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Calls In Range<span class="tip" data-tip="Historical annual calls for service inside this unit's modeled coverage area.">?</span></div>
+      <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{int(d_calls_in_range_yr):,}</div>
+    </div>
+    <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
+      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Calls This Unit Can Handle<span class="tip" data-tip="Annual capacity based on a 24-hour operating cycle, average distance to in-range calls, a 10-minute minimum on-scene time, and the unit's swap or recharge downtime.">?</span></div>
+      <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{int(d_calls_handle_yr):,}</div>
+    </div>
+    <div style="background:{"rgba(220,53,69,0.08)" if d_calls_unanswered_yr > 0.1 else "rgba(255,255,255,0.04)"};border:1px solid {"#dc3545" if d_calls_unanswered_yr > 0.1 else card_border};border-radius:5px;padding:6px 8px;text-align:center;">
+      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Calls Unanswered<span class="tip" data-tip="Annual calls in range that exceed this unit's physical capacity under the 10-minute on-scene floor model.">?</span></div>
+      <div style="font-size:0.88rem;font-weight:800;color:{"#dc3545" if d_calls_unanswered_yr > 0.1 else card_title};">{int(d_calls_unanswered_yr):,}</div>
     </div>
   </div>
   {_sim_fin_specialty}
@@ -1402,17 +1413,17 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   {_full_fin_value_breakdown}
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.68rem; flex:1; margin-bottom:8px; align-content:start;">
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Assigned Flights/day<span class="tip" data-tip="Marginal flights/day assigned to this drone in deployment order. Under call-coverage optimization, this is the order-consistent demand added by placing this unit at its step.">?</span></div>
-      <div style="font-weight:800; color:{accent_color}; font-size:0.82rem;">{d_assigned_flights_day:.1f}/day</div>
-      <div style="font-size:0.59rem; color:{text_muted};">({d_assigned_flights_annual:,.0f}/yr)</div>
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Calls In Range<span class="tip" data-tip="Historical annual calls for service inside this unit's modeled coverage area.">?</span></div>
+      <div style="font-weight:800; color:{accent_color}; font-size:0.82rem;">{int(d_calls_in_range_yr):,}</div>
+      <div style="font-size:0.59rem; color:{text_muted};">{(d_calls_in_range_yr / 365.0):.1f}/day</div>
     </div>
     <div style="background:{"rgba(220,53,69,0.08)" if d_capacity_limited else "rgba(255,255,255,0.04)"}; border:1px solid {"#dc3545" if d_capacity_limited else card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">{"Effective" if d.get("effective_dfr_rate", dfr_dispatch_rate) < dfr_dispatch_rate - 0.001 else "Max"} DFR Rate<span class="tip" data-tip="The DFR dispatch rate at which this drone hits exactly 100% utilization. Enable Auto-cap in Deployment Strategy to apply this limit per-station without affecting others. Formula: max_flights_cap / (zone_perc × daily_calls).">?</span></div>
-      <div style="font-weight:800; color:{"#dc3545" if d_capacity_limited else "#2ecc71"}; font-size:0.82rem;">{(min(d_max_cap / max(d_assigned_flights_day, 0.001), 1.0) * dfr_dispatch_rate * 100):.1f}%</div>
-      <div style="font-size:0.59rem; color:{text_muted};">{"▼ reduce to clear" if d_capacity_limited else ("⚡ auto-capped" if d.get("effective_dfr_rate", dfr_dispatch_rate) < dfr_dispatch_rate - 0.001 else "✓ current rate ok")}</div>
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Calls This Unit Can Handle<span class="tip" data-tip="Annual capacity based on a 24-hour operating cycle, average distance to in-range calls, a 10-minute minimum on-scene time, and the unit's swap or recharge downtime.">?</span></div>
+      <div style="font-weight:800; color:{"#dc3545" if d_capacity_limited else "#2ecc71"}; font-size:0.82rem;">{int(d_calls_handle_yr):,}</div>
+      <div style="font-size:0.59rem; color:{text_muted};">{d_max_cap:.1f}/day max</div>
     </div>
     <div style="background:{"rgba(220,53,69,0.08)" if d_capacity_limited else "rgba(255,255,255,0.04)"}; border:1px solid {"#dc3545" if d_capacity_limited else card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Utilization<span class="tip" data-tip="Flight time demanded as % of daily capacity using the 10-min on-scene floor model. Over 100% means this drone cannot serve all calls in its zone.">?</span></div>
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Utilization<span class="tip" data-tip="Calls in range as a percent of this unit's daily call-handling capacity using the 10-minute on-scene floor model. If any calls are unanswered, utilization is shown as 100%.">?</span></div>
       <div style="font-weight:800; color:{util_color}; font-size:0.82rem;">{util_pct}</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
@@ -1424,8 +1435,8 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
       <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_time:.1f} min</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Zone Calls/yr<span class="tip" data-tip="Total historical calls for service within this drone's patrol radius. Ceiling for thermal and K-9 assist estimates.">?</span></div>
-      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{int(d_zone_calls):,}</div>
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Calls Unanswered<span class="tip" data-tip="Annual calls in range that exceed this unit's physical capacity under the 10-minute on-scene floor model.">?</span></div>
+      <div style="font-weight:800; color:{"#dc3545" if d_calls_unanswered_yr > 0.1 else card_title}; font-size:0.82rem;">{int(d_calls_unanswered_yr):,}</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">FAA Ceiling<span class="tip" data-tip="Max authorized altitude from FAA LAANC maps at this location. 0 ft = controlled airspace requiring coordination before flight.">?</span></div>
@@ -1593,7 +1604,7 @@ def generate_community_impact_dashboard_html(
     g_count  = max(0, int(actual_k_guardian or 0))
     r_count  = max(0, int(actual_k_responder or 0))
     g_daily_hrs = g_count * GUARDIAN_FLIGHT_HOURS_PER_DAY
-    r_daily_hrs = r_count * 11.6          # Responder patrol hours
+    r_daily_hrs = r_count * CONFIG["RESPONDER_PATROL_HOURS"]          # Responder patrol hours
     total_daily_flight_hrs = g_daily_hrs + r_daily_hrs
     annual_flight_hrs = total_daily_flight_hrs * 365
 
@@ -1630,7 +1641,7 @@ def generate_community_impact_dashboard_html(
             f'<div class="rt-bar-fill" style="height:{_resp_bar_h:.0f}%;background:linear-gradient(180deg,var(--accent-blue),#3b82f6);"></div>'
             '</div>'
             '<div class="rt-bar-label">&#x1F681; Responder '
-            '<span class="tip-cid" data-tip="Avg flight time for Responder drones (42 mph airspeed, 2-mile zone). Direct line-of-sight flight — no traffic, no turns.">?</span></div>'
+            '<span class="tip-cid" data-tip="Avg flight time for Responder drones (45 mph airspeed, 2-mile zone). Direct line-of-sight flight — no traffic, no turns.">?</span></div>'
             f'<div class="rt-bar-value" style="color:var(--accent-blue);">{resp_drone_min:.1f} min</div>'
             '</div>'
         )
@@ -2229,9 +2240,9 @@ def generate_community_impact_dashboard_html(
 
   <div class="stat-card">
     <div class="accent-bar" style="background:var(--accent-blue);"></div>
-    <div class="card-label">Daily Airtime (Fleet) <span class="tip-cid" data-tip="Total hours all drones are airborne per day. Guardians run a 60-min flight / 3-min charge cycle (~22.9 hrs/day). Responders operate on an 11.6-hr patrol shift.">?</span></div>
+    <div class="card-label">Daily Airtime (Fleet) <span class="tip-cid" data-tip="Total hours all drones are airborne per day. Guardians run a 60-min flight / 3-min swap cycle (~22.9 hrs/day). Responders run a 30-min flight / 30-min recharge cycle (12.0 hrs/day).">?</span></div>
     <div class="card-value"><span class="counter" data-target="{total_daily_flight_hrs:.1f}">{total_daily_flight_hrs:.1f}</span> hrs</div>
-    <div class="card-sub">{g_count} Guardian × {GUARDIAN_FLIGHT_HOURS_PER_DAY}h &nbsp;+&nbsp; {r_count} Responder × 11.6h</div>
+    <div class="card-sub">{g_count} Guardian × {GUARDIAN_FLIGHT_HOURS_PER_DAY:.1f}h &nbsp;+&nbsp; {r_count} Responder × {CONFIG["RESPONDER_PATROL_HOURS"]:.1f}h</div>
     <span class="card-badge" style="background:var(--accent-blue-lt);color:var(--accent-blue);">Modeled duty cycle</span>
   </div>
 
@@ -2265,7 +2276,7 @@ def generate_community_impact_dashboard_html(
     <div class="prog-meta"><span class="prog-label">Charging / Docked <span class="tip-cid" data-tip="Time spent in the automated recharging dock between sorties. The 3-minute recharge gap between 60-min flights is the only downtime — drone is available for re-dispatch within seconds of landing.">?</span></span><span class="prog-val">{24-GUARDIAN_FLIGHT_HOURS_PER_DAY:.1f} hrs / 24 hrs</span></div>
     <div class="prog-track"><div class="prog-fill" style="width:{(24-GUARDIAN_FLIGHT_HOURS_PER_DAY)/24*100:.1f}%;background:var(--rule);"></div></div>
   </div>
-  <div class="card-sub" style="margin-top:6px;">Guardian duty cycle: {CONFIG['GUARDIAN_FLIGHT_MIN']} min flight → {CONFIG['GUARDIAN_CHARGE_MIN']} min auto-recharge → repeat</div>
+  <div class="card-sub" style="margin-top:6px;">Guardian duty cycle: {CONFIG['GUARDIAN_FLIGHT_MIN']} min flight → {CONFIG['GUARDIAN_CHARGE_MIN']} min battery swap → repeat</div>
 </div>
 
 

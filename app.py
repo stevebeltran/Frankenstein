@@ -36,7 +36,7 @@ from modules.config import (
     card_text, card_title, budget_box_bg, budget_box_border, budget_box_shadow,
     map_style, map_boundary_color, map_incident_color, legend_bg, legend_text,
     get_hero_message, get_faa_message, get_airfield_message,
-    get_jurisdiction_message, get_spatial_message
+    get_jurisdiction_message, get_spatial_message, calculate_max_flights_per_day
 )
 import modules.versioning as _versioning_mod
 # No importlib.reload needed here — Streamlit restarts the process on every
@@ -4038,7 +4038,7 @@ body{{background:transparent;overflow:hidden}}
                 # Shared calls are split across overlapping active drones so adding
                 # another station reduces the demand carried by already-maxed stations.
                 _is_guard    = (d_type == 'GUARDIAN')
-                _budget_min  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] if _is_guard else (CONFIG["RESPONDER_PATROL_HOURS"] * 60)
+                _budget_min  = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"] if _is_guard else CONFIG["RESPONDER_DAILY_FLIGHT_MIN"]
                 _zone_flights = _weighted_zone_perc * calls_per_day * dfr_dispatch_rate
 
                 # ── CAPACITY MODEL: 10-minute on-scene floor ──────────────────────
@@ -4051,34 +4051,28 @@ body{{background:transparent;overflow:hidden}}
                 #   deficit       = on_scene_min < 10  ↔  zone_flights > max_flights
                 _MIN_SCENE_MIN   = 10.0
                 _g_budget        = CONFIG["GUARDIAN_DAILY_FLIGHT_MIN"]
-                _r_budget        = CONFIG["RESPONDER_PATROL_HOURS"] * 60
+                _r_budget        = CONFIG["RESPONDER_DAILY_FLIGHT_MIN"]
                 _alt_is_guard    = not _is_guard   # cross-type recommendation
                 _alt_budget      = _g_budget if _alt_is_guard else _r_budget
-                _alt_max_single  = CONFIG["GUARDIAN_FLIGHT_MIN"] if _alt_is_guard else CONFIG["RESPONDER_FLIGHT_MIN"]
 
                 # Capacity of THIS drone type (flights/day with 10-min scene floor)
-                # Guardian responses include outbound travel, on-scene time, and return-to-patrol travel.
-                # Responder responses include one-way travel plus the on-scene floor.
-                _SORTIES_PER_DAY = (24 * 60) / (CONFIG["GUARDIAN_FLIGHT_MIN"] + CONFIG["GUARDIAN_CHARGE_MIN"])
-                _travel_cost     = (2 * avg_time_min) if _is_guard else avg_time_min
+                # Drones go call-to-call across the 24-hour operating cycle, only pausing
+                # for the unit-specific swap or recharge downtime when endurance is spent.
+                _travel_cost     = avg_time_min
                 _response_cost   = _travel_cost + _MIN_SCENE_MIN
-                if _is_guard:
-                    _airtime_cap_g    = _budget_min / _response_cost
-                    _per_sortie_g     = max(1, math.floor(CONFIG["GUARDIAN_FLIGHT_MIN"] / _response_cost))
-                    _duty_cap_g       = _SORTIES_PER_DAY * _per_sortie_g
-                    _max_flights_cap  = min(_airtime_cap_g, _duty_cap_g)
-                else:
-                    _max_flights_cap  = _budget_min / _response_cost
+                _max_flights_cap  = calculate_max_flights_per_day(
+                    _response_cost,
+                    flight_minutes=CONFIG["GUARDIAN_FLIGHT_MIN"] if _is_guard else CONFIG["RESPONDER_FLIGHT_MIN"],
+                    downtime_minutes=CONFIG["GUARDIAN_CHARGE_MIN"] if _is_guard else CONFIG["RESPONDER_CHARGE_MIN"],
+                )
                 # Alternate type cap (for cross-type deficit recommendation)
-                _alt_travel_cost = (2 * avg_time_min) if _alt_is_guard else avg_time_min
+                _alt_travel_cost = avg_time_min
                 _alt_response_cost = _alt_travel_cost + _MIN_SCENE_MIN
-                if _alt_is_guard:
-                    _airtime_cap_ag   = _alt_budget / _alt_response_cost
-                    _per_sortie_ag    = max(1, math.floor(CONFIG["GUARDIAN_FLIGHT_MIN"] / _alt_response_cost))
-                    _duty_cap_ag      = _SORTIES_PER_DAY * _per_sortie_ag
-                    _alt_max_flights  = min(_airtime_cap_ag, _duty_cap_ag)
-                else:
-                    _alt_max_flights  = _alt_budget / _alt_response_cost
+                _alt_max_flights  = calculate_max_flights_per_day(
+                    _alt_response_cost,
+                    flight_minutes=CONFIG["GUARDIAN_FLIGHT_MIN"] if _alt_is_guard else CONFIG["RESPONDER_FLIGHT_MIN"],
+                    downtime_minutes=CONFIG["GUARDIAN_CHARGE_MIN"] if _alt_is_guard else CONFIG["RESPONDER_CHARGE_MIN"],
+                )
 
                 # ── Auto-cap: clamp this station's effective DFR rate to its
                 #    physical capacity limit so it doesn't show a deficit while
@@ -4096,15 +4090,17 @@ body{{background:transparent;overflow:hidden}}
                 # so Guardians no longer overstate spare time by ignoring the return leg.
                 _on_scene_min = (_budget_min / max(_zone_flights, 0.001)) - _travel_cost if _zone_flights > 0 else 99.0
 
-                # True (uncapped) utilization using the same scene-inclusive response cost.
-                _true_util = (_zone_flights * _response_cost) / max(1.0, _budget_min)
-                # Display util capped at 1.0 (100%) for progress bars; deficit shown separately
+                _calls_in_range_day = _weighted_zone_calls / 365.0
+                _call_capacity_util = _calls_in_range_day / max(_max_flights_cap, 0.001) if _max_flights_cap > 0 else (1.0 if _calls_in_range_day > 0 else 0.0)
+                # Utilization is based on total calls in range versus physical call-handling capacity.
+                # If calls are left unanswered, the unit is at 100% utilization.
+                _true_util = _call_capacity_util
                 _util = min(1.0, _true_util)
 
-                # Deficit: flights demanded beyond physical capacity
-                _deficit_flights  = max(0.0, _zone_flights - _max_flights_cap)
+                # Deficit: calls demanded beyond physical capacity
+                _deficit_flights  = max(0.0, _calls_in_range_day - _max_flights_cap)
                 _has_deficit      = _deficit_flights > 0.01
-                _unserv_calls_day = _deficit_flights / max(dfr_dispatch_rate, 0.01) if _has_deficit else 0.0
+                _unserv_calls_day = _deficit_flights if _has_deficit else 0.0
                 _unserv_calls_yr  = _unserv_calls_day * 365
 
                 # Extra stations needed to clear deficit (same type and alternate type)
@@ -4155,6 +4151,12 @@ body{{background:transparent;overflow:hidden}}
                 d['assigned_calls_day']  = _assigned_daily_calls
                 d['assigned_flights_day']= _assigned_flights_day
                 d['assigned_flights_yr'] = _assigned_flights_day * 365.0
+                d['calls_in_range_day']  = _calls_in_range_day
+                d['calls_in_range_yr']   = _weighted_zone_calls
+                d['calls_handle_day']    = min(_weighted_zone_calls / 365.0, _max_flights_cap)
+                d['calls_handle_yr']     = min(_weighted_zone_calls, _max_flights_cap * 365.0)
+                d['calls_unanswered_day']= max(0.0, (_weighted_zone_calls / 365.0) - _max_flights_cap)
+                d['calls_unanswered_yr'] = max(0.0, _weighted_zone_calls - (_max_flights_cap * 365.0))
                 d['marginal_flights']    = _excl_flights
                 d['marginal_deflected']  = _excl_deflected
                 d['shared_flights']      = _shared_dfr
@@ -4197,6 +4199,9 @@ body{{background:transparent;overflow:hidden}}
                           'concurrent_monthly':0,'best_case_annual':0,
                           'blocked_per_day':0,'best_be_text':"N/A",'base_annual':0,
                           'concurrent_annual':0,'zone_flights':0,'zone_calls_annual':0,
+                          'calls_in_range_day':0,'calls_in_range_yr':0,
+                          'calls_handle_day':0,'calls_handle_yr':0,
+                          'calls_unanswered_day':0,'calls_unanswered_yr':0,
                           'zone_flights_annual':0})
             active_drones.append(d)
             step += 1

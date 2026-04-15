@@ -1196,6 +1196,9 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
     limit = max(1, min(int(limit or 6), 10))
     preferred_city = str(preferred_city or '').strip()
     preferred_state = str(preferred_state or '').strip().upper()
+    # Full state name for providers (OSM) that return "Nebraska" instead of "NE"
+    _abbr_to_full = {v: k for k, v in US_STATES_ABBR.items()}
+    preferred_state_full = _abbr_to_full.get(preferred_state, '').lower()
     candidates = []
     seen = set()
 
@@ -1241,7 +1244,13 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
 
         if preferred_state:
             _state_token = f", {preferred_state.lower()}"
-            if _state_token in _label or _label.endswith(f" {preferred_state.lower()}"):
+            _full_token = f", {preferred_state_full}" if preferred_state_full else None
+            _in_label = (
+                _state_token in _label
+                or _label.endswith(f" {preferred_state.lower()}")
+                or (_full_token and _full_token in _label)
+            )
+            if _in_label:
                 _score += 220
             else:
                 _score -= 180
@@ -4059,6 +4068,8 @@ body{{background:transparent;overflow:hidden}}
             _metric_cov_r = np.zeros(_metric_total_calls, dtype=bool)
         if _metric_cov_g.shape[0] != _metric_total_calls:
             _metric_cov_g = np.zeros(_metric_total_calls, dtype=bool)
+        cov_r = _metric_cov_r
+        cov_g = _metric_cov_g
         for _fleet_type, _fleet_order in (
                     ('GUARDIAN', [idx for idx, d_type in ordered_deployments_raw if d_type == 'GUARDIAN']),
                     ('RESPONDER', [idx for idx, d_type in ordered_deployments_raw if d_type == 'RESPONDER']),

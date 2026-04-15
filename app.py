@@ -4090,15 +4090,19 @@ body{{background:transparent;overflow:hidden}}
                 # so Guardians no longer overstate spare time by ignoring the return leg.
                 _on_scene_min = (_budget_min / max(_zone_flights, 0.001)) - _travel_cost if _zone_flights > 0 else 99.0
 
-                _calls_in_range_day = _weighted_zone_calls / 365.0
-                _call_capacity_util = _calls_in_range_day / max(_max_flights_cap, 0.001) if _max_flights_cap > 0 else (1.0 if _calls_in_range_day > 0 else 0.0)
-                # Utilization is based on total calls in range versus physical call-handling capacity.
-                # If calls are left unanswered, the unit is at 100% utilization.
+                _raw_calls_in_range_day = _raw_zone_calls / 365.0
+                _dispatchable_calls_day = _raw_calls_in_range_day * _effective_dfr
+                _dispatchable_calls_yr = _raw_zone_calls * _effective_dfr
+                _weighted_dispatchable_calls_day = (_weighted_zone_calls / 365.0) * _effective_dfr
+                _weighted_dispatchable_calls_yr = _weighted_zone_calls * _effective_dfr
+                _call_capacity_util = _weighted_dispatchable_calls_day / max(_max_flights_cap, 0.001) if _max_flights_cap > 0 else (1.0 if _weighted_dispatchable_calls_day > 0 else 0.0)
+                # Utilization is based on dispatchable calls in range versus physical call-handling capacity.
+                # If dispatchable calls are left unanswered, the unit is at 100% utilization.
                 _true_util = _call_capacity_util
                 _util = min(1.0, _true_util)
 
-                # Deficit: calls demanded beyond physical capacity
-                _deficit_flights  = max(0.0, _calls_in_range_day - _max_flights_cap)
+                # Deficit: overlap-weighted dispatchable calls demanded beyond physical capacity
+                _deficit_flights  = max(0.0, _weighted_dispatchable_calls_day - _max_flights_cap)
                 _has_deficit      = _deficit_flights > 0.01
                 _unserv_calls_day = _deficit_flights if _has_deficit else 0.0
                 _unserv_calls_yr  = _unserv_calls_day * 365
@@ -4115,33 +4119,21 @@ body{{background:transparent;overflow:hidden}}
                 _same_type_label  = "Guardian"  if _is_guard else "Responder"
                 _alt_type_label   = "Responder" if _is_guard else "Guardian"
 
-                # ── BASE VALUE: calls uniquely covered (non-shared zone) ──────────
-                # Cap savings to physically serviceable flights when in deficit
-                _excl_daily        = (_excl_calls / total_calls) * calls_per_day
-                _excl_flights_raw  = _excl_daily * dfr_dispatch_rate
-                # Clamp exclusive flights to what the drone can actually serve
-                _excl_flights      = min(_excl_flights_raw, _max_flights_cap) if _has_deficit else _excl_flights_raw
-                _excl_deflected    = _excl_flights * deflection_rate
+                # ── ANNUAL CAPACITY VALUE: directly tied to handled calls ────────
                 _cost_delta        = CONFIG["OFFICER_COST_PER_CALL"] - CONFIG["DRONE_COST_PER_CALL"]
-                _base_monthly      = _cost_delta * _excl_deflected * 30.4
-                _base_annual       = _base_monthly * 12
-
-                # ── CONCURRENT VALUE: shared-zone calls captured while partner is busy ─
-                _shared_daily      = (_shared_calls / total_calls) * calls_per_day
-                _shared_dfr        = _shared_daily * dfr_dispatch_rate
-                _concurrent_daily  = _shared_dfr * _util
-                # In deficit, the drone is already at or over capacity from exclusive zone
-                # flights alone. Cap concurrent to whatever flight capacity remains so the
-                # Annual Capacity Value reflects only calls the drone can physically service.
-                if _has_deficit:
-                    _remaining_cap_day = max(0.0, _max_flights_cap - _excl_flights)
-                    _concurrent_daily  = min(_concurrent_daily, _remaining_cap_day)
-                _concurrent_month  = _cost_delta * (_concurrent_daily * deflection_rate) * 30.4
-                _concurrent_annual = _concurrent_month * 12
-
-                # ── BEST CASE: base + full concurrent (partner always available) ──
-                _best_monthly  = _base_monthly + _concurrent_month
-                _best_annual   = _base_annual  + _concurrent_annual
+                _handled_calls_day = min(_weighted_dispatchable_calls_day, _max_flights_cap)
+                _handled_calls_yr  = _handled_calls_day * 365.0
+                _deflected_calls_day = _handled_calls_day * deflection_rate
+                _deflected_calls_yr  = _handled_calls_yr * deflection_rate
+                _base_annual       = _handled_calls_yr * _cost_delta
+                _base_monthly      = _base_annual / 12.0
+                _concurrent_daily  = 0.0
+                _concurrent_month  = 0.0
+                _concurrent_annual = 0.0
+                _best_monthly      = _base_monthly
+                _best_annual       = _base_annual
+                _excl_flights      = _handled_calls_day
+                _excl_deflected    = _deflected_calls_day
 
                 # ── STORE — use best_case as primary display value ─────────────────
                 _assigned_daily_calls   = _weighted_zone_perc * calls_per_day if total_calls > 0 else 0.0
@@ -4151,15 +4143,21 @@ body{{background:transparent;overflow:hidden}}
                 d['assigned_calls_day']  = _assigned_daily_calls
                 d['assigned_flights_day']= _assigned_flights_day
                 d['assigned_flights_yr'] = _assigned_flights_day * 365.0
-                d['calls_in_range_day']  = _calls_in_range_day
-                d['calls_in_range_yr']   = _weighted_zone_calls
-                d['calls_handle_day']    = min(_weighted_zone_calls / 365.0, _max_flights_cap)
-                d['calls_handle_yr']     = min(_weighted_zone_calls, _max_flights_cap * 365.0)
-                d['calls_unanswered_day']= max(0.0, (_weighted_zone_calls / 365.0) - _max_flights_cap)
-                d['calls_unanswered_yr'] = max(0.0, _weighted_zone_calls - (_max_flights_cap * 365.0))
+                d['calls_in_range_day']  = _raw_calls_in_range_day
+                d['calls_in_range_yr']   = float(_raw_zone_calls)
+                d['dispatchable_calls_day'] = _dispatchable_calls_day
+                d['dispatchable_calls_yr']  = _dispatchable_calls_yr
+                d['weighted_dispatchable_calls_day'] = _weighted_dispatchable_calls_day
+                d['weighted_dispatchable_calls_yr']  = _weighted_dispatchable_calls_yr
+                d['calls_handle_day']    = min(_dispatchable_calls_day, _max_flights_cap)
+                d['calls_handle_yr']     = min(_dispatchable_calls_yr, _max_flights_cap * 365.0)
+                d['calls_unanswered_day']= _unserv_calls_day
+                d['calls_unanswered_yr'] = _unserv_calls_yr
                 d['marginal_flights']    = _excl_flights
                 d['marginal_deflected']  = _excl_deflected
-                d['shared_flights']      = _shared_dfr
+                d['handled_calls_day']   = _handled_calls_day
+                d['handled_calls_yr']    = _handled_calls_yr
+                d['shared_flights']      = 0.0
                 d['zone_flights']        = _zone_flights
                 d['zone_calls_annual']   = _weighted_zone_calls * 365.0 / 365.0
                 d['raw_zone_calls_annual'] = _raw_zone_calls
@@ -4200,6 +4198,8 @@ body{{background:transparent;overflow:hidden}}
                           'blocked_per_day':0,'best_be_text':"N/A",'base_annual':0,
                           'concurrent_annual':0,'zone_flights':0,'zone_calls_annual':0,
                           'calls_in_range_day':0,'calls_in_range_yr':0,
+                          'dispatchable_calls_day':0,'dispatchable_calls_yr':0,
+                          'weighted_dispatchable_calls_day':0,'weighted_dispatchable_calls_yr':0,
                           'calls_handle_day':0,'calls_handle_yr':0,
                           'calls_unanswered_day':0,'calls_unanswered_yr':0,
                           'zone_flights_annual':0})
@@ -4208,8 +4208,12 @@ body{{background:transparent;overflow:hidden}}
 
         # ── RECONCILE UNIT ECONOMICS TO FLEET HEADLINE ───────────────────────
         if active_drones and annual_savings >= 0:
-            _fleet_target_annual = float(max(0, annual_savings))
             _raw_total_annual = float(sum(max(0, d.get('best_case_annual', d.get('annual_savings', 0)) or 0) for d in active_drones))
+            if _raw_total_annual > 0:
+                annual_savings = _raw_total_annual
+                monthly_savings = annual_savings / 12.0
+                break_even_text = f"{fleet_capex / monthly_savings:.1f} MONTHS" if monthly_savings > 0 else "N/A"
+            _fleet_target_annual = float(max(0, annual_savings))
             if _fleet_target_annual > 0:
                 if _raw_total_annual <= 0:
                     _weights = [max(0.0, float(d.get('marginal_perc', 0) or 0)) for d in active_drones]
@@ -4253,25 +4257,27 @@ body{{background:transparent;overflow:hidden}}
                 _reconciled_total = float(sum(max(0, d.get('annual_savings', 0) or 0) for d in active_drones))
                 _drift = _fleet_target_annual - _reconciled_total
                 if abs(_drift) > 0.01 and active_drones:
-                    _lead = max(active_drones, key=lambda x: float(x.get('annual_savings', 0) or 0))
-                    _lead['annual_savings']   = float(_lead.get('annual_savings',   0) or 0) + _drift
-                    _lead['best_case_annual'] = float(_lead.get('best_case_annual', 0) or 0) + _drift
-                    _lead['monthly_savings']  = float(_lead.get('monthly_savings',  0) or 0) + (_drift / 12.0)
-                    # Distribute drift into base first; overflow goes into concurrent so that
-                    # base_annual + concurrent_annual always equals best_case_annual (keeps the
-                    # Value Breakdown box consistent with the headline figure).
-                    _lead_base = float(_lead.get('base_annual', 0) or 0)
-                    _lead_conc = float(_lead.get('concurrent_annual', 0) or 0)
-                    _drift_to_base = max(-_lead_base, min(_drift, _drift))  # full drift to base …
-                    _new_base = _lead_base + _drift_to_base
-                    if _new_base < 0:                                        # … unless base would go negative
-                        _drift_to_base = -_lead_base
-                        _new_base = 0.0
-                    _drift_to_conc = _drift - _drift_to_base
-                    _lead['base_annual']       = _new_base
-                    _lead['concurrent_annual'] = max(0.0, _lead_conc + _drift_to_conc)
-                    _lead['be_text']      = f"{_lead['cost']/_lead['monthly_savings']:.1f} MO" if _lead['monthly_savings'] > 0 else "N/A"
-                    _lead['best_be_text'] = _lead['be_text']
+                    _weights = [max(0.0, float(d.get('annual_savings', 0) or 0)) for d in active_drones]
+                    _w_sum = sum(_weights)
+                    if _w_sum <= 0:
+                        _weights = [max(0.0, float(d.get('base_annual', 0) or 0)) for d in active_drones]
+                        _w_sum = sum(_weights)
+                    if _w_sum <= 0:
+                        _weights = [1.0 for _ in active_drones]
+                        _w_sum = float(len(active_drones))
+
+                    _allocated = 0.0
+                    for _idx, (_d, _w) in enumerate(zip(active_drones, _weights)):
+                        _share = _drift if _idx == len(active_drones) - 1 else _drift * (_w / _w_sum)
+                        if _idx < len(active_drones) - 1:
+                            _allocated += _share
+                        else:
+                            _share = _drift - _allocated
+                        _d['annual_savings']   = float(_d.get('annual_savings', 0) or 0) + _share
+                        _d['best_case_annual'] = float(_d.get('best_case_annual', 0) or 0) + _share
+                        _d['monthly_savings']  = float(_d.get('monthly_savings', 0) or 0) + (_share / 12.0)
+                        _d['be_text']      = f"{_d['cost']/_d['monthly_savings']:.1f} MO" if _d['monthly_savings'] > 0 else "N/A"
+                        _d['best_be_text'] = _d['be_text']
 
         # ── SIDEBAR: fill Annual Capacity Value box with specialty values that match unit cards ──
         if fleet_capex > 0 and show_financials:
@@ -7926,3 +7932,4 @@ body{{background:transparent;overflow:hidden}}
 
 
 main()
+

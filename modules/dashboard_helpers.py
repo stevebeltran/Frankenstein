@@ -12,7 +12,7 @@ import pandas as pd
 from shapely.geometry import box
 from shapely.ops import unary_union
 
-from modules.config import calculate_max_flights_per_day
+from modules.config import calculate_max_flights_per_day, US_STATES_ABBR
 from modules.versioning import __version__ as _app_version
 
 
@@ -983,7 +983,13 @@ def manage_custom_stations(
             if not preferred_state:
                 return True
             text = str(match.get('matched_address', '') or '').upper()
-            return f", {preferred_state}" in text or text.endswith(f" {preferred_state}")
+            _abbr_to_full = {v: k for k, v in US_STATES_ABBR.items()}
+            _full_state = _abbr_to_full.get(preferred_state.upper(), '').upper()
+            return (
+                f", {preferred_state}" in text
+                or text.endswith(f" {preferred_state}")
+                or (_full_state and _full_state in text)
+            )
 
         def _match_in_preferred_city(match):
             if not preferred_city:

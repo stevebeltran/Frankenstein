@@ -4204,7 +4204,9 @@ body{{background:transparent;overflow:hidden}}
                 shared_mask   = d['cov_array'] & (_cover_counts > 1)
                 _shared_calls = int(np.sum(shared_mask))
                 _excl_calls   = _raw_zone_calls - _shared_calls  # calls ONLY this drone covers
+                _exclusive_weighted_zone_calls = float(np.sum(d['cov_array'] & (_cover_counts == 1)))
                 _weighted_zone_calls = float(np.sum(d['cov_array'] / np.maximum(_cover_counts, 1)))
+                _concurrent_weighted_zone_calls = max(0.0, _weighted_zone_calls - _exclusive_weighted_zone_calls)
                 _weighted_zone_perc  = (_weighted_zone_calls / total_calls) if total_calls > 0 else 0.0
 
                 # ── UTILIZATION: based on overlap-adjusted station load ───────────
@@ -4311,15 +4313,30 @@ body{{background:transparent;overflow:hidden}}
                 _handled_calls_yr  = _handled_calls_day * 365.0
                 _deflected_calls_day = _handled_calls_day * deflection_rate
                 _deflected_calls_yr  = _handled_calls_yr * deflection_rate
-                _base_annual       = _handled_calls_yr * _cost_delta
+                _exclusive_dispatchable_calls_day = min(
+                    (_exclusive_weighted_zone_calls / 365.0) * _effective_dfr,
+                    _dispatchable_calls_day,
+                )
+                _concurrent_dispatchable_calls_day = min(
+                    (_concurrent_weighted_zone_calls / 365.0) * _effective_dfr,
+                    _dispatchable_calls_day,
+                )
+                _dispatchable_split_total = max(_weighted_dispatchable_calls_day, 0.0)
+                if _dispatchable_split_total > 0:
+                    _exclusive_share = min(1.0, max(0.0, _exclusive_dispatchable_calls_day / _dispatchable_split_total))
+                else:
+                    _exclusive_share = 0.0
+                _concurrent_share = max(0.0, 1.0 - _exclusive_share)
+                _excl_flights      = _handled_calls_day * _exclusive_share
+                _concurrent_daily  = _handled_calls_day * _concurrent_share
+                _excl_deflected    = _deflected_calls_day * _exclusive_share
+                _concurrent_deflected_day = _deflected_calls_day * _concurrent_share
+                _base_annual       = (_excl_flights * 365.0) * _cost_delta
                 _base_monthly      = _base_annual / 12.0
-                _concurrent_daily  = 0.0
-                _concurrent_month  = 0.0
-                _concurrent_annual = 0.0
-                _best_monthly      = _base_monthly
-                _best_annual       = _base_annual
-                _excl_flights      = _handled_calls_day
-                _excl_deflected    = _deflected_calls_day
+                _concurrent_month  = (_concurrent_daily * 365.0 * _cost_delta) / 12.0
+                _concurrent_annual = _concurrent_daily * 365.0 * _cost_delta
+                _best_monthly      = _base_monthly + _concurrent_month
+                _best_annual       = _base_annual + _concurrent_annual
 
                 # ── STORE — use best_case as primary display value ─────────────────
                 _assigned_daily_calls   = _weighted_zone_perc * calls_per_day if total_calls > 0 else 0.0
@@ -4343,7 +4360,7 @@ body{{background:transparent;overflow:hidden}}
                 d['marginal_deflected']  = _excl_deflected
                 d['handled_calls_day']   = _handled_calls_day
                 d['handled_calls_yr']    = _handled_calls_yr
-                d['shared_flights']      = 0.0
+                d['shared_flights']      = _concurrent_daily
                 d['zone_flights']        = _zone_flights
                 d['zone_calls_annual']   = _weighted_zone_calls * 365.0 / 365.0
                 d['raw_zone_calls_annual'] = _raw_zone_calls

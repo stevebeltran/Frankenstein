@@ -1188,14 +1188,75 @@ def get_address_from_latlon(lat, lon):
     return f"{lat:.5f}, {lon:.5f}"
 
 @st.cache_data(show_spinner=False)
-def search_address_candidates(address_str, limit=6):
+def search_address_candidates(address_str, limit=6, preferred_city="", preferred_state=""):
     address_str = str(address_str or '').strip()
     if not address_str:
         return []
 
     limit = max(1, min(int(limit or 6), 10))
+    preferred_city = str(preferred_city or '').strip()
+    preferred_state = str(preferred_state or '').strip().upper()
     candidates = []
     seen = set()
+
+    def _lookup_secret(*names):
+        try:
+            for _key_name in names:
+                _key_val = str(st.secrets.get(_key_name, "") or "").strip()
+                if _key_val:
+                    return _key_val
+        except Exception:
+            return ""
+        return ""
+
+    def _normalize_text(value):
+        return str(value or "").strip().lower()
+
+    def _query_variants():
+        _variants = [address_str]
+        _has_city = preferred_city and preferred_city.lower() in address_str.lower()
+        _has_state = preferred_state and preferred_state.lower() in address_str.lower()
+        if preferred_city and preferred_state and (not _has_city or not _has_state):
+            _variants.append(f"{address_str}, {preferred_city}, {preferred_state}")
+        if preferred_state and not _has_state:
+            _variants.append(f"{address_str}, {preferred_state}")
+        ordered = []
+        seen_variants = set()
+        for _variant in _variants:
+            _clean = str(_variant or '').strip()
+            if _clean and _clean.lower() not in seen_variants:
+                seen_variants.add(_clean.lower())
+                ordered.append(_clean)
+        return ordered
+
+    def _candidate_score(candidate):
+        _label = _normalize_text(candidate.get('matched_address') or candidate.get('label'))
+        _source = str(candidate.get('source', ''))
+        _score = {
+            'Google': 500,
+            'Mapbox': 425,
+            'Census': 350,
+            'OSM': 250,
+        }.get(_source, 0)
+
+        if preferred_state:
+            _state_token = f", {preferred_state.lower()}"
+            if _state_token in _label or _label.endswith(f" {preferred_state.lower()}"):
+                _score += 220
+            else:
+                _score -= 180
+        if preferred_city:
+            if preferred_city.lower() in _label:
+                _score += 150
+            else:
+                _score -= 80
+
+        _typed = _normalize_text(address_str)
+        if _typed and _typed in _label:
+            _score += 80
+        elif _typed:
+            _score += max(0, 30 - min(len(_typed), 30))
+        return _score
 
     def _add_candidate(label, lat, lon, source, raw_match=''):
         try:
@@ -1213,82 +1274,119 @@ def search_address_candidates(address_str, limit=6):
             'lat': lat_f,
             'lon': lon_f,
             'source': source,
+            '_score': 0,
         })
 
     def _google_maps_api_key():
-        try:
-            for _key_name in ("GOOGLE_MAPS_API_KEY", "GOOGLE_GEOCODING_API_KEY", "GMAPS_API_KEY"):
-                _key_val = str(st.secrets.get(_key_name, "") or "").strip()
-                if _key_val:
-                    return _key_val
-        except Exception:
-            return ""
-        return ""
+        return _lookup_secret("GOOGLE_MAPS_API_KEY", "GOOGLE_GEOCODING_API_KEY", "GMAPS_API_KEY")
 
-    try:
-        _params = urllib.parse.urlencode({
-            'address': address_str,
-            'benchmark': '2020',
-            'format': 'json'
-        })
-        _url = f"https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?{_params}"
-        _req = urllib.request.Request(_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
-        with urllib.request.urlopen(_req, timeout=8) as _resp:
-            _data = json.loads(_resp.read().decode('utf-8'))
-        for _match in _data.get('result', {}).get('addressMatches', [])[:limit]:
-            _coords = _match.get('coordinates', {})
-            _add_candidate(
-                _match.get('matchedAddress', address_str),
-                _coords.get('y'),
-                _coords.get('x'),
-                'Census',
-                raw_match=_match.get('matchedAddress', address_str),
-            )
-    except Exception:
-        pass
+    def _mapbox_api_key():
+        return _lookup_secret("MAPBOX_ACCESS_TOKEN", "MAPBOX_API_KEY")
 
-
-    _google_api_key = _google_maps_api_key()
-    if _google_api_key:
+    for _query in _query_variants():
         try:
             _params = urllib.parse.urlencode({
-                'address': address_str,
-                'key': _google_api_key,
+                'address': _query,
+                'benchmark': '2020',
+                'format': 'json'
             })
-            _url = f"https://maps.googleapis.com/maps/api/geocode/json?{_params}"
+            _url = f"https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?{_params}"
             _req = urllib.request.Request(_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
             with urllib.request.urlopen(_req, timeout=8) as _resp:
                 _data = json.loads(_resp.read().decode('utf-8'))
-            for _match in _data.get('results', [])[:limit]:
-                _geometry = _match.get('geometry', {}).get('location', {})
-                _label = _match.get('formatted_address', address_str)
-                _add_candidate(_label, _geometry.get('lat'), _geometry.get('lng'), 'Google', raw_match=_label)
+            for _match in _data.get('result', {}).get('addressMatches', [])[:limit]:
+                _coords = _match.get('coordinates', {})
+                _add_candidate(
+                    _match.get('matchedAddress', _query),
+                    _coords.get('y'),
+                    _coords.get('x'),
+                    'Census',
+                    raw_match=_match.get('matchedAddress', _query),
+                )
         except Exception:
             pass
 
-    try:
-        _params = urllib.parse.urlencode({
-            'format': 'jsonv2',
-            'q': address_str,
-            'limit': str(limit),
-            'countrycodes': 'us',
-            'addressdetails': '1',
-        })
-        _url = f"https://nominatim.openstreetmap.org/search?{_params}"
-        _req = urllib.request.Request(_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
-        with urllib.request.urlopen(_req, timeout=8) as _resp:
-            _data = json.loads(_resp.read().decode('utf-8'))
-        for _match in _data[:limit]:
-            _label = _match.get('display_name', address_str)
-            _add_candidate(_label, _match.get('lat'), _match.get('lon'), 'OSM', raw_match=_label)
-    except Exception:
-        pass
+    _google_api_key = _google_maps_api_key()
+    if _google_api_key:
+        for _query in _query_variants():
+            try:
+                _params = urllib.parse.urlencode({
+                    'address': _query,
+                    'key': _google_api_key,
+                    'components': f'country:US|administrative_area:{preferred_state}' if preferred_state else 'country:US',
+                })
+                _url = f"https://maps.googleapis.com/maps/api/geocode/json?{_params}"
+                _req = urllib.request.Request(_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+                with urllib.request.urlopen(_req, timeout=8) as _resp:
+                    _data = json.loads(_resp.read().decode('utf-8'))
+                for _match in _data.get('results', [])[:limit]:
+                    _geometry = _match.get('geometry', {}).get('location', {})
+                    _label = _match.get('formatted_address', _query)
+                    _add_candidate(_label, _geometry.get('lat'), _geometry.get('lng'), 'Google', raw_match=_label)
+            except Exception:
+                pass
 
-    return candidates[:limit]
+    _mapbox_key = _mapbox_api_key()
+    if _mapbox_key:
+        for _query in _query_variants():
+            try:
+                _params = urllib.parse.urlencode({
+                    'q': _query,
+                    'access_token': _mapbox_key,
+                    'country': 'US',
+                    'limit': str(limit),
+                    'autocomplete': 'true',
+                    'types': 'address,street',
+                })
+                _url = f"https://api.mapbox.com/search/geocode/v6/forward?{_params}"
+                _req = urllib.request.Request(_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+                with urllib.request.urlopen(_req, timeout=8) as _resp:
+                    _data = json.loads(_resp.read().decode('utf-8'))
+                for _match in _data.get('features', [])[:limit]:
+                    _coords = (_match.get('geometry') or {}).get('coordinates') or [None, None]
+                    _props = _match.get('properties') or {}
+                    _label = (
+                        _props.get('full_address')
+                        or _match.get('place_name')
+                        or _match.get('name')
+                        or _query
+                    )
+                    _add_candidate(_label, _coords[1], _coords[0], 'Mapbox', raw_match=_label)
+            except Exception:
+                pass
+
+    for _query in _query_variants():
+        try:
+            _params = urllib.parse.urlencode({
+                'format': 'jsonv2',
+                'q': _query,
+                'limit': str(limit),
+                'countrycodes': 'us',
+                'addressdetails': '1',
+            })
+            _url = f"https://nominatim.openstreetmap.org/search?{_params}"
+            _req = urllib.request.Request(_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+            with urllib.request.urlopen(_req, timeout=8) as _resp:
+                _data = json.loads(_resp.read().decode('utf-8'))
+            for _match in _data[:limit]:
+                _label = _match.get('display_name', _query)
+                _add_candidate(_label, _match.get('lat'), _match.get('lon'), 'OSM', raw_match=_label)
+        except Exception:
+            pass
+
+    for _candidate in candidates:
+        _candidate['_score'] = _candidate_score(_candidate)
+    candidates.sort(key=lambda _item: (-_item.get('_score', 0), _item.get('matched_address', '')))
+    return [{k: v for k, v in _candidate.items() if k != '_score'} for _candidate in candidates[:limit]]
 
 @st.cache_data(show_spinner=False)
 def forward_geocode(address_str):
-    _matches = search_address_candidates(address_str, limit=1)
+    _matches = search_address_candidates(
+        address_str,
+        limit=1,
+        preferred_city=st.session_state.get('active_city', ''),
+        preferred_state=st.session_state.get('active_state', ''),
+    )
     if _matches:
         return float(_matches[0]['lat']), float(_matches[0]['lon'])
     return None, None

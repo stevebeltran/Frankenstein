@@ -4157,9 +4157,14 @@ body{{background:transparent;overflow:hidden}}
                     _effective_dfr = dfr_dispatch_rate
 
                 # On-scene minutes available per flight given current demand.
-                # This uses the same travel-cost assumption as the capacity model,
-                # so Guardians no longer overstate spare time by ignoring the return leg.
-                _on_scene_min = (_budget_min / max(_zone_flights, 0.001)) - _travel_cost if _zone_flights > 0 else 99.0
+                # Capped at single-flight endurance minus travel — you cannot stay
+                # on scene longer than the battery allows regardless of how few calls there are.
+                _flight_endurance = CONFIG["GUARDIAN_FLIGHT_MIN"] if _is_guard else CONFIG["RESPONDER_FLIGHT_MIN"]
+                _max_on_scene = max(0.0, _flight_endurance - _travel_cost)
+                _on_scene_min = min(
+                    (_budget_min / max(_zone_flights, 0.001)) - _travel_cost if _zone_flights > 0 else _max_on_scene,
+                    _max_on_scene,
+                )
 
                 _raw_calls_in_range_day = _raw_zone_calls / 365.0
                 _dispatchable_calls_day = _raw_calls_in_range_day * _effective_dfr
@@ -6283,6 +6288,34 @@ body{{background:transparent;overflow:hidden}}
             "brinc_user": st.session_state.get('brinc_user', ''),
             "pricing_tier": st.session_state.get('pricing_tier', 'Safe Guard'),
             "app_version": __version__,
+            # ── Extended session state ────────────────────────────────────
+            "estimated_pop":               int(st.session_state.get('estimated_pop', 0) or 0),
+            "total_original_calls":        int(st.session_state.get('total_original_calls', 0) or 0),
+            "total_modeled_calls":         int(st.session_state.get('total_modeled_calls', 0) or 0),
+            "inferred_daily_calls_override": st.session_state.get('inferred_daily_calls_override'),
+            "data_source":                 st.session_state.get('data_source', 'unknown'),
+            "active_dept_name":            st.session_state.get('active_dept_name', ''),
+            "file_meta":                   {k: v for k, v in (st.session_state.get('file_meta') or {}).items()
+                                            if isinstance(v, (str, int, float, bool, type(None)))},
+            "show_satellite_b":            st.session_state.get('show_satellite_b', False),
+            "show_boundaries_b":           st.session_state.get('show_boundaries_b', True),
+            "show_faa_b":                  st.session_state.get('show_faa_b', False),
+            "show_no_fly_b":               st.session_state.get('show_no_fly_b', False),
+            "show_obstacles_b":            st.session_state.get('show_obstacles_b', False),
+            "show_coverage_b":             st.session_state.get('show_coverage_b', False),
+            "show_cell_towers_b":          st.session_state.get('show_cell_towers_b', False),
+            "show_heatmap_b":              st.session_state.get('show_heatmap_b', False),
+            "show_dots_b":                 st.session_state.get('show_dots_b', True),
+            "simulate_traffic_b":          st.session_state.get('simulate_traffic_b', False),
+            "show_health_b":               st.session_state.get('show_health_b', False),
+            "show_financials_b":           st.session_state.get('show_financials_b', True),
+            "simple_cards_b":              st.session_state.get('simple_cards_b', False),
+            "doc_custom_intro":            st.session_state.get('doc_custom_intro', ''),
+            "doc_talking_pt_1":            st.session_state.get('doc_talking_pt_1', ''),
+            "doc_talking_pt_2":            st.session_state.get('doc_talking_pt_2', ''),
+            "doc_talking_pt_3":            st.session_state.get('doc_talking_pt_3', ''),
+            "doc_custom_closing":          st.session_state.get('doc_custom_closing', ''),
+            "doc_ae_phone":                st.session_state.get('doc_ae_phone', ''),
         }
 
         if fleet_capex > 0:
@@ -6451,6 +6484,37 @@ body{{background:transparent;overflow:hidden}}
                 # Pricing tier selection
                 "pricing_tier": st.session_state.get('pricing_tier', 'Safe Guard'),
                 "app_version": __version__,
+                # ── Extended session state ────────────────────────────────────
+                # Jurisdiction metrics
+                "estimated_pop":               int(st.session_state.get('estimated_pop', 0) or 0),
+                "total_original_calls":        int(st.session_state.get('total_original_calls', 0) or 0),
+                "total_modeled_calls":         int(st.session_state.get('total_modeled_calls', 0) or 0),
+                "inferred_daily_calls_override": st.session_state.get('inferred_daily_calls_override'),
+                "data_source":                 st.session_state.get('data_source', 'unknown'),
+                "active_dept_name":            st.session_state.get('active_dept_name', ''),
+                "file_meta":                   {k: v for k, v in (st.session_state.get('file_meta') or {}).items()
+                                                if isinstance(v, (str, int, float, bool, type(None)))},
+                # Display options (widget keys)
+                "show_satellite_b":            st.session_state.get('show_satellite_b', False),
+                "show_boundaries_b":           st.session_state.get('show_boundaries_b', True),
+                "show_faa_b":                  st.session_state.get('show_faa_b', False),
+                "show_no_fly_b":               st.session_state.get('show_no_fly_b', False),
+                "show_obstacles_b":            st.session_state.get('show_obstacles_b', False),
+                "show_coverage_b":             st.session_state.get('show_coverage_b', False),
+                "show_cell_towers_b":          st.session_state.get('show_cell_towers_b', False),
+                "show_heatmap_b":              st.session_state.get('show_heatmap_b', False),
+                "show_dots_b":                 st.session_state.get('show_dots_b', True),
+                "simulate_traffic_b":          st.session_state.get('simulate_traffic_b', False),
+                "show_health_b":               st.session_state.get('show_health_b', False),
+                "show_financials_b":           st.session_state.get('show_financials_b', True),
+                "simple_cards_b":              st.session_state.get('simple_cards_b', False),
+                # Document customization
+                "doc_custom_intro":            st.session_state.get('doc_custom_intro', ''),
+                "doc_talking_pt_1":            st.session_state.get('doc_talking_pt_1', ''),
+                "doc_talking_pt_2":            st.session_state.get('doc_talking_pt_2', ''),
+                "doc_talking_pt_3":            st.session_state.get('doc_talking_pt_3', ''),
+                "doc_custom_closing":          st.session_state.get('doc_custom_closing', ''),
+                "doc_ae_phone":                st.session_state.get('doc_ae_phone', ''),
             }
 
             export_html = None

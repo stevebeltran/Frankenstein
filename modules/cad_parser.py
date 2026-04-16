@@ -437,8 +437,8 @@ def aggressive_parse_calls(uploaded_files):
 
             res = pd.DataFrame()
             exact_coord_names = {
-                'lat': ['latitude', 'lat', 'gps_lat', 'gps_latitude'],
-                'lon': ['longitude', 'lon', 'long', 'gps_lon', 'gps_longitude']
+                'lat': ['latitude', 'lat', 'gps_lat', 'gps_latitude', 'y'],
+                'lon': ['longitude', 'lon', 'long', 'gps_lon', 'gps_longitude', 'x']
             }
             for field in ['lat', 'lon']:
                 found_exact = [c for c in raw_df.columns if c.strip().lower() in exact_coord_names[field]]
@@ -478,7 +478,7 @@ def aggressive_parse_calls(uploaded_files):
                         lat_candidates.append((c, series))
                         lon_candidates.append((c, series))
                         continue
-                    if -90 <= mn and mx <= 90 and mn < -1:
+                    if -90 <= mn and mx <= 90:
                         lat_candidates.append((c, series))
                     if -180 <= mn and mx <= 180 and (mn < -90 or mx > 90):
                         lon_candidates.append((c, series))

@@ -4974,8 +4974,8 @@ body{{background:transparent;overflow:hidden}}
                 _unserv_calls_yr  = _unserv_calls_day * 365
 
                 # Extra stations needed to clear deficit (same type and alternate type)
-                _extra_same = int(math.ceil(_deficit_flights / _max_flights_cap)) if _has_deficit else 0
-                _extra_alt  = int(math.ceil(_deficit_flights / _alt_max_flights))  if _has_deficit else 0
+                _extra_same = int(math.ceil(_deficit_flights / _max_flights_cap)) if (_has_deficit and _max_flights_cap > 0) else 0
+                _extra_alt  = int(math.ceil(_deficit_flights / _alt_max_flights))  if (_has_deficit and _alt_max_flights > 0) else 0
 
                 # CapEx cost of each resolution path
                 _same_type_cost = CONFIG["GUARDIAN_COST"] if _is_guard else CONFIG["RESPONDER_COST"]

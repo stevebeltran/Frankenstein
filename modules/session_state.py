@@ -55,6 +55,21 @@ DEFAULTS = {
     "doc_custom_closing": "",
     "doc_ae_phone": "",
     "inferred_daily_calls_override": None,
+    "census_pending": False,
+    "census_source_signature": "",
+    "census_stage_df": None,
+    "census_original_df": None,
+    "census_partial_calls_df": None,
+    "census_batch_zip_bytes": b"",
+    "census_batch_zip_name": "",
+    "census_sample_bytes": b"",
+    "census_sample_name": "",
+    "census_summary": {},
+    "census_conversion_summary": {},
+    "census_corrected_bytes": b"",
+    "census_corrected_name": "",
+    "census_corrected_format": "csv",
+    "census_download_notice": False,
 }
 
 

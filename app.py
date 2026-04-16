@@ -1814,6 +1814,19 @@ def fetch_census_population(state_fips, place_name, is_county=False):
         pass
     return KNOWN_POPULATIONS.get(place_name)
 
+@st.cache_data
+def fetch_census_state_population(state_fips):
+    url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=state:{state_fips}"
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            if len(data) > 1 and len(data[1]) > 0:
+                return int(data[1][0])
+    except Exception:
+        pass
+    return None
+
 SHAPEFILE_DIR = "jurisdiction_data"
 if not os.path.exists(SHAPEFILE_DIR): os.makedirs(SHAPEFILE_DIR)
 
@@ -1853,6 +1866,58 @@ def load_saved_boundary(kind, name, state_abbr):
     except Exception as e:
         print(f"[BRINC] load_saved_boundary failed for {kind}/{name}/{state_abbr}: {e}")
     return None
+
+@st.cache_data
+def fetch_tiger_state_shapefile(state_fips, state_abbr, output_dir):
+    temp_dir = os.path.join(output_dir, "temp_tiger_states")
+    cached_shp = os.path.join(temp_dir, "tl_2023_us_state.shp")
+    gdf = None
+
+    if os.path.exists(cached_shp):
+        try:
+            gdf = gpd.read_file(cached_shp)
+        except Exception:
+            gdf = None
+
+    if gdf is None:
+        for year in ["2023", "2022"]:
+            url = f"https://www2.census.gov/geo/tiger/TIGER{year}/STATE/tl_{year}_us_state.zip"
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"})
+                with urllib.request.urlopen(req, timeout=45) as resp:
+                    zip_data = resp.read()
+                zip_file = zipfile.ZipFile(io.BytesIO(zip_data))
+                os.makedirs(temp_dir, exist_ok=True)
+                zip_file.extractall(temp_dir)
+                shp_files = glob.glob(os.path.join(temp_dir, "*.shp"))
+                if shp_files:
+                    gdf = gpd.read_file(shp_files[0])
+                    break
+            except Exception:
+                continue
+
+    if gdf is None:
+        return False, None
+
+    try:
+        state_gdf = gdf[gdf['STATEFP'].astype(str) == str(state_fips)].copy()
+        if state_gdf.empty:
+            return False, None
+        if 'STUSPS' in state_gdf.columns:
+            _abbr_rows = state_gdf[state_gdf['STUSPS'].astype(str).str.upper() == str(state_abbr).upper()].copy()
+            if not _abbr_rows.empty:
+                state_gdf = _abbr_rows
+        state_gdf = state_gdf.dissolve().reset_index(drop=True)
+        state_gdf['NAME'] = str(state_abbr).upper()
+        if state_gdf.crs is None:
+            state_gdf = state_gdf.set_crs(epsg=4269)
+        state_gdf = state_gdf.to_crs(epsg=4326)
+        save_path = os.path.join(output_dir, f"state_{state_abbr.upper()}_{state_fips}.shp")
+        state_gdf.to_file(save_path)
+        return True, state_gdf[['NAME', 'geometry']]
+    except Exception as e:
+        print(f"[BRINC] fetch_tiger_state_shapefile failed for {state_abbr}: {e}")
+        return False, None
 
 @st.cache_data
 def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
@@ -3935,16 +4000,30 @@ def main():
                 if not st.session_state.get('demo_mode_used', False):
                     st.session_state['demo_mode_used'] = True
 
-            active_targets = [loc for loc in st.session_state['target_cities'] if loc['city'].strip()]
+            active_targets = [
+                {
+                    'city': str(loc.get('city', '') or '').strip(),
+                    'state': str(loc.get('state', '') or '').strip().upper(),
+                }
+                for loc in st.session_state['target_cities']
+                if str(loc.get('city', '') or '').strip() or str(loc.get('state', '') or '').strip().upper() in STATE_FIPS
+            ]
             if not active_targets:
-                st.error("Please enter at least one valid city name.")
+                st.error("Please enter at least one valid city, county, or state.")
                 st.stop()
 
+            _abbr_to_full = {abbr: name for name, abbr in US_STATES_ABBR.items()}
             if len(active_targets) == 1:
-                st.session_state['active_city']  = str(active_targets[0]['city']).title()
+                _target_city = str(active_targets[0]['city']).title()
+                if not _target_city:
+                    _target_city = _abbr_to_full.get(active_targets[0]['state'], active_targets[0]['state'])
+                st.session_state['active_city']  = _target_city
                 st.session_state['active_state'] = active_targets[0]['state']
             else:
-                st.session_state['active_city']  = f"{str(active_targets[0]['city']).title()} & {len(active_targets)-1} others"
+                _target_city = str(active_targets[0]['city']).title()
+                if not _target_city:
+                    _target_city = _abbr_to_full.get(active_targets[0]['state'], active_targets[0]['state'])
+                st.session_state['active_city']  = f"{_target_city} & {len(active_targets)-1} others"
                 st.session_state['active_state'] = active_targets[0]['state']
 
             # ── Fetch real population for upload path ─────────────────────────────
@@ -3963,7 +4042,7 @@ def main():
                 pass
 
             # ── Flight-path loading overlay ───────────────────────────────────────
-            _swarm_city = str(active_targets[0]['city']).title() if active_targets else "Jurisdiction"
+            _swarm_city = st.session_state.get('active_city', 'Jurisdiction') if active_targets else "Jurisdiction"
             _swarm_logo_b64 = get_themed_logo_base64("logo.png", theme="dark") or ""
             _swarm_gigs_b64 = get_transparent_product_base64("gigs.png") or ""
             _swarm_city_js  = _swarm_city.upper().replace('"', '').replace("'", '')
@@ -4306,8 +4385,10 @@ body{{background:transparent;overflow:hidden}}
                 DEMO_CITIES,
                 fetch_county_boundary_local,
                 fetch_place_boundary_local,
+                fetch_tiger_state_shapefile,
                 save_boundary_gdf,
                 fetch_census_population,
+                fetch_census_state_population,
             )
             for _msg in boundary_messages:
                 st.toast(_msg)

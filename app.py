@@ -1247,8 +1247,82 @@ def get_address_from_latlon(lat, lon):
     # Fallback to coordinates if an exact street address isn't found
     return f"{lat:.5f}, {lon:.5f}"
 
+def _lookup_streamlit_secret(*names):
+    _target_names = {str(_name or '').strip().upper() for _name in names if str(_name or '').strip()}
+    if not _target_names:
+        return ""
+
+    def _scan_secret_container(_container, _visited=None):
+        _visited = _visited or set()
+        _obj_id = id(_container)
+        if _obj_id in _visited:
+            return ""
+        _visited.add(_obj_id)
+
+        if hasattr(_container, 'items'):
+            try:
+                _items = list(_container.items())
+            except Exception:
+                _items = []
+
+            for _key, _value in _items:
+                if str(_key or '').strip().upper() in _target_names and not hasattr(_value, 'items'):
+                    _secret_value = str(_value or '').strip()
+                    if _secret_value:
+                        return _secret_value
+
+            for _, _value in _items:
+                if hasattr(_value, 'items'):
+                    _nested_value = _scan_secret_container(_value, _visited)
+                    if _nested_value:
+                        return _nested_value
+        return ""
+
+    try:
+        _secret_value = _scan_secret_container(st.secrets)
+        if _secret_value:
+            return _secret_value
+    except Exception:
+        pass
+
+    for _name in names:
+        _env_value = str(os.environ.get(str(_name or '').strip(), '') or '').strip()
+        if _env_value:
+            return _env_value
+    return ""
+
+
+def _get_google_maps_api_key():
+    return _lookup_streamlit_secret(
+        "GOOGLE_MAPS_API_KEY",
+        "GOOGLE_GEOCODING_API_KEY",
+        "GOOGLE_API_KEY",
+        "GMAPS_API_KEY",
+    )
+
+
+def _get_mapbox_api_key():
+    return _lookup_streamlit_secret(
+        "MAPBOX_ACCESS_TOKEN",
+        "MAPBOX_API_KEY",
+        "MAPBOX_TOKEN",
+    )
+
+
+def _get_geocoder_provider_signature():
+    _provider_values = {
+        'google': _get_google_maps_api_key(),
+        'mapbox': _get_mapbox_api_key(),
+    }
+    _signature_payload = "|".join(
+        f"{_provider}:{hashlib.sha256(str(_value or '').encode('utf-8')).hexdigest()}"
+        for _provider, _value in sorted(_provider_values.items())
+    )
+    return hashlib.sha256(_signature_payload.encode('utf-8')).hexdigest()
+
+
 @st.cache_data(show_spinner=False)
-def search_address_candidates(address_str, limit=6, preferred_city="", preferred_state=""):
+def _search_address_candidates_cached(address_str, limit=6, preferred_city="", preferred_state="", provider_signature=""):
     address_str = str(address_str or '').strip()
     if not address_str:
         try:
@@ -1272,16 +1346,6 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
     preferred_state_full = _abbr_to_full.get(preferred_state, '').lower()
     candidates = []
     seen = set()
-
-    def _lookup_secret(*names):
-        try:
-            for _key_name in names:
-                _key_val = str(st.secrets.get(_key_name, "") or "").strip()
-                if _key_val:
-                    return _key_val
-        except Exception:
-            return ""
-        return ""
 
     def _normalize_text(value):
         return str(value or "").strip().lower()
@@ -1434,12 +1498,6 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
             '_score': 0,
         })
 
-    def _google_maps_api_key():
-        return _lookup_secret("GOOGLE_MAPS_API_KEY", "GOOGLE_GEOCODING_API_KEY", "GMAPS_API_KEY")
-
-    def _mapbox_api_key():
-        return _lookup_secret("MAPBOX_ACCESS_TOKEN", "MAPBOX_API_KEY")
-
     _queries = _query_variants()
     _provider_trace = []
 
@@ -1468,7 +1526,7 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
         except Exception:
             _provider_trace.append({'provider': 'Census', 'query': _query, 'used': True, 'match_count': 0, 'status': 'error'})
 
-    _google_api_key = _google_maps_api_key()
+    _google_api_key = _get_google_maps_api_key()
     if _google_api_key:
         for _query in _queries:
             try:
@@ -1492,7 +1550,7 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
     else:
         _provider_trace.append({'provider': 'Google', 'query': '', 'used': False, 'match_count': 0, 'status': 'missing_api_key'})
 
-    _mapbox_key = _mapbox_api_key()
+    _mapbox_key = _get_mapbox_api_key()
     if _mapbox_key:
         for _query in _queries:
             try:
@@ -1562,6 +1620,16 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
     except Exception:
         pass
     return [{k: v for k, v in _candidate.items() if k != '_score'} for _candidate in candidates[:limit]]
+
+
+def search_address_candidates(address_str, limit=6, preferred_city="", preferred_state=""):
+    return _search_address_candidates_cached(
+        address_str,
+        limit=limit,
+        preferred_city=preferred_city,
+        preferred_state=preferred_state,
+        provider_signature=_get_geocoder_provider_signature(),
+    )
 
 @st.cache_data(show_spinner=False)
 def forward_geocode(address_str):

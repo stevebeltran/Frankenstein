@@ -596,8 +596,10 @@ def build_demo_boundaries(
     demo_cities,
     fetch_county_boundary_local,
     fetch_place_boundary_local,
+    fetch_tiger_state_shapefile,
     save_boundary_gdf,
     fetch_census_population,
+    fetch_census_state_population,
 ):
     all_gdfs = []
     total_estimated_pop = 0
@@ -608,10 +610,16 @@ def build_demo_boundaries(
     for index, loc in enumerate(active_targets):
         city_name = loc['city'].strip()
         state_name = loc['state']
+        is_state = not city_name and state_name in state_fips
         is_county = city_name.lower().endswith(' county')
-        boundary_kind = 'county' if is_county else 'place'
+        boundary_kind = 'state' if is_state else ('county' if is_county else 'place')
 
-        if is_county:
+        if is_state:
+            success, temp_gdf = fetch_tiger_state_shapefile(state_fips[state_name], state_name, 'jurisdiction_data')
+            if success:
+                boundary_kind = 'state'
+                city_name = state_name
+        elif is_county:
             success, temp_gdf = fetch_county_boundary_local(state_name, city_name)
             if not success:
                 success, temp_gdf = fetch_county_boundary_local(state_name, city_name + ' County')
@@ -629,6 +637,7 @@ def build_demo_boundaries(
                     boundary_kind = 'county'
 
         is_county = boundary_kind == 'county'
+        is_state = boundary_kind == 'state'
         session_state['boundary_kind'] = boundary_kind
 
         if success and temp_gdf is not None:
@@ -638,18 +647,23 @@ def build_demo_boundaries(
 
         if success:
             all_gdfs.append(temp_gdf)
-            population = fetch_census_population(state_fips[state_name], city_name, is_county=is_county)
+            population = (
+                fetch_census_state_population(state_fips[state_name])
+                if is_state else
+                fetch_census_population(state_fips[state_name], city_name, is_county=is_county)
+            )
             if population:
                 total_estimated_pop += population
-                boundary_messages.append(f"✅ {city_name} population verified: {population:,}")
+                boundary_messages.append(f"✅ {city_name or state_name} population verified: {population:,}")
             else:
                 gdf_proj = temp_gdf.to_crs(epsg=3857)
                 area_sq_mi = gdf_proj.geometry.area.sum() / 2589988.11
-                estimated_pop = known_populations.get(city_name, int(area_sq_mi * 3500))
+                default_density = 35 if is_state else 3500
+                estimated_pop = known_populations.get(city_name or state_name, int(area_sq_mi * default_density))
                 total_estimated_pop += estimated_pop
-                boundary_messages.append(f"⚠️ {city_name} population estimated: {estimated_pop:,}")
+                boundary_messages.append(f"⚠️ {city_name or state_name} population estimated: {estimated_pop:,}")
         else:
-            warnings.append(f"⚠️ Could not find a boundary for {city_name}, {state_name}. Try another city.")
+            warnings.append(f"⚠️ Could not find a boundary for {city_name or state_name}, {state_name}. Try another city or state.")
             if session_state.get('_last_demo_city') == city_name:
                 candidates = [city for city in demo_cities if city[0] != city_name]
                 rerun_demo_target = random.choice(candidates)

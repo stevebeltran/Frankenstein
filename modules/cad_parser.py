@@ -91,7 +91,7 @@ def _extract_file_meta(raw_df, res_df, filename=""):
     except Exception:
         pass
     return meta
-def aggressive_parse_calls(uploaded_files):
+def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
     all_calls_list = []
     CV = {
         'date': ['received date','incident date','call date','call creation date','calldatetime','call datetime','calltime','timestamp','date','datetime','date time','dispatch date','time received','incdate','date_rept','date_occu','createdtime','created_time','receivedtime','received_time','eventtime','event_time','incidenttime','incident_time','reportedtime','reported_time','entrytime','entry_time','time_central','time_stamp','created'],
@@ -293,7 +293,7 @@ def aggressive_parse_calls(uploaded_files):
         if m: return int(m.group(1))
         return 3
 
-    for cfile in uploaded_files:
+    for file_idx, cfile in enumerate(uploaded_files):
         try:
             fname = cfile.name.lower()
             excel_exts = ('.xlsx', '.xls', '.xlsb', '.xlsm')
@@ -434,6 +434,8 @@ def aggressive_parse_calls(uploaded_files):
                                 raw_df['_csv_state'] = _top_st
                     except Exception:
                         pass
+
+            source_ids = [f"{file_idx}:{cfile.name}:{row_idx}" for row_idx in range(len(raw_df))]
 
             res = pd.DataFrame()
             exact_coord_names = {
@@ -795,6 +797,9 @@ def aggressive_parse_calls(uploaded_files):
             if inferred_state:
                 res["_csv_state"] = inferred_state
 
+            res["_source_row_id"] = source_ids
+            res["_source_file"] = cfile.name
+
             # ── Capture file data matrix for Sheets/email logging ────────────
             try:
                 _meta = _extract_file_meta(raw_df, res, filename=cfile.name)
@@ -812,16 +817,23 @@ def aggressive_parse_calls(uploaded_files):
         except: continue
         
     if not all_calls_list: return pd.DataFrame()
-    # Only keep frames that actually have lat/lon columns — Excel sheets
-    # without coordinate data should not crash the concat
-    valid = [df for df in all_calls_list if 'lat' in df.columns and 'lon' in df.columns]
-    if not valid: return pd.DataFrame()
-    combined = pd.concat(valid, ignore_index=True)
-    # Safe dropna — columns guaranteed to exist now
-    combined = combined.dropna(subset=['lat', 'lon'])
-    combined['lat'] = pd.to_numeric(combined['lat'], errors='coerce')
-    combined['lon'] = pd.to_numeric(combined['lon'], errors='coerce')
-    combined = combined[(combined['lat'].between(-90, 90)) & (combined['lon'].between(-180, 180))]
+    if require_valid_coordinates:
+        # Only keep frames that actually have lat/lon columns — Excel sheets
+        # without coordinate data should not crash the concat
+        valid = [df for df in all_calls_list if 'lat' in df.columns and 'lon' in df.columns]
+        if not valid: return pd.DataFrame()
+        combined = pd.concat(valid, ignore_index=True)
+        # Safe dropna — columns guaranteed to exist now
+        combined = combined.dropna(subset=['lat', 'lon'])
+        combined['lat'] = pd.to_numeric(combined['lat'], errors='coerce')
+        combined['lon'] = pd.to_numeric(combined['lon'], errors='coerce')
+        combined = combined[(combined['lat'].between(-90, 90)) & (combined['lon'].between(-180, 180))]
+    else:
+        combined = pd.concat(all_calls_list, ignore_index=True)
+        if 'lat' in combined.columns:
+            combined['lat'] = pd.to_numeric(combined['lat'], errors='coerce')
+        if 'lon' in combined.columns:
+            combined['lon'] = pd.to_numeric(combined['lon'], errors='coerce')
     # IMPORTANT: keep the full parsed CAD dataset here.
     #
     # The optimizer is sampled later (after upload) for performance, but the

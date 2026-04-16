@@ -96,6 +96,12 @@ from modules.notifications import (
 from modules.cad_parser import (
     aggressive_parse_calls, _extract_file_meta, _get_annualized_calls
 )
+from modules.census_batch import (
+    build_census_staging, make_census_batch_chunks, make_census_batch_zip,
+    make_sample_census_batch, parse_census_result_files, merge_census_results,
+    submit_census_batch_chunk, build_census_chunk_payload,
+    build_corrected_export,
+)
 from modules.geospatial import (
     _load_uploaded_boundary_overlay, _boundary_overlay_status,
     _count_points_within_boundary, find_jurisdictions_by_coordinates
@@ -123,6 +129,35 @@ from modules.onboarding import (
 )
 
 APP_DIR = Path(__file__).resolve().parent
+
+
+def _uploaded_files_signature(files):
+    parts = []
+    for idx, uploaded_file in enumerate(files or []):
+        try:
+            size = len(uploaded_file.getvalue())
+        except Exception:
+            size = 0
+        parts.append(f"{idx}:{uploaded_file.name}:{size}")
+    return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest() if parts else ""
+
+
+def _reset_census_state(session_state):
+    session_state['census_pending'] = False
+    session_state['census_source_signature'] = ''
+    session_state['census_stage_df'] = None
+    session_state['census_original_df'] = None
+    session_state['census_partial_calls_df'] = None
+    session_state['census_batch_zip_bytes'] = b""
+    session_state['census_batch_zip_name'] = ""
+    session_state['census_sample_bytes'] = b""
+    session_state['census_sample_name'] = ""
+    session_state['census_summary'] = {}
+    session_state['census_conversion_summary'] = {}
+    session_state['census_corrected_bytes'] = b""
+    session_state['census_corrected_name'] = ""
+    session_state['census_corrected_format'] = "csv"
+    session_state['census_download_notice'] = False
 
 
 def _resolve_public_reports_dir():
@@ -3156,7 +3191,163 @@ def main():
             def _is_boundary_sidecar(fname):
                 return Path(fname).suffix.lower() in {'.shp', '.shx', '.dbf', '.prj'}
 
-            if uploaded_files and len(uploaded_files) >= 1:
+            current_upload_signature = _uploaded_files_signature(uploaded_files)
+            if current_upload_signature and st.session_state.get('census_source_signature') and current_upload_signature != st.session_state.get('census_source_signature'):
+                _reset_census_state(st.session_state)
+
+            census_result_files = None
+            if st.session_state.get('census_pending'):
+                _census_summary = st.session_state.get('census_summary') or {}
+                _rows_ready = int(_census_summary.get('rows_ready', 0) or 0)
+                _rows_missing = int(_census_summary.get('rows_missing', 0) or 0)
+                st.warning(
+                    f"Census batch conversion is waiting for results. "
+                    f"{_rows_ready:,} rows are ready for Census formatting and {_rows_missing:,} rows still need address cleanup."
+                )
+                st.caption(
+                    "Download the prepared batch files, run them through the Census batch geocoder, "
+                    "then upload the returned result CSVs here. The prepared data is only kept for this browser session."
+                )
+                st.info(
+                    "What is happening now: the app identified that this upload does not contain recoverable coordinates and switched to the Census batch workflow. "
+                    "Preparing the batch files should usually take a few seconds to about 30 seconds. "
+                    "After that, total turnaround depends on how quickly the Census files are uploaded there and returned here."
+                )
+                if st.session_state.get('census_sample_bytes'):
+                    st.download_button(
+                        "⬇️ Download Census Sample Batch",
+                        data=st.session_state['census_sample_bytes'],
+                        file_name=st.session_state.get('census_sample_name') or "census_sample_batch.csv",
+                        mime="text/csv",
+                        key="download_census_sample_batch_btn",
+                        width="stretch",
+                    )
+                if st.session_state.get('census_batch_zip_bytes'):
+                    st.download_button(
+                        "⬇️ Download Census Batch ZIP",
+                        data=st.session_state['census_batch_zip_bytes'],
+                        file_name=st.session_state.get('census_batch_zip_name') or "census_batches.zip",
+                        mime="application/zip",
+                        key="download_census_batch_zip_btn",
+                        width="stretch",
+                    )
+                census_result_files = st.file_uploader(
+                    "Upload returned Census result CSVs",
+                    accept_multiple_files=True,
+                    type=['csv', 'txt'],
+                    key='census_result_files_uploader',
+                    help="Upload the CSV result files returned by the Census batch geocoder. The app will stitch them together and continue into the stations workflow.",
+                )
+
+                if census_result_files:
+                    with st.spinner("🛰 Stitching Census results back into the CAD file…"):
+                        result_df = parse_census_result_files(census_result_files)
+                        partial_calls_df = st.session_state.get('census_partial_calls_df')
+                        original_df = st.session_state.get('census_original_df')
+                        if partial_calls_df is None or original_df is None or result_df.empty:
+                            st.error("❌ Census result upload failed: missing prepared session data or no valid result rows were found.")
+                            st.stop()
+
+                        merged_full_df, merged_ready_df, merge_summary = merge_census_results(partial_calls_df, result_df)
+                        if merged_ready_df is None or merged_ready_df.empty:
+                            st.error("❌ Census result upload failed: no valid coordinates were recovered from the returned result files.")
+                            st.stop()
+
+                        corrected_export_df = build_corrected_export(original_df, result_df)
+                        corrected_csv = corrected_export_df.to_csv(index=False).encode('utf-8')
+                        st.session_state['census_corrected_bytes'] = corrected_csv
+                        st.session_state['census_corrected_name'] = "cad_calls_census_corrected.csv"
+                        st.session_state['census_conversion_summary'] = merge_summary
+                        st.session_state['census_download_notice'] = True
+
+                        df_c_full = merged_ready_df.reset_index(drop=True).copy()
+                        if len(df_c_full) > 25000:
+                            df_c = df_c_full.sample(25000, random_state=42).reset_index(drop=True)
+                            st.toast(f"⚠️ Optimization modeled with {len(df_c):,} representative calls out of {len(df_c_full):,} geocoded incidents.")
+                        else:
+                            df_c = df_c_full.copy()
+
+                        call_files_current, station_file_current, boundary_files_current = split_uploaded_files(
+                            uploaded_files or [],
+                            _is_boundary_sidecar,
+                            _looks_like_stations,
+                        )
+
+                        if station_file_current is not None:
+                            with st.spinner("🔍 Reading stations file…"):
+                                try:
+                                    df_s, osm_note = load_station_file(station_file_current)
+                                    st.session_state['stations_user_uploaded'] = True
+                                except Exception as e:
+                                    df_s, osm_note = None, f"Failed: {e}"
+                            if df_s is None or df_s.empty:
+                                st.error(f"❌ Stations file error: {osm_note}")
+                                st.stop()
+                        else:
+                            st.session_state['stations_user_uploaded'] = False
+                            with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools…"):
+                                df_s, osm_note = generate_stations_from_calls(df_c)
+                            if df_s is None or df_s.empty:
+                                df_s = _make_random_stations(df_c, n=40)
+                                osm_note = "⚠️ Could not reach any map source — using estimated station positions from call data."
+                                st.warning(osm_note)
+                            else:
+                                st.toast(f"✅ {osm_note}")
+
+                        if len(df_s) > 100:
+                            df_s = df_s.sample(100, random_state=42).reset_index(drop=True)
+
+                        with st.spinner("🛰 Census coordinates restored — resolving jurisdiction…"):
+                            detected_city, detected_state, detection_source = detect_location_from_calls(
+                                df_c,
+                                STATE_FIPS,
+                                US_STATES_ABBR,
+                                reverse_geocode_state,
+                            )
+                            if detected_city and detected_state:
+                                st.session_state['active_city'] = str(detected_city).title()
+                                st.session_state['active_state'] = detected_state
+                                st.session_state['target_cities'] = [{"city": detected_city, "state": detected_state}]
+                                st.session_state['location_detection_source'] = detection_source
+                            elif detected_state:
+                                st.session_state['active_state'] = detected_state
+                                st.session_state['location_detection_source'] = detection_source
+
+                        st.session_state['df_calls'] = df_c
+                        st.session_state['df_calls_full'] = df_c_full
+                        st.session_state['df_stations'] = df_s
+                        st.session_state['total_original_calls'] = int(merge_summary.get('rows_total', len(df_c_full)) or len(df_c_full))
+                        st.session_state['total_modeled_calls'] = len(df_c)
+
+                        with st.spinner(get_jurisdiction_message()):
+                            resolve_uploaded_boundaries(
+                                st.session_state,
+                                df_c,
+                                df_c_full,
+                                STATE_FIPS,
+                                find_jurisdictions_by_coordinates,
+                                _select_best_boundary_for_calls,
+                                save_boundary_gdf,
+                            )
+
+                        st.session_state['data_source'] = 'cad_upload'
+                        st.session_state['demo_mode_used'] = False
+                        st.session_state['sim_mode_used'] = False
+                        st.session_state['map_build_logged'] = False
+                        st.session_state['csvs_ready'] = True
+                        st.toast("✅ Census batch conversion completed. The corrected calls file is ready for download in the sidebar.")
+                        _reset_census_state(st.session_state)
+                        st.session_state['census_corrected_bytes'] = corrected_csv
+                        st.session_state['census_corrected_name'] = "cad_calls_census_corrected.csv"
+                        st.session_state['census_conversion_summary'] = merge_summary
+                        st.session_state['census_download_notice'] = True
+                        st.rerun()
+
+            if uploaded_files and len(uploaded_files) >= 1 and not (
+                st.session_state.get('census_pending') and
+                current_upload_signature == st.session_state.get('census_source_signature') and
+                not census_result_files
+            ):
                 _upload_logo_b64 = get_themed_logo_base64("logo.png", theme="dark") or ""
                 _upload_gigs_b64 = get_transparent_product_base64("gigs.png") or ""
                 components.html(f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
@@ -3180,6 +3371,12 @@ def main():
     +'#brinc-flo .fl-stline{{font-size:10px;letter-spacing:2px;color:rgba(0,210,255,0.7);text-transform:uppercase;margin-top:7px}}'
     +'#brinc-flo .fl-made{{margin-top:12px;font-size:11px;font-weight:800;letter-spacing:2.6px;color:rgba(255,255,255,0.92);text-transform:uppercase}}'
     +'#brinc-flo .fl-copy{{margin-top:8px;font-size:11px;line-height:1.55;color:rgba(255,255,255,0.62)}}'
+    +'#brinc-flo .fl-prog-wrap{{margin:14px auto 0;max-width:520px}}'
+    +'#brinc-flo .fl-prog-meta{{display:flex;justify-content:space-between;gap:12px;font-size:10px;letter-spacing:1.6px;color:rgba(255,255,255,0.62);text-transform:uppercase}}'
+    +'#brinc-flo .fl-prog{{margin-top:6px;height:7px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden;border:1px solid rgba(255,255,255,0.08)}}'
+    +'#brinc-flo .fl-prog-bar{{height:100%;width:4%;background:linear-gradient(90deg,#00D2FF,#39FF14);box-shadow:0 0 18px rgba(0,210,255,0.35);transition:width .28s ease}}'
+    +'#brinc-flo .fl-log{{margin:14px auto 0;max-width:620px;min-height:86px;max-height:132px;overflow:auto;text-align:left;padding:12px 14px;border:1px solid rgba(255,255,255,0.08);border-radius:12px;background:rgba(255,255,255,0.03);font-size:11px;line-height:1.5;color:rgba(255,255,255,0.72);white-space:pre-wrap}}'
+    +'#brinc-flo .fl-log.error{{border-color:rgba(255,99,99,0.45);background:rgba(110,20,20,0.22);color:rgba(255,215,215,0.95)}}'
     +'#brinc-flo .fl-loader{{position:relative;width:280px;height:180px}}'
     +'#brinc-flo .fl-radar{{position:absolute;inset:18px;border:1px solid rgba(0,210,255,0.22);border-radius:50%}}'
     +'#brinc-flo .fl-radar::before,#brinc-flo .fl-radar::after{{content:"";position:absolute;border:1px solid rgba(0,210,255,0.18);border-radius:50%}}'
@@ -3208,10 +3405,12 @@ def main():
     + '<div class="fl-stline" id="fl-stl">INGESTING INCIDENT DATA<span class="fl-dots"></span></div>'
     + '<div class="fl-made">MADE IN THE USA</div>'
     + '<div class="fl-copy">Parsing calls, resolving boundaries, and preparing deployment analysis.</div>'
+    + '<div class="fl-prog-wrap"><div class="fl-prog-meta"><span id="fl-prog-label">Progress</span><span id="fl-prog-pct">0%</span></div><div class="fl-prog"><div class="fl-prog-bar" id="fl-prog-bar"></div></div></div>'
+    + '<div class="fl-log" id="fl-log">Waiting to start…</div>'
     + '</div>';
   doc.body.appendChild(wrap);
   var statusEl = wrap.querySelector('#fl-stl');
-  var msgs = ['INGESTING INCIDENT DATA','DETECTING COLUMN TYPES','RESOLVING JURISDICTION','BUILDING STATION GRID','PREPARING ANALYSIS'];
+  var msgs = ['INGESTING INCIDENT DATA','CHECKING FOR LAT/LON','DETECTING COLUMN TYPES','PREPARING CENSUS BATCH IF NEEDED','RESOLVING JURISDICTION','BUILDING STATION GRID','PREPARING ANALYSIS'];
   var mi = 0;
   if(parent._brincFloMsgs) parent.clearInterval(parent._brincFloMsgs);
   parent._brincFloMsgs = parent.setInterval(function(){{
@@ -3241,6 +3440,44 @@ def main():
   }, 280);
 })();
 </script></body></html>""", height=0, scrolling=False)
+
+                def _set_upload_overlay_status(title="", status="", copy="", progress=None, logs=None, error=False):
+                    _title_js = json.dumps(str(title or ""))
+                    _status_js = json.dumps(str(status or ""))
+                    _copy_js = json.dumps(str(copy or ""))
+                    _progress_val = max(0, min(100, int(progress if progress is not None else 0)))
+                    _logs_js = json.dumps([str(x) for x in (logs or [])][-8:])
+                    _error_js = 'true' if error else 'false'
+                    components.html(f"""<!DOCTYPE html><html><head></head><body><script>
+(function(){{
+  var doc = parent.document;
+  var el = doc.getElementById('brinc-flo');
+  if(!el) return;
+  var titleEl = el.querySelector('.fl-city');
+  var statusEl = el.querySelector('#fl-stl');
+  var copyEl = el.querySelector('.fl-copy');
+  var progBar = el.querySelector('#fl-prog-bar');
+  var progPct = el.querySelector('#fl-prog-pct');
+  var logEl = el.querySelector('#fl-log');
+  if(titleEl && {_title_js}) titleEl.textContent = {_title_js};
+  if(statusEl && {_status_js}) statusEl.innerHTML = {_status_js} + '<span class="fl-dots"></span>';
+  if(copyEl && {_copy_js}) copyEl.textContent = {_copy_js};
+  if(progBar) progBar.style.width = '{_progress_val}%';
+  if(progPct) progPct.textContent = '{_progress_val}%';
+  if(logEl){{
+    var _lines = {_logs_js};
+    logEl.innerHTML = _lines && _lines.length ? _lines.join('<br>') : 'Waiting to start…';
+    if({_error_js}) logEl.classList.add('error'); else logEl.classList.remove('error');
+  }}
+  if(parent._brincFloMsgs){{ parent.clearInterval(parent._brincFloMsgs); parent._brincFloMsgs = null; }}
+}})();
+</script></body></html>""", height=0, scrolling=False)
+
+                _upload_logs = []
+
+                def _push_upload_log(message):
+                    _upload_logs.append(str(message))
+                    return list(_upload_logs[-8:])
 
                 # --- 1. INTELLIGENTLY CHECK FOR .BRINC FILE ---
                 # Browsers sometimes append .json to .brinc files on download
@@ -3274,15 +3511,246 @@ def main():
                     st.session_state['boundary_overlay_file'] = ''
 
                     if call_files:
+                        census_auto_processed = False
+                        _push_upload_log("Starting coordinate inspection.")
+                        _set_upload_overlay_status(
+                            title="CAD UPLOAD",
+                            status="CHECKING FOR COORDINATES",
+                            copy="Inspecting headers and cell values for usable latitude and longitude fields. This usually takes a few seconds.",
+                            progress=8,
+                            logs=_upload_logs,
+                        )
                         with st.spinner("🔍 Detecting column types in CAD export…"):
                             df_c = aggressive_parse_calls(call_files)
 
                         if df_c is None or df_c.empty:
-                            _clear_upload_overlay()
-                            st.error("❌ Calls file error: Could not parse valid coordinates.")
-                            st.stop()
+                            _push_upload_log("No usable coordinates found. Switching to automated Census batch geocoding.")
+                            _set_upload_overlay_status(
+                                title="CENSUS REQUIRED",
+                                status="COORDINATES NOT FOUND",
+                                copy="No usable latitude/longitude values were found in the upload. Preparing automated Census batch geocoding now.",
+                                progress=18,
+                                logs=_upload_logs,
+                            )
+                            with st.spinner("🛰 No recoverable coordinates found — preparing Census batch conversion…"):
+                                _push_upload_log("Building partial call frame for merge-back.")
+                                _set_upload_overlay_status(
+                                    title="CENSUS REQUIRED",
+                                    status="BUILDING STAGING DATA",
+                                    copy="Preparing source rows and merge keys before Census submission.",
+                                    progress=24,
+                                    logs=_upload_logs,
+                                )
+                                df_c_partial = aggressive_parse_calls(call_files, require_valid_coordinates=False)
+                                _push_upload_log("Extracting street, city, state, and ZIP fields for Census formatting.")
+                                _set_upload_overlay_status(
+                                    title="CENSUS REQUIRED",
+                                    status="EXTRACTING ADDRESSES",
+                                    copy="Deriving Census-ready address fields from the uploaded CAD export.",
+                                    progress=32,
+                                    logs=_upload_logs,
+                                )
+                                census_stage_df, census_original_df, census_summary = build_census_staging(call_files)
+                                if (
+                                    df_c_partial is None or
+                                    df_c_partial.empty or
+                                    '_source_row_id' not in df_c_partial.columns
+                                ):
+                                    _push_upload_log(
+                                        "Structured CAD parsing was unavailable for merge-back. Falling back to staged source rows for the Census merge."
+                                    )
+                                    df_c_partial = census_original_df.copy()
+                                    if '_source_row_id' not in df_c_partial.columns:
+                                        df_c_partial['_source_row_id'] = [
+                                            f"fallback:{idx}" for idx in range(len(df_c_partial))
+                                        ]
+                                    if '_source_file' not in df_c_partial.columns:
+                                        df_c_partial['_source_file'] = call_files[0].name if call_files else ''
+                                    if 'priority' not in df_c_partial.columns:
+                                        df_c_partial['priority'] = 3
+                                    if 'agency' not in df_c_partial.columns:
+                                        df_c_partial['agency'] = 'police'
+                                    _set_upload_overlay_status(
+                                        title="CENSUS REQUIRED",
+                                        status="USING MERGE FALLBACK",
+                                        copy="The upload did not produce a structured CAD dataframe, so the app is preserving the staged source rows and merging coordinates back onto them directly.",
+                                        progress=34,
+                                        logs=_upload_logs,
+                                    )
+                                if census_stage_df is None or census_stage_df.empty or int(census_summary.get('rows_ready', 0) or 0) == 0:
+                                    _clear_upload_overlay()
+                                    st.error("❌ Calls file error: no valid coordinates were found and the app could not assemble enough address data for Census batch geocoding.")
+                                    st.stop()
 
-                        df_c_full = df_c.reset_index(drop=True).copy()
+                                for _file_diag in (census_summary.get('files') or [])[:4]:
+                                    _diag_bits = []
+                                    if _file_diag.get('street_cols'):
+                                        _diag_bits.append(f"street={','.join(_file_diag['street_cols'][:3])}")
+                                    if _file_diag.get('city_col'):
+                                        _diag_bits.append(f"city={_file_diag['city_col']}")
+                                    if _file_diag.get('state_col'):
+                                        _diag_bits.append(f"state={_file_diag['state_col']}")
+                                    if _file_diag.get('zip_col'):
+                                        _diag_bits.append(f"zip={_file_diag['zip_col']}")
+                                    _push_upload_log(
+                                        f"{_file_diag.get('file','file')}: {_file_diag.get('ready_rows',0):,}/{_file_diag.get('rows',0):,} rows ready"
+                                        + (f" ({'; '.join(_diag_bits)})" if _diag_bits else "")
+                                    )
+                                _set_upload_overlay_status(
+                                    title="CENSUS REQUIRED",
+                                    status="ADDRESS EXTRACTION COMPLETE",
+                                    copy="Address extraction finished. Preparing Census batches from the rows with complete street, city, state, and ZIP data.",
+                                    progress=38,
+                                    logs=_upload_logs,
+                                )
+
+                                census_chunks = make_census_batch_chunks(census_stage_df, chunk_size=5000)
+                                _push_upload_log(
+                                    f"Prepared {int(census_summary.get('rows_ready', 0) or 0):,} Census-ready rows across {len(census_chunks)} Census chunk(s)."
+                                )
+                                _set_upload_overlay_status(
+                                    title="CENSUS AUTOMATION",
+                                    status="SUBMITTING BATCHES",
+                                    copy="Sending chunked address batches directly to the Census geocoder and waiting for returned coordinates.",
+                                    progress=42,
+                                    logs=_upload_logs,
+                                )
+
+                                census_result_parts = []
+                                chunk_queue = list(census_chunks)
+                                completed_chunks = 0
+                                total_chunks = max(1, len(chunk_queue))
+                                while chunk_queue:
+                                    chunk = chunk_queue.pop(0)
+                                    chunk_idx = completed_chunks + 1
+                                    _push_upload_log(
+                                        f"Submitting chunk {chunk_idx}/{total_chunks} with {chunk['rows']:,} rows to Census."
+                                    )
+                                    _set_upload_overlay_status(
+                                        title="CENSUS AUTOMATION",
+                                        status=f"SUBMITTING CHUNK {chunk_idx} OF {total_chunks}",
+                                        copy="Waiting for the Census batch endpoint to return the geocoded CSV for this chunk.",
+                                        progress=42 + int(completed_chunks / max(1, total_chunks) * 34),
+                                        logs=_upload_logs,
+                                    )
+                                    try:
+                                        chunk_result_df, _chunk_resp = submit_census_batch_chunk(
+                                            chunk['csv_bytes'],
+                                            chunk['filename'],
+                                        )
+                                    except Exception as exc:
+                                        if chunk['rows'] > 1000 and chunk.get('frame') is not None:
+                                            _push_upload_log(
+                                                f"Chunk {chunk_idx}/{total_chunks} failed: {exc}. Splitting into smaller batches and retrying."
+                                            )
+                                            split_frame = chunk['frame']
+                                            mid = max(1, len(split_frame) // 2)
+                                            left = split_frame.iloc[:mid].copy().reset_index(drop=True)
+                                            right = split_frame.iloc[mid:].copy().reset_index(drop=True)
+                                            retry_chunks = [
+                                                build_census_chunk_payload(
+                                                    left,
+                                                    chunk_index=chunk['index'],
+                                                    filename=chunk['filename'].replace('.csv', '_a.csv'),
+                                                ),
+                                                build_census_chunk_payload(
+                                                    right,
+                                                    chunk_index=chunk['index'],
+                                                    filename=chunk['filename'].replace('.csv', '_b.csv'),
+                                                ),
+                                            ]
+                                            chunk_queue = retry_chunks + chunk_queue
+                                            total_chunks += 1
+                                            _set_upload_overlay_status(
+                                                title="CENSUS AUTOMATION",
+                                                status=f"RETRYING CHUNK {chunk_idx}",
+                                                copy="The Census endpoint rejected the larger batch. Splitting it into smaller chunks and retrying automatically.",
+                                                progress=42 + int(completed_chunks / max(1, total_chunks) * 34),
+                                                logs=_upload_logs,
+                                            )
+                                            continue
+
+                                        _push_upload_log(f"Chunk {chunk_idx}/{total_chunks} failed: {exc}")
+                                        _set_upload_overlay_status(
+                                            title="CENSUS ERROR",
+                                            status=f"CHUNK {chunk_idx} FAILED",
+                                            copy="The Census batch request failed. Review the error log below and share it with Steven if needed.",
+                                            progress=42 + int(completed_chunks / max(1, total_chunks) * 34),
+                                            logs=_upload_logs,
+                                            error=True,
+                                        )
+                                        st.error(f"❌ Automated Census geocoding failed on chunk {chunk_idx} of {total_chunks}: {exc}")
+                                        st.stop()
+
+                                    _matched_rows = int((chunk_result_df['lat'].notna() & chunk_result_df['lon'].notna()).sum())
+                                    _push_upload_log(
+                                        f"Chunk {chunk_idx}/{total_chunks} completed. Returned {_matched_rows:,} rows with coordinates."
+                                    )
+                                    completed_chunks += 1
+                                    _set_upload_overlay_status(
+                                        title="CENSUS AUTOMATION",
+                                        status=f"CHUNK {chunk_idx} COMPLETE",
+                                        copy="Chunk returned successfully. Parsing and appending results before the next submission.",
+                                        progress=42 + int(completed_chunks / max(1, total_chunks) * 34),
+                                        logs=_upload_logs,
+                                    )
+                                    census_result_parts.append(chunk_result_df)
+
+                                result_df = pd.concat(census_result_parts, ignore_index=True) if census_result_parts else pd.DataFrame()
+                                result_df = result_df.drop_duplicates(subset=['source_id'], keep='first') if not result_df.empty else result_df
+                                _push_upload_log("All Census chunks returned. Merging coordinates back into the source calls file.")
+                                _set_upload_overlay_status(
+                                    title="CENSUS AUTOMATION",
+                                    status="MERGING RESULTS",
+                                    copy="Combining all Census chunk responses and restoring coordinates into the original dataset.",
+                                    progress=80,
+                                    logs=_upload_logs,
+                                )
+
+                                merged_full_df, merged_ready_df, merge_summary = merge_census_results(df_c_partial, result_df)
+                                if merged_ready_df is None or merged_ready_df.empty:
+                                    _push_upload_log("Census returned no valid coordinates after chunk processing.")
+                                    _set_upload_overlay_status(
+                                        title="CENSUS ERROR",
+                                        status="NO VALID RESULTS",
+                                        copy="Census responded, but the returned data did not contain any usable coordinates.",
+                                        progress=84,
+                                        logs=_upload_logs,
+                                        error=True,
+                                    )
+                                    st.error("❌ Automated Census geocoding completed, but no valid coordinates were returned.")
+                                    st.stop()
+
+                                corrected_export_df = build_corrected_export(census_original_df, result_df)
+                                corrected_csv = corrected_export_df.to_csv(index=False).encode('utf-8')
+                                st.session_state['census_corrected_bytes'] = corrected_csv
+                                st.session_state['census_corrected_name'] = "cad_calls_census_corrected.csv"
+                                st.session_state['census_conversion_summary'] = merge_summary
+                                st.session_state['census_download_notice'] = True
+
+                                df_c_full = merged_ready_df.reset_index(drop=True).copy()
+                                if len(df_c_full) > 25000:
+                                    df_c = df_c_full.sample(25000, random_state=42).reset_index(drop=True)
+                                    st.toast(f"⚠️ Optimization modeled with {len(df_c):,} representative calls out of {len(df_c_full):,} geocoded incidents.")
+                                else:
+                                    df_c = df_c_full.copy()
+
+                                _push_upload_log(
+                                    f"Merged Census results. {int(merge_summary.get('rows_ready', len(df_c_full)) or len(df_c_full)):,} rows now have coordinates."
+                                )
+                                _set_upload_overlay_status(
+                                    title="CENSUS AUTOMATION",
+                                    status="GEOCODING COMPLETE",
+                                    copy="Coordinates restored. Finalizing station discovery and jurisdiction setup now.",
+                                    progress=88,
+                                    logs=_upload_logs,
+                                )
+                                census_auto_processed = True
+
+                        if census_auto_processed:
+                            df_c_full = df_c_full.reset_index(drop=True).copy()
+                        else:
+                            df_c_full = df_c.reset_index(drop=True).copy()
 
                         if len(df_c_full) > 25000:
                             df_c = df_c_full.sample(25000, random_state=42).reset_index(drop=True)
@@ -3296,6 +3764,14 @@ def main():
                         })
 
                         if station_file is not None:
+                            _push_upload_log("Loading uploaded stations file.")
+                            _set_upload_overlay_status(
+                                title="UPLOAD PROCESSING",
+                                status="READING STATIONS FILE",
+                                copy="Reading the uploaded stations file and validating station coordinates.",
+                                progress=91,
+                                logs=_upload_logs,
+                            )
                             with st.spinner("🔍 Reading stations file…"):
                                 try:
                                     df_s, osm_note = load_station_file(station_file)
@@ -3307,6 +3783,14 @@ def main():
                                 st.error(f"❌ Stations file error: {osm_note}")
                                 st.stop()
                         else:
+                            _push_upload_log("No stations file provided. Building stations automatically from call data.")
+                            _set_upload_overlay_status(
+                                title="UPLOAD PROCESSING",
+                                status="BUILDING STATIONS",
+                                copy="No stations file was uploaded, so station candidates are being generated from the call data.",
+                                progress=91,
+                                logs=_upload_logs,
+                            )
                             st.session_state['stations_user_uploaded'] = False
                             with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools…"):
                                 df_s, osm_note = generate_stations_from_calls(df_c)
@@ -3321,6 +3805,14 @@ def main():
                         if len(df_s) > 100:
                             df_s = df_s.sample(100, random_state=42).reset_index(drop=True)
 
+                        _push_upload_log("Detecting jurisdiction from call locations.")
+                        _set_upload_overlay_status(
+                            title="UPLOAD PROCESSING",
+                            status="DETECTING JURISDICTION",
+                            copy="Using the restored coordinates to identify the active city/state and resolve the deployment area.",
+                            progress=95,
+                            logs=_upload_logs,
+                        )
                         with st.spinner(get_jurisdiction_message()):
                             detected_city, detected_state, detection_source = detect_location_from_calls(
                                 df_c,
@@ -3348,6 +3840,14 @@ def main():
                         st.session_state['total_original_calls'] = len(df_c_full)
                         st.session_state['total_modeled_calls'] = len(df_c)
 
+                        _push_upload_log("Resolving uploaded boundaries and final session state.")
+                        _set_upload_overlay_status(
+                            title="UPLOAD PROCESSING",
+                            status="FINALIZING DATASET",
+                            copy="Saving the restored calls dataset, resolving boundaries, and opening the stations workflow.",
+                            progress=98,
+                            logs=_upload_logs,
+                        )
                         with st.spinner(get_jurisdiction_message()):
                             resolve_uploaded_boundaries(
                                 st.session_state,
@@ -3364,6 +3864,14 @@ def main():
                         st.session_state['sim_mode_used'] = False
                         st.session_state['map_build_logged'] = False
                         st.session_state['csvs_ready'] = True
+                        _push_upload_log("Upload workflow complete. Opening the stations page.")
+                        _set_upload_overlay_status(
+                            title="UPLOAD COMPLETE",
+                            status="OPENING STATIONS PAGE",
+                            copy="The corrected calls dataset is ready. Transitioning into the stations workflow now.",
+                            progress=100,
+                            logs=_upload_logs,
+                        )
                         st.rerun()
 
         with path_demo_col:
@@ -3919,6 +4427,25 @@ body{{background:transparent;overflow:hidden}}
         # ── MAP BUILD EVENT: log to sheets once per session ──────────────────────
         log_map_build_event_once(st.session_state, _log_to_sheets)
 
+        if st.session_state.get('census_download_notice'):
+            _census_conv = st.session_state.get('census_conversion_summary') or {}
+            _census_ready = int(_census_conv.get('rows_ready', len(df_calls_full)) or len(df_calls_full))
+            _census_total = int(st.session_state.get('total_original_calls', _census_ready) or _census_ready)
+            st.sidebar.info(
+                "Coordinates restored via Census batch geocoding.\n\n"
+                f"{_census_ready:,} of {_census_total:,} records now have usable coordinates."
+            )
+            if st.session_state.get('census_corrected_bytes'):
+                st.sidebar.download_button(
+                    "⬇️ Download Corrected Calls File",
+                    data=st.session_state['census_corrected_bytes'],
+                    file_name=st.session_state.get('census_corrected_name') or "cad_calls_census_corrected.csv",
+                    mime="text/csv",
+                    key="sidebar_download_corrected_census_calls_btn",
+                    width="stretch",
+                    help="Download the corrected calls file so the Census conversion does not need to run again in a future browser session.",
+                )
+            st.sidebar.caption("This corrected data is only stored for the current browser session.")
 
         master_gdf, _boundary_kind_note, _boundary_src_note = resolve_master_boundary(
             st,

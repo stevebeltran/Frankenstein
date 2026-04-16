@@ -4123,7 +4123,7 @@ def main():
                 _swarm_map_svg = re.sub(r'<svg\b', '<svg id="fl-svg" class="fl-us-map" preserveAspectRatio="xMidYMid meet"', _swarm_map_svg, count=1)
             except Exception:
                 pass
-            components.html(f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+            _swarm_overlay_html = """<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
 body{{background:transparent;overflow:hidden}}
@@ -4418,7 +4418,18 @@ body{{background:transparent;overflow:hidden}}
 }})();
 </script>
 </body></html>
-""", height=0, scrolling=False)
+"""
+            _swarm_overlay_html = (
+                _swarm_overlay_html
+                .replace("{_swarm_logo_b64}", _swarm_logo_b64)
+                .replace("{_swarm_gigs_b64}", _swarm_gigs_b64)
+                .replace("{_swarm_map_svg}", _swarm_map_svg)
+                .replace("{_swarm_city_js}", _swarm_city_js)
+                .replace("{_swarm_state_js}", _swarm_state_js)
+                .replace("{{", "{")
+                .replace("}}", "}")
+            )
+            components.html(_swarm_overlay_html, height=0, scrolling=False)
             prog = st.progress(0, text="🫡 Preparing tools worthy of those who serve…")
             all_gdfs = []
             total_estimated_pop = 0

@@ -192,12 +192,17 @@ def split_uploaded_files(uploaded_files, is_boundary_sidecar, looks_like_station
         second_file.seek(0)
         second_size = len(second_file.read())
         second_file.seek(0)
-        if first_size >= second_size:
-            call_files = [first_file]
-            station_file = second_file
-        else:
-            call_files = [second_file]
-            station_file = first_file
+        larger = max(first_size, second_size)
+        smaller = min(first_size, second_size)
+        # Only reassign the smaller file as stations if it is at least 10x smaller —
+        # two similarly-sized files are almost certainly both CAD exports.
+        if smaller > 0 and larger / smaller >= 10:
+            if first_size >= second_size:
+                call_files = [first_file]
+                station_file = second_file
+            else:
+                call_files = [second_file]
+                station_file = first_file
 
     return call_files, station_file, boundary_files
 

@@ -5515,7 +5515,7 @@ body{{background:transparent;overflow:hidden}}
             <div style="display: flex; align-items: center; flex-wrap: wrap; font-size: 0.9rem;">
                 <span style="color: {accent_color}; font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; letter-spacing: 1px; text-transform: uppercase; margin-right: 12px;">Strategic Deployment Plan</span>
                 <span style="font-weight: 800; color: {text_main}; font-size: 1.1rem; margin-right: 12px;">{_display_jurisdiction_name}, {st.session_state.get('active_state', 'US')}</span>
-                <span style="color: {text_muted}; margin-right: 12px;">• Serving {st.session_state.get('estimated_pop', 0):,} residents across ~{int(area_sq_mi):,} sq miles</span>
+                <span style="color: {text_muted}; margin-right: 12px;">• {"Serving {:,} residents across".format(st.session_state.get('estimated_pop', 0)) if st.session_state.get('estimated_pop', 0) else "Coverage area:"} ~{int(area_sq_mi):,} sq miles</span>
             </div>
             <div style="display: flex; align-items: center; font-size: 0.85rem; color: {text_muted}; gap: 15px;">
                 <span>Data Period: <span style="color:#fff;">{date_range_str}</span></span>
@@ -8235,8 +8235,8 @@ body{{background:transparent;overflow:hidden}}
                 <div class="cover-tag">Drone as a First Responder · Deployment Proposal</div>
                 <h1>Protecting <span>{prop_city}</span>,<br>{prop_state}</h1>
                 <div class="cover-population">
-                  Serving <strong>{int(pop_metric):,}</strong> residents of {prop_city}, {prop_state}
-                  <abbr title="Source: US Census Bureau American Community Survey (ACS) 5-Year Estimates · census.gov/programs-surveys/acs" style="font-size:11px;color:#666;margin-left:4px;text-decoration:none;cursor:help;">ⓘ</abbr>
+                  {"Serving <strong>" + f"{int(pop_metric):,}" + f"</strong> residents of {prop_city}, {prop_state}" if pop_metric else f"Aerial Response Deployment &mdash; {prop_city}, {prop_state}"}
+                  {('<abbr title="Source: US Census Bureau American Community Survey (ACS) 5-Year Estimates · census.gov/programs-surveys/acs" style="font-size:11px;color:#666;margin-left:4px;text-decoration:none;cursor:help;">ⓘ</abbr>') if pop_metric else ''}
                 </div>
                 <p>A data-driven deployment plan for <strong>{actual_k_responder + actual_k_guardian} BRINC aerial units</strong> covering {calls_covered_perc:.1f}% of {st.session_state.get('total_original_calls', total_calls):,} annual incidents · {len(df_stations_all):,} public facilities protected across {area_sq_mi_est:,} sq mi.</p>
               </div>

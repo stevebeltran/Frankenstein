@@ -5501,6 +5501,11 @@ body{{background:transparent;overflow:hidden}}
             _tier_desc = "Core Functionality"
 
         # 1. THE SINGLE-LINE EXECUTIVE HEADER
+        _display_jurisdiction_name = _get_document_jurisdiction_name(
+            st.session_state,
+            selected_names,
+            fallback='Unknown City',
+        )
         logo_b64 = get_transparent_product_base64("gigs.png")
         main_logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:32px; vertical-align:middle; margin-right:15px;">' if logo_b64 else f'<span style="font-size:1.5rem; font-weight:900; letter-spacing:2px; color:#ffffff; margin-right:15px;">BRINC</span>'
 
@@ -5508,7 +5513,7 @@ body{{background:transparent;overflow:hidden}}
         <div style="margin-top: 5px; margin-bottom: 15px; padding-bottom: 12px; border-bottom: 1px solid {card_border}; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
             <div style="display: flex; align-items: center; flex-wrap: wrap; font-size: 0.9rem;">
                 <span style="color: {accent_color}; font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; letter-spacing: 1px; text-transform: uppercase; margin-right: 12px;">Strategic Deployment Plan</span>
-                <span style="font-weight: 800; color: {text_main}; font-size: 1.1rem; margin-right: 12px;">{st.session_state.get('active_city', 'Unknown City')}, {st.session_state.get('active_state', 'US')}</span>
+                <span style="font-weight: 800; color: {text_main}; font-size: 1.1rem; margin-right: 12px;">{_display_jurisdiction_name}, {st.session_state.get('active_state', 'US')}</span>
                 <span style="color: {text_muted}; margin-right: 12px;">• Serving {st.session_state.get('estimated_pop', 0):,} residents across ~{int(area_sq_mi):,} sq miles</span>
             </div>
             <div style="display: flex; align-items: center; font-size: 0.85rem; color: {text_muted}; gap: 15px;">
@@ -6383,7 +6388,7 @@ body{{background:transparent;overflow:hidden}}
                 for _t in df_stations_all['type'].dropna().astype(str):
                     _cid_fac_counts[_t] = _cid_fac_counts.get(_t, 0) + 1
             _cid_html = html_reports.generate_community_impact_dashboard_html(
-                city=st.session_state.get('active_city', 'City'),
+                city=_get_document_jurisdiction_name(st.session_state, selected_names, fallback='City'),
                 state=st.session_state.get('active_state', 'TX'),
                 population=int(st.session_state.get('estimated_pop', 0) or 0),
                 total_calls=int(st.session_state.get('total_original_calls', full_total_calls or total_calls) or 0),
@@ -7724,7 +7729,7 @@ body{{background:transparent;overflow:hidden}}
                 cad_charts_html_export = html_reports._build_cad_charts_html(df_calls_full if df_calls_full is not None else df_calls)
                 staffing_pressure_html_export = ""
     
-                prepared_for_city = st.session_state.get('active_city', prop_city) or prop_city
+                prepared_for_city = _get_document_jurisdiction_name(st.session_state, selected_names, fallback=prop_city) or prop_city
                 prepared_by_name = prop_name
     
                 # ── School safety export variables ────────────────────────────────────────

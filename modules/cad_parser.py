@@ -37,7 +37,7 @@ def _extract_file_meta(raw_df, res_df, filename=""):
 
         # ── Date range ───────────────────────────────────────────────────────
         if 'date' in res_df.columns:
-            _dates = pd.to_datetime(res_df['date'], errors='coerce').dropna()
+            _dates = pd.to_datetime(res_df['date'], format='mixed', errors='coerce').dropna()
             if not _dates.empty:
                 meta['file_date_range_start'] = _dates.min().strftime('%Y-%m-%d')
                 meta['file_date_range_end']   = _dates.max().strftime('%Y-%m-%d')
@@ -168,9 +168,9 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                 lat_lon_rate = (a_num.between(-90, 90) & b_num.between(-180, 180)).mean()
                 return max(lon_lat_rate, lat_lon_rate)
 
-            date_rate = pd.to_datetime(sample.iloc[:, 0], errors='coerce').notna().mean()
+            date_rate = pd.to_datetime(sample.iloc[:, 0], format='mixed', errors='coerce').notna().mean()
             time_rate = pd.to_datetime(sample.iloc[:, 1], format='%H:%M:%S', errors='coerce').notna().mean() if len(sample.columns) > 1 else 0.0
-            datetime_rate = pd.to_datetime((sample.iloc[:, 0].astype(str).str.strip() + ' ' + sample.iloc[:, 1].astype(str).str.strip()), errors='coerce').notna().mean() if len(sample.columns) > 1 else 0.0
+            datetime_rate = pd.to_datetime((sample.iloc[:, 0].astype(str).str.strip() + ' ' + sample.iloc[:, 1].astype(str).str.strip()), format='mixed', errors='coerce').notna().mean() if len(sample.columns) > 1 else 0.0
             textish_rate = sample.iloc[:, 2].astype(str).str.strip().ne('').mean() if len(sample.columns) > 2 else 0.0
             coord_score = 0.0
             max_scan = min(len(sample.columns) - 1, 7)
@@ -558,7 +558,7 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                     if _col in (t_found or []):
                         continue
                     try:
-                        _test = pd.to_datetime(raw_df[_col].dropna().head(50), errors='coerce')
+                        _test = pd.to_datetime(raw_df[_col].dropna().head(50), format='mixed', errors='coerce')
                         _valid = _test.dropna()
                         if len(_valid) >= 10 and _valid.dt.year.between(2000, 2035).mean() > 0.8:
                             d_found = [_col]
@@ -575,7 +575,7 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                 def _col_to_datestr(series):
                     """Convert a column that may contain datetime objects → 'YYYY-MM-DD' strings."""
                     try:
-                        _p = pd.to_datetime(series, errors='coerce')
+                        _p = pd.to_datetime(series, format='mixed', errors='coerce')
                         if _p.notna().mean() > 0.6:
                             return _p.dt.strftime('%Y-%m-%d').where(_p.notna(), '')
                     except Exception:
@@ -629,7 +629,7 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                             continue
                 if dt_series is None:
                     # Final fallback: let pandas infer (slow but handles edge cases)
-                    dt_series = pd.to_datetime(_raw_dt_str, errors='coerce')
+                    dt_series = pd.to_datetime(_raw_dt_str, format='mixed', errors='coerce')
 
                 res['date'] = dt_series.dt.strftime('%Y-%m-%d')
                 res['time'] = dt_series.dt.strftime('%H:%M:%S')

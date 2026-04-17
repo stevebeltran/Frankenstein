@@ -5669,7 +5669,7 @@ body{{background:transparent;overflow:hidden}}
                     showscale=False, name="Heatmap", hoverinfo='skip'))
 
             if show_dots and not display_calls.empty:
-                point_size = 1 if len(display_calls) > 150000 else 2 if len(display_calls) > 50000 else 3 if len(display_calls) > 20000 else 4
+                point_size = 2 if len(display_calls) > 150000 else 3 if len(display_calls) > 50000 else 4 if len(display_calls) > 20000 else 5
                 point_opacity = 0.06 if len(display_calls) > 150000 else 0.10 if len(display_calls) > 50000 else 0.18 if len(display_calls) > 20000 else 0.28 if len(display_calls) > 10000 else 0.4
                 # Split by agency so fire calls render red and police calls use the theme colour
                 _has_agency = 'agency' in display_calls.columns

@@ -3325,9 +3325,10 @@ def main():
             st.markdown("""
             <div class="field-footnote">
                 <b style='color:#555;'>1 file</b> — any CAD export (CSV or Excel); stations auto-built from OSM<br>
-                <b style='color:#555;'>2+ files</b> - calls + optional stations + optional .shp/.shx/.dbf/.prj overlay files<br>
+                <b style='color:#555;'>Multiple CAD files</b> — drop several spreadsheets; they are combined automatically<br>
+                <b style='color:#555;'>CAD + stations</b> — include a file with "station" in the name to supply custom stations<br>
                 <b style='color:#39FF14;'>.brinc file</b> — instantly restore a saved deployment<br>
-                Max 25,000 calls · 100 stations
+                Max 25,000 calls (sampled) · 100 stations
             </div>
             """, unsafe_allow_html=True)
 

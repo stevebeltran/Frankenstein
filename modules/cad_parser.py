@@ -11,8 +11,11 @@ import io
 import json
 import datetime
 import math
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
+import pyproj
 from modules.config import STATE_FIPS, US_STATES_ABBR, KNOWN_POPULATIONS
 
 def _extract_file_meta(raw_df, res_df, filename=""):
@@ -104,6 +107,18 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                 'map_x','point_x','gps_lon','gps_long','gps_longitude','xlon','coord_x','easting',
                 'x_wgs','lon_wgs','incident_lon','inc_lon','event_lon','x_coordinate','address_x','xlocation']
     }
+
+    def _coord_column_matches(col_name, patterns):
+        norm = str(col_name).strip().lower()
+        normalized = norm.replace('-', ' ').replace('_', ' ')
+        compact = re.sub(r'[^a-z0-9]+', '', norm)
+        for pattern in patterns:
+            p_norm = str(pattern).strip().lower()
+            p_normalized = p_norm.replace('-', ' ').replace('_', ' ')
+            p_compact = re.sub(r'[^a-z0-9]+', '', p_norm)
+            if p_norm in norm or p_normalized in normalized or (p_compact and p_compact in compact):
+                return True
+        return False
 
 
     def _looks_like_headerless_geocoder_export(df):
@@ -435,7 +450,10 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                     except Exception:
                         pass
 
-            source_ids = [f"{file_idx}:{cfile.name}:{row_idx}" for row_idx in range(len(raw_df))]
+            source_ids = pd.Series(
+                [f"{file_idx}:{cfile.name}:{row_idx}" for row_idx in range(len(raw_df))],
+                index=raw_df.index
+            )
 
             res = pd.DataFrame()
             exact_coord_names = {
@@ -447,7 +465,7 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                 # Exclude bare 'lonlat' from the loose scan — it's a combined field,
                 # not a plain numeric column, and will produce all-NaN via pd.to_numeric.
                 found_loose = [c for c in raw_df.columns
-                               if c != 'lonlat' and any(s in c for s in CV[field])]
+                               if c != 'lonlat' and _coord_column_matches(c, CV[field])]
                 found = found_exact or found_loose
                 if found:
                     res[field] = pd.to_numeric(raw_df[found[0]], errors='coerce')
@@ -618,72 +636,83 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
 
             # --- COORDINATE CLEANUP: sentinel values & sign errors ---
             if not res.empty and 'lat' in res.columns and 'lon' in res.columns:
-                # Drop obvious sentinel/null-coordinate rows before any further processing
-                # lat=0 and lon=0 are common CAD null sentinels (no valid location on the equator/prime meridian)
-                # lon=-179.99999 is another common sentinel used by some CAD vendors
-                _sentinel_mask = (
-                    (res['lat'] == 0) | (res['lon'] == 0) |
-                    (res['lat'].abs() < 0.001) | (res['lon'].abs() < 0.001) |
-                    (res['lon'] < -179.9)
-                )
-                if _sentinel_mask.any():
-                    res = res[~_sentinel_mask].copy()
+                _coord_scale_max = max(res['lat'].abs().max(), res['lon'].abs().max())
+                if _coord_scale_max <= 1000:
+                    # Drop obvious sentinel/null-coordinate rows before any further processing.
+                    # Keep this limited to decimal-scale coordinates so integer microdegrees
+                    # and projected coordinates are not discarded before conversion.
+                    _sentinel_mask = (
+                        (res['lat'] == 0) | (res['lon'] == 0) |
+                        (res['lat'].abs() < 0.001) | (res['lon'].abs() < 0.001) |
+                        (res['lon'] < -179.9)
+                    )
+                    if _sentinel_mask.any():
+                        res = res[~_sentinel_mask].copy()
 
-                # Fix wrong-sign longitudes: some CAD exports omit the minus sign for
-                # western-hemisphere longitudes (e.g. 81.31 instead of -81.31).
-                # Detect by checking if the majority of lons are negative (correct for US)
-                # while a small minority are positive with the same absolute magnitude.
-                if not res.empty and 'lon' in res.columns:
-                    _neg_count = (res['lon'] < 0).sum()
-                    _pos_count = (res['lon'] > 0).sum()
-                    _total = len(res)
-                    # If >90% are negative but some are positive AND the median negative lon
-                    # matches -(positive lon range), flip the positive ones
-                    if _neg_count > 0 and _pos_count > 0 and (_neg_count / _total) > 0.90:
-                        _median_neg = res.loc[res['lon'] < 0, 'lon'].median()
-                        _pos_vals = res.loc[res['lon'] > 0, 'lon']
-                        # Check if flipping would land near the median negative cluster
-                        _would_match = ((-_pos_vals).between(_median_neg - 2, _median_neg + 2)).mean()
-                        if _would_match > 0.5:
-                            res.loc[res['lon'] > 0, 'lon'] = -res.loc[res['lon'] > 0, 'lon']
+                    # Fix wrong-sign longitudes: some CAD exports omit the minus sign for
+                    # western-hemisphere longitudes (e.g. 81.31 instead of -81.31).
+                    if not res.empty and 'lon' in res.columns:
+                        _neg_count = (res['lon'] < 0).sum()
+                        _pos_count = (res['lon'] > 0).sum()
+                        _total = len(res)
+                        if _neg_count > 0 and _pos_count > 0 and (_neg_count / _total) > 0.90:
+                            _median_neg = res.loc[res['lon'] < 0, 'lon'].median()
+                            _pos_vals = res.loc[res['lon'] > 0, 'lon']
+                            _would_match = ((-_pos_vals).between(_median_neg - 2, _median_neg + 2)).mean()
+                            if _would_match > 0.5:
+                                res.loc[res['lon'] > 0, 'lon'] = -res.loc[res['lon'] > 0, 'lon']
 
-            # --- COORDINATE CONVERSION (STATE PLANE / LARGE-INTEGER DETECTOR) ---
+            # --- COORDINATE CONVERSION (MICRODEGREES / STATE PLANE / LARGE-INTEGER DETECTOR) ---
             if not res.empty and 'lat' in res.columns and 'lon' in res.columns:
                 res = res[(res['lat'] != 0) & (res['lon'] != 0)].dropna(subset=['lat', 'lon'])
                 if not res.empty:
                     max_val = max(res['lat'].abs().max(), res['lon'].abs().max())
                     if max_val > 1000:
                         converted = False
+                        # Common CAD export pattern: integer microdegrees
+                        # (-98281987, 30568167) -> (-98.281987, 30.568167).
+                        _lon_micro = res['lon'] / 1_000_000.0
+                        _lat_micro = res['lat'] / 1_000_000.0
+                        _micro_valid = (
+                            _lat_micro.between(18, 72) &
+                            _lon_micro.between(-170, -60)
+                        ).mean()
+                        if _micro_valid > 0.80:
+                            res['lon'] = _lon_micro
+                            res['lat'] = _lat_micro
+                            converted = True
+
                         # Strategy 1: Try common State Plane CRS at /100 and /1 scales
-                        candidate_crs = [
-                            "EPSG:2278",  # TX South Central (ftUS)
-                            "EPSG:2277",  # TX Central (ftUS)
-                            "EPSG:2276",  # TX North Central (ftUS)
-                            "EPSG:2279",  # TX South (ftUS)
-                            "EPSG:32140", # TX South Central (m)
-                        ]
-                        for scale in [100.0, 1.0]:
-                            for crs in candidate_crs:
-                                try:
-                                    transformer = pyproj.Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
-                                    test_lons, test_lats = transformer.transform(
-                                        res['lon'].values[:20] / scale,
-                                        res['lat'].values[:20] / scale
-                                    )
-                                    if (24 < float(test_lats.mean()) < 50 and
-                                            -130 < float(test_lons.mean()) < -60 and
-                                            float(test_lats.std()) < 5 and
-                                            float(test_lons.std()) < 5):
-                                        lons, lats = transformer.transform(
-                                            res['lon'].values / scale, res['lat'].values / scale
+                        if not converted:
+                            candidate_crs = [
+                                "EPSG:2278",  # TX South Central (ftUS)
+                                "EPSG:2277",  # TX Central (ftUS)
+                                "EPSG:2276",  # TX North Central (ftUS)
+                                "EPSG:2279",  # TX South (ftUS)
+                                "EPSG:32140", # TX South Central (m)
+                            ]
+                            for scale in [100.0, 1.0]:
+                                for crs in candidate_crs:
+                                    try:
+                                        transformer = pyproj.Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+                                        test_lons, test_lats = transformer.transform(
+                                            res['lon'].values[:20] / scale,
+                                            res['lat'].values[:20] / scale
                                         )
-                                        res['lon'], res['lat'] = lons, lats
-                                        converted = True
-                                        break
-                                except Exception:
-                                    continue
-                            if converted:
-                                break
+                                        if (24 < float(test_lats.mean()) < 50 and
+                                                -130 < float(test_lons.mean()) < -60 and
+                                                float(test_lats.std()) < 5 and
+                                                float(test_lons.std()) < 5):
+                                            lons, lats = transformer.transform(
+                                                res['lon'].values / scale, res['lat'].values / scale
+                                            )
+                                            res['lon'], res['lat'] = lons, lats
+                                            converted = True
+                                            break
+                                    except Exception:
+                                        continue
+                                if converted:
+                                    break
 
                         # Strategy 2: If CRS conversion failed, anchor to city column geocode
                         if not converted:
@@ -797,7 +826,7 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
             if inferred_state:
                 res["_csv_state"] = inferred_state
 
-            res["_source_row_id"] = source_ids
+            res["_source_row_id"] = source_ids.reindex(res.index).values
             res["_source_file"] = cfile.name
 
             # ── Capture file data matrix for Sheets/email logging ────────────

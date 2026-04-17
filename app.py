@@ -1866,7 +1866,7 @@ def fetch_census_population(state_fips, place_name, is_county=False):
         url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=place:*&in=state:{state_fips}"
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=10) as response:
+        with urllib.request.urlopen(req, timeout=15) as response:
             data = json.loads(response.read().decode('utf-8'))
             search_name = str(place_name).lower().strip()
             for suffix in [' city', ' town', ' village', ' borough', ' township', ' cdp', ' municipality']:

@@ -7863,7 +7863,68 @@ body{{background:transparent;overflow:hidden}}
                     else (_boundary_src_note.split('/')[-1].split('\\')[-1] if _boundary_src_note else 'live lookup')
                 )
                 _selected_labels_str = ', '.join(selected_names) if selected_names else prop_city
-    
+                _grant_context_text = " ".join(
+                    str(v) for v in [
+                        prepared_for_city, prop_city, prop_state, police_names_str,
+                        jurisdiction_list, dept_summary, _selected_labels_str,
+                    ] if v
+                ).lower()
+
+                def _grant_context_looks_like_state_agency(ctx_text: str) -> bool:
+                    _state_agency_markers = (
+                        "single state agency",
+                        "state agency",
+                        "state of ",
+                        "department of health",
+                        "behavioral health",
+                        "mental health",
+                        "substance abuse",
+                        "public health",
+                        "ssa",
+                    )
+                    return any(marker in ctx_text for marker in _state_agency_markers)
+
+                def _render_timed_custom_grant_html(
+                    *,
+                    title: str,
+                    description: str,
+                    deadline: datetime.date,
+                    eligibility_note: str,
+                    nofo_number: str = "",
+                    historical_note: str = "",
+                    require_state_agency: bool = False,
+                ) -> str:
+                    if datetime.date.today() > deadline:
+                        return ""
+                    if require_state_agency and not _grant_context_looks_like_state_agency(_grant_context_text):
+                        return ""
+                    _meta = [f"Application due {deadline.strftime('%B %d, %Y')}"]
+                    if nofo_number:
+                        _meta.append(f"NOFO {nofo_number}")
+                    if eligibility_note:
+                        _meta.append(eligibility_note)
+                    if historical_note:
+                        _meta.append(historical_note)
+                    return (
+                        f"<br><strong>{html.escape(title)}</strong> — {html.escape(description)} "
+                        f"<span style=\"color:#666;\">({' | '.join(html.escape(m) for m in _meta)})</span>"
+                    )
+
+                _custom_law_grants_html = "".join([
+                    _render_timed_custom_grant_html(
+                        title="SAMHSA State Opioid Response Grants (SOR)",
+                        description=(
+                            "Supports opioid and stimulant use-disorder prevention, harm reduction, "
+                            "treatment, recovery support, and MOUD access."
+                        ),
+                        deadline=datetime.date(2022, 7, 18),
+                        eligibility_note="Eligible applicants limited to Single State Agencies and territories",
+                        nofo_number="TI-22-005",
+                        historical_note="Historical NOFO posted before January 20, 2025",
+                        require_state_agency=True,
+                    ),
+                ])
+
                 export_html = f"""<!DOCTYPE html>
         <html lang="en"><head>
         <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -8369,7 +8430,7 @@ body{{background:transparent;overflow:hidden}}
           <div class="section-eyebrow">
             <span class="pg-num">06</span>
             <span class="pg-title">Grant Narrative</span>
-            <span class="src" data-src="Grant programs referenced: DOJ Byrne JAG · FEMA HSGP · DOJ COPS Office · DOT RAISE · DOJ Smart Policing Initiative. Financial figures are BRINC model estimates. Narrative is AI-generated — must be reviewed, localized, and fact-checked by your grants administrator before submission.">ⓘ</span>
+            <span class="src" data-src="Grant programs referenced: DOJ Byrne JAG · FEMA HSGP · DOJ COPS Office · DOT RAISE · DOJ Smart Policing Initiative. Timed custom grants render only while open and when the applicant context appears eligible. Financial figures are BRINC model estimates. Narrative is AI-generated — must be reviewed, localized, and fact-checked by your grants administrator before submission.">ⓘ</span>
             <button class="copy-section-btn grant-law" onclick="copyGrantText('grant-body-law', this)">
               <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
               Copy Grant Text
@@ -8443,7 +8504,7 @@ body{{background:transparent;overflow:hidden}}
               <a href="https://www.fema.gov/grants/preparedness/homeland-security">FEMA HSGP</a> — Homeland security CapEx offset<br>
               <a href="https://cops.usdoj.gov/grants">DOJ COPS Office</a> — Law enforcement technology<br>
               <a href="https://www.transportation.gov/grants">DOT RAISE</a> — Regional infrastructure and safety<br>
-              <a href="https://bja.ojp.gov/program/smart-policing-initiative/overview">DOJ Smart Policing Initiative</a> — Data-driven public safety
+              <a href="https://bja.ojp.gov/program/smart-policing-initiative/overview">DOJ Smart Policing Initiative</a> — Data-driven public safety{_custom_law_grants_html}
             </p>
           </div>
           <div class="grant-sidebar">

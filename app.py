@@ -185,6 +185,20 @@ def _slugify(value):
     return re.sub(r'[^a-z0-9]+', '-', str(value or '').lower()).strip('-') or 'report'
 
 
+def _get_document_jurisdiction_name(session_state, selected_names=None, fallback="City"):
+    _active_name = str(session_state.get("active_city", fallback) or fallback).strip() or fallback
+    _boundary_kind = str(session_state.get("boundary_kind", "") or "").strip().lower()
+    _use_county_boundary = bool(session_state.get("use_county_boundary", False))
+    _selected = [str(name).strip() for name in (selected_names or []) if str(name).strip()]
+
+    if _use_county_boundary or _boundary_kind == "county":
+        if _selected:
+            return ", ".join(_selected)
+        return _active_name
+
+    return _active_name
+
+
 def _get_request_base_url():
     try:
         _host = st.context.headers.get("host", "") or st.context.headers.get("Host", "")
@@ -3483,7 +3497,7 @@ def main():
             ):
                 _upload_logo_b64 = get_themed_logo_base64("logo.png", theme="dark") or ""
                 _upload_gigs_b64 = get_transparent_product_base64("gigs.png") or ""
-                components.html(f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+                _upload_overlay_html = """<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
 <script>
 (function(){{
   var doc = parent.document;
@@ -3552,7 +3566,15 @@ def main():
   }}, 2400);
 }})();
 </script>
-</body></html>""", height=0, scrolling=False)
+</body></html>"""
+                _upload_overlay_html = (
+                    _upload_overlay_html
+                    .replace("{_upload_logo_b64}", _upload_logo_b64)
+                    .replace("{_upload_gigs_b64}", _upload_gigs_b64)
+                    .replace("{{", "{")
+                    .replace("}}", "}")
+                )
+                components.html(_upload_overlay_html, height=0, scrolling=False)
 
                 def _clear_upload_overlay():
                     components.html("""<!DOCTYPE html><html><head></head><body><script>
@@ -3581,7 +3603,7 @@ def main():
                     _progress_val = max(0, min(100, int(progress if progress is not None else 0)))
                     _logs_js = json.dumps([str(x) for x in (logs or [])][-8:])
                     _error_js = 'true' if error else 'false'
-                    components.html(f"""<!DOCTYPE html><html><head></head><body><script>
+                    _upload_overlay_status_html = """<!DOCTYPE html><html><head></head><body><script>
 (function(){{
   var doc = parent.document;
   var el = doc.getElementById('brinc-flo');
@@ -3604,7 +3626,19 @@ def main():
   }}
   if(parent._brincFloMsgs){{ parent.clearInterval(parent._brincFloMsgs); parent._brincFloMsgs = null; }}
 }})();
-</script></body></html>""", height=0, scrolling=False)
+</script></body></html>"""
+                    _upload_overlay_status_html = (
+                        _upload_overlay_status_html
+                        .replace("{_title_js}", _title_js)
+                        .replace("{_status_js}", _status_js)
+                        .replace("{_copy_js}", _copy_js)
+                        .replace("{_progress_val}", str(_progress_val))
+                        .replace("{_logs_js}", _logs_js)
+                        .replace("{_error_js}", _error_js)
+                        .replace("{{", "{")
+                        .replace("}}", "}")
+                    )
+                    components.html(_upload_overlay_status_html, height=0, scrolling=False)
 
                 _upload_logs = []
 
@@ -6166,7 +6200,7 @@ body{{background:transparent;overflow:hidden}}
 
                 drone_svg = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M18 6a2 2 0 100-4 2 2 0 000 4zm-12 0a2 2 0 100-4 2 2 0 000 4zm12 12a2 2 0 100-4 2 2 0 000 4zm-12 0a2 2 0 100-4 2 2 0 000 4z'/%3E%3Cpath stroke='white' stroke-width='2' stroke-linecap='round' d='M8.5 8.5l7 7m0-7l-7 7'/%3E%3Ccircle cx='12' cy='12' r='2' fill='white'/%3E%3C/svg%3E"
 
-                sim_html = f"""<!DOCTYPE html><html><head>
+                sim_html = """<!DOCTYPE html><html><head>
                 <script src="https://unpkg.com/deck.gl@8.9.35/dist.min.js"></script>
                 <script src="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.js"></script>
                 <link href="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.css" rel="stylesheet"/>
@@ -6256,6 +6290,21 @@ body{{background:transparent;overflow:hidden}}
                   }};
                   render();
                 </script></body></html>"""
+                sim_html = (
+                    sim_html
+                    .replace("{warn_html_sim}", warn_html_sim)
+                    .replace("{total_sim_flights:,}", f"{total_sim_flights:,}")
+                    .replace("{int(dfr_dispatch_rate*100)}", str(int(dfr_dispatch_rate * 100)))
+                    .replace("{legend_html_sim}", legend_html_sim)
+                    .replace("{json.dumps(stations_json)}", json.dumps(stations_json))
+                    .replace("{json.dumps(flights_json)}", json.dumps(flights_json))
+                    .replace("{center_lon}", str(center_lon))
+                    .replace("{center_lat}", str(center_lat))
+                    .replace("{dynamic_zoom}", str(dynamic_zoom))
+                    .replace("{drone_svg}", drone_svg)
+                    .replace("{{", "{")
+                    .replace("}}", "}")
+                )
 
                 components.html(sim_html, height=700)
 
@@ -6733,7 +6782,7 @@ body{{background:transparent;overflow:hidden}}
             # The main program renders the full detailed boundary; mobile map focuses on station locations and calls
 
             _qr_params = _up.urlencode({
-                "city":  str(st.session_state.get("active_city", "")).title(),
+                "city":  _get_document_jurisdiction_name(st.session_state, selected_names, fallback="").title(),
                 "state": st.session_state.get("active_state", ""),
                 "pop":   int(st.session_state.get("estimated_pop", 0) or 0),
                 "cov":   round(float(calls_covered_perc or 0), 1),
@@ -6800,7 +6849,7 @@ body{{background:transparent;overflow:hidden}}
             if not _qr_name:
                 _name_seed = (_qr_email.split("@")[0] if _qr_email else _qr_user or "BRINC Representative")
                 _qr_name = " ".join(w.capitalize() for w in _name_seed.replace("_", ".").split("."))
-            _qr_city  = st.session_state.get("active_city", "")
+            _qr_city  = _get_document_jurisdiction_name(st.session_state, selected_names, fallback="")
             _qr_state = st.session_state.get("active_state", "")
             _qr_loc   = f"{_qr_city}, {_qr_state}" if _qr_city else "your city"
 
@@ -6925,7 +6974,7 @@ body{{background:transparent;overflow:hidden}}
               </div>
             """
 
-            _public_summary_html = f"""<!DOCTYPE html>
+            _public_summary_html = """<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -7096,6 +7145,31 @@ body{{background:transparent;overflow:hidden}}
 </div>
 </body>
 </html>"""
+            _public_summary_html = (
+                _public_summary_html
+                .replace("{_qr_city}", _qr_city)
+                .replace("{_qr_state}", _qr_state)
+                .replace("{_h(_qr_dept)}", _h(_qr_dept))
+                .replace("{_h(_qr_city)}", _h(_qr_city))
+                .replace("{_h(_qr_state)}", _h(_qr_state))
+                .replace("{_qr_email}", _qr_email)
+                .replace("{_h(_qr_loc)}", _h(_qr_loc))
+                .replace("{_qr_avg_resp:.1f}", f"{_qr_avg_resp:.1f}")
+                .replace("{_qr_time_saved:.1f}", f"{_qr_time_saved:.1f}")
+                .replace("{float(calls_covered_perc or 0):.1f}", f"{float(calls_covered_perc or 0):.1f}")
+                .replace("{_qr_covered_calls:,}", f"{_qr_covered_calls:,}")
+                .replace("{actual_k_responder}", str(actual_k_responder))
+                .replace("{actual_k_guardian}", str(actual_k_guardian))
+                .replace("{float(annual_savings or 0):,.0f}", f"{float(annual_savings or 0):,.0f}")
+                .replace("{_h(_qr_summary_text)}", _h(_qr_summary_text))
+                .replace("{_qr_fleet_total}", str(_qr_fleet_total))
+                .replace("{_impact_html}", _impact_html)
+                .replace("{_station_table_rows_html}", _station_table_rows_html)
+                .replace("{_h(_qr_name)}", _h(_qr_name))
+                .replace("{_h(_qr_email)}", _h(_qr_email))
+                .replace("{{", "{")
+                .replace("}}", "}")
+            )
             _report_id = st.session_state.get('public_report_id', '')
             _fleet_summary = f"{actual_k_responder}R / {actual_k_guardian}G"
             _stations_json = json.dumps([
@@ -7197,7 +7271,7 @@ body{{background:transparent;overflow:hidden}}
         prop_name = user_clean
 
         # Always define these so download buttons work regardless of fleet_capex
-        prop_city  = st.session_state.get('active_city', 'City')
+        prop_city  = _get_document_jurisdiction_name(st.session_state, selected_names, fallback='City')
         prop_state = st.session_state.get('active_state', 'FL')
         _safe_city_base = prop_city.replace(" ", "_").replace("/", "_")
         export_details = {}
@@ -7270,7 +7344,7 @@ body{{background:transparent;overflow:hidden}}
 
         if fleet_capex > 0:
 
-            prop_city  = st.session_state.get('active_city', 'City')
+            prop_city  = _get_document_jurisdiction_name(st.session_state, selected_names, fallback='City')
             prop_state = st.session_state.get('active_state', 'FL')
 
             pop_metric = st.session_state.get('estimated_pop', 250000)
@@ -8783,7 +8857,8 @@ body{{background:transparent;overflow:hidden}}
           <span>Prepared by {prop_name} · <a href="mailto:{prop_email}">{prop_email}</a>{" · " + _doc_phone if _doc_phone else ""}</span>
         </footer>
     
-        </main>
+        </main>"""
+                export_html += """
         <script>
         // Highlight active nav link on scroll
         const sections=document.querySelectorAll('section[id],div[id="analytics"]');
@@ -8847,7 +8922,7 @@ body{{background:transparent;overflow:hidden}}
           }});
         }}
         </script>
-        </body></html>"""
+        </body></html>""".replace("{{", "{").replace("}}", "}")
     
                 # Section 09 (Analytics Dashboard) removed — its content (cad_charts_html_export)
                 # is already rendered in Section 04 (Incident Data Analysis). Duplicating it

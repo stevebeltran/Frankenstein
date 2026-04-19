@@ -3531,6 +3531,8 @@ def main():
                             )
 
                         try:
+                            st.session_state['estimated_pop'] = 0
+                            st.session_state['_pop_resolved'] = False
                             _resolved_boundary_kind = str(st.session_state.get('boundary_kind', 'place') or 'place').strip().lower()
                             _resolved_city = str(st.session_state.get('active_city', '') or '').strip()
                             _resolved_state = str(st.session_state.get('active_state', '') or '').strip().upper()
@@ -4543,7 +4545,7 @@ body{{background:transparent;overflow:hidden}}
 
 
 
-            all_gdfs, total_estimated_pop, boundary_messages, boundary_warnings, rerun_demo_target = build_demo_boundaries(
+            all_gdfs, total_estimated_pop, boundary_messages, boundary_warnings, rerun_demo_target, all_populations_verified = build_demo_boundaries(
                 st.session_state,
                 active_targets,
                 STATE_FIPS,
@@ -4590,7 +4592,7 @@ body{{background:transparent;overflow:hidden}}
             active_city_gdf = pd.concat(all_gdfs, ignore_index=True)
             city_poly = active_city_gdf.geometry.union_all()
             st.session_state['estimated_pop'] = total_estimated_pop
-            st.session_state['_pop_resolved'] = True
+            st.session_state['_pop_resolved'] = all_populations_verified
 
             prog.progress(55, text="🚔 Modeling 911 calls — every one represents someone who needed help…")
             df_demo, annual_cfs, simulated_points_count = build_demo_calls(city_poly, total_estimated_pop, generate_clustered_calls)
@@ -7372,6 +7374,7 @@ body{{background:transparent;overflow:hidden}}
             "app_version": __version__,
             # ── Extended session state ────────────────────────────────────
             "estimated_pop":               int(st.session_state.get('estimated_pop', 0) or 0),
+            "_pop_resolved":              bool(st.session_state.get('_pop_resolved', False)),
             "total_original_calls":        int(st.session_state.get('total_original_calls', 0) or 0),
             "total_modeled_calls":         int(st.session_state.get('total_modeled_calls', 0) or 0),
             "inferred_daily_calls_override": st.session_state.get('inferred_daily_calls_override'),
@@ -7569,6 +7572,7 @@ body{{background:transparent;overflow:hidden}}
                 # ── Extended session state ────────────────────────────────────
                 # Jurisdiction metrics
                 "estimated_pop":               int(st.session_state.get('estimated_pop', 0) or 0),
+                "_pop_resolved":              bool(st.session_state.get('_pop_resolved', False)),
                 "total_original_calls":        int(st.session_state.get('total_original_calls', 0) or 0),
                 "total_modeled_calls":         int(st.session_state.get('total_modeled_calls', 0) or 0),
                 "inferred_daily_calls_override": st.session_state.get('inferred_daily_calls_override'),

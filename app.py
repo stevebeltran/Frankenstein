@@ -1858,6 +1858,59 @@ def reverse_geocode_state(lat, lon):
     except Exception:
         return None, None
 
+_PLACE_SUFFIXES = (
+    ' city', ' town', ' village', ' borough', ' township', ' cdp', ' municipality',
+    ' county', ' parish', ' census area', ' city and borough', ' borough county',
+    ' urban county', ' unified government', ' metro government',
+)
+
+
+def _normalize_population_lookup_name(value):
+    text = str(value or '').strip().lower()
+    text = text.replace('&', ' and ')
+    text = re.sub(r'[^\w\s-]', '', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    for suffix in _PLACE_SUFFIXES:
+        if text.endswith(suffix):
+            text = text[:-len(suffix)].strip()
+            break
+    return text
+
+
+def _population_lookup_aliases(value):
+    base = _normalize_population_lookup_name(value)
+    aliases = {base} if base else set()
+    if not base:
+        return aliases
+    aliases.add(base.replace('saint ', 'st '))
+    aliases.add(base.replace('st ', 'saint '))
+    aliases.add(base.replace('-', ' '))
+    aliases.add(base.replace('saint ', 'st ').replace('-', ' '))
+    aliases.add(base.replace('st ', 'saint ').replace('-', ' '))
+    return {alias.strip() for alias in aliases if alias.strip()}
+
+
+def _lookup_known_population(place_name):
+    direct = KNOWN_POPULATIONS.get(place_name)
+    if direct is not None:
+        return direct
+    aliases = _population_lookup_aliases(place_name)
+    for known_name, pop in KNOWN_POPULATIONS.items():
+        if _normalize_population_lookup_name(known_name) in aliases:
+            return pop
+    return None
+
+
+def _lookup_population_for_boundary(state_abbr, city_name, boundary_kind='place'):
+    state_fips = STATE_FIPS.get(str(state_abbr or '').strip().upper(), '')
+    if not state_fips:
+        return None
+    if boundary_kind == 'state':
+        return fetch_census_state_population(state_fips)
+    lookup_name = city_name or state_abbr
+    return fetch_census_population(state_fips, lookup_name, is_county=(boundary_kind == 'county'))
+
+
 @st.cache_data
 def fetch_census_population(state_fips, place_name, is_county=False):
     if is_county:
@@ -1868,33 +1921,32 @@ def fetch_census_population(state_fips, place_name, is_county=False):
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=15) as response:
             data = json.loads(response.read().decode('utf-8'))
-            search_name = str(place_name).lower().strip()
-            for suffix in [' city', ' town', ' village', ' borough', ' township', ' cdp', ' municipality']:
-                if search_name.endswith(suffix):
-                    search_name = search_name[:-len(suffix)].strip()
-                    break
-
+            search_aliases = _population_lookup_aliases(place_name)
             exact_match = None
             prefix_match = None
             for row in data[1:]:
-                place_full = str(row[1]).lower().split(',')[0].strip()
-                place_core = place_full
-                for suffix in [' city', ' town', ' village', ' borough', ' township', ' cdp', ' municipality', ' county']:
-                    if place_core.endswith(suffix):
-                        place_core = place_core[:-len(suffix)].strip()
-                        break
-                if place_core == search_name or place_full == search_name:
+                place_full = str(row[1]).split(',')[0].strip()
+                place_aliases = _population_lookup_aliases(place_full)
+                if search_aliases & place_aliases:
                     exact_match = int(row[0])
                     break
-                if is_county and (place_full.startswith(search_name + ' ') or place_core.startswith(search_name + ' ')):
-                    prefix_match = int(row[0])
+                for search_name in search_aliases:
+                    if any(
+                        alias.startswith(search_name + ' ')
+                        or alias.startswith(search_name + '-')
+                        for alias in place_aliases
+                    ):
+                        prefix_match = int(row[0])
+                        break
+                if prefix_match is not None:
+                    break
             if exact_match is not None:
                 return exact_match
             if prefix_match is not None:
                 return prefix_match
     except Exception:
         pass
-    return KNOWN_POPULATIONS.get(place_name)
+    return _lookup_known_population(place_name)
 
 @st.cache_data
 def fetch_census_state_population(state_fips):
@@ -3478,6 +3530,23 @@ def main():
                                 save_boundary_gdf,
                             )
 
+                        try:
+                            st.session_state['estimated_pop'] = 0
+                            st.session_state['_pop_resolved'] = False
+                            _resolved_boundary_kind = str(st.session_state.get('boundary_kind', 'place') or 'place').strip().lower()
+                            _resolved_city = str(st.session_state.get('active_city', '') or '').strip()
+                            _resolved_state = str(st.session_state.get('active_state', '') or '').strip().upper()
+                            _resolved_pop = _lookup_population_for_boundary(
+                                _resolved_state,
+                                _resolved_city,
+                                boundary_kind=_resolved_boundary_kind,
+                            )
+                            if _resolved_pop:
+                                st.session_state['estimated_pop'] = _resolved_pop
+                                st.session_state['_pop_resolved'] = True
+                        except Exception:
+                            pass
+
                         st.session_state['data_source'] = 'cad_upload'
                         st.session_state['demo_mode_used'] = False
                         st.session_state['sim_mode_used'] = False
@@ -4129,21 +4198,6 @@ def main():
                 st.session_state['active_city']  = f"{_target_city} & {len(active_targets)-1} others"
                 st.session_state['active_state'] = active_targets[0]['state']
 
-            # ── Fetch real population for upload path ─────────────────────────────
-            try:
-                _upload_pop = 0
-                for _t in active_targets:
-                    _fips = STATE_FIPS.get(_t.get('state', ''), '')
-                    if _fips:
-                        _p = fetch_census_population(_fips, _t.get('city', ''))
-                        if _p:
-                            _upload_pop += _p
-                if _upload_pop > 0:
-                    st.session_state['estimated_pop'] = _upload_pop
-                    st.session_state['_pop_resolved'] = True
-            except Exception:
-                pass
-
             # ── Flight-path loading overlay ───────────────────────────────────────
             _swarm_city = st.session_state.get('active_city', 'Jurisdiction') if active_targets else "Jurisdiction"
             _swarm_logo_b64 = get_themed_logo_base64("logo.png", theme="dark") or ""
@@ -4491,7 +4545,7 @@ body{{background:transparent;overflow:hidden}}
 
 
 
-            all_gdfs, total_estimated_pop, boundary_messages, boundary_warnings, rerun_demo_target = build_demo_boundaries(
+            all_gdfs, total_estimated_pop, boundary_messages, boundary_warnings, rerun_demo_target, all_populations_verified = build_demo_boundaries(
                 st.session_state,
                 active_targets,
                 STATE_FIPS,
@@ -4538,7 +4592,7 @@ body{{background:transparent;overflow:hidden}}
             active_city_gdf = pd.concat(all_gdfs, ignore_index=True)
             city_poly = active_city_gdf.geometry.union_all()
             st.session_state['estimated_pop'] = total_estimated_pop
-            st.session_state['_pop_resolved'] = True
+            st.session_state['_pop_resolved'] = all_populations_verified
 
             prog.progress(55, text="🚔 Modeling 911 calls — every one represents someone who needed help…")
             df_demo, annual_cfs, simulated_points_count = build_demo_calls(city_poly, total_estimated_pop, generate_clustered_calls)
@@ -7320,6 +7374,7 @@ body{{background:transparent;overflow:hidden}}
             "app_version": __version__,
             # ── Extended session state ────────────────────────────────────
             "estimated_pop":               int(st.session_state.get('estimated_pop', 0) or 0),
+            "_pop_resolved":              bool(st.session_state.get('_pop_resolved', False)),
             "total_original_calls":        int(st.session_state.get('total_original_calls', 0) or 0),
             "total_modeled_calls":         int(st.session_state.get('total_modeled_calls', 0) or 0),
             "inferred_daily_calls_override": st.session_state.get('inferred_daily_calls_override'),
@@ -7517,6 +7572,7 @@ body{{background:transparent;overflow:hidden}}
                 # ── Extended session state ────────────────────────────────────
                 # Jurisdiction metrics
                 "estimated_pop":               int(st.session_state.get('estimated_pop', 0) or 0),
+                "_pop_resolved":              bool(st.session_state.get('_pop_resolved', False)),
                 "total_original_calls":        int(st.session_state.get('total_original_calls', 0) or 0),
                 "total_modeled_calls":         int(st.session_state.get('total_modeled_calls', 0) or 0),
                 "inferred_daily_calls_override": st.session_state.get('inferred_daily_calls_override'),

@@ -148,6 +148,7 @@ def restore_brinc_session(session_state, save_data):
     # total_original_calls is already set above from len(calls_df))
     if 'estimated_pop' in save_data:
         session_state['estimated_pop'] = int(save_data['estimated_pop'] or 0)
+    session_state['_pop_resolved'] = bool(save_data.get('_pop_resolved', False))
     if 'total_original_calls' in save_data and 'calls_data' not in save_data:
         # Only override if calls_data isn't present (otherwise set from len above)
         session_state['total_original_calls'] = int(save_data['total_original_calls'] or 0)
@@ -616,6 +617,7 @@ def build_demo_boundaries(
 ):
     all_gdfs = []
     total_estimated_pop = 0
+    all_populations_verified = True
     boundary_messages = []
     warnings = []
     rerun_demo_target = None
@@ -669,6 +671,7 @@ def build_demo_boundaries(
                 total_estimated_pop += population
                 boundary_messages.append(f"✅ {city_name or state_name} population verified: {population:,}")
             else:
+                all_populations_verified = False
                 gdf_proj = temp_gdf.to_crs(epsg=3857)
                 area_sq_mi = gdf_proj.geometry.area.sum() / 2589988.11
                 default_density = 35 if is_state else 3500
@@ -681,10 +684,13 @@ def build_demo_boundaries(
                 candidates = [city for city in demo_cities if city[0] != city_name]
                 rerun_demo_target = random.choice(candidates)
 
+    if not all_gdfs:
+        all_populations_verified = False
+
     boundary_messages = [_normalize_display_text(msg) for msg in boundary_messages]
     warnings = [_normalize_display_text(msg) for msg in warnings]
 
-    return all_gdfs, total_estimated_pop, boundary_messages, warnings, rerun_demo_target
+    return all_gdfs, total_estimated_pop, boundary_messages, warnings, rerun_demo_target, all_populations_verified
 
 
 def build_demo_calls(city_poly, total_estimated_pop, generate_clustered_calls):

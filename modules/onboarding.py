@@ -15,6 +15,14 @@ import datetime
 import random
 
 
+def _normalize_display_text(value):
+    text = str(value)
+    try:
+        return text.encode("latin1").decode("utf-8")
+    except Exception:
+        return text
+
+
 _OPT_CACHE_KEYS = (
     '_opt_cache_key',
     '_opt_best_combo',
@@ -672,6 +680,9 @@ def build_demo_boundaries(
             if session_state.get('_last_demo_city') == city_name:
                 candidates = [city for city in demo_cities if city[0] != city_name]
                 rerun_demo_target = random.choice(candidates)
+
+    boundary_messages = [_normalize_display_text(msg) for msg in boundary_messages]
+    warnings = [_normalize_display_text(msg) for msg in warnings]
 
     return all_gdfs, total_estimated_pop, boundary_messages, warnings, rerun_demo_target
 

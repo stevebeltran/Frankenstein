@@ -21,6 +21,7 @@ import urllib.request
 import urllib.parse
 import zipfile
 import streamlit.components.v1 as components
+from streamlit.components.v1 import declare_component
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import gspread
@@ -129,6 +130,10 @@ from modules.onboarding import (
 )
 
 APP_DIR = Path(__file__).resolve().parent
+QUICK_PIN_COMPONENT = declare_component(
+    "quick_pin_component",
+    path=str(APP_DIR / "quick_pin_component"),
+)
 
 
 def _uploaded_files_signature(files):
@@ -5901,6 +5906,18 @@ body{{background:transparent;overflow:hidden}}
                         text=_custom_text,
                     ))
 
+            _pending_pin = st.session_state.get('pending_pin')
+            if isinstance(_pending_pin, dict) and _pending_pin.get('lat') is not None and _pending_pin.get('lon') is not None:
+                fig.add_trace(go.Scattermap(
+                    lat=[float(_pending_pin['lat'])],
+                    lon=[float(_pending_pin['lon'])],
+                    mode='markers',
+                    marker=dict(size=18, color='#39FF14', symbol='diamond'),
+                    name='Pending Pin',
+                    hovertemplate='Pending custom station<extra></extra>',
+                    showlegend=False,
+                ))
+
             map_cfg = dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style=map_style)
             if show_satellite:
                 map_cfg["style"] = "carto-positron"
@@ -5909,11 +5926,7 @@ body{{background:transparent;overflow:hidden}}
                     "source":["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"]}]
 
             _pin_drop_active = st.session_state.get('pin_drop_mode', False)
-
-            # In pin-drop mode, switch Plotly to 'select' dragmode so a click-drag
-            # draws a selection box instead of panning.  The center of that box
-            # becomes the pin coordinate — no need to hit an invisible point precisely.
-            _layout_extra = dict(dragmode='select') if _pin_drop_active else {}
+            _layout_extra = {}
 
             fig.update_layout(uirevision="LOCKED_MAP", map=map_cfg,
                 margin=dict(l=0,r=0,t=0,b=0), height=800, font=dict(size=18),
@@ -5924,73 +5937,37 @@ body{{background:transparent;overflow:hidden}}
                 **_layout_extra)
 
             if _pin_drop_active:
-                # Dense grid of subtle markers so box-select always captures at least
-                # one point to confirm the lat/lon.  Size=40 ensures full overlap at
-                # typical city zoom levels (no gaps between adjacent markers).
-                _grid_n = 80
-                _grid_lats = np.linspace(miny, maxy, _grid_n)
-                _grid_lons = np.linspace(minx, maxx, _grid_n)
-                _gla, _glo = np.meshgrid(_grid_lats, _grid_lons)
-                fig.add_trace(go.Scattermap(
-                    lat=_gla.ravel().tolist(),
-                    lon=_glo.ravel().tolist(),
-                    mode='markers',
-                    marker=dict(size=40, color='rgba(0,210,255,0.04)'),
-                    hoverinfo='skip',
-                    showlegend=False,
-                    name='__pin_grid__',
-                ))
                 fig.add_annotation(
-                    text="📍 Pin Drop Mode — click and drag a small box on your target location",
+                    text="📍 Pin Drop Mode — single-click the map to capture a station location",
                     xref="paper", yref="paper", x=0.5, y=0.98,
                     showarrow=False, font=dict(size=13, color="#00D2FF"),
                     bgcolor="rgba(0,0,0,0.72)", bordercolor="#00D2FF", borderwidth=1,
                     borderpad=6, xanchor="center",
                 )
-
-            _map_event = st.plotly_chart(
-                fig, width="stretch",
-                config={"scrollZoom": not _pin_drop_active, "displayModeBar": _pin_drop_active},
-                on_select="rerun" if _pin_drop_active else "ignore",
-                key="main_map_chart",
-            )
-
-            # Resolve pin location from whichever signal arrives first:
-            #   1. Selection box center  (most reliable — works even on empty map)
-            #   2. First selected point  (fallback)
-            if _pin_drop_active and _map_event and hasattr(_map_event, 'selection') \
-                    and st.session_state.get('pending_pin') is None:
-                _sel = _map_event.selection
-                _clicked_lat = _clicked_lon = None
-
-                # Priority 1: bounding box of the drawn selection rectangle
-                _box_list = getattr(_sel, 'box', None) or []
-                if _box_list:
-                    _b = _box_list[0]
-                    _lats = _b.get('y') or _b.get('lat') or []
-                    _lons = _b.get('x') or _b.get('lon') or []
-                    if len(_lats) >= 2 and len(_lons) >= 2:
-                        _clicked_lat = (min(_lats) + max(_lats)) / 2.0
-                        _clicked_lon = (min(_lons) + max(_lons)) / 2.0
-
-                # Priority 2: nearest grid point that was selected
-                if _clicked_lat is None:
-                    _sel_pts = getattr(_sel, 'points', []) or []
-                    if _sel_pts:
-                        _pt = _sel_pts[0]
-                        _clicked_lat = _pt.get('lat') or _pt.get('y')
-                        _clicked_lon = _pt.get('lon') or _pt.get('x')
-
-                if _clicked_lat is not None and _clicked_lon is not None:
-                    # Dedup: ignore if this is the same selection that was already processed
-                    _sel_hash = hash(f"{_clicked_lat:.4f},{_clicked_lon:.4f}")
-                    if _sel_hash != st.session_state.get('_pin_sel_hash'):
-                        st.session_state['_pin_sel_hash'] = _sel_hash
+                _quick_pin_event = QUICK_PIN_COMPONENT(
+                    figure_json=fig.to_plotly_json(),
+                    height=800,
+                    key="quick_pin_component",
+                    default=None,
+                )
+                if isinstance(_quick_pin_event, dict):
+                    _clicked_lat = _quick_pin_event.get('lat')
+                    _clicked_lon = _quick_pin_event.get('lon')
+                    _click_nonce = _quick_pin_event.get('nonce')
+                    if _clicked_lat is not None and _clicked_lon is not None and _click_nonce != st.session_state.get('_pin_click_nonce'):
+                        st.session_state['_pin_click_nonce'] = _click_nonce
+                        st.session_state['_pin_sel_hash'] = hash(f"{float(_clicked_lat):.4f},{float(_clicked_lon):.4f}")
                         st.session_state['pending_pin'] = {
                             'lat': round(float(_clicked_lat), 6),
                             'lon': round(float(_clicked_lon), 6),
                         }
                         st.rerun()
+            else:
+                st.plotly_chart(
+                    fig, width="stretch",
+                    config={"scrollZoom": True, "displayModeBar": False},
+                    key="main_map_chart",
+                )
 
 
         # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────

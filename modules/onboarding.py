@@ -90,6 +90,34 @@ def restore_brinc_session(session_state, save_data):
     session_state['_brinc_k_override'] = True
     session_state.pop('_auto_minimums_sig', None)
 
+    target_cities = save_data.get('target_cities')
+    if isinstance(target_cities, list):
+        restored_targets = []
+        for target in target_cities:
+            if not isinstance(target, dict):
+                continue
+            restored_targets.append({
+                'city': str(target.get('city', '') or '').strip(),
+                'state': str(target.get('state', session_state.get('active_state', '')) or '').strip().upper(),
+            })
+        if restored_targets:
+            session_state['target_cities'] = restored_targets
+            session_state['city_count'] = max(1, int(save_data.get('city_count', len(restored_targets)) or len(restored_targets)))
+        else:
+            session_state['target_cities'] = [{'city': session_state['active_city'], 'state': session_state['active_state']}]
+            session_state['city_count'] = 1
+    else:
+        session_state['target_cities'] = [{'city': session_state['active_city'], 'state': session_state['active_state']}]
+        session_state['city_count'] = 1
+
+    saved_jurisdiction_names = save_data.get('saved_jurisdiction_names')
+    if isinstance(saved_jurisdiction_names, list):
+        session_state['saved_jurisdiction_names'] = [
+            str(name or '').strip() for name in saved_jurisdiction_names if str(name or '').strip()
+        ]
+    else:
+        session_state['saved_jurisdiction_names'] = []
+
     for cache_key in _OPT_CACHE_KEYS:
         session_state.pop(cache_key, None)
 
@@ -105,8 +133,8 @@ def restore_brinc_session(session_state, save_data):
             raise ValueError('.brinc file contains no valid coordinate data after parsing.')
         session_state['df_calls'] = calls_df
         session_state['df_calls_full'] = calls_df.copy()
-        session_state['total_original_calls'] = len(calls_df)
-        session_state['total_modeled_calls'] = len(calls_df)
+        session_state['total_original_calls'] = int(save_data.get('total_original_calls', len(calls_df)) or len(calls_df))
+        session_state['total_modeled_calls'] = int(save_data.get('total_modeled_calls', len(calls_df)) or len(calls_df))
 
     stations_data = save_data.get('stations_data')
     if stations_data:
@@ -150,16 +178,27 @@ def restore_brinc_session(session_state, save_data):
         session_state['estimated_pop'] = int(save_data['estimated_pop'] or 0)
     session_state['_pop_resolved'] = bool(save_data.get('_pop_resolved', False))
     if 'total_original_calls' in save_data and 'calls_data' not in save_data:
-        # Only override if calls_data isn't present (otherwise set from len above)
         session_state['total_original_calls'] = int(save_data['total_original_calls'] or 0)
     if 'total_modeled_calls' in save_data and 'calls_data' not in save_data:
         session_state['total_modeled_calls'] = int(save_data['total_modeled_calls'] or 0)
+    if 'population_reference_kind' in save_data:
+        session_state['population_reference_kind'] = str(save_data.get('population_reference_kind') or '')
+    if isinstance(save_data.get('population_reference_targets'), list):
+        session_state['population_reference_targets'] = [
+            str(target or '').strip() for target in save_data.get('population_reference_targets', []) if str(target or '').strip()
+        ]
     if save_data.get('inferred_daily_calls_override') is not None:
         session_state['inferred_daily_calls_override'] = save_data['inferred_daily_calls_override']
     if save_data.get('active_dept_name'):
         session_state['active_dept_name'] = save_data['active_dept_name']
     if save_data.get('file_meta'):
         session_state['file_meta'] = dict(save_data['file_meta'])
+    if save_data.get('session_start'):
+        session_state['session_start'] = str(save_data['session_start'])
+    if isinstance(save_data.get('export_event_log'), list):
+        session_state['export_event_log'] = [str(item or '') for item in save_data.get('export_event_log', [])]
+    if 'export_count' in save_data:
+        session_state['export_count'] = int(save_data.get('export_count') or 0)
 
     # Display options — restore widget keys so toggles/sliders pick up saved state
     _bool_display_keys = [

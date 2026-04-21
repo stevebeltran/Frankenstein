@@ -7421,8 +7421,16 @@ body{{background:transparent;overflow:hidden}}
             "inferred_daily_calls_override": st.session_state.get('inferred_daily_calls_override'),
             "data_source":                 st.session_state.get('data_source', 'unknown'),
             "active_dept_name":            st.session_state.get('active_dept_name', ''),
+            "target_cities":               st.session_state.get('target_cities', []),
+            "city_count":                  int(st.session_state.get('city_count', 1) or 1),
+            "saved_jurisdiction_names":    list(st.session_state.get('population_reference_targets', [])),
+            "population_reference_kind":   st.session_state.get('population_reference_kind', ''),
+            "population_reference_targets": list(st.session_state.get('population_reference_targets', [])),
+            "session_start":               st.session_state.get('session_start', ''),
+            "export_event_log":            list(st.session_state.get('export_event_log', [])),
+            "export_count":                int(st.session_state.get('export_count', 0) or 0),
             "file_meta":                   {k: v for k, v in (st.session_state.get('file_meta') or {}).items()
-                                            if isinstance(v, (str, int, float, bool, type(None)))},
+                                           if isinstance(v, (str, int, float, bool, type(None)))},
             "show_satellite_b":            st.session_state.get('show_satellite_b', False),
             "show_boundaries_b":           st.session_state.get('show_boundaries_b', True),
             "show_faa_b":                  st.session_state.get('show_faa_b', False),
@@ -7619,6 +7627,14 @@ body{{background:transparent;overflow:hidden}}
                 "inferred_daily_calls_override": st.session_state.get('inferred_daily_calls_override'),
                 "data_source":                 st.session_state.get('data_source', 'unknown'),
                 "active_dept_name":            st.session_state.get('active_dept_name', ''),
+                "target_cities":               st.session_state.get('target_cities', []),
+                "city_count":                  int(st.session_state.get('city_count', 1) or 1),
+                "saved_jurisdiction_names":    list(selected_names),
+                "population_reference_kind":   st.session_state.get('population_reference_kind', ''),
+                "population_reference_targets": list(st.session_state.get('population_reference_targets', [])),
+                "session_start":               st.session_state.get('session_start', ''),
+                "export_event_log":            list(st.session_state.get('export_event_log', [])),
+                "export_count":                int(st.session_state.get('export_count', 0) or 0),
                 "file_meta":                   {k: v for k, v in (st.session_state.get('file_meta') or {}).items()
                                                 if isinstance(v, (str, int, float, bool, type(None)))},
                 # Display options (widget keys)
@@ -9228,10 +9244,8 @@ body{{background:transparent;overflow:hidden}}
             "k_resp": 0, "k_guard": 0,
             "_disclaimer": "No drones deployed yet.",
         })
-        # Include authenticated user's name in the .brinc filename for easy identification
-        _user_name_safe = user_clean.replace(" ", "_")
         if st.sidebar.download_button("💾 Save Deployment Plan", data=_brinc_data,
-                                      file_name=f"{_user_name_safe}_BRINC_DFR_{_safe_city}_{_version_slug}_{_ts}.brinc",
+                                      file_name=f"BRINC_Deployment_Plan_{_safe_city}_{_version_slug}_{_ts}.brinc",
                                       mime="application/json", width="stretch"):
             # ── Track export event ───────────────────────────────────────────────
             st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['BRINC']

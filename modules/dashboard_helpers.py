@@ -289,6 +289,15 @@ def render_sidebar_jurisdiction_selector(
     options_map = dict(zip(master_gdf['LABEL'], master_gdf['DISPLAY_NAME']))
     all_options = master_gdf['LABEL'].tolist()
     default_selection = [all_options[0]] if all_options else []
+    saved_selection_names = []
+    for _saved_name in (session_state.get('saved_jurisdiction_names') or []):
+        _saved_text = str(_saved_name or '').strip()
+        if _saved_text:
+            saved_selection_names.append(_saved_text)
+    if saved_selection_names:
+        _saved_labels = [label for label, display_name in options_map.items() if display_name in saved_selection_names]
+        if _saved_labels:
+            default_selection = _saved_labels
     options_signature = tuple(all_options)
     if session_state.get('_jurisdiction_options_signature') != options_signature:
         session_state['jurisdictions_multiselect'] = default_selection

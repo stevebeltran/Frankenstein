@@ -137,9 +137,14 @@ from modules.highway_corridor import (
 )
 
 APP_DIR = Path(__file__).resolve().parent
-QUICK_PIN_COMPONENT = declare_component(
-    "quick_pin_component",
-    path=str(APP_DIR / "quick_pin_component"),
+QUICK_PIN_COMPONENT_DIR = APP_DIR / "quick_pin_component"
+QUICK_PIN_COMPONENT = (
+    declare_component(
+        "quick_pin_component",
+        path=str(QUICK_PIN_COMPONENT_DIR),
+    )
+    if QUICK_PIN_COMPONENT_DIR.is_dir()
+    else None
 )
 
 
@@ -6031,30 +6036,83 @@ body{{background:transparent;overflow:hidden}}
 
             if _pin_drop_active:
                 fig.add_annotation(
-                    text="📍 Pin Drop Mode — single-click the map to capture a station location",
+                    text=(
+                        "📍 Pin Drop Mode — single-click the map to capture a station location"
+                        if QUICK_PIN_COMPONENT is not None
+                        else "📍 Pin Drop Mode — click and drag a small box on your target location"
+                    ),
                     xref="paper", yref="paper", x=0.5, y=0.98,
                     showarrow=False, font=dict(size=13, color="#00D2FF"),
                     bgcolor="rgba(0,0,0,0.72)", bordercolor="#00D2FF", borderwidth=1,
                     borderpad=6, xanchor="center",
                 )
-                _quick_pin_event = QUICK_PIN_COMPONENT(
-                    figure_json=fig.to_plotly_json(),
-                    height=800,
-                    key="quick_pin_component",
-                    default=None,
-                )
-                if isinstance(_quick_pin_event, dict):
-                    _clicked_lat = _quick_pin_event.get('lat')
-                    _clicked_lon = _quick_pin_event.get('lon')
-                    _click_nonce = _quick_pin_event.get('nonce')
-                    if _clicked_lat is not None and _clicked_lon is not None and _click_nonce != st.session_state.get('_pin_click_nonce'):
-                        st.session_state['_pin_click_nonce'] = _click_nonce
-                        st.session_state['_pin_sel_hash'] = hash(f"{float(_clicked_lat):.4f},{float(_clicked_lon):.4f}")
-                        st.session_state['pending_pin'] = {
-                            'lat': round(float(_clicked_lat), 6),
-                            'lon': round(float(_clicked_lon), 6),
-                        }
-                        st.rerun()
+                if QUICK_PIN_COMPONENT is not None:
+                    _quick_pin_event = QUICK_PIN_COMPONENT(
+                        figure_json=fig.to_plotly_json(),
+                        height=800,
+                        key="quick_pin_component",
+                        default=None,
+                    )
+                    if isinstance(_quick_pin_event, dict):
+                        _clicked_lat = _quick_pin_event.get('lat')
+                        _clicked_lon = _quick_pin_event.get('lon')
+                        _click_nonce = _quick_pin_event.get('nonce')
+                        if _clicked_lat is not None and _clicked_lon is not None and _click_nonce != st.session_state.get('_pin_click_nonce'):
+                            st.session_state['_pin_click_nonce'] = _click_nonce
+                            st.session_state['_pin_sel_hash'] = hash(f"{float(_clicked_lat):.4f},{float(_clicked_lon):.4f}")
+                            st.session_state['pending_pin'] = {
+                                'lat': round(float(_clicked_lat), 6),
+                                'lon': round(float(_clicked_lon), 6),
+                            }
+                            st.rerun()
+                else:
+                    _grid_n = 80
+                    _grid_lats = np.linspace(miny, maxy, _grid_n)
+                    _grid_lons = np.linspace(minx, maxx, _grid_n)
+                    _gla, _glo = np.meshgrid(_grid_lats, _grid_lons)
+                    fig.add_trace(go.Scattermap(
+                        lat=_gla.ravel().tolist(),
+                        lon=_glo.ravel().tolist(),
+                        mode='markers',
+                        marker=dict(size=40, color='rgba(0,210,255,0.04)'),
+                        hoverinfo='skip',
+                        showlegend=False,
+                        name='__pin_grid__',
+                    ))
+                    fig.update_layout(dragmode='select')
+                    _map_event = st.plotly_chart(
+                        fig,
+                        width="stretch",
+                        config={"scrollZoom": False, "displayModeBar": True},
+                        on_select="rerun",
+                        key="main_map_chart_pin_fallback",
+                    )
+                    if _map_event and hasattr(_map_event, 'selection') and st.session_state.get('pending_pin') is None:
+                        _sel = _map_event.selection
+                        _clicked_lat = _clicked_lon = None
+                        _box_list = getattr(_sel, 'box', None) or []
+                        if _box_list:
+                            _b = _box_list[0]
+                            _lats = _b.get('y') or _b.get('lat') or []
+                            _lons = _b.get('x') or _b.get('lon') or []
+                            if len(_lats) >= 2 and len(_lons) >= 2:
+                                _clicked_lat = (min(_lats) + max(_lats)) / 2.0
+                                _clicked_lon = (min(_lons) + max(_lons)) / 2.0
+                        if _clicked_lat is None:
+                            _sel_pts = getattr(_sel, 'points', []) or []
+                            if _sel_pts:
+                                _pt = _sel_pts[0]
+                                _clicked_lat = _pt.get('lat') or _pt.get('y')
+                                _clicked_lon = _pt.get('lon') or _pt.get('x')
+                        if _clicked_lat is not None and _clicked_lon is not None:
+                            _sel_hash = hash(f"{_clicked_lat:.4f},{_clicked_lon:.4f}")
+                            if _sel_hash != st.session_state.get('_pin_sel_hash'):
+                                st.session_state['_pin_sel_hash'] = _sel_hash
+                                st.session_state['pending_pin'] = {
+                                    'lat': round(float(_clicked_lat), 6),
+                                    'lon': round(float(_clicked_lon), 6),
+                                }
+                                st.rerun()
             else:
                 st.plotly_chart(
                     fig, width="stretch",

@@ -792,7 +792,12 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
             if _agency_col:
                 res['agency'] = raw_df[_agency_col].astype(str).str.strip().str.lower()
             else:
-                res['agency'] = 'police'   # safe default for single-agency files
+                # Fall back to filename-based agency detection when no agency column exists
+                _fname_lower = str(cfile.name).lower()
+                if any(k in _fname_lower for k in ('fire', 'ems', 'medic', 'rescue', 'ambulance', 'engine', 'ladder', 'battalion')):
+                    res['agency'] = 'fire'
+                else:
+                    res['agency'] = 'police'   # safe default for single-agency files
 
             # City/state detection: store top values on rows for location detection
             top_city_name = None

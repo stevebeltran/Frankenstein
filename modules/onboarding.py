@@ -255,26 +255,62 @@ def split_uploaded_files(uploaded_files, is_boundary_sidecar, looks_like_station
     return call_files, station_file, boundary_files
 
 
-def load_station_file(station_file):
-    station_name = station_file.name.lower()
+def _read_station_upload(uploaded_file):
+    station_name = str(getattr(uploaded_file, 'name', '')).lower()
     if station_name.endswith(('.xlsx', '.xls', '.xlsm', '.xlsb')):
         engine = 'xlrd' if station_name.endswith('.xls') else 'pyxlsb' if station_name.endswith('.xlsb') else 'openpyxl'
-        stations_df = pd.read_excel(io.BytesIO(station_file.getvalue()), engine=engine)
-    else:
-        station_file.seek(0)
-        stations_df = pd.read_csv(station_file)
+        uploaded_file.seek(0)
+        return pd.read_excel(io.BytesIO(uploaded_file.getvalue()), engine=engine)
+    uploaded_file.seek(0)
+    return pd.read_csv(uploaded_file)
 
-    stations_df.columns = [str(column).lower().strip() for column in stations_df.columns]
-    if 'latitude' in stations_df.columns:
-        stations_df = stations_df.rename(columns={'latitude': 'lat'})
-    if 'longitude' in stations_df.columns:
-        stations_df = stations_df.rename(columns={'longitude': 'lon'})
-    if 'station_name' in stations_df.columns:
-        stations_df = stations_df.rename(columns={'station_name': 'name'})
-    if 'station_type' in stations_df.columns:
-        stations_df = stations_df.rename(columns={'station_type': 'type'})
+
+def _normalize_station_columns(station_df):
+    station_df = station_df.copy()
+    station_df.columns = [str(column).lower().strip() for column in station_df.columns]
+    if 'latitude' in station_df.columns:
+        station_df = station_df.rename(columns={'latitude': 'lat'})
+    if 'longitude' in station_df.columns:
+        station_df = station_df.rename(columns={'longitude': 'lon'})
+    if 'station_name' in station_df.columns:
+        station_df = station_df.rename(columns={'station_name': 'name'})
+    if 'station_type' in station_df.columns:
+        station_df = station_df.rename(columns={'station_type': 'type'})
+    return station_df
+
+
+def _extract_single_column_station_addresses(station_df):
+    if station_df is None or station_df.empty or len(station_df.columns) != 1:
+        return station_df, None
+
+    sole_col = station_df.columns[0]
+    header_value = str(sole_col).strip()
+    series = station_df.iloc[:, 0]
+    values = [str(value).strip() for value in series.tolist() if pd.notna(value) and str(value).strip()]
+    header_looks_like_address = any(ch.isdigit() for ch in header_value) and ',' in header_value
+
+    if not values and not header_looks_like_address:
+        return station_df, None
+
+    address_rows = []
+    if header_looks_like_address:
+        address_rows.append(header_value)
+    address_rows.extend(values)
+    if not address_rows:
+        return station_df, None
+
+    extracted_df = pd.DataFrame({'address': address_rows})
+    return extracted_df, 'Detected a single-column address list and treated each row as a station address.'
+
+
+def load_station_file(station_file):
+    stations_df = _read_station_upload(station_file)
+    stations_df = _normalize_station_columns(stations_df)
+    stations_df, single_col_note = _extract_single_column_station_addresses(stations_df)
 
     if 'lat' not in stations_df.columns or 'lon' not in stations_df.columns:
+        if single_col_note:
+            raise ValueError('Detected address rows but no lat/lon columns. In Path 01, address-only station files are geocoded during simulation upload.')
         raise ValueError('Could not find lat/lon columns.')
 
     stations_df['lat'] = pd.to_numeric(stations_df['lat'], errors='coerce')
@@ -546,15 +582,9 @@ def load_simulation_boundary_overlay(session_state, boundary_files, load_uploade
 
 
 def load_simulation_custom_stations(sim_uploader, active_targets, forward_geocode):
-    station_name = sim_uploader.name.lower()
-    if station_name.endswith(('.xlsx', '.xls', '.xlsm', '.xlsb')):
-        engine = 'xlrd' if station_name.endswith('.xls') else 'pyxlsb' if station_name.endswith('.xlsb') else 'openpyxl'
-        station_df = pd.read_excel(io.BytesIO(sim_uploader.getvalue()), engine=engine)
-    else:
-        sim_uploader.seek(0)
-        station_df = pd.read_csv(sim_uploader)
-
-    station_df.columns = [str(column).lower().strip() for column in station_df.columns]
+    station_df = _read_station_upload(sim_uploader)
+    station_df = _normalize_station_columns(station_df)
+    station_df, _single_col_note = _extract_single_column_station_addresses(station_df)
     lat_col = next((c for c in station_df.columns if c in ['lat', 'latitude', 'y']), None)
     lon_col = next((c for c in station_df.columns if c in ['lon', 'long', 'longitude', 'x']), None)
     addr_col = next((c for c in station_df.columns if any(a in c for a in ['address', 'street', 'location'])), None)

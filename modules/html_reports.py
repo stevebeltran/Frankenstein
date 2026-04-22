@@ -2054,11 +2054,16 @@ def _build_cad_charts(df_calls, text_main, text_muted, card_bg, card_border, acc
 
             )
 
+            _report_chart_key = (
+                f"report_top_call_types_{state_abbr}_{len(top_types)}_{int(sum(top_types['count']))}"
+                if hasattr(top_types, "__len__") and len(top_types) > 0
+                else f"report_top_call_types_{state_abbr}_empty"
+            )
             st.plotly_chart(
                 fig_types,
                 width="stretch",
                 config={'displayModeBar': False},
-                key="report_top_call_types",
+                key=_report_chart_key,
             )
 
 

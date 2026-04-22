@@ -3282,6 +3282,35 @@ def main():
 
             st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
+            # Move "+ City" and "Deploy" buttons up (before file uploader and download button)
+            st.markdown("""
+            <style>
+            [data-testid="stBaseButton-primary"], button[kind="primary"] {
+                background: #00D2FF !important;
+                background-color: #00D2FF !important;
+                border-color: #00D2FF !important;
+                color: #000 !important;
+                font-weight: 800 !important;
+            }
+            [data-testid="stBaseButton-primary"]:hover, button[kind="primary"]:hover {
+                background: #33DEFF !important;
+                background-color: #33DEFF !important;
+                border-color: #33DEFF !important;
+                color: #000 !important;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+            col_add, col_run = st.columns([1, 1])
+            if st.session_state.city_count < 10:
+                if col_add.button("＋ City", width="stretch", key="add_city_btn"):
+                    st.session_state.city_count += 1
+                    st.rerun()
+            submit_demo = col_run.button("Deploy", width="stretch", key="run_sim_btn",
+                                         type="primary",
+                                         help="Fetch boundaries and launch the simulation.")
+
+            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
             # ── Highway / State Police Mode ───────────────────────────────────
             _hw_mode_ui = st.checkbox(
                 "Highway / State Police Mode",
@@ -3332,35 +3361,6 @@ def main():
                     st.caption("Enter a state abbreviation above first.")
                     st.session_state['selected_highways'] = []
                     st.session_state['active_highway'] = None
-
-            st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-
-            # Move "+ City" and "Deploy" buttons up (before file uploader and download button)
-            st.markdown("""
-            <style>
-            [data-testid="stBaseButton-primary"], button[kind="primary"] {
-                background: #00D2FF !important;
-                background-color: #00D2FF !important;
-                border-color: #00D2FF !important;
-                color: #000 !important;
-                font-weight: 800 !important;
-            }
-            [data-testid="stBaseButton-primary"]:hover, button[kind="primary"]:hover {
-                background: #33DEFF !important;
-                background-color: #33DEFF !important;
-                border-color: #33DEFF !important;
-                color: #000 !important;
-            }
-            </style>
-            """, unsafe_allow_html=True)
-            col_add, col_run = st.columns([1, 1])
-            if st.session_state.city_count < 10:
-                if col_add.button("＋ City", width="stretch", key="add_city_btn"):
-                    st.session_state.city_count += 1
-                    st.rerun()
-            submit_demo = col_run.button("Deploy", width="stretch", key="run_sim_btn",
-                                         type="primary",
-                                         help="Fetch boundaries and launch the simulation.")
 
             st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
@@ -3442,18 +3442,24 @@ def main():
 
       function bindEnterToDeploy(){
         var doc = parent.document;
-        var cityInput = doc.querySelector('input[aria-label="city_or_county_0"]');
-        if(!cityInput || cityInput.getAttribute('data-brinc-enter-submit')) return;
-        cityInput.setAttribute('data-brinc-enter-submit', '1');
-        cityInput.addEventListener('keydown', function(evt){
-          if(evt.key !== 'Enter' || evt.shiftKey || evt.ctrlKey || evt.altKey || evt.metaKey) return;
-          var deployBtn = Array.from(doc.querySelectorAll('[data-testid="stButton"] > button')).find(function(btn){
-            var p = btn.querySelector('p');
-            return p && p.textContent.trim() === 'Deploy';
+        var targets = Array.from(doc.querySelectorAll('input[type="text"], input:not([type]), textarea'));
+        targets.forEach(function(input){
+          if(!input || input.getAttribute('data-brinc-enter-submit')) return;
+          input.setAttribute('data-brinc-enter-submit', '1');
+          input.addEventListener('keydown', function(evt){
+            if(evt.key !== 'Enter' || evt.shiftKey || evt.ctrlKey || evt.altKey || evt.metaKey) return;
+            var deployBtn = Array.from(doc.querySelectorAll('[data-testid="stButton"] > button')).find(function(btn){
+              var p = btn.querySelector('p');
+              return p && p.textContent.trim() === 'Deploy';
+            });
+            if(!deployBtn) return;
+            try {
+              input.dispatchEvent(new Event('change', {bubbles:true}));
+              input.blur();
+            } catch (e) {}
+            evt.preventDefault();
+            setTimeout(function(){ deployBtn.click(); }, 60);
           });
-          if(!deployBtn) return;
-          evt.preventDefault();
-          setTimeout(function(){ deployBtn.click(); }, 30);
         });
       }
 
@@ -4741,6 +4747,12 @@ body{{background:transparent;overflow:hidden}}
                     _selected_boundary_override['DISPLAY_NAME'] = _selected_boundary_override[_selected_name_col].astype(str)
                 _selected_boundary_override['data_count'] = 1
                 st.session_state['master_gdf_override'] = _selected_boundary_override[['DISPLAY_NAME', 'data_count', 'geometry']].copy()
+                _demo_selected_names = [
+                    str(name).strip() for name in _selected_boundary_override['DISPLAY_NAME'].tolist()
+                    if str(name).strip()
+                ]
+                st.session_state['saved_jurisdiction_names'] = list(dict.fromkeys(_demo_selected_names))
+                st.session_state['population_reference_targets'] = list(dict.fromkeys(_demo_selected_names))
 
                 prog.progress(35, text="💙 Boundaries loaded — honoring the officers who know every street…")
                 active_city_gdf = pd.concat(all_gdfs, ignore_index=True)
@@ -9435,7 +9447,7 @@ body{{background:transparent;overflow:hidden}}
         if active_drones:
             if st.sidebar.download_button("🌏 Google Earth Briefing File",
                                           data=html_reports.generate_kml(active_gdf, active_drones, calls_in_city),
-                                          file_name="drone_deployment.kml",
+                                          file_name=f"BRINC_Google_Earth_Briefing_{_safe_city}_{_version_slug}_{_ts}.kml",
                                           mime="application/vnd.google-earth.kml+xml",
                                           width="stretch"):
                 # ── Track export event ───────────────────────────────────────────

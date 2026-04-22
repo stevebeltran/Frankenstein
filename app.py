@@ -4730,6 +4730,18 @@ body{{background:transparent;overflow:hidden}}
                     st.error("❌ Could not find Census boundaries for any of the entered locations. Check spelling.")
                     st.stop()
 
+                _selected_boundary_override = pd.concat(all_gdfs, ignore_index=True).copy()
+                _selected_name_col = next(
+                    (column for column in ['NAME', 'DISTRICT', 'NAMELSAD'] if column in _selected_boundary_override.columns),
+                    None,
+                )
+                if _selected_name_col is None:
+                    _selected_boundary_override['DISPLAY_NAME'] = 'Selected Boundary'
+                else:
+                    _selected_boundary_override['DISPLAY_NAME'] = _selected_boundary_override[_selected_name_col].astype(str)
+                _selected_boundary_override['data_count'] = 1
+                st.session_state['master_gdf_override'] = _selected_boundary_override[['DISPLAY_NAME', 'data_count', 'geometry']].copy()
+
                 prog.progress(35, text="💙 Boundaries loaded — honoring the officers who know every street…")
                 active_city_gdf = pd.concat(all_gdfs, ignore_index=True)
                 city_poly = active_city_gdf.geometry.union_all()
@@ -5842,8 +5854,17 @@ body{{background:transparent;overflow:hidden}}
                 geoms_to_draw = [city_boundary_geom] if isinstance(city_boundary_geom, Polygon) else list(city_boundary_geom.geoms)
                 for gi, geom in enumerate(geoms_to_draw):
                     bx, by = geom.exterior.coords.xy
+                    fig.add_trace(go.Scattermap(
+                        mode="lines",
+                        lon=list(bx),
+                        lat=list(by),
+                        line=dict(color="rgba(8, 15, 28, 0.95)", width=6),
+                        name="Jurisdiction Boundary Halo",
+                        hoverinfo='skip',
+                        showlegend=False,
+                    ))
                     fig.add_trace(go.Scattermap(mode="lines", lon=list(bx), lat=list(by),
-                        line=dict(color=map_boundary_color, width=2), name="Jurisdiction Boundary",
+                        line=dict(color="#3CF2FF", width=3), name="Jurisdiction Boundary",
                         hoverinfo='skip', showlegend=(gi==0)))
 
             boundary_overlay_gdf = st.session_state.get('boundary_overlay_gdf')
@@ -5858,8 +5879,17 @@ body{{background:transparent;overflow:hidden}}
                         _overlay_parts.extend(list(_overlay_geom.geoms))
                 for oi, geom in enumerate(_overlay_parts):
                     bx, by = geom.exterior.coords.xy
+                    fig.add_trace(go.Scattermap(
+                        mode="lines",
+                        lon=list(bx),
+                        lat=list(by),
+                        line=dict(color="rgba(8, 15, 28, 0.9)", width=5),
+                        name="Uploaded Boundary Overlay Halo",
+                        hoverinfo='skip',
+                        showlegend=False,
+                    ))
                     fig.add_trace(go.Scattermap(mode="lines", lon=list(bx), lat=list(by),
-                        line=dict(color="#00D2FF", width=2), name="Uploaded Boundary Overlay",
+                        line=dict(color="#FFD166", width=2.5), name="Uploaded Boundary Overlay",
                         hoverinfo='skip', showlegend=(oi==0)))
 
             if show_heatmap and not display_calls.empty:

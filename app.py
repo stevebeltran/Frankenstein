@@ -4597,6 +4597,20 @@ body{{background:transparent;overflow:hidden}}
                 prog.progress(38, text=f"📐 Building {_active_hw} corridor boundary…")
                 _corridor_poly, _corridor_line, _corridor_miles = build_corridor_polygon(_hw_gdf)
                 city_poly = _corridor_poly
+                _corridor_label = f"{_active_hw} Corridor"
+                _corridor_override = gpd.GeoDataFrame(
+                    {
+                        'DISPLAY_NAME': [_corridor_label],
+                        'data_count': [1],
+                    },
+                    geometry=[_corridor_poly],
+                    crs="EPSG:4326",
+                )
+                st.session_state['master_gdf_override'] = _corridor_override
+                st.session_state['saved_jurisdiction_names'] = [_corridor_label]
+                st.session_state['population_reference_targets'] = [_corridor_label]
+                st.session_state['active_city'] = _corridor_label
+                st.session_state['active_state'] = _hw_state
                 st.session_state['estimated_pop'] = 0
                 st.session_state['_pop_resolved'] = False
                 prog.progress(55, text=f"🚔 Modeling patrol calls along {_corridor_miles:.0f} miles of {_active_hw}…")

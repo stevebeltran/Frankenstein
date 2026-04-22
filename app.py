@@ -6162,7 +6162,12 @@ body{{background:transparent;overflow:hidden}}
                     paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                     hoverlabel=dict(bgcolor=card_bg, font_size=13, font_color=text_main, bordercolor=accent_color)
                 )
-                st.plotly_chart(fig_curve, width="stretch", config={'displayModeBar':False})
+                st.plotly_chart(
+                    fig_curve,
+                    width="stretch",
+                    config={'displayModeBar': False},
+                    key="coverage_curve_chart",
+                )
             else:
                 st.info("Run optimization to generate coverage curve.")
 
@@ -6287,7 +6292,12 @@ body{{background:transparent;overflow:hidden}}
                     paper_bgcolor='rgba(0,0,0,0)',
                     hoverlabel=dict(bgcolor=card_bg, font_size=12, font_color=text_main),
                 )
-                st.plotly_chart(fig_ring, width="stretch", config={'displayModeBar':False})
+                st.plotly_chart(
+                    fig_ring,
+                    width="stretch",
+                    config={'displayModeBar': False},
+                    key="station_distribution_ring",
+                )
 
                 # Mode legend below the ring
                 _mode_label = {
@@ -6881,7 +6891,12 @@ body{{background:transparent;overflow:hidden}}
                             _cr, _cov_boundary, center_lat, center_lon,
                             dynamic_zoom, map_style
                         )
-                        st.plotly_chart(_mini_fig, width="stretch", config={"displayModeBar": False})
+                        st.plotly_chart(
+                            _mini_fig,
+                            width="stretch",
+                            config={"displayModeBar": False},
+                            key=f"carrier_mini_map_{_ci}",
+                        )
 
                 # Rank line
                 if len(_carrier_results) > 1:

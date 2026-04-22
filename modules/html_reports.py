@@ -2054,7 +2054,12 @@ def _build_cad_charts(df_calls, text_main, text_muted, card_bg, card_border, acc
 
             )
 
-            st.plotly_chart(fig_types, width="stretch", config={'displayModeBar': False})
+            st.plotly_chart(
+                fig_types,
+                width="stretch",
+                config={'displayModeBar': False},
+                key="report_top_call_types",
+            )
 
 
 

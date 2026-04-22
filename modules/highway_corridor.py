@@ -136,28 +136,47 @@ def fetch_highway_geometry(highway_ref, state_abbr):
     ref_num = highway_ref.strip().upper().replace('I-', '').replace('I ', '').strip()
     south, west, north, east = _STATE_BBOXES.get(state_abbr.upper(), (24.0, -125.0, 49.0, -66.0))
 
-    ref_pattern = f'(^|;\\\\s*)I[ -]{ref_num}(\\\\s*;|$)'
-    overpass_query = (
-        f'[out:json][timeout:60];\n'
-        f'(\n'
-        f'  relation["route"="road"]["ref"~"{ref_pattern}"]({south},{west},{north},{east});\n'
-        f'  way["highway"~"motorway|trunk"]["ref"~"{ref_pattern}"]({south},{west},{north},{east});\n'
-        f');\n'
-        f'out geom;\n'
-    )
-
     _headers = {"Accept": "*/*", "User-Agent": "BRINC-Frankenstein/1.0"}
-    try:
-        resp = requests.post(
-            "https://overpass-api.de/api/interpreter",
-            data={"data": overpass_query},
-            headers=_headers,
-            timeout=90,
-        )
-        resp.raise_for_status()
-        elements = resp.json().get("elements", [])
-    except Exception:
-        return None
+
+    # OSM refs are not fully standardized; try the most common Interstate forms first,
+    # then fall back to a broader bbox if the state-specific search comes back empty.
+    ref_patterns = [
+        rf'(^|;\\s*)I[- ]?{ref_num}(\\s*;|$)',
+        rf'(^|;\\s*){ref_num}(\\s*;|$)',
+    ]
+    bboxes = [
+        (south, west, north, east),
+        _STATE_BBOXES.get(state_abbr.upper(), (24.0, -125.0, 49.0, -66.0)),
+    ]
+
+    elements = []
+    for bbox in bboxes:
+        if elements:
+            break
+        for ref_pattern in ref_patterns:
+            overpass_query = (
+                f'[out:json][timeout:60];\n'
+                f'(\n'
+                f'  relation["route"="road"]["ref"~"{ref_pattern}"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});\n'
+                f'  way["highway"~"motorway|trunk"]["ref"~"{ref_pattern}"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});\n'
+                f'  way["highway"~"motorway|trunk"]["name"~"^I[- ]?{ref_num}$"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});\n'
+                f');\n'
+                f'out geom;\n'
+            )
+
+            try:
+                resp = requests.post(
+                    "https://overpass-api.de/api/interpreter",
+                    data={"data": overpass_query},
+                    headers=_headers,
+                    timeout=90,
+                )
+                resp.raise_for_status()
+                elements = resp.json().get("elements", [])
+            except Exception:
+                elements = []
+            if elements:
+                break
 
     lines = []
     for el in elements:

@@ -6073,7 +6073,11 @@ body{{background:transparent;overflow:hidden}}
                 st.plotly_chart(
                     fig, width="stretch",
                     config={"scrollZoom": True, "displayModeBar": False},
-                    key="main_map_chart",
+                    key=(
+                        f"main_map_chart_{_hw_state}_{_active_hw}"
+                        if _corridor_mode and _hw_state and _active_hw
+                        else "main_map_chart"
+                    ),
                 )
 
 

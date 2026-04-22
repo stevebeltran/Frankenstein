@@ -2238,7 +2238,7 @@ def _prepare_sampling_polygon(polygon):
     try:
         if isinstance(polygon, MultiPolygon):
             non_empty = [p for p in polygon.geoms if p is not None and not p.is_empty]
-            polygon = max(non_empty, key=lambda p: p.area) if non_empty else None
+            polygon = MultiPolygon(non_empty) if non_empty else None
         if polygon is None or polygon.is_empty:
             return None
         if not polygon.is_valid:

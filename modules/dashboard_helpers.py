@@ -299,6 +299,13 @@ def render_sidebar_jurisdiction_selector(
         if _saved_labels:
             default_selection = _saved_labels
     options_signature = tuple(all_options)
+    current_selection = [
+        label for label in (session_state.get('jurisdictions_multiselect') or [])
+        if label in options_map
+    ]
+    if current_selection:
+        default_selection = current_selection
+
     if session_state.get('_jurisdiction_options_signature') != options_signature:
         session_state['jurisdictions_multiselect'] = default_selection
         session_state['_jurisdiction_options_signature'] = options_signature

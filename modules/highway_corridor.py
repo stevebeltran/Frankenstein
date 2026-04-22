@@ -136,11 +136,12 @@ def fetch_highway_geometry(highway_ref, state_abbr):
     ref_num = highway_ref.strip().upper().replace('I-', '').replace('I ', '').strip()
     south, west, north, east = _STATE_BBOXES.get(state_abbr.upper(), (24.0, -125.0, 49.0, -66.0))
 
+    ref_pattern = f'(^|;\\\\s*)I[ -]{ref_num}(\\\\s*;|$)'
     overpass_query = (
         f'[out:json][timeout:60];\n'
         f'(\n'
-        f'  way["highway"~"motorway|trunk"]["ref"~"(^|;\\\\s*)I[ -]{ref_num}(\\\\s*;|$)"]'
-        f'({south},{west},{north},{east});\n'
+        f'  relation["route"="road"]["ref"~"{ref_pattern}"]({south},{west},{north},{east});\n'
+        f'  way["highway"~"motorway|trunk"]["ref"~"{ref_pattern}"]({south},{west},{north},{east});\n'
         f');\n'
         f'out geom;\n'
     )
@@ -160,7 +161,7 @@ def fetch_highway_geometry(highway_ref, state_abbr):
 
     lines = []
     for el in elements:
-        if el.get("type") == "way" and "geometry" in el:
+        if el.get("type") in {"way", "relation"} and "geometry" in el:
             coords = [(node["lon"], node["lat"]) for node in el["geometry"]]
             if len(coords) >= 2:
                 lines.append(LineString(coords))

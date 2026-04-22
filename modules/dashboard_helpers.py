@@ -1322,9 +1322,49 @@ def optimize_fleet_selection(
     chrono_r, chrono_g = [], []
     best_combo = None
 
-    if k_responder + k_guardian > n:
-        st.error('⚠️ Over-Deployment: Total drones exceed available stations.')
-    elif k_responder == 0 and k_guardian == 0:
+    if n <= 0:
+        st.error(
+            '⚠️ No station candidates are available. Upload a stations file with known placement sites, '
+            'or switch to a mode that can generate station candidates.'
+        )
+        return {
+            'active_resp_names': active_resp_names,
+            'active_guard_names': active_guard_names,
+            'active_resp_idx': active_resp_idx,
+            'active_guard_idx': active_guard_idx,
+            'chrono_r': chrono_r,
+            'chrono_g': chrono_g,
+            'best_combo': best_combo,
+            'guard_claims_by_idx': {},
+        }
+
+    total_requested = int(k_responder or 0) + int(k_guardian or 0)
+    if total_requested > n:
+        if total_requested <= 0:
+            k_responder = 0
+            k_guardian = 0
+        else:
+            cap = n
+            resp_share = int(round(cap * (int(k_responder or 0) / total_requested))) if total_requested else 0
+            resp_share = max(0, min(resp_share, cap))
+            guard_share = cap - resp_share
+
+            if int(k_responder or 0) > 0 and resp_share == 0:
+                resp_share = 1
+                guard_share = max(0, cap - 1)
+            if int(k_guardian or 0) > 0 and guard_share == 0 and cap > 1:
+                guard_share = 1
+                resp_share = max(0, cap - 1)
+
+            k_responder = min(int(k_responder or 0), resp_share)
+            k_guardian = min(int(k_guardian or 0), guard_share)
+
+            st.warning(
+                f"Station file limits the fleet to {n} placement sites. "
+                f"Adjusted request to {k_responder} Responder and {k_guardian} Guardian drones."
+            )
+
+    if k_responder == 0 and k_guardian == 0:
         pass
     else:
         if session_state.get('_opt_cache_key') != opt_cache_key:

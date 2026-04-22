@@ -6070,14 +6070,16 @@ body{{background:transparent;overflow:hidden}}
                                 }
                                 st.rerun()
             else:
+                _map_key = "main_map_chart"
+                if st.session_state.get('highway_patrol_mode', False):
+                    _map_state = st.session_state.get('active_state', '')
+                    _map_hw = st.session_state.get('active_highway', '')
+                    if _map_state or _map_hw:
+                        _map_key = f"main_map_chart_{_map_state}_{_map_hw}"
                 st.plotly_chart(
                     fig, width="stretch",
                     config={"scrollZoom": True, "displayModeBar": False},
-                    key=(
-                        f"main_map_chart_{_hw_state}_{_active_hw}"
-                        if _corridor_mode and _hw_state and _active_hw
-                        else "main_map_chart"
-                    ),
+                    key=_map_key,
                 )
 
 

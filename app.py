@@ -5759,24 +5759,6 @@ body{{background:transparent;overflow:hidden}}
         )
 
         st.markdown(kpi_html, unsafe_allow_html=True)
-        if orig_calls != modeled_calls:
-            model_note = f"Optimization modeled via {modeled_calls:,} representative CAD samples from {orig_calls:,} total incidents."
-        else:
-            model_note = f"Optimization modeled via all {modeled_calls:,} available incidents."
-        if displayed_points and displayed_points < orig_calls:
-            map_note = f"Map renders {displayed_points:,} incident points using Plotly's WebGL-backed map layer for dense full-call visualization."
-        elif displayed_points:
-            map_note = f"Map renders all {displayed_points:,} incident points."
-        else:
-            map_note = ""
-        full_daily_note = f"Citywide daily-call estimates are based on the full uploaded CAD total of {orig_calls:,} incidents." if orig_calls else ""
-        note_bits = [model_note]
-        if map_note:
-            note_bits.append(map_note)
-        if full_daily_note:
-            note_bits.append(full_daily_note)
-        st.markdown(f"<div style='font-size:0.65rem;color:gray;margin-top:-10px;margin-bottom:12px;text-align:right;'>{' '.join(note_bits)}</div>", unsafe_allow_html=True)
-
         overtime_stats = html_reports.estimate_high_activity_overtime(
             df_calls_full if df_calls_full is not None else df_calls,
             st.session_state.get('active_state', 'TX'),

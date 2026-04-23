@@ -456,12 +456,14 @@ def render_deployment_strategy(st, session_state, config, text_muted):
         )
         pricing_tier = st.radio(
             'Pricing Plan',
-            ('Safe Guard', 'Safe Guard Lite'),
-            index=0 if session_state.get('pricing_tier', 'Safe Guard') == 'Safe Guard' else 1,
+            ('Safe Guard', 'Safe Guard Lite', 'Custom Quote'),
+            index={'Safe Guard': 0, 'Safe Guard Lite': 1, 'Custom Quote': 2}.get(session_state.get('pricing_tier', 'Safe Guard'), 0),
             label_visibility='collapsed',
-            help='Safe Guard (Responder $79,999 | Guardian $159,999): Advanced custom features and add-ons. Safe Guard Lite (Responder $59,999 | Guardian $119,999): Core functionality. See DFR Safeguard Option Comparison Sheet for feature breakdown.',
+            help='Safe Guard (Responder $79,999 | Guardian $159,999): Advanced custom features and add-ons. Safe Guard Lite (Responder $59,999 | Guardian $119,999): Core functionality. Custom Quote: manual per-unit pricing override for sales scenarios.',
         )
         session_state['pricing_tier'] = pricing_tier
+        session_state.setdefault('custom_responder_cost', 79999)
+        session_state.setdefault('custom_guardian_cost', 159999)
 
         if pricing_tier == 'Safe Guard':
             config['RESPONDER_COST'] = 79999
@@ -473,6 +475,28 @@ def render_deployment_strategy(st, session_state, config, text_muted):
             config['GUARDIAN_COST'] = 119999
             tier_badge = '🛡️ Safe Guard Lite'
             tier_desc = 'Core Functionality'
+
+        if pricing_tier == 'Custom Quote':
+            custom_responder_cost = int(st.number_input(
+                'Custom Responder Price',
+                min_value=0,
+                step=1000,
+                value=int(session_state.get('custom_responder_cost', 79999) or 79999),
+                help='Per-unit Responder price used for fleet CapEx, ROI, and report outputs.',
+            ))
+            custom_guardian_cost = int(st.number_input(
+                'Custom Guardian Price',
+                min_value=0,
+                step=1000,
+                value=int(session_state.get('custom_guardian_cost', 159999) or 159999),
+                help='Per-unit Guardian price used for fleet CapEx, ROI, and report outputs.',
+            ))
+            session_state['custom_responder_cost'] = custom_responder_cost
+            session_state['custom_guardian_cost'] = custom_guardian_cost
+            config['RESPONDER_COST'] = custom_responder_cost
+            config['GUARDIAN_COST'] = custom_guardian_cost
+            tier_badge = 'Custom Quote'
+            tier_desc = 'Sales-Entered Pricing'
 
         st.markdown('---')
 

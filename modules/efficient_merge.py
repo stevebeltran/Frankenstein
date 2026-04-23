@@ -20,38 +20,6 @@ try:
     import polars as pl
 except ModuleNotFoundError:
     pl = None
-from modules.data_validation import (
-    validate_census_results,
-    validate_merged_data,
-)
-
-
-def _pandas_to_polars(df: pd.DataFrame) -> Any:
-    """
-    Convert pandas DataFrame to Polars with type inference.
-
-    Args:
-        df: Pandas DataFrame
-
-    Returns:
-        Polars DataFrame
-    """
-    if pl is None:
-        raise ModuleNotFoundError("polars is not installed")
-    return pl.from_pandas(df)
-
-
-def _polars_to_pandas(df: Any) -> pd.DataFrame:
-    """
-    Convert Polars DataFrame to pandas.
-
-    Args:
-        df: Polars DataFrame
-
-    Returns:
-        Pandas DataFrame
-    """
-    return df.to_pandas()
 
 
 def merge_census_results_fast(
@@ -88,6 +56,7 @@ def merge_census_results_fast(
         merged_df, ready_df, summary = _merge_with_polars(
             partial_calls_df, result_df
         )
+        summary["merge_backend"] = "polars"
     else:
         merged_df, ready_df, summary = _merge_with_pandas(
             partial_calls_df, result_df
@@ -96,9 +65,6 @@ def merge_census_results_fast(
             summary["merge_backend"] = "pandas_fallback_polars_missing"
         else:
             summary["merge_backend"] = "pandas"
-
-    if use_polars and polars_available and result_df is not None and not result_df.empty:
-        summary["merge_backend"] = "polars"
 
     summary["merge_time_seconds"] = time.time() - start_time
     return merged_df, ready_df, summary
@@ -181,7 +147,7 @@ def _merge_with_polars(
     summary = {
         "rows_total": int(len(merged_df)),
         "rows_ready": int(len(ready_df)),
-        "rows_geocoded": int((pl_census["_source_row_id"].is_in(merged_df["_source_row_id"])).sum()),
+        "rows_geocoded": int((merged_df["geocode_source"] == "census_batch").sum()),
         "rows_still_missing": int(
             ((merged_df["lat"].isna()) | (merged_df["lon"].isna())).sum()
         ),

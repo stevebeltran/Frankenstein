@@ -96,7 +96,7 @@ class CADRecord(BaseModel):
         agency: Responding agency
         date: Date of incident
     """
-    _source_row_id: int = Field(..., alias="source_row_id")
+    source_row_id: int = Field(..., alias="_source_row_id")
     lat: Optional[float] = Field(None, ge=-90.0, le=90.0)
     lon: Optional[float] = Field(None, ge=-180.0, le=180.0)
     address: Optional[str] = Field(None, max_length=255)
@@ -112,7 +112,7 @@ class CADRecord(BaseModel):
         arbitrary_types_allowed=True,
     )
 
-    @field_validator("lat", "lon", "zip", mode="before")
+    @field_validator("lat", "lon", mode="before")
     @classmethod
     def coerce_numeric(cls, v):
         """Convert numeric strings to float."""

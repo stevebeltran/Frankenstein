@@ -3117,7 +3117,7 @@ def main():
                     Model coverage, forecast ROI, and generate grant-ready proposals in minutes.
                 </div>
                 <div class="brinc-badges" style="justify-content:flex-start;">
-                    <div class="brinc-badge pulse">🛰 3D Swarm Simulation</div>
+                    <div class="brinc-badge">🛰 3D Swarm Simulation</div>
                     <div class="brinc-badge">🗺 Census Boundaries</div>
                     <div class="brinc-badge">📄 Grant Narrative Export</div>
                     <div class="brinc-badge">✈️ FAA LAANC Overlay</div>

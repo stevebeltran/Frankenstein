@@ -426,7 +426,7 @@ def render_display_options(st):
             key='simple_cards_b',
             help='Show a compact card with just the key numbers: name, type, response time, annual savings, and CapEx.',
         )
-        traffic_level = st.slider('Traffic Congestion', 0, 100, 40) if simulate_traffic else 40
+        traffic_level = st.slider('Traffic Congestion', 0, 100, 40, help='Simulates road congestion intensity. Higher values extend ground response times and related financial estimates.') if simulate_traffic else 40
 
     return {
         'show_satellite': show_satellite,
@@ -573,7 +573,7 @@ def render_deployment_strategy(st, session_state, config, text_muted):
             f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Coverage Ranges</div>",
             unsafe_allow_html=True,
         )
-        resp_radius_mi = st.slider('🚁 Responder Range (mi)', 2.0, 3.0, float(session_state.get('r_resp', 2.0)), step=0.5)
+        resp_radius_mi = st.slider('🚁 Responder Range (mi)', 2.0, 3.0, float(session_state.get('r_resp', 2.0)), step=0.5, help='Flight radius for Responder drones. Smaller radius concentrates coverage; larger radius extends reach at the cost of density.')
         guard_radius_mi = st.slider(
             '🦅 Guardian Range (mi) [⚡ 5mi Rapid]',
             1,
@@ -1285,14 +1285,14 @@ def prepare_runtime_context(
         st.markdown('---')
         inferred_daily = session_state.get('inferred_daily_calls_override') or full_daily_calls or 1
         inferred_daily = max(1, int(inferred_daily))
-        calls_per_day = st.slider('Total Daily Calls (citywide)', 1, max(100, inferred_daily * 3), inferred_daily)
+        calls_per_day = st.slider('Total Daily Calls (citywide)', 1, max(100, inferred_daily * 3), inferred_daily, help='Total 911 calls per day citywide used to project annual dispatch volume, officer hours saved, and ROI.')
         st.caption(f'Derived from the full uploaded CAD total ({full_total_calls:,} incidents), not the optimization sample.')
         st.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>DFR Dispatch Rate (%)</div>", unsafe_allow_html=True)
         st.markdown("<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>What % of in-range calls will the drone be sent to?</div>", unsafe_allow_html=True)
-        dfr_dispatch_rate = st.slider('DFR Dispatch Rate', 1, 100, session_state.get('dfr_rate', 20), label_visibility='collapsed') / 100.0
+        dfr_dispatch_rate = st.slider('DFR Dispatch Rate', 1, 100, session_state.get('dfr_rate', 20), label_visibility='collapsed', help='Percentage of in-range calls the drone is dispatched to. Higher rates increase coverage and savings projections.') / 100.0
         st.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>Calls Resolved Without Officer Dispatch (%)</div>", unsafe_allow_html=True)
         st.markdown("<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>Of drone-attended calls, what % close without a patrol car?</div>", unsafe_allow_html=True)
-        deflection_rate = st.slider('Resolution Rate', 0, 100, session_state.get('deflect_rate', 25), label_visibility='collapsed') / 100.0
+        deflection_rate = st.slider('Resolution Rate', 0, 100, session_state.get('deflect_rate', 25), label_visibility='collapsed', help='Of drone-attended calls, the percentage that close without requiring a patrol car dispatch. Higher values increase officer hours saved.') / 100.0
         session_state['dfr_rate'] = int(dfr_dispatch_rate * 100)
         session_state['deflect_rate'] = int(deflection_rate * 100)
 

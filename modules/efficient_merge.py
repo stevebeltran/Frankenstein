@@ -13,16 +13,20 @@ Usage:
 """
 
 import pandas as pd
-import polars as pl
 import time
-from typing import Tuple, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
+
+try:
+    import polars as pl
+except ModuleNotFoundError:
+    pl = None
 from modules.data_validation import (
     validate_census_results,
     validate_merged_data,
 )
 
 
-def _pandas_to_polars(df: pd.DataFrame) -> pl.DataFrame:
+def _pandas_to_polars(df: pd.DataFrame) -> Any:
     """
     Convert pandas DataFrame to Polars with type inference.
 
@@ -32,10 +36,12 @@ def _pandas_to_polars(df: pd.DataFrame) -> pl.DataFrame:
     Returns:
         Polars DataFrame
     """
+    if pl is None:
+        raise ModuleNotFoundError("polars is not installed")
     return pl.from_pandas(df)
 
 
-def _polars_to_pandas(df: pl.DataFrame) -> pd.DataFrame:
+def _polars_to_pandas(df: Any) -> pd.DataFrame:
     """
     Convert Polars DataFrame to pandas.
 
@@ -76,7 +82,9 @@ def merge_census_results_fast(
     """
     start_time = time.time()
 
-    if use_polars and result_df is not None and not result_df.empty:
+    polars_available = pl is not None
+
+    if use_polars and polars_available and result_df is not None and not result_df.empty:
         merged_df, ready_df, summary = _merge_with_polars(
             partial_calls_df, result_df
         )
@@ -84,6 +92,13 @@ def merge_census_results_fast(
         merged_df, ready_df, summary = _merge_with_pandas(
             partial_calls_df, result_df
         )
+        if use_polars and not polars_available:
+            summary["merge_backend"] = "pandas_fallback_polars_missing"
+        else:
+            summary["merge_backend"] = "pandas"
+
+    if use_polars and polars_available and result_df is not None and not result_df.empty:
+        summary["merge_backend"] = "polars"
 
     summary["merge_time_seconds"] = time.time() - start_time
     return merged_df, ready_df, summary

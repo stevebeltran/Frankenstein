@@ -12,6 +12,8 @@ import pandera as pa
 from pandera import Column, Index, Check
 import pandas as pd
 
+PA_OBJECT = getattr(pa, "object_", getattr(pa, "Object", object))
+
 
 # ── CAD Parsing Validation ────────────────────────────────────────────────────
 
@@ -24,27 +26,27 @@ cad_raw_schema = pa.DataFrameSchema(
             description="Unique row identifier from CAD source"
         ),
         "date": Column(
-            pa.object_,
+            PA_OBJECT,
             nullable=True,
             description="Incident date (will be coerced to datetime)"
         ),
         "address": Column(
-            pa.object_,
+            PA_OBJECT,
             nullable=True,
             description="Street address"
         ),
         "city": Column(
-            pa.object_,
+            PA_OBJECT,
             nullable=True,
             description="City name"
         ),
         "state": Column(
-            pa.object_,
+            PA_OBJECT,
             nullable=True,
             description="State code (2 letters)"
         ),
         "zip": Column(
-            pa.object_,
+            PA_OBJECT,
             nullable=True,
             description="ZIP code"
         ),
@@ -55,7 +57,7 @@ cad_raw_schema = pa.DataFrameSchema(
             description="Dispatch priority 1-5"
         ),
         "agency": Column(
-            pa.object_,
+            PA_OBJECT,
             nullable=True,
             description="Responding agency"
         ),
@@ -89,7 +91,7 @@ cad_with_coords_schema = pa.DataFrameSchema(
             description="Longitude (-180 to 180)"
         ),
         "geocode_source": Column(
-            pa.object_,
+            PA_OBJECT,
             checks=[Check.isin(["direct", "census_batch", "manual"])],
             nullable=True,
             description="Source of coordinate data"
@@ -123,19 +125,19 @@ census_result_schema = pa.DataFrameSchema(
             description="Matched longitude"
         ),
         "match_status": Column(
-            pa.object_,
+            PA_OBJECT,
             checks=[Check.isin(["Match", "Tie", "No_Match"])],
             nullable=False,
             description="Census API match status"
         ),
         "match_type": Column(
-            pa.object_,
+            PA_OBJECT,
             checks=[Check.isin(["Exact", "Non_Exact", "Ambiguous", None])],
             nullable=True,
             description="Type of geocoding match"
         ),
         "matched_address": Column(
-            pa.object_,
+            PA_OBJECT,
             nullable=True,
             description="Full matched address"
         ),
@@ -164,12 +166,12 @@ merged_cad_census_schema = pa.DataFrameSchema(
             nullable=True,
         ),
         "geocode_source": Column(
-            pa.object_,
+            PA_OBJECT,
             checks=[Check.isin(["direct", "census_batch", "manual"])],
             nullable=True,
         ),
         "match_status": Column(
-            pa.object_,
+            PA_OBJECT,
             checks=[Check.isin(["Match", "Tie", "No_Match", None])],
             nullable=True,
         ),

@@ -3244,6 +3244,7 @@ def main():
                         ["Primary interstates (auto)", "Custom"],
                         horizontal=True,
                         key="hw_source_radio",
+                        help="Choose whether to deploy along the state's primary interstates automatically, or enter custom corridor names.",
                     )
                     if _hw_src == "Primary interstates (auto)":
                         st.caption(
@@ -3256,6 +3257,7 @@ def main():
                             "Highways (comma-separated)",
                             placeholder="e.g. I-80, I-29",
                             key="custom_highways_input",
+                            help="Enter interstate or highway designations separated by commas. Each corridor runs as an independent deployment plan.",
                         )
                         st.session_state['selected_highways'] = [
                             h.strip() for h in _custom_hw_str.split(',') if h.strip()
@@ -3266,6 +3268,7 @@ def main():
                             "Run plan for:",
                             _avail_hws,
                             key="active_highway_select",
+                            help="Select which corridor to run the active deployment plan against. Switch between corridors to compare coverage.",
                         )
                     elif len(_avail_hws) == 1:
                         st.session_state['active_highway'] = _avail_hws[0]
@@ -4156,7 +4159,7 @@ def main():
 
             st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-            if st.button("⚡ Launch Random Demo City", width="stretch", key="demo_btn"):
+            if st.button("⚡ Launch Random Demo City", width="stretch", key="demo_btn", help="Load a random US city with simulated 911 call data to demo the full DFR deployment workflow."):
                 random.seed(datetime.datetime.now().microsecond + os.getpid())
                 already_used = st.session_state.get('_last_demo_city', '')
                 candidates = [c for c in FAST_DEMO_CITIES if c[0] != already_used]
@@ -6338,7 +6341,7 @@ body{{background:transparent;overflow:hidden}}
             st.markdown(f"<h3 style='color:{text_main};'>🚁 3D Swarm Simulation <span class='tip' data-tip='Deck.gl-powered 3D animation of all DFR flights compressed into a single 24-hour day. Each arc represents a dispatch flight from station to incident. Use the speed slider to control playback. Best viewed fullscreen for council presentations.'>?</span></h3>", unsafe_allow_html=True)
             st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Animated deck.gl simulation of all DFR flights over a compressed 24-hour day. Use the speed slider to accelerate or slow the simulation. Great for council presentations.</div>", unsafe_allow_html=True)
 
-            show_sim = st.toggle("🎬 Enable 3D Simulation", value=False, key='show_sim_b')
+            show_sim = st.toggle("🎬 Enable 3D Simulation", value=False, key='show_sim_b', help='Deck.gl 3D arc animation of all DFR dispatches compressed into a 24-hour day. Best viewed fullscreen for council presentations.')
             if show_sim:
                 calls_lonlat = calls_in_city.to_crs(epsg=4326)
                 calls_coords = np.column_stack((calls_lonlat.geometry.x, calls_lonlat.geometry.y))
@@ -6512,6 +6515,7 @@ body{{background:transparent;overflow:hidden}}
             "Show CAD Ingestion Analytics",
             value=True,
             key="show_cad_ingestion_analytics_section",
+            help="Temporal breakdown of uploaded CAD data — hourly call volume, day-of-week patterns, optimal DFR shift windows, and a call-volume calendar heatmap.",
         )
         if _show_analytics_section:
             # ── COMMAND CENTER ANALYTICS DASHBOARD ──
@@ -6562,6 +6566,7 @@ body{{background:transparent;overflow:hidden}}
             "Show Community Impact Dashboard",
             value=True,
             key="show_community_impact_dashboard_section",
+            help="Public-facing transparency report: flight hours, response time advantage, Fourth Amendment safeguards, community outcomes, and taxpayer ROI. Designed for city council presentations.",
         )
         if _show_community_impact_section:
             # ── COMMUNITY IMPACT DASHBOARD ────────────────────────────────────────────
@@ -6611,6 +6616,7 @@ body{{background:transparent;overflow:hidden}}
             "Show School Safety Impact",
             value=True,
             key="show_school_safety_impact_section",
+            help="Side-by-side comparison of DFR vs. School Resource Officer (SRO) response capability, cost per school, and coverage reach.",
         )
         if _show_school_safety_section:
             # ── SCHOOL SAFETY IMPACT MATRIX ──────────────────────────────────────────
@@ -6866,6 +6872,7 @@ body{{background:transparent;overflow:hidden}}
             "Show 4G LTE Cell Coverage",
             value=True,
             key="show_lte_cell_coverage_section",
+            help="Per-carrier 4G LTE coverage analysis for the deployment area. Shows AT&T, T-Mobile, and Verizon coverage percentages to validate drone data-link reliability.",
         )
         if _show_lte_section:
             # ── 4G LTE CELL COVERAGE — 3 carrier maps with % coverage ────────────────

@@ -5647,6 +5647,9 @@ body{{background:transparent;overflow:hidden}}
         if _pricing_tier == "Safe Guard":
             _tier_badge = "🛡️ Safe Guard"
             _tier_desc = "Advanced Custom Features"
+        elif _pricing_tier == "Custom Quote":
+            _tier_badge = "Custom Quote"
+            _tier_desc = "Sales-Entered Pricing"
         else:
             _tier_badge = "🛡️ Safe Guard Lite"
             _tier_desc = "Core Functionality"
@@ -7513,6 +7516,8 @@ body{{background:transparent;overflow:hidden}}
             "boundary_source_path": st.session_state.get('boundary_source_path', ''),
             "brinc_user": st.session_state.get('brinc_user', ''),
             "pricing_tier": st.session_state.get('pricing_tier', 'Safe Guard'),
+            "custom_responder_cost": int(st.session_state.get('custom_responder_cost', 79999) or 79999),
+            "custom_guardian_cost": int(st.session_state.get('custom_guardian_cost', 159999) or 159999),
             "app_version": __version__,
             # ── Extended session state ────────────────────────────────────
             "estimated_pop":               int(st.session_state.get('estimated_pop', 0) or 0),
@@ -7718,6 +7723,8 @@ body{{background:transparent;overflow:hidden}}
                 "brinc_user": st.session_state.get('brinc_user', ''),
                 # Pricing tier selection
                 "pricing_tier": st.session_state.get('pricing_tier', 'Safe Guard'),
+                "custom_responder_cost": int(st.session_state.get('custom_responder_cost', 79999) or 79999),
+                "custom_guardian_cost": int(st.session_state.get('custom_guardian_cost', 159999) or 159999),
                 "app_version": __version__,
                 # ── Extended session state ────────────────────────────────────
                 # Jurisdiction metrics
@@ -8066,6 +8073,9 @@ body{{background:transparent;overflow:hidden}}
                 if _exp_pricing_tier == "Safe Guard":
                     _tier_badge = "🛡️ Safe Guard"
                     _tier_desc = "Advanced Custom Features"
+                elif _exp_pricing_tier == "Custom Quote":
+                    _tier_badge = "Custom Quote"
+                    _tier_desc = "Sales-Entered Pricing"
                 else:
                     _tier_badge = "🛡️ Safe Guard Lite"
                     _tier_desc = "Core Functionality"
@@ -8538,7 +8548,7 @@ body{{background:transparent;overflow:hidden}}
     
         <!-- ── 01: EXECUTIVE SUMMARY ──────────────────────────────────── -->
         <section class="doc-section" id="executive">
-          <div class="section-eyebrow"><span class="pg-num">01</span><span class="pg-title">Executive Summary</span><span class="src" data-src="Sources: Incident coverage &amp; response time computed from uploaded CAD data via BRINC geospatial optimizer. Hardware pricing: BRINC Responder $80K · Guardian $160K (MSRP). Officer dispatch cost benchmark: $76–$120/call (IACP/DOJ). Population: US Census Bureau ACS.">ⓘ</span></div>
+          <div class="section-eyebrow"><span class="pg-num">01</span><span class="pg-title">Executive Summary</span><span class="src" data-src="Sources: Incident coverage &amp; response time computed from uploaded CAD data via BRINC geospatial optimizer. Hardware pricing: BRINC Responder ${CONFIG['RESPONDER_COST']:,} · Guardian ${CONFIG['GUARDIAN_COST']:,} per unit{'' if st.session_state.get('pricing_tier', 'Safe Guard') == 'Custom Quote' else ' (' + st.session_state.get('pricing_tier', 'Safe Guard') + ')'}. Officer dispatch cost benchmark: $76–$120/call (IACP/DOJ). Population: US Census Bureau ACS.">ⓘ</span></div>
           <div class="metrics-hero">
             <div class="metric-cell"><div class="m-label">Fleet Capital Expenditure</div><div class="m-value cyan">${fleet_capex:,.0f}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
             <div class="metric-cell"><div class="m-label">Annual Savings Capacity</div><div class="m-value gold">${annual_savings:,.0f}</div><div class="m-sub">At {int(dfr_dispatch_rate*100)}% dispatch · {int(deflection_rate*100)}% resolution</div></div>

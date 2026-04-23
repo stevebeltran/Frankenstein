@@ -8,6 +8,7 @@ These schemas enforce data integrity at each stage:
 - Export data validation
 """
 
+import logging
 import pandera as pa
 from pandera import Column, Index, Check
 import pandas as pd
@@ -226,7 +227,7 @@ def validate_cad_raw(df: pd.DataFrame, raise_exceptions: bool = False) -> bool:
     except pa.errors.SchemaError as e:
         if raise_exceptions:
             raise
-        print(f"CAD raw validation warning: {e}")
+        logging.warning("CAD raw validation warning: %s", e)
         return False
 
 
@@ -247,7 +248,7 @@ def validate_cad_with_coords(df: pd.DataFrame, raise_exceptions: bool = False) -
     except pa.errors.SchemaError as e:
         if raise_exceptions:
             raise
-        print(f"CAD with coordinates validation warning: {e}")
+        logging.warning("CAD with coordinates validation warning: %s", e)
         return False
 
 
@@ -268,7 +269,7 @@ def validate_census_results(df: pd.DataFrame, raise_exceptions: bool = False) ->
     except pa.errors.SchemaError as e:
         if raise_exceptions:
             raise
-        print(f"Census results validation warning: {e}")
+        logging.warning("Census results validation warning: %s", e)
         return False
 
 
@@ -289,7 +290,7 @@ def validate_merged_data(df: pd.DataFrame, raise_exceptions: bool = False) -> bo
     except pa.errors.SchemaError as e:
         if raise_exceptions:
             raise
-        print(f"Merged data validation warning: {e}")
+        logging.warning("Merged data validation warning: %s", e)
         return False
 
 
@@ -310,5 +311,5 @@ def validate_export_ready(df: pd.DataFrame, raise_exceptions: bool = False) -> b
     except pa.errors.SchemaError as e:
         if raise_exceptions:
             raise
-        print(f"Export ready validation warning: {e}")
+        logging.warning("Export ready validation warning: %s", e)
         return False

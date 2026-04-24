@@ -9,8 +9,8 @@ These schemas enforce data integrity at each stage:
 """
 
 import logging
-import pandera as pa
-from pandera import Column, Index, Check
+import pandera.pandas as pa
+from pandera.pandas import Column, Index, Check
 import pandas as pd
 
 PA_OBJECT = getattr(pa, "object_", getattr(pa, "Object", object))

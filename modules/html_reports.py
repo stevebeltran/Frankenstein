@@ -2923,7 +2923,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   </div>
   {_full_fin_capex_roi}
   { (f'<div style="border-top:1px solid rgba(220,53,69,0.35);margin-top:4px;padding-top:5px;">'  
-      f'<div style="font-size:0.62rem;font-weight:800;color:#dc3545;margin-bottom:3px;">⚠️ MAXED CAPACITY<span class="tip" data-tip="This unit''s attributed demand exceeds its modeled physical capacity under the current mission profile and on-scene time assumption.">?</span> · {min(d_on_scene, 10.0):.1f} min on-scene floor<span class="tip" data-tip="Capacity is modeled with at least this many minutes spent on scene per dispatch before the drone can clear and recharge.">?</span></div>'  
+      f'<div style="font-size:0.62rem;font-weight:800;color:#dc3545;margin-bottom:3px;">MAXED CAPACITY<span class="tip" data-tip="This unit''s attributed demand exceeds its modeled physical capacity under the current mission profile and on-scene time assumption.">?</span> · {min(d_on_scene, 10.0):.1f} min on-scene floor<span class="tip" data-tip="Capacity is modeled with at least this many minutes spent on scene per dispatch before the drone can clear and recharge.">?</span></div>'  
        f'<div style="font-size:0.59rem;color:{text_muted};margin-bottom:4px;">{d_unserv_day:.0f} calls/day unserviceable · {d_unserv_yr:,.0f}/yr</div>'  
        f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:4px;">'  
        f'<div style="background:rgba(220,53,69,0.08);border:1px solid rgba(220,53,69,0.2);border-radius:4px;padding:3px 6px;font-size:0.59rem;">'  
@@ -2943,7 +2943,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
        f'</div></div>')  
     if d_capacity_limited else  
     (f'<div style="border-top:1px solid rgba(34,197,94,0.2);margin-top:4px;padding-top:4px;display:flex;align-items:center;gap:5px;">'  
-     f'<span style="font-size:0.60rem;color:#2ecc71;font-weight:700;">✓ WITHIN CAPACITY<span class="tip" data-tip="This unit''s attributed annual demand stays within its modeled physical capacity.">?</span></span>'  
+     f'<span style="font-size:0.60rem;color:#2ecc71;font-weight:700;">WITHIN CAPACITY<span class="tip" data-tip="This unit''s attributed annual demand stays within its modeled physical capacity.">?</span></span>'  
      f'<span style="font-size:0.60rem;color:{scene_color};font-weight:600;">· {d_on_scene:.1f} min on-scene<span class="tip" data-tip="Assumed average on-scene time per dispatch used in the capacity model for this unit.">?</span></span>'  
      f'</div>') }
   <!-- Inline lock status indicators -->

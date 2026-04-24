@@ -1456,7 +1456,12 @@ def optimize_fleet_selection(
                     assigned_calls = covered_calls[nearest_guard_pos == local_pos]
                     if len(assigned_calls) == 0:
                         continue
-                    avg_dist = float(station_metadata[guard_idx].get('avg_dist_g', 0) or 0)
+                    avg_dist = optimization_module.mean_covered_distance_miles(
+                        dist_matrix_g,
+                        guard_matrix,
+                        guard_idx,
+                        fallback_miles=float(station_metadata[guard_idx].get('avg_dist_g', 0) or 0),
+                    )
                     avg_time_min = (avg_dist / guard_speed) * 60.0
                     response_cost = avg_time_min + min_scene_min
                     if response_cost <= 0:

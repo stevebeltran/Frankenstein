@@ -5116,6 +5116,10 @@ body{{background:transparent;overflow:hidden}}
         locked_r_pins = [_name_to_idx[n] for n in pinned_resp_names if n in _name_to_idx]
 
         bounds_hash = f"{minx}_{miny}_{maxx}_{maxy}_{n}_{resp_radius_mi}_{guard_radius_mi}"
+        _station_signature = "|".join(
+            f"{str(row.get('name', ''))}:{float(row.get('lat', 0) or 0):.5f}:{float(row.get('lon', 0) or 0):.5f}"
+            for _, row in df_stations_all.iterrows()
+        )
 
         _runtime_ctx = prepare_runtime_context(
             st,
@@ -5161,7 +5165,7 @@ body{{background:transparent;overflow:hidden}}
         deflection_rate = _runtime_ctx['deflection_rate']
         # ── OPTIMIZATION ──────────────────────────────────────────────────
         _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
-        opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{guard_strategy}_{resp_strategy}_{deployment_mode}_{incremental_build}_{bounds_hash}_{_pins_key}"
+        opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{guard_strategy}_{resp_strategy}_{deployment_mode}_{incremental_build}_{bounds_hash}_{_station_signature}_{_pins_key}"
         _opt_result = optimize_fleet_selection(
             st,
             st.session_state,
@@ -5368,11 +5372,23 @@ body{{background:transparent;overflow:hidden}}
         for idx, d_type in ordered_deployments_raw:
             if d_type == 'RESPONDER':
                 cov_array = resp_matrix[idx]; cost = CONFIG["RESPONDER_COST"]
-                speed_mph = CONFIG["RESPONDER_SPEED"]; avg_dist = station_metadata[idx]['avg_dist_r']
+                speed_mph = CONFIG["RESPONDER_SPEED"]
+                avg_dist = optimization.mean_covered_distance_miles(
+                    dist_matrix_r,
+                    resp_matrix,
+                    idx,
+                    fallback_miles=float(station_metadata[idx].get('avg_dist_r', 0) or 0),
+                )
                 radius_m  = resp_radius_mi * 1609.34
             else:
                 cov_array = guard_matrix[idx]; cost = CONFIG["GUARDIAN_COST"]
-                speed_mph = CONFIG["GUARDIAN_SPEED"]; avg_dist = station_metadata[idx]['avg_dist_g']
+                speed_mph = CONFIG["GUARDIAN_SPEED"]
+                avg_dist = optimization.mean_covered_distance_miles(
+                    dist_matrix_g,
+                    guard_matrix,
+                    idx,
+                    fallback_miles=float(station_metadata[idx].get('avg_dist_g', 0) or 0),
+                )
                 radius_m  = guard_radius_mi * 1609.34
             map_color    = active_color_map[f"{idx}_{d_type}"]
             avg_time_min = (avg_dist / speed_mph) * 60

@@ -2961,7 +2961,197 @@ init_session_state(st.session_state, _slugify, _build_public_report_url)
 # APP FLOW
 # ============================================================
 
+FAQ_CHANGELOG = [
+    {
+        "version": __version__,
+        "timestamp": __build_datetime__,
+        "summary": "Added an in-app FAQ launcher in the upper-left with a compact versioned release-notes footer.",
+    },
+]
+
+
+def _render_in_app_faq():
+    _faq_items = [
+        (
+            "What does this software do?",
+            "It helps plan BRINC Drone as First Responder deployments using incident data, jurisdiction boundaries, station modeling, and optimization.",
+        ),
+        (
+            "What file should I upload?",
+            "The most common input is a CAD or incident export in CSV or Excel format with usable location data.",
+        ),
+        (
+            "How is the jurisdiction selected?",
+            "The app matches uploaded incident coordinates to local jurisdiction boundary data, then lets you confirm or refine the selected area in the sidebar.",
+        ),
+        (
+            "What is the difference between Responder and Guardian?",
+            "Responder is modeled for shorter-range tactical response, while Guardian is modeled for broader long-range coverage and overwatch.",
+        ),
+        (
+            "Can I choose my own stations?",
+            "Yes. The app can recommend stations automatically, and you can also add or lock custom stations into the plan.",
+        ),
+        (
+            "What outputs can I export?",
+            "You can export a saved deployment plan, an executive-summary HTML report, and a Google Earth KML briefing file.",
+        ),
+        (
+            "Why are map layers or FAA overlays missing?",
+            "The regulatory cache may be missing or outdated. Re-run download_regulatory_layers.py and restart the app.",
+        ),
+    ]
+
+    _faq_html_parts = []
+    for _question, _answer in _faq_items:
+        _faq_html_parts.append(
+            f"""
+            <div class="faq-item">
+                <div class="faq-q">{html.escape(_question)}</div>
+                <div class="faq-a">{html.escape(_answer)}</div>
+            </div>
+            """
+        )
+
+    _changelog_lines = "".join(
+        f'<div class="faq-changelog-line">v{html.escape(str(_entry["version"]))} | '
+        f'{html.escape(str(_entry["timestamp"]))} | '
+        f'{html.escape(str(_entry["summary"]))}</div>'
+        for _entry in FAQ_CHANGELOG
+    )
+
+    st.markdown(
+        f"""
+        <style>
+        .faq-float {{
+            position: fixed;
+            top: 12px;
+            left: 14px;
+            z-index: 9998;
+            width: min(420px, calc(100vw - 28px));
+            font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }}
+        .faq-float summary {{
+            list-style: none;
+        }}
+        .faq-float summary::-webkit-details-marker {{
+            display: none;
+        }}
+        .faq-pill {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 10px;
+            border-radius: 999px;
+            background: rgba(8, 12, 20, 0.88);
+            border: 1px solid rgba(116, 224, 255, 0.22);
+            color: rgba(226, 238, 246, 0.92);
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            cursor: pointer;
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+            backdrop-filter: blur(8px);
+        }}
+        .faq-pill:hover {{
+            border-color: rgba(116, 224, 255, 0.42);
+            background: rgba(10, 16, 28, 0.96);
+        }}
+        .faq-panel {{
+            margin-top: 8px;
+            background: rgba(7, 11, 18, 0.97);
+            border: 1px solid rgba(116, 224, 255, 0.18);
+            border-radius: 16px;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
+            overflow: hidden;
+        }}
+        .faq-panel-inner {{
+            max-height: min(78vh, 760px);
+            overflow-y: auto;
+            padding: 14px 14px 12px;
+        }}
+        .faq-title {{
+            color: #f4fbff;
+            font-size: 0.92rem;
+            font-weight: 800;
+            margin: 0 0 4px 0;
+        }}
+        .faq-subtitle {{
+            color: rgba(193, 209, 221, 0.78);
+            font-size: 0.76rem;
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }}
+        .faq-item {{
+            padding: 10px 0;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+        }}
+        .faq-item:first-of-type {{
+            border-top: none;
+            padding-top: 0;
+        }}
+        .faq-q {{
+            color: #f6fbff;
+            font-size: 0.79rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }}
+        .faq-a {{
+            color: rgba(209, 220, 230, 0.84);
+            font-size: 0.75rem;
+            line-height: 1.52;
+        }}
+        .faq-footer {{
+            margin-top: 12px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(116, 224, 255, 0.14);
+        }}
+        .faq-footer-label {{
+            color: #7edfff;
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }}
+        .faq-version-line {{
+            color: rgba(245, 250, 255, 0.92);
+            font-size: 0.72rem;
+            font-family: "IBM Plex Mono", Consolas, monospace;
+            margin-bottom: 8px;
+        }}
+        .faq-changelog-line {{
+            color: rgba(201, 214, 225, 0.82);
+            font-size: 0.70rem;
+            line-height: 1.45;
+            font-family: "IBM Plex Mono", Consolas, monospace;
+            word-break: break-word;
+        }}
+        </style>
+        <details class="faq-float">
+            <summary class="faq-pill">Help / FAQ</summary>
+            <div class="faq-panel">
+                <div class="faq-panel-inner">
+                    <div class="faq-title">BRINC DFR Planning FAQ</div>
+                    <div class="faq-subtitle">
+                        Quick answers for upload, jurisdiction setup, fleet planning, exports, and map-layer troubleshooting.
+                    </div>
+                    {''.join(_faq_html_parts)}
+                    <div class="faq-footer">
+                        <div class="faq-footer-label">Version &amp; Changelog</div>
+                        <div class="faq-version-line">Current version: v{html.escape(__version__)} | Build time: {html.escape(__build_datetime__)}</div>
+                        {_changelog_lines}
+                    </div>
+                </div>
+            </div>
+        </details>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def main():
+    _render_in_app_faq()
     if not st.session_state['csvs_ready']:
 
         # GRAB THE LOGO FOR THE UPLOAD PAGE
@@ -8530,7 +8720,6 @@ body{{background:transparent;overflow:hidden}}
                   {"Serving <strong>" + f"{int(pop_metric):,}" + f"</strong> residents of {prop_city}, {prop_state}" if pop_metric else f"Aerial Response Deployment &mdash; {prop_city}, {prop_state}"}
                   {('<abbr title="Source: US Census Bureau American Community Survey (ACS) 5-Year Estimates · census.gov/programs-surveys/acs" style="font-size:11px;color:#666;margin-left:4px;text-decoration:none;cursor:help;">ⓘ</abbr>') if pop_metric else ''}
                 </div>
-                <p>A data-driven deployment plan for <strong>{actual_k_responder + actual_k_guardian} BRINC aerial units</strong> covering {calls_covered_perc:.1f}% of {st.session_state.get('total_original_calls', total_calls):,} annual incidents · {len(df_stations_all):,} public facilities protected across {area_sq_mi_est:,} sq mi.</p>
               </div>
               <div class="cover-meta">
                 <div class="cover-meta-cell"><div class="label">Fleet CapEx</div><div class="value accent">${fleet_capex:,.0f}</div></div>
@@ -8699,7 +8888,6 @@ body{{background:transparent;overflow:hidden}}
           <div class="grant-body" id="grant-body-law">
             <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — {prepared_for_city}, {prop_state}</p>
     
-            <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully requests funding to establish a Drone as a First Responder (DFR) program deploying {actual_k_responder + actual_k_guardian} purpose-built BRINC aerial units — {actual_k_responder} BRINC Responder and {actual_k_guardian} BRINC Guardian — across {dept_summary} serving {pop_metric:,} residents. Modeled against {st.session_state.get('total_original_calls', total_calls):,} historical incidents from {_exp_date_range}, the program is projected to cover <strong>{calls_covered_perc:.1f}%</strong> of calls for service, arrive an average of <strong>{avg_time_saved:.1f} minutes faster</strong> than ground patrol, and generate <strong>${annual_savings:,.0f} in annual operational savings</strong>, with an additional modeled specialty-response upside of <strong>${possible_additional_savings:,.0f}</strong> from thermal-supported searches and avoided K-9 deployments, reaching full cost recovery in <strong>{break_even_text.lower()}</strong>.</p>
     
             <p><strong>Statement of Need:</strong> {jurisdiction_list} currently responds to an estimated {st.session_state.get('total_original_calls', total_calls):,} calls for service annually — approximately {max(1,int(st.session_state.get('total_original_calls',total_calls)/365)):,} calls per day. Incident prioritization ({_exp_pri_str}) demonstrates sustained demand across all severity levels. Ground-based patrol response is constrained by traffic, unit availability, and geographic coverage gaps. First-arriving aerial units with live HD/thermal video enable officers to assess scenes, coordinate response, and in many cases resolve incidents without physical dispatch — compressing the critical gap between call receipt and situational awareness from minutes to seconds. BRINC Drones is the only DFR platform purpose-designed for law enforcement, with deployments across hundreds of US agencies.</p>
     
@@ -8822,7 +9010,6 @@ body{{background:transparent;overflow:hidden}}
           <div class="grant-body" id="grant-body-fire">
             <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — Fire Department Aerial Operations Enhancement — {prepared_for_city}, {prop_state}</p>
     
-            <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully requests funding to extend its Drone as a First Responder (DFR) program to support fire department operations in {prepared_for_city}, {prop_state}. Deploying {actual_k_responder + actual_k_guardian} BRINC aerial units across {dept_summary}, the program is projected to assist an estimated <strong>{fire_calls_annual:,.0f} fire-related calls annually</strong> — delivering <strong>${fire_savings:,.0f} per year</strong> in fire department operational value through aerial scene size-up, avoided aerial ladder deployments, and thermal-guided overhaul support. The program reaches full capital cost recovery in <strong>{break_even_text.lower()}</strong> when combined with law enforcement operational savings.</p>
     
             <p><strong>Statement of Need — Fire Operations:</strong> {jurisdiction_list} fire personnel respond to an estimated {fire_calls_annual:,.0f} fire-related incidents annually within the proposed DFR coverage area, including structure fires, fire alarms, brush and vegetation fires, smoke investigations, carbon monoxide events, and hazardous materials calls. Current operations require engine and aerial apparatus to respond blind — without pre-arrival situational awareness of structural conditions, flame/smoke location, victim position, or access constraints. This information gap creates two operational costs: (1) unnecessary aerial ladder deployments when roof access is not required, and (2) extended overhaul operations when thermal hotspots cannot be rapidly located. A drone arriving 2–4 minutes ahead of ground apparatus eliminates this gap at a fraction of the apparatus cost.</p>
     

@@ -134,13 +134,13 @@ except KeyError:
     _session_state_spec.loader.exec_module(_session_state_mod)
     init_session_state = _session_state_mod.init_session_state
 from modules.dashboard_helpers import log_map_build_event_once, resolve_master_boundary, render_sidebar_jurisdiction_selector, render_data_filters, render_display_options, render_deployment_strategy, prepare_station_candidates, manage_custom_stations, prepare_runtime_context, optimize_fleet_selection
+from modules import onboarding as _onboarding_mod
 from modules.onboarding import (
     detect_brinc_file, load_brinc_save_data, restore_brinc_session,
     split_uploaded_files, load_station_file, detect_location_from_calls,
     resolve_uploaded_boundaries, split_simulation_optional_files,
     load_simulation_boundary_overlay, load_simulation_custom_stations,
     build_demo_boundaries, build_demo_calls, resolve_demo_stations,
-    infer_simulation_targets_from_station_file,
 )
 from modules.highway_corridor import (
     STATE_PRIMARY_INTERSTATES,
@@ -148,6 +148,17 @@ from modules.highway_corridor import (
     build_corridor_polygon,
     estimate_corridor_calls,
     build_corridor_demo,
+)
+
+
+def _infer_simulation_targets_from_station_file_fallback(*args, **kwargs):
+    return [], ''
+
+
+infer_simulation_targets_from_station_file = getattr(
+    _onboarding_mod,
+    'infer_simulation_targets_from_station_file',
+    _infer_simulation_targets_from_station_file_fallback,
 )
 
 APP_DIR = Path(__file__).resolve().parent

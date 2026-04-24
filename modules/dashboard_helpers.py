@@ -748,7 +748,8 @@ def manage_custom_stations(
 ):
     n = len(df_stations_all)
     max_resp_calc = min(n, int(math.ceil(area_sq_mi / (math.pi * (r_resp_est**2)))) + 5)
-    max_guard_calc = min(n, int(math.ceil(area_sq_mi / (math.pi * (r_guard_est**2)))) + 5)
+    # Guardian placements should be allowed at any uploaded in-boundary station.
+    max_guard_calc = n
 
     try:
         pin_r_count = len(session_state.get('pinned_resp_names', []))

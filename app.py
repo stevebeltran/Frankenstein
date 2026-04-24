@@ -5029,6 +5029,7 @@ body{{background:transparent;overflow:hidden}}
         show_cell_towers = _display_opts['show_cell_towers']
         show_heatmap = _display_opts['show_heatmap']
         show_dots = _display_opts['show_dots']
+        show_rapid_response_ring = _display_opts['show_rapid_response_ring']
         simulate_traffic = _display_opts['simulate_traffic']
         show_health = _display_opts['show_health']
         show_financials = _display_opts['show_financials']
@@ -6094,7 +6095,7 @@ body{{background:transparent;overflow:hidden}}
                     fill='toself', fillcolor='rgba(0,0,0,0)', name=lbl, hoverinfo='name'))
 
                 # The 5-mile Rapid Response ring gets the "Important" styling (thick, solid, heavier fill)
-                if is_extended_guardian:
+                if is_extended_guardian and show_rapid_response_ring:
                     f_lats, f_lons = get_circle_coords(d['lat'], d['lon'], r_mi=5.0)
                     fig.add_trace(go.Scattermap(
                         lat=list(f_lats), lon=list(f_lons),
@@ -7759,6 +7760,7 @@ body{{background:transparent;overflow:hidden}}
             "show_cell_towers_b":          st.session_state.get('show_cell_towers_b', False),
             "show_heatmap_b":              st.session_state.get('show_heatmap_b', False),
             "show_dots_b":                 st.session_state.get('show_dots_b', True),
+            "show_rapid_response_ring_b":  st.session_state.get('show_rapid_response_ring_b', True),
             "simulate_traffic_b":          st.session_state.get('simulate_traffic_b', False),
             "show_health_b":               st.session_state.get('show_health_b', False),
             "show_financials_b":           st.session_state.get('show_financials_b', True),
@@ -7968,6 +7970,7 @@ body{{background:transparent;overflow:hidden}}
                 "show_cell_towers_b":          st.session_state.get('show_cell_towers_b', False),
                 "show_heatmap_b":              st.session_state.get('show_heatmap_b', False),
                 "show_dots_b":                 st.session_state.get('show_dots_b', True),
+                "show_rapid_response_ring_b":  st.session_state.get('show_rapid_response_ring_b', True),
                 "simulate_traffic_b":          st.session_state.get('simulate_traffic_b', False),
                 "show_health_b":               st.session_state.get('show_health_b', False),
                 "show_financials_b":           st.session_state.get('show_financials_b', True),

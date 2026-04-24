@@ -401,6 +401,12 @@ def render_display_options(st):
             key='show_dots_b',
             help='Show individual 911 call locations as dots on the map.',
         )
+        show_rapid_response_ring = st.toggle(
+            'Rapid Response Ring',
+            value=True,
+            key='show_rapid_response_ring_b',
+            help='Show or hide the highlighted 5-mile rapid response ring around extended Guardian stations.',
+        )
         simulate_traffic = st.toggle(
             'Simulate Ground Traffic',
             value=False,
@@ -438,6 +444,7 @@ def render_display_options(st):
         'show_cell_towers': show_cell_towers,
         'show_heatmap': show_heatmap,
         'show_dots': show_dots,
+        'show_rapid_response_ring': show_rapid_response_ring,
         'simulate_traffic': simulate_traffic,
         'show_health': show_health,
         'show_financials': show_financials,

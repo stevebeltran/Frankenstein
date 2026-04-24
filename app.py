@@ -1,4 +1,10 @@
 ﻿# Copyright (c) Steven Beltran. Created by Steven Beltran in partnership with BRINC Drones.
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message=r"authlib\.jose module is deprecated, please use joserfc instead\.",
+    category=DeprecationWarning,
+)
 import streamlit as st
 import pandas as pd
 import os

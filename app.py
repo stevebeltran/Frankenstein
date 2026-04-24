@@ -8305,43 +8305,165 @@ body{{background:transparent;overflow:hidden}}
                     )
                     return any(marker in ctx_text for marker in _state_agency_markers)
 
-                def _render_timed_custom_grant_html(
+                def _grant_context_looks_like_state_law_enforcement(ctx_text: str) -> bool:
+                    _state_law_markers = (
+                        "state police",
+                        "state patrol",
+                        "highway patrol",
+                        "department of public safety",
+                        "state bureau of investigation",
+                        "state law enforcement",
+                    )
+                    return any(marker in ctx_text for marker in _state_law_markers)
+
+                def _grant_context_looks_like_tribal_applicant(ctx_text: str) -> bool:
+                    _tribal_markers = (
+                        "tribe",
+                        "tribal",
+                        "nation",
+                        "pueblo",
+                        "rancheria",
+                    )
+                    return any(marker in ctx_text for marker in _tribal_markers)
+
+                def _render_federal_grant_card_html(
                     *,
                     title: str,
                     description: str,
-                    deadline: datetime.date,
+                    narrative: str,
+                    status_label: str,
+                    status_tone: str,
                     eligibility_note: str,
+                    links: list[tuple[str, str]],
+                    grants_gov_deadline: str = "",
+                    portal_deadline: str = "",
                     nofo_number: str = "",
-                    historical_note: str = "",
+                    status_note: str = "",
                     require_state_agency: bool = False,
+                    require_state_law_enforcement: bool = False,
+                    require_tribal: bool = False,
                 ) -> str:
-                    if datetime.date.today() > deadline:
-                        return ""
                     if require_state_agency and not _grant_context_looks_like_state_agency(_grant_context_text):
                         return ""
-                    _meta = [f"Application due {deadline.strftime('%B %d, %Y')}"]
+                    if require_state_law_enforcement and not _grant_context_looks_like_state_law_enforcement(_grant_context_text):
+                        return ""
+                    if require_tribal and not _grant_context_looks_like_tribal_applicant(_grant_context_text):
+                        return ""
+                    _meta = [status_label]
+                    if grants_gov_deadline:
+                        _meta.append(f"Grants.gov deadline: {grants_gov_deadline}")
+                    if portal_deadline:
+                        _meta.append(portal_deadline)
                     if nofo_number:
                         _meta.append(f"NOFO {nofo_number}")
                     if eligibility_note:
                         _meta.append(eligibility_note)
-                    if historical_note:
-                        _meta.append(historical_note)
+                    if status_note:
+                        _meta.append(status_note)
+                    _links_html = " · ".join(
+                        f'<a href="{html.escape(url, quote=True)}" target="_blank">{html.escape(label)}</a>'
+                        for label, url in links if label and url
+                    )
                     return (
-                        f"<br><strong>{html.escape(title)}</strong> — {html.escape(description)} "
-                        f"<span style=\"color:#666;\">({' | '.join(html.escape(m) for m in _meta)})</span>"
+                        f"<div class=\"federal-grant-card\">"
+                        f"<div class=\"federal-grant-head\">"
+                        f"<strong>{html.escape(title)}</strong>"
+                        f"<span class=\"grant-status-badge {html.escape(status_tone)}\">{html.escape(status_label)}</span>"
+                        f"</div>"
+                        f"<div class=\"federal-grant-desc\">{html.escape(description)}</div>"
+                        f"<div class=\"federal-grant-meta\">{' | '.join(html.escape(m) for m in _meta)}</div>"
+                        f"<p>{html.escape(narrative)}</p>"
+                        f"<div class=\"federal-grant-links\">{_links_html}</div>"
+                        f"</div>"
                     )
 
-                _custom_law_grants_html = "".join([
-                    _render_timed_custom_grant_html(
-                        title="SAMHSA State Opioid Response Grants (SOR)",
+                _current_federal_grants_html = "".join([
+                    _render_federal_grant_card_html(
+                        title="DOJ/BJA Comprehensive Opioid, Stimulant, and Substance Use Program (COSSUP)",
                         description=(
-                            "Supports opioid and stimulant use-disorder prevention, harm reduction, "
-                            "treatment, recovery support, and MOUD access."
+                            "Supports coordinated opioid, stimulant, and substance-use response across public "
+                            "safety, overdose response, diversion, deflection, treatment access, recovery, and data-sharing."
                         ),
-                        deadline=datetime.date(2022, 7, 18),
-                        eligibility_note="Eligible applicants limited to Single State Agencies and territories",
-                        nofo_number="TI-22-005",
-                        historical_note="Historical NOFO posted before January 20, 2025",
+                        narrative=(
+                            "For this DFR deployment, COSSUP is the strongest federal opioid-response fit because it "
+                            "allows the agency to position BRINC as overdose-scene intelligence infrastructure that improves "
+                            "dispatcher awareness, accelerates multi-agency coordination, reduces responder risk, and supports "
+                            "deflection workflows linking law enforcement, EMS, and behavioral-health partners."
+                        ),
+                        status_label="Open now",
+                        status_tone="open",
+                        eligibility_note="Eligible applicants include states, units of local government, and Indian tribal governments",
+                        links=[
+                            ("BJA FY25 COSSUP opportunity", "https://bja.ojp.gov/funding/opportunities/o-bja-2025-172485"),
+                            ("BJA COSSUP overview", "https://www.bja.ojp.gov/program/cossup/about"),
+                        ],
+                        grants_gov_deadline="May 4, 2026, 11:59 p.m. ET",
+                        portal_deadline="JustGrants deadline: May 11, 2026, 8:59 p.m. ET",
+                        nofo_number="O-BJA-2025-172485",
+                    ),
+                    _render_federal_grant_card_html(
+                        title="SAMHSA Tribal Opioid Response (TOR)",
+                        description=(
+                            "Supports opioid and stimulant prevention, harm reduction, treatment, recovery support, and "
+                            "MOUD access for tribal communities."
+                        ),
+                        narrative=(
+                            "When the applicant is a Tribe or tribal organization, TOR can support a DFR deployment framed "
+                            "around faster overdose-scene assessment, safer responder approach, and stronger connection between "
+                            "dispatch, tribal public safety, EMS, and treatment or recovery partners."
+                        ),
+                        status_label="Forecasted / watchlist",
+                        status_tone="watch",
+                        eligibility_note="Eligible applicants are federally recognized Tribes and tribal organizations",
+                        links=[
+                            ("Simpler.Grants.gov forecast search", "https://simpler.grants.gov/search?query=opioid+use+disorder"),
+                            ("SAMHSA TOR program page", "https://www.samhsa.gov/grants/grant-announcements/ti-24-009"),
+                        ],
+                        status_note="FY26 forecast posted March 20, 2026; close date not yet published",
+                        require_tribal=True,
+                    ),
+                    _render_federal_grant_card_html(
+                        title="COPS Anti-Heroin Task Force (AHTF)",
+                        description=(
+                            "Funds statewide collaborative law-enforcement efforts focused on heroin, fentanyl, carfentanil, "
+                            "and unlawful prescription-opioid distribution."
+                        ),
+                        narrative=(
+                            "For state law-enforcement applicants, AHTF can support a DFR narrative centered on earlier aerial "
+                            "scene intelligence for trafficking investigations, safer operational planning, and faster coordination "
+                            "across state task-force partners confronting opioid distribution networks."
+                        ),
+                        status_label="Recurring program",
+                        status_tone="closed",
+                        eligibility_note="Eligible applicants are state law-enforcement agencies with statewide jurisdiction",
+                        links=[
+                            ("COPS AHTF program page", "https://cops.usdoj.gov/ahtf"),
+                            ("COPS grants page", "https://cops.usdoj.gov/grants"),
+                        ],
+                        grants_gov_deadline="June 25, 2025, 4:59 p.m. ET",
+                        portal_deadline="JustGrants deadline: July 2, 2025, 4:59 p.m. ET",
+                        status_note="Most recent posted cycle is closed; keep on the watchlist for the next federal round",
+                        require_state_law_enforcement=True,
+                    ),
+                    _render_federal_grant_card_html(
+                        title="SAMHSA State Opioid Response (SOR)",
+                        description=(
+                            "Supports opioid and stimulant prevention, harm reduction, treatment, recovery support, and "
+                            "MOUD access through Single State Agencies and territorial applicants."
+                        ),
+                        narrative=(
+                            "For state behavioral-health or Single State Agency applicants, SOR can support a DFR narrative "
+                            "focused on overdose-scene intelligence, faster linkage to care, coordinated field response, and "
+                            "safer interoperability between public safety and treatment systems."
+                        ),
+                        status_label="State-only program",
+                        status_tone="closed",
+                        eligibility_note="Eligible applicants are Single State Agencies and territories",
+                        links=[
+                            ("SAMHSA SOR program page", "https://www.samhsa.gov/grants/grant-announcements/ti-24-008"),
+                        ],
+                        grants_gov_deadline="July 1, 2024",
+                        status_note="Most recent public NOFO is historical; include only for state-level behavioral-health applicants",
                         require_state_agency=True,
                     ),
                 ])
@@ -8622,6 +8744,22 @@ body{{background:transparent;overflow:hidden}}
         .grant-stat .gs-sub{{font-size:11px;color:var(--muted);margin-top:4px}}
         .grant-stat.gold .gs-val{{color:var(--gold)}}
         .grant-stat.green .gs-val{{color:var(--green)}}
+        .federal-grants-wrap{{margin:20px 0 22px;padding:18px 20px;border-radius:12px;background:linear-gradient(180deg,#f8fbff 0%,#f4f8fc 100%);border:1px solid rgba(59,130,246,0.18)}}
+        .federal-grants-wrap h4{{font-size:12px;font-weight:800;letter-spacing:1.3px;text-transform:uppercase;color:#1d4ed8;margin-bottom:8px}}
+        .federal-grants-wrap p{{font-size:13px;color:#334155;margin-bottom:14px}}
+        .federal-grant-card{{background:#fff;border:1px solid rgba(148,163,184,0.22);border-radius:10px;padding:14px 16px;margin-bottom:12px;box-shadow:0 4px 18px rgba(15,23,42,0.04)}}
+        .federal-grant-card:last-child{{margin-bottom:0}}
+        .federal-grant-head{{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}}
+        .federal-grant-head strong{{font-size:14px;color:#0f172a}}
+        .federal-grant-desc{{font-size:12px;color:#334155;margin-bottom:8px}}
+        .federal-grant-meta{{font-size:11px;color:#64748b;margin-bottom:10px}}
+        .grant-status-badge{{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:0.8px;text-transform:uppercase;white-space:nowrap}}
+        .grant-status-badge.open{{background:rgba(34,197,94,0.12);color:#15803d;border:1px solid rgba(34,197,94,0.25)}}
+        .grant-status-badge.watch{{background:rgba(245,158,11,0.12);color:#b45309;border:1px solid rgba(245,158,11,0.28)}}
+        .grant-status-badge.closed{{background:rgba(59,130,246,0.1);color:#1d4ed8;border:1px solid rgba(59,130,246,0.2)}}
+        .federal-grant-links{{font-size:12px;font-weight:700}}
+        .federal-grant-links a{{color:#2563eb;text-decoration:none}}
+        .federal-grant-links a:hover{{text-decoration:underline}}
     
         /* ── CRIME STATS BOX ─────────────────────────────────────────── */
         .crime-box{{
@@ -8850,7 +8988,7 @@ body{{background:transparent;overflow:hidden}}
           <div class="section-eyebrow">
             <span class="pg-num">06</span>
             <span class="pg-title">Grant Narrative</span>
-            <span class="src" data-src="Grant programs referenced: DOJ Byrne JAG · FEMA HSGP · DOJ COPS Office · DOT RAISE · DOJ Smart Policing Initiative. Timed custom grants render only while open and when the applicant context appears eligible. Financial figures are BRINC model estimates. Narrative is AI-generated — must be reviewed, localized, and fact-checked by your grants administrator before submission.">ⓘ</span>
+            <span class="src" data-src="Grant programs referenced: DOJ Byrne JAG · FEMA HSGP · DOJ COPS Office · DOT RAISE · DOJ Smart Policing Initiative · DOJ/BJA COSSUP · COPS AHTF · SAMHSA TOR · SAMHSA SOR. Federal opioid-program dates and eligibility are based on current public federal postings as of April 24, 2026. Financial figures are BRINC model estimates. Narrative is AI-generated — must be reviewed, localized, and fact-checked by your grants administrator before submission.">ⓘ</span>
             <button class="copy-section-btn grant-law" onclick="copyGrantText('grant-body-law', this)">
               <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
               Copy Grant Text
@@ -8916,6 +9054,12 @@ body{{background:transparent;overflow:hidden}}
             <p><strong>Officer Safety &amp; Liability Reduction:</strong> Beyond direct operational savings, DFR programs measurably reduce officer exposure to unknown-risk call scenarios. First-arriving drones perform scene reconnaissance before ground units arrive, enabling officers to approach with full situational awareness. Documented outcomes across peer agencies include: reduced officer injuries in drone-supported zones (avg. 18% reduction, per DOJ data), faster suspect identification improving apprehension rates, and reduced use-of-force incidents through earlier de-escalation intelligence. These outcomes reduce agency liability costs and workers' compensation claims — benefits not captured in the direct cost model above.</p>
     
             <p><strong>Community &amp; Economic Impact:</strong> Response time improvements of <strong>{avg_time_saved:.1f} minutes</strong> translate directly to better outcomes in time-sensitive incidents: cardiac events, structure fires, crimes in progress, and missing persons cases. Studies by the International Association of Chiefs of Police (IACP) document measurable improvements in case clearance rates, property crime deterrence (15–30% reduction in areas with visible DFR patrols), and community trust metrics in agencies with active drone programs. For {prop_city}'s business community, faster emergency response reduces property damage, shortens insurance claim cycles, and improves the commercial district safety perception that drives foot traffic and investment.</p>
+
+            <div class="federal-grants-wrap">
+              <h4>Current Federal Opioid-Response Grants</h4>
+              <p>Federal opioid-response funding can strengthen this executive export when the DFR program is positioned as overdose-scene intelligence, responder-safety infrastructure, and a coordination layer connecting dispatch, law enforcement, EMS, and behavioral-health partners. The entries below surface the best current-fit federal opportunities for the applicant context reflected in this export.</p>
+              {_current_federal_grants_html}
+            </div>
     
             <p style="background:#f8f9fa;padding:15px;border-radius:8px;border:1px solid #eee;font-size:13px">
               <strong>Applicable Grant Funding Sources:</strong><br>
@@ -8923,7 +9067,7 @@ body{{background:transparent;overflow:hidden}}
               <a href="https://www.fema.gov/grants/preparedness/homeland-security">FEMA HSGP</a> — Homeland security CapEx offset<br>
               <a href="https://cops.usdoj.gov/grants">DOJ COPS Office</a> — Law enforcement technology<br>
               <a href="https://www.transportation.gov/grants">DOT RAISE</a> — Regional infrastructure and safety<br>
-              <a href="https://bja.ojp.gov/program/smart-policing-initiative/overview">DOJ Smart Policing Initiative</a> — Data-driven public safety{_custom_law_grants_html}
+              <a href="https://bja.ojp.gov/program/smart-policing-initiative/overview">DOJ Smart Policing Initiative</a> — Data-driven public safety
             </p>
           </div>
           <div class="grant-sidebar">

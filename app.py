@@ -140,6 +140,7 @@ from modules.onboarding import (
     resolve_uploaded_boundaries, split_simulation_optional_files,
     load_simulation_boundary_overlay, load_simulation_custom_stations,
     build_demo_boundaries, build_demo_calls, resolve_demo_stations,
+    infer_simulation_targets_from_station_file,
 )
 from modules.highway_corridor import (
     STATE_PRIMARY_INTERSTATES,
@@ -4404,8 +4405,35 @@ def main():
                     'state': str(loc.get('state', '') or '').strip().upper(),
                 }
                 for loc in st.session_state['target_cities']
-                if str(loc.get('city', '') or '').strip() or str(loc.get('state', '') or '').strip().upper() in STATE_FIPS
+                if (
+                    str(loc.get('city', '') or '').strip()
+                    or (
+                        st.session_state.get('highway_patrol_mode', False)
+                        and str(loc.get('state', '') or '').strip().upper() in STATE_FIPS
+                    )
+                )
             ]
+            if not active_targets:
+                _pre_sim_station_file, _, _ = split_simulation_optional_files(
+                    st.session_state.get('sim_optional_uploader') or [],
+                    _is_boundary_sidecar,
+                    _looks_like_stations,
+                )
+                if _pre_sim_station_file is not None:
+                    _inferred_targets, _inferred_notice = infer_simulation_targets_from_station_file(
+                        _pre_sim_station_file,
+                        forward_geocode,
+                        reverse_geocode_state,
+                        US_STATES_ABBR,
+                        default_state=st.session_state.get('active_state', ''),
+                    )
+                    if _inferred_targets:
+                        active_targets = _inferred_targets
+                        st.session_state['target_cities'] = list(_inferred_targets)
+                        st.session_state['active_city'] = _inferred_targets[0]['city']
+                        st.session_state['active_state'] = _inferred_targets[0]['state']
+                        if _inferred_notice:
+                            st.toast(_inferred_notice)
             if not active_targets:
                 st.error("Please enter at least one valid city, county, or state.")
                 st.stop()
@@ -4814,7 +4842,7 @@ body{{background:transparent;overflow:hidden}}
                 st.toast(f"✅ {_active_hw} · {_hw_state} · {_corridor_miles:.0f} mi · {annual_cfs:,} calls/yr")
 
             else:
-                all_gdfs, total_estimated_pop, boundary_messages, boundary_warnings, rerun_demo_target, all_populations_verified = build_demo_boundaries(
+                all_gdfs, boundary_records, total_estimated_pop, boundary_messages, boundary_warnings, rerun_demo_target, all_populations_verified = build_demo_boundaries(
                     st.session_state,
                     active_targets,
                     STATE_FIPS,
@@ -4882,7 +4910,12 @@ body{{background:transparent;overflow:hidden}}
                 st.session_state['_pop_resolved'] = all_populations_verified
 
                 prog.progress(55, text="🚔 Modeling 911 calls — every one represents someone who needed help…")
-                df_demo, annual_cfs, simulated_points_count = build_demo_calls(city_poly, total_estimated_pop, generate_clustered_calls)
+                df_demo, annual_cfs, simulated_points_count = build_demo_calls(
+                    city_poly,
+                    total_estimated_pop,
+                    generate_clustered_calls,
+                    boundary_records=boundary_records,
+                )
             st.session_state['total_original_calls'] = annual_cfs
             st.session_state['df_calls'] = df_demo
             st.session_state['df_calls_full'] = df_demo.copy()

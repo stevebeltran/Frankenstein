@@ -5458,28 +5458,57 @@ body{{background:transparent;overflow:hidden}}
         active_drones = []
         cumulative_mask = np.zeros(total_calls, dtype=bool) if total_calls > 0 else None
         step = 1
+        _stable_avg_distance = getattr(
+            optimization,
+            "bounded_station_avg_distance_miles",
+            optimization.mean_covered_distance_miles,
+        )
         for idx, d_type in ordered_deployments_raw:
             if d_type == 'RESPONDER':
                 cov_array = resp_matrix[idx]; cost = CONFIG["RESPONDER_COST"]
                 speed_mph = CONFIG["RESPONDER_SPEED"]
-                avg_dist = optimization.bounded_station_avg_distance_miles(
-                    dist_matrix_r,
-                    resp_matrix,
-                    idx,
-                    fallback_miles=float(station_metadata[idx].get('avg_dist_r', 0) or 0),
-                    max_radius_miles=resp_radius_mi,
-                )
+                _fallback_avg = float(station_metadata[idx].get('avg_dist_r', 0) or 0)
+                try:
+                    avg_dist = _stable_avg_distance(
+                        dist_matrix_r,
+                        resp_matrix,
+                        idx,
+                        fallback_miles=_fallback_avg,
+                        max_radius_miles=resp_radius_mi,
+                    )
+                except TypeError:
+                    avg_dist = min(
+                        _stable_avg_distance(
+                            dist_matrix_r,
+                            resp_matrix,
+                            idx,
+                            fallback_miles=_fallback_avg,
+                        ),
+                        resp_radius_mi,
+                    )
                 radius_m  = resp_radius_mi * 1609.34
             else:
                 cov_array = guard_matrix[idx]; cost = CONFIG["GUARDIAN_COST"]
                 speed_mph = CONFIG["GUARDIAN_SPEED"]
-                avg_dist = optimization.bounded_station_avg_distance_miles(
-                    dist_matrix_g,
-                    guard_matrix,
-                    idx,
-                    fallback_miles=float(station_metadata[idx].get('avg_dist_g', 0) or 0),
-                    max_radius_miles=guard_radius_mi,
-                )
+                _fallback_avg = float(station_metadata[idx].get('avg_dist_g', 0) or 0)
+                try:
+                    avg_dist = _stable_avg_distance(
+                        dist_matrix_g,
+                        guard_matrix,
+                        idx,
+                        fallback_miles=_fallback_avg,
+                        max_radius_miles=guard_radius_mi,
+                    )
+                except TypeError:
+                    avg_dist = min(
+                        _stable_avg_distance(
+                            dist_matrix_g,
+                            guard_matrix,
+                            idx,
+                            fallback_miles=_fallback_avg,
+                        ),
+                        guard_radius_mi,
+                    )
                 radius_m  = guard_radius_mi * 1609.34
             map_color    = active_color_map[f"{idx}_{d_type}"]
             avg_time_min = (avg_dist / speed_mph) * 60

@@ -206,7 +206,7 @@ def restore_brinc_session(session_state, save_data):
     _bool_display_keys = [
         'show_satellite_b', 'show_boundaries_b', 'show_faa_b', 'show_no_fly_b',
         'show_obstacles_b', 'show_coverage_b', 'show_cell_towers_b', 'show_heatmap_b',
-        'show_dots_b', 'simulate_traffic_b', 'show_health_b', 'show_financials_b',
+        'show_dots_b', 'show_rapid_response_ring_b', 'simulate_traffic_b', 'show_health_b', 'show_financials_b',
         'simple_cards_b',
     ]
     for _k in _bool_display_keys:
@@ -254,7 +254,33 @@ def split_uploaded_files(uploaded_files, is_boundary_sidecar, looks_like_station
                 call_files = [second_file]
                 station_file = first_file
 
+    if station_file is None and len(call_files) > 1:
+        for candidate in list(call_files):
+            if _looks_like_station_upload_content(candidate):
+                station_file = candidate
+                call_files = [uploaded_file for uploaded_file in call_files if uploaded_file is not candidate]
+                break
+
     return call_files, station_file, boundary_files
+
+
+def _looks_like_station_upload_content(uploaded_file):
+    """Best-effort station-file detector for uploads without a helpful filename."""
+    try:
+        station_df = _read_station_upload(uploaded_file)
+        station_df = _normalize_station_columns(station_df)
+        station_df, single_col_note = _extract_single_column_station_addresses(station_df)
+        cols = {str(column).lower().strip() for column in station_df.columns}
+        if single_col_note:
+            return True
+        if not cols:
+            return False
+        has_coords = {'lat', 'lon'}.issubset(cols)
+        has_station_shape = bool(cols & {'name', 'type', 'address', 'lat', 'lon'})
+        cad_like = bool(cols & {'date', 'time', 'priority', 'call_type_desc', 'nature', 'description'})
+        return bool(has_coords and has_station_shape and not cad_like)
+    except Exception:
+        return False
 
 
 def _read_station_upload(uploaded_file):
@@ -561,6 +587,12 @@ def split_simulation_optional_files(optional_files, is_boundary_sidecar, looks_l
 
     if station_file is None and len(non_boundary_files) == 1:
         station_file = non_boundary_files[0]
+
+    if station_file is None and len(non_boundary_files) > 1:
+        for optional_file in non_boundary_files:
+            if _looks_like_station_upload_content(optional_file):
+                station_file = optional_file
+                break
 
     unused_files = [
         optional_file.name for optional_file in non_boundary_files

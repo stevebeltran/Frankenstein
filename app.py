@@ -8412,6 +8412,11 @@ body{{background:transparent;overflow:hidden}}
                         return ""
                     if require_tribal and not _grant_context_looks_like_tribal_applicant(_grant_context_text):
                         return ""
+                    _badge_styles = {
+                        "open": "display:inline-block;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:0.8px;text-transform:uppercase;white-space:nowrap;background:rgba(34,197,94,0.12);color:#15803d;border:1px solid rgba(34,197,94,0.25);",
+                        "watch": "display:inline-block;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:0.8px;text-transform:uppercase;white-space:nowrap;background:rgba(245,158,11,0.12);color:#b45309;border:1px solid rgba(245,158,11,0.28);",
+                        "closed": "display:inline-block;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:0.8px;text-transform:uppercase;white-space:nowrap;background:rgba(59,130,246,0.1);color:#1d4ed8;border:1px solid rgba(59,130,246,0.2);",
+                    }
                     _meta = [status_label]
                     if grants_gov_deadline:
                         _meta.append(f"Grants.gov deadline: {grants_gov_deadline}")
@@ -8424,19 +8429,32 @@ body{{background:transparent;overflow:hidden}}
                     if status_note:
                         _meta.append(status_note)
                     _links_html = " · ".join(
-                        f'<a href="{html.escape(url, quote=True)}" target="_blank">{html.escape(label)}</a>'
+                        f'<a href="{html.escape(url, quote=True)}" target="_blank" style="color:#2563eb;text-decoration:none;font-weight:700;">{html.escape(label)}</a>'
                         for label, url in links if label and url
                     )
+                    _badge_style = _badge_styles.get(status_tone, _badge_styles["closed"])
+                    _primary_link = next((url for _label, url in links if _label and url), "")
+                    if _primary_link:
+                        _badge_html = (
+                            f'<a href="{html.escape(_primary_link, quote=True)}" target="_blank" '
+                            f'class="grant-status-badge {html.escape(status_tone)}" '
+                            f'style="{_badge_style}text-decoration:none;cursor:pointer;">{html.escape(status_label)}</a>'
+                        )
+                    else:
+                        _badge_html = (
+                            f'<span class="grant-status-badge {html.escape(status_tone)}" '
+                            f'style="{_badge_style}">{html.escape(status_label)}</span>'
+                        )
                     return (
-                        f"<div class=\"federal-grant-card\">"
-                        f"<div class=\"federal-grant-head\">"
-                        f"<strong>{html.escape(title)}</strong>"
-                        f"<span class=\"grant-status-badge {html.escape(status_tone)}\">{html.escape(status_label)}</span>"
+                        f"<div class=\"federal-grant-card\" style=\"background:#fff;border:1px solid rgba(148,163,184,0.22);border-radius:10px;padding:14px 16px;margin-bottom:12px;box-shadow:0 4px 18px rgba(15,23,42,0.04);\">"
+                        f"<div class=\"federal-grant-head\" style=\"margin-bottom:6px;\">"
+                        f"<strong style=\"display:block;font-size:14px;color:#0f172a;margin-bottom:6px;\">{html.escape(title)}</strong>"
+                        f"{_badge_html}"
                         f"</div>"
-                        f"<div class=\"federal-grant-desc\">{html.escape(description)}</div>"
-                        f"<div class=\"federal-grant-meta\">{' | '.join(html.escape(m) for m in _meta)}</div>"
-                        f"<p>{html.escape(narrative)}</p>"
-                        f"<div class=\"federal-grant-links\">{_links_html}</div>"
+                        f"<div class=\"federal-grant-desc\" style=\"font-size:12px;color:#334155;margin:8px 0;\">{html.escape(description)}</div>"
+                        f"<div class=\"federal-grant-meta\" style=\"font-size:11px;color:#64748b;margin:0 0 10px;\">{' | '.join(html.escape(m) for m in _meta)}</div>"
+                        f"<p style=\"font-size:13px;color:#334155;line-height:1.65;margin:0 0 10px;\">{html.escape(narrative)}</p>"
+                        f"<div class=\"federal-grant-links\" style=\"font-size:12px;font-weight:700;line-height:1.6;\">{_links_html}</div>"
                         f"</div>"
                     )
 

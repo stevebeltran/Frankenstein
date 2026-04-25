@@ -131,13 +131,13 @@ __build_datetime__ = _versioning_mod.__build_datetime__
 __build_line_count__ = _versioning_mod.__build_line_count__
 _render_version_badge = _versioning_mod._render_version_badge
 from modules.public_reports import (
-    PUBLIC_REPORTS_DIR,
     _build_public_report_url,
     _get_document_jurisdiction_name,
     _get_public_report_secret,
     _get_query_params_dict,
     _get_request_base_url,
     _publish_public_report_html,
+    _public_report_metadata_path,
     _public_report_html_path,
     _resolve_public_reports_dir,
     _sign_public_report_id,
@@ -253,16 +253,22 @@ def _render_public_report_route():
     if not _report_id:
         return False
 
-    if not _sig or not hmac.compare_digest(_sig, _sign_public_report_id(_report_id)):
+    try:
+        _expected_sig = _sign_public_report_id(_report_id)
+        _html_path = _public_report_html_path(_report_id)
+        _meta_path = _public_report_metadata_path(_report_id)
+    except ValueError:
         st.error("Invalid public report link.")
         st.stop()
 
-    _html_path = _public_report_html_path(_report_id)
+    if not _sig or not hmac.compare_digest(_sig, _expected_sig):
+        st.error("Invalid public report link.")
+        st.stop()
+
     if not _html_path.exists():
         st.warning("This public report is not available yet.")
         st.stop()
 
-    _meta_path = PUBLIC_REPORTS_DIR / f"{_report_id}.json"
     _scan_meta = {}
     if _meta_path.exists():
         try:
@@ -5270,6 +5276,7 @@ body{{background:transparent;overflow:hidden}}
             CONFIG,
             k_responder,
             k_guardian,
+            guard_radius_mi,
             allow_redundancy,
             complement_mode,
             shared_mode,

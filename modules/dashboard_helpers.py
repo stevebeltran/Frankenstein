@@ -1340,6 +1340,7 @@ def optimize_fleet_selection(
     config,
     k_responder,
     k_guardian,
+    guard_radius_mi,
     allow_redundancy,
     complement_mode,
     shared_mode,

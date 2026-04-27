@@ -189,6 +189,11 @@ def _merge_with_polars(
         .alias("lon"),
     ]).drop(["lat_census", "lon_census"])
 
+    if "geocode_source" not in pl_merged.columns:
+        pl_merged = pl_merged.with_columns(
+            pl.lit(None).alias("geocode_source")
+        )
+
     # Mark geocode source
     pl_merged = pl_merged.with_columns([
         pl.when(pl.col("_census_filled"))

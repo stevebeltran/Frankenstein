@@ -2297,6 +2297,21 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         max_patrol_mins  = _GUARDIAN_DAILY_MINS  if is_guardian else _RESPONDER_DAILY_MINS
 
         max_patrol_hours = _GUARDIAN_DAILY_HOURS if is_guardian else _RESPONDER_DAILY_HOURS
+        max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
+        loiter_delta_mins = abs(CONFIG["GUARDIAN_FLIGHT_MIN"] - CONFIG["RESPONDER_FLIGHT_MIN"])
+        scene_hours_annual = (d_calls_handle_yr * loiter_delta_mins) / 60.0
+        loiter_compare_text = (
+            f"+{loiter_delta_mins:.0f} min vs Responder"
+            if is_guardian
+            else f"-{loiter_delta_mins:.0f} min vs Guardian"
+        )
+        loiter_value_text = (
+            f"+{scene_hours_annual:.1f} scene-hrs/yr"
+            if is_guardian
+            else f"-{scene_hours_annual:.1f} scene-hrs/yr"
+        )
+        loiter_color = "#F0B429" if is_guardian else "#00D2FF"
+        loiter_comp_color = "#F0B429" if is_guardian else "#00D2FF"
 
 
 
@@ -2476,8 +2491,6 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
         if _display_flights_day > 0:
 
-            max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
-
             raw_mins_per_flight = max_patrol_mins / max(_display_flights_day, 0.001)
 
             mins_per_flight = min(raw_mins_per_flight, max_single_flight)
@@ -2518,6 +2531,16 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
                 f'<span style="font-weight:600; color:{patrol_color};">{mins_label}</span></div>'
 
+            )
+            patrol_time_line += (
+                f'<div style="margin-top:4px;padding-top:4px;border-top:1px dashed rgba(255,255,255,0.08);">'
+                f'<div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;text-align:right;">Scene endurance / sortie'
+                f'<span class="tip" data-tip="How long the aircraft can stay airborne on a single launch at the same station. This is the direct Guardian-vs-Responder comparison metric and a proxy for retained scene coverage.">?</span></div>'
+                f'<div style="font-size:0.78rem;font-weight:800;color:{loiter_color};text-align:right;line-height:1.1;">{max_single_flight:.0f} min</div>'
+                f'<div style="font-size:0.58rem;color:{text_muted};text-align:right;margin-top:1px;">Same-site comparison</div>'
+                f'<div style="font-size:0.66rem;font-weight:700;color:{loiter_comp_color};text-align:right;line-height:1.1;">{loiter_compare_text}</div>'
+                f'<div style="font-size:0.64rem;color:{text_muted};text-align:right;margin-top:1px;">{loiter_value_text}</div>'
+                f'</div>'
             )
 
         if d_calls_unanswered_yr > 0.1:
@@ -2862,6 +2885,17 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
       <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{d_actual_resolved_day:.1f}</div>
     </div>
     {_sim_fin_breakeven_cell}
+  </div>
+  <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-bottom:6px;padding:6px 8px;background:rgba(255,255,255,0.03);border:1px solid {card_border};border-radius:5px;">
+    <div>
+      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Scene endurance / sortie<span class="tip" data-tip="How long the aircraft can stay airborne on a single launch at the same station. This is the direct Guardian-vs-Responder comparison metric and a proxy for retained scene coverage.">?</span></div>
+      <div style="font-size:0.88rem;font-weight:800;color:{loiter_color};">{max_single_flight:.0f} min</div>
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Same-site comparison</div>
+      <div style="font-size:0.72rem;font-weight:700;color:{loiter_comp_color};line-height:1.2;">{loiter_compare_text}</div>
+      <div style="font-size:0.64rem;color:{text_muted};line-height:1.2;margin-top:1px;">{loiter_value_text}</div>
+    </div>
   </div>
   {_sim_fin_specialty}
   {_sim_fin_capex}

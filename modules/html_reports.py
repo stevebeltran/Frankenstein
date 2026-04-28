@@ -2457,13 +2457,13 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
         util_pct = "100%" if d_capacity_limited else f"{d_true_util*100:.1f}%"
 
-        util_color = "#dc3545" if d_capacity_limited or d_true_util > 0.75 else "#F0B429" if d_true_util > 0.4 else "#2ecc71"
+        util_color = "#F0B429" if d_capacity_limited else "#dc3545" if d_true_util > 0.75 else "#F0B429" if d_true_util > 0.4 else "#2ecc71"
 
         # On-scene time color coding
 
         if d_capacity_limited or d_on_scene < 10.0:
 
-            scene_color = "#dc3545"
+            scene_color = "#F0B429" if d_capacity_limited else "#dc3545"
 
         elif d_on_scene < 20.0:
 
@@ -2493,7 +2493,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
             if d_capacity_limited:
 
-                patrol_color = "#dc3545"
+                patrol_color = "#F0B429"
 
                 flights_label = f"{d_max_cap:.1f} max flights/day"
 
@@ -2537,13 +2537,13 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
         if d_calls_unanswered_yr > 0.1:
 
-            status_text = "At Capacity"
+            status_text = "Capacity"
 
-            status_bg = "rgba(220,53,69,0.10)"
+            status_bg = "rgba(240,180,41,0.12)"
 
-            status_border = "rgba(220,53,69,0.35)"
+            status_border = "rgba(240,180,41,0.40)"
 
-            status_color = "#dc3545"
+            status_color = "#F0B429"
 
         else:
 
@@ -2889,6 +2889,10 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
     <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
       <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Dispatchable Calls<span class="tip" data-tip="Raw calls in range multiplied by the drone dispatch rate. This is total drone demand inside the unit's physical coverage area before overlap sharing.">?</span></div>
       <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{int(d_dispatchable_calls_yr):,}</div>
+    </div>
+    <div style="background:{"rgba(220,53,69,0.08)" if d_calls_unanswered_yr > 0.1 else "rgba(255,255,255,0.04)"};border:1px solid {"#dc3545" if d_calls_unanswered_yr > 0.1 else card_border};border-radius:5px;padding:6px 8px;text-align:center;">
+      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Calls Unanswered<span class="tip" data-tip="Raw in-range calls that remain unhandled after the station's physical time limit is applied.">?</span></div>
+      <div style="font-size:0.88rem;font-weight:800;color:{"#dc3545" if d_calls_unanswered_yr > 0.1 else card_title};">{int(d_calls_unanswered_yr):,}</div>
     </div>
     <div style="background:{"rgba(220,53,69,0.08)" if d_capacity_limited else "rgba(255,255,255,0.04)"};border:1px solid {"#dc3545" if d_capacity_limited else card_border};border-radius:5px;padding:6px 8px;text-align:center;">
       <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Utilization<span class="tip" data-tip="Dispatchable calls in range as a percent of this unit's daily call-handling capacity using the 10-minute on-scene floor model. If any dispatchable calls are unanswered, utilization is shown as 100%.">?</span></div>

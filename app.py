@@ -5809,6 +5809,8 @@ body{{background:transparent;overflow:hidden}}
                 d['zone_flights']        = _zone_flights
                 d['zone_calls_annual']   = _weighted_zone_calls * 365.0 / 365.0
                 d['raw_zone_calls_annual'] = _raw_zone_calls
+                d['city_calls_day']      = total_calls / 365.0 if total_calls > 0 else 0.0
+                d['city_calls_yr']       = float(total_calls)
                 d['zone_flights_annual'] = _zone_flights * 365.0
                 d['utilization']         = _util
                 d['true_util']           = _true_util

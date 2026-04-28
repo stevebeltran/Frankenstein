@@ -2298,14 +2298,6 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
         max_patrol_hours = _GUARDIAN_DAILY_HOURS if is_guardian else _RESPONDER_DAILY_HOURS
         max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
-        loiter_delta_mins = abs(CONFIG["GUARDIAN_FLIGHT_MIN"] - CONFIG["RESPONDER_FLIGHT_MIN"])
-        loiter_compare_text = (
-            f"+{loiter_delta_mins:.0f} min vs Responder"
-            if is_guardian
-            else f"-{loiter_delta_mins:.0f} min vs Guardian"
-        )
-        loiter_color = "#F0B429" if is_guardian else "#00D2FF"
-        loiter_comp_color = "#F0B429" if is_guardian else "#00D2FF"
 
 
 
@@ -2341,19 +2333,14 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
         d_zone_calls = float(d.get("zone_calls_annual", 0) or 0)
 
-        d_calls_in_range_yr = float(d.get("calls_in_range_yr", d_zone_calls) or 0)
+        d_calls_in_range_yr = float(d.get("city_calls_yr", d.get("calls_in_range_yr", d_zone_calls)) or 0)
+        d_calls_in_range_day = float(d.get("city_calls_day", d_calls_in_range_yr / 365.0) or 0)
 
         d_dispatchable_calls_yr = float(d.get("dispatchable_calls_yr", 0) or 0)
 
         d_weighted_dispatchable_calls_yr = float(d.get("weighted_dispatchable_calls_yr", d_dispatchable_calls_yr) or 0)
 
         d_calls_handle_yr = float(d.get("handled_calls_yr", d.get("calls_handle_yr", 0)) or 0)
-        scene_hours_annual = (d_calls_handle_yr * loiter_delta_mins) / 60.0
-        loiter_value_text = (
-            f"+{scene_hours_annual:.1f} scene-hrs/yr"
-            if is_guardian
-            else f"-{scene_hours_annual:.1f} scene-hrs/yr"
-        )
 
         d_calls_unanswered_yr = float(d.get("calls_unanswered_yr", 0) or 0)
 
@@ -2402,6 +2389,9 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_true_util    = d.get('true_util', d_util)
 
         d_on_scene     = d.get('on_scene_min', 99.0)
+        d_loiter_min   = max(0.0, float(d_on_scene or 0.0))
+        d_loiter_annual_hrs = (d_loiter_min * d_calls_handle_yr) / 60.0
+        loiter_color = "#F0B429" if is_guardian else "#00D2FF"
 
         d_max_cap      = float(d.get('max_flights_cap', 0) or 0)
 
@@ -2534,12 +2524,11 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             )
             patrol_time_line += (
                 f'<div style="margin-top:4px;padding-top:4px;border-top:1px dashed rgba(255,255,255,0.08);">'
-                f'<div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;text-align:right;">Scene endurance / sortie'
-                f'<span class="tip" data-tip="How long the aircraft can stay airborne on a single launch at the same station. This is the direct Guardian-vs-Responder comparison metric and a proxy for retained scene coverage.">?</span></div>'
-                f'<div style="font-size:0.78rem;font-weight:800;color:{loiter_color};text-align:right;line-height:1.1;">{max_single_flight:.0f} min</div>'
-                f'<div style="font-size:0.58rem;color:{text_muted};text-align:right;margin-top:1px;">Same-site comparison</div>'
-                f'<div style="font-size:0.66rem;font-weight:700;color:{loiter_comp_color};text-align:right;line-height:1.1;">{loiter_compare_text}</div>'
-                f'<div style="font-size:0.64rem;color:{text_muted};text-align:right;margin-top:1px;">{loiter_value_text}</div>'
+                f'<div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;text-align:right;">Calculated loiter / sortie'
+                f'<span class="tip" data-tip="Average scene time remaining after travel and duty-cycle limits are applied. Stations with closer incidents retain more loiter time.">?</span></div>'
+                f'<div style="font-size:0.78rem;font-weight:800;color:{loiter_color};text-align:right;line-height:1.1;">{d_loiter_min:.1f} min</div>'
+                f'<div style="font-size:0.58rem;color:{text_muted};text-align:right;margin-top:1px;">Retained scene time</div>'
+                f'<div style="font-size:0.64rem;color:{text_muted};text-align:right;margin-top:1px;">{d_loiter_annual_hrs:.1f} scene-hrs/yr</div>'
                 f'</div>'
             )
 
@@ -2857,7 +2846,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   {_sim_fin_hero}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:6px;">
     <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
-      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Raw Calls In Range<span class="tip" data-tip="All historical annual calls physically inside this unit's coverage area before dispatch-rate filtering.">?</span></div>
+      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Total City Calls<span class="tip" data-tip="Full annual CAD volume for the city or jurisdiction. This is the unadjusted citywide call count, not the overlap-weighted station figure.">?</span></div>
       <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{int(d_calls_in_range_yr):,}</div>
     </div>
     <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
@@ -2888,13 +2877,12 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   </div>
   <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-bottom:6px;padding:6px 8px;background:rgba(255,255,255,0.03);border:1px solid {card_border};border-radius:5px;">
     <div>
-      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Scene endurance / sortie<span class="tip" data-tip="How long the aircraft can stay airborne on a single launch at the same station. This is the direct Guardian-vs-Responder comparison metric and a proxy for retained scene coverage.">?</span></div>
-      <div style="font-size:0.88rem;font-weight:800;color:{loiter_color};">{max_single_flight:.0f} min</div>
+      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Calculated loiter / sortie<span class="tip" data-tip="Average scene time remaining after travel and duty-cycle limits are applied. Stations with closer incidents retain more loiter time.">?</span></div>
+      <div style="font-size:0.88rem;font-weight:800;color:{loiter_color};">{d_loiter_min:.1f} min</div>
     </div>
     <div style="text-align:right;">
-      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Same-site comparison</div>
-      <div style="font-size:0.72rem;font-weight:700;color:{loiter_comp_color};line-height:1.2;">{loiter_compare_text}</div>
-      <div style="font-size:0.64rem;color:{text_muted};line-height:1.2;margin-top:1px;">{loiter_value_text}</div>
+      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Retained scene time</div>
+      <div style="font-size:0.72rem;font-weight:700;color:{loiter_color};line-height:1.2;">{d_loiter_annual_hrs:.1f} scene-hrs/yr</div>
     </div>
   </div>
   {_sim_fin_specialty}
@@ -2922,9 +2910,9 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   {_full_fin_value_breakdown}
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.68rem; flex:1; margin-bottom:8px; align-content:start;">
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Raw Calls In Range<span class="tip" data-tip="All historical annual calls physically inside this unit's coverage area before dispatch-rate filtering.">?</span></div>
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Total City Calls<span class="tip" data-tip="Full annual CAD volume for the city or jurisdiction. This is the unadjusted citywide call count, not the overlap-weighted station figure.">?</span></div>
       <div style="font-weight:800; color:{accent_color}; font-size:0.82rem;">{int(d_calls_in_range_yr):,}</div>
-      <div style="font-size:0.59rem; color:{text_muted};">{(d_calls_in_range_yr / 365.0):.1f}/day</div>
+      <div style="font-size:0.59rem; color:{text_muted};">{d_calls_in_range_day:.1f}/day</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Dispatchable Calls<span class="tip" data-tip="Raw calls in range multiplied by the drone dispatch rate. This is total drone demand inside the unit's physical coverage area before overlap sharing.">?</span></div>

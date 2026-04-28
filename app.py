@@ -7902,6 +7902,56 @@ body{{background:transparent;overflow:hidden}}
         _safe_city_base = _safe_export_slug(prop_city, "City")
         export_details = {}
         export_html = None
+        _report_build_started = time.perf_counter()
+
+        def _report_wait_message():
+            _call_count = len(calls_in_city) if calls_in_city is not None else 0
+            _drone_count = len(active_drones) if active_drones else 0
+            _last_seconds = st.session_state.get('report_build_seconds')
+            if isinstance(_last_seconds, (int, float)) and _last_seconds > 0:
+                return (
+                    f"Creating a custom report takes time, please wait. "
+                    f"Last build took {_last_seconds:.1f}s for {_call_count:,} calls and {_drone_count} drones."
+                )
+            _estimated_seconds = 4.0 + min(20.0, (_call_count / 180.0) + (_drone_count * 1.5))
+            return (
+                f"Creating a custom report takes time, please wait. "
+                f"Estimated wait is about {_estimated_seconds:.0f} seconds for {_call_count:,} calls and {_drone_count} drones."
+            )
+
+        _report_wait_note = _report_wait_message()
+        _report_notice_slot = st.sidebar.empty()
+        _brinc_export_slot = st.sidebar.empty()
+        _html_export_slot = st.sidebar.empty()
+        _kml_export_slot = st.sidebar.empty()
+
+        _report_notice_slot.info(_report_wait_note)
+        _brinc_export_slot.button(
+            "💾 Save Deployment Plan",
+            disabled=True,
+            width="stretch",
+            help=_report_wait_note,
+        )
+        _html_export_slot.button(
+            f"📄 {prop_city}, {prop_state} — Executive Summary",
+            disabled=True,
+            width="stretch",
+            help=(
+                "Deploy at least one drone to generate the executive summary."
+                if fleet_capex <= 0
+                else _report_wait_note
+            ),
+        )
+        _kml_export_slot.button(
+            "🌏 Google Earth Briefing File",
+            disabled=True,
+            width="stretch",
+            help=(
+                "Deploy at least one drone to generate the KML file."
+                if not active_drones
+                else _report_wait_note
+            ),
+        )
         export_dict = {
             "city": prop_city,
             "state": prop_state,
@@ -9975,6 +10025,10 @@ body{{background:transparent;overflow:hidden}}
         _safe_city   = _safe_city_base
         _ts          = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         _version_slug = _safe_export_slug(__version__, "version")
+        st.session_state['report_build_seconds'] = round(time.perf_counter() - _report_build_started, 2)
+        _report_notice_slot.caption(
+            f"Reports ready in {st.session_state['report_build_seconds']:.1f}s. The download buttons below are active."
+        )
 
         # 1. Save Deployment Plan (.brinc) — always available
         _brinc_payload = export_dict if fleet_capex > 0 else {
@@ -9983,9 +10037,9 @@ body{{background:transparent;overflow:hidden}}
             "_disclaimer": "No drones deployed yet.",
         }
         _brinc_data = _json_export_download(_brinc_payload)
-        if st.sidebar.download_button("💾 Save Deployment Plan", data=_brinc_data,
-                                      file_name=f"BRINC_Deployment_Plan_{_safe_city}_{_version_slug}_{_ts}.brinc",
-                                      mime="application/octet-stream", width="stretch"):
+        if _brinc_export_slot.download_button("💾 Save Deployment Plan", data=_brinc_data,
+                                              file_name=f"BRINC_Deployment_Plan_{_safe_city}_{_version_slug}_{_ts}.brinc",
+                                              mime="application/octet-stream", width="stretch"):
             # ── Track export event ───────────────────────────────────────────────
             st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['BRINC']
             st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
@@ -9998,11 +10052,11 @@ body{{background:transparent;overflow:hidden}}
         # 2. Executive Summary / proposal HTML export
         _export_html_ready = isinstance(export_html, str) and export_html.lstrip().lower().startswith("<!doctype html")
         if fleet_capex > 0:
-            if _export_html_ready and st.sidebar.download_button(f"📄 {prop_city}, {prop_state} — Executive Summary",
-                                          data=export_html,
-                                          file_name=f"BRINC_Executive_Summary_{_safe_city}_{_version_slug}_{_ts}.html",
-                                          mime="text/html",
-                                          width="stretch"):
+            if _export_html_ready and _html_export_slot.download_button(f"📄 {prop_city}, {prop_state} — Executive Summary",
+                                                                        data=export_html,
+                                                                        file_name=f"BRINC_Executive_Summary_{_safe_city}_{_version_slug}_{_ts}.html",
+                                                                        mime="text/html",
+                                                                        width="stretch"):
                 # ── Track export event ───────────────────────────────────────────
                 st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['HTML']
                 st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
@@ -10013,15 +10067,19 @@ body{{background:transparent;overflow:hidden}}
                                "HTML", k_responder, k_guardian, calls_covered_perc,
                                prop_name, prop_email, details=export_details)
             elif not _export_html_ready:
-                st.sidebar.button(f"📄 {prop_city}, {prop_state} — Executive Summary",
-                                  disabled=True,
-                                  width="stretch",
-                                  help="Executive summary data is not ready for this run.")
+                _html_export_slot.button(
+                    f"📄 {prop_city}, {prop_state} — Executive Summary",
+                    disabled=True,
+                    width="stretch",
+                    help="Executive summary data is not ready for this run.",
+                )
         else:
-            st.sidebar.button(f"📄 {prop_city}, {prop_state} — Executive Summary",
-                              disabled=True,
-                              width="stretch",
-                              help="Deploy at least one drone to generate the executive summary.")
+            _html_export_slot.button(
+                f"📄 {prop_city}, {prop_state} — Executive Summary",
+                disabled=True,
+                width="stretch",
+                help="Deploy at least one drone to generate the executive summary.",
+            )
 
         # 3. Google Earth KML — only when drones are placed
         _kml_data = None
@@ -10035,11 +10093,11 @@ body{{background:transparent;overflow:hidden}}
                 _kml_error = str(_kml_exc)[:140]
 
         if active_drones and _kml_data:
-            if st.sidebar.download_button("🌏 Google Earth Briefing File",
-                                          data=_kml_data,
-                                          file_name=f"BRINC_Google_Earth_Briefing_{_safe_city}_{_version_slug}_{_ts}.kml",
-                                          mime="application/vnd.google-earth.kml+xml",
-                                          width="stretch"):
+            if _kml_export_slot.download_button("🌏 Google Earth Briefing File",
+                                                data=_kml_data,
+                                                file_name=f"BRINC_Google_Earth_Briefing_{_safe_city}_{_version_slug}_{_ts}.kml",
+                                                mime="application/vnd.google-earth.kml+xml",
+                                                width="stretch"):
                 # ── Track export event ───────────────────────────────────────────
                 st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['KML']
                 st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
@@ -10050,15 +10108,15 @@ body{{background:transparent;overflow:hidden}}
                                "KML", k_responder, k_guardian, calls_covered_perc,
                                prop_name, prop_email, details=export_details)
         elif active_drones:
-            st.sidebar.button("🌏 Google Earth Briefing File", disabled=True,
-                              width="stretch",
-                              help="Google Earth export is unavailable for the current geometry.")
+            _kml_export_slot.button("🌏 Google Earth Briefing File", disabled=True,
+                                    width="stretch",
+                                    help="Google Earth export is unavailable for the current geometry.")
             if _kml_error:
                 st.sidebar.caption(f"Google Earth export issue: {_kml_error}")
         else:
-            st.sidebar.button("🌏 Google Earth Briefing File", disabled=True,
-                              width="stretch",
-                              help="Deploy at least one drone to generate the KML file.")
+            _kml_export_slot.button("🌏 Google Earth Briefing File", disabled=True,
+                                    width="stretch",
+                                    help="Deploy at least one drone to generate the KML file.")
 
 
 

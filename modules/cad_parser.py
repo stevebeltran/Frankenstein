@@ -819,7 +819,8 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
             # fields exist (for example Agency + Agency.1 after CSV import).
             _agency_candidates = [
                 c for c in raw_df.columns
-                if c.strip().lower() in ('agency', 'agency.1', 'department', 'department.1', 'dept', 'dept.1')
+                if c.strip().lower() in ('agency', 'agency.1', 'department', 'department.1', 'dept', 'dept.1',
+                                         'agencyname', 'agencyname.1', 'agency_name', 'agency_name.1')
             ]
             _agency_col = None
             for _cand in _agency_candidates:
@@ -834,7 +835,13 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                 _agency_col = _agency_candidates[0] if _agency_candidates else None
 
             if _agency_col:
-                res['agency'] = raw_df[_agency_col].astype(str).str.strip().str.lower()
+                _raw_agency = raw_df[_agency_col].astype(str).str.strip().str.lower()
+                # Normalize to canonical 'fire' / 'police' so the renderer colours correctly.
+                # If a raw value already IS 'fire' or 'police', keep it; otherwise look for
+                # fire-department keywords and fall back to 'police'.
+                _fire_kw = r'fire|ems|medic|rescue|ambulance|engine|ladder|battalion'
+                _is_fire = _raw_agency.str.contains(_fire_kw, regex=True, na=False)
+                res['agency'] = _is_fire.map({True: 'fire', False: 'police'})
             else:
                 # Fall back to filename-based agency detection when no agency column exists
                 _fname_lower = str(cfile.name).lower()

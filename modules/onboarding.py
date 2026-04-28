@@ -625,6 +625,7 @@ def clear_stale_boundary_shapefiles(shapefile_dir):
 
 
 def resolve_uploaded_boundaries(
+    st,
     session_state,
     df_calls,
     df_calls_full,
@@ -633,28 +634,47 @@ def resolve_uploaded_boundaries(
     select_best_boundary_for_calls,
     save_boundary_gdf,
 ):
+    stage_box = st.empty()
+    stage_progress = st.progress(0, text="Resolving uploaded boundary…")
+
+    def set_stage(step_pct, message):
+        stage_box.info(message)
+        try:
+            stage_progress.progress(int(step_pct), text=message)
+        except Exception:
+            stage_progress.progress(int(step_pct))
+
+    set_stage(15, "Checking uploaded CAD coordinates for an existing boundary match…")
     clear_stale_boundary_shapefiles('jurisdiction_data')
     session_state['boundary_source_path'] = ''
     session_state['master_gdf_override'] = None
 
     calls_for_boundary = df_calls_full if df_calls_full is not None and len(df_calls_full) > 0 else df_calls
+    set_stage(35, "Looking for a boundary in the local cache…")
     coord_gdf = find_jurisdictions_by_coordinates(calls_for_boundary)
 
     if coord_gdf is not None and not coord_gdf.empty:
+        set_stage(100, "Boundary resolved from local coordinates.")
         session_state['master_gdf_override'] = coord_gdf
         session_state['boundary_source_path'] = 'local_parquet'
         session_state['boundary_kind'] = 'place'
         session_state['active_city'] = str(coord_gdf.iloc[0]['DISPLAY_NAME']).title()
+        stage_progress.empty()
+        stage_box.empty()
         return
 
     session_state['master_gdf_override'] = None
     detected_city = session_state.get('active_city', '')
     detected_state = session_state.get('active_state', '')
     if not detected_city or not detected_state or detected_state not in state_fips:
+        set_stage(100, "No active city/state was available for boundary resolution.")
+        stage_progress.empty()
+        stage_box.empty()
         return
 
     city_text = str(detected_city).strip()
     prefer_county = str(session_state.get('location_detection_source', '')) == 'centroid'
+    set_stage(55, "Selecting the best county or place boundary for the current jurisdiction…")
     boundary_success, boundary_gdf, boundary_kind, _ = select_best_boundary_for_calls(
         calls_for_boundary,
         city_text,
@@ -663,8 +683,13 @@ def resolve_uploaded_boundaries(
     )
     session_state['boundary_kind'] = boundary_kind
     if boundary_success and boundary_gdf is not None:
+        set_stage(85, "Saving the resolved boundary for faster reuse next time…")
         saved_path = save_boundary_gdf(boundary_gdf, boundary_kind, city_text, detected_state)
         session_state['boundary_source_path'] = saved_path or ''
+
+    set_stage(100, "Boundary resolution complete.")
+    stage_progress.empty()
+    stage_box.empty()
 
 
 def split_simulation_optional_files(optional_files, is_boundary_sidecar, looks_like_stations):

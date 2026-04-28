@@ -86,6 +86,15 @@ def resolve_master_boundary(
 ):
     use_county = session_state.get('use_county_boundary', False)
     master_override = session_state.get('master_gdf_override')
+    stage_box = st.empty()
+    stage_progress = st.progress(0, text="Resolving jurisdiction boundary…")
+
+    def set_stage(step_pct, message):
+        stage_box.info(message)
+        try:
+            stage_progress.progress(int(step_pct), text=message)
+        except Exception:
+            stage_progress.progress(int(step_pct))
 
     if use_county:
         active_state = session_state.get('active_state', '')
@@ -94,11 +103,14 @@ def resolve_master_boundary(
             session_state.get('_county_boundary_cache_key') == county_cache_key
             and session_state.get('_county_boundary_gdf') is not None
         ):
+            set_stage(100, "Using cached county boundary.")
             master_gdf = session_state['_county_boundary_gdf'].copy()
         else:
+            set_stage(20, "Checking county boundary cache and county lookup data…")
             with st.spinner("Loading county boundary…"):
                 ok, county_gdf = fetch_county_by_centroid(df_calls, active_state)
             if ok and county_gdf is not None:
+                set_stage(60, "County boundary found. Finalizing jurisdiction geometry…")
                 county_gdf = county_gdf.copy()
                 county_gdf['DISPLAY_NAME'] = county_gdf['NAME'].astype(str)
                 county_gdf['data_count'] = len(df_calls)
@@ -108,8 +120,10 @@ def resolve_master_boundary(
             else:
                 st.warning("County boundary not found — check that counties_lite.parquet is present.")
                 if master_override is not None and not master_override.empty:
+                    set_stage(70, "County boundary unavailable. Using the uploaded override boundary.")
                     master_gdf = master_override.copy()
                 else:
+                    set_stage(75, "County boundary unavailable. Resolving jurisdiction from uploaded calls…")
                     with st.spinner(get_jurisdiction_message()):
                         preferred_shp = session_state.get('boundary_source_path', '') or None
                         master_gdf = get_relevant_jurisdictions_cached(
@@ -118,8 +132,10 @@ def resolve_master_boundary(
                             preferred_shp=preferred_shp,
                         )
     elif master_override is not None and not master_override.empty:
+        set_stage(100, "Using uploaded boundary override.")
         master_gdf = master_override.copy()
     else:
+        set_stage(35, "Resolving jurisdiction from uploaded calls…")
         with st.spinner(get_jurisdiction_message()):
             preferred_shp = session_state.get('boundary_source_path', '') or None
             master_gdf = get_relevant_jurisdictions_cached(
@@ -135,6 +151,7 @@ def resolve_master_boundary(
         shp_files = glob.glob(os.path.join(shapefile_dir, '*.shp'))
         if shp_files:
             try:
+                set_stage(60, "Searching local shapefiles for the best matching boundary…")
                 preferred_kind = session_state.get('boundary_kind', 'place')
                 active_city = session_state.get('active_city', '')
                 active_state = session_state.get('active_state', '')
@@ -207,10 +224,12 @@ def resolve_master_boundary(
                 master_gdf = fallback_gdf[['DISPLAY_NAME', 'data_count', 'geometry']]
                 session_state['boundary_source_path'] = best
                 boundary_src_note = best
+                set_stage(90, "Boundary resolved from local shapefile cache.")
             except Exception:
                 master_gdf = None
 
     if master_gdf is None or master_gdf.empty:
+        set_stage(95, "No boundary cache matched. Generating a temporary boundary.")
         min_lon, min_lat = df_calls['lon'].min(), df_calls['lat'].min()
         max_lon, max_lat = df_calls['lon'].max(), df_calls['lat'].max()
         lon_pad = (max_lon - min_lon) * 0.1
@@ -222,6 +241,8 @@ def resolve_master_boundary(
             crs='EPSG:4326',
         )
 
+    stage_progress.empty()
+    stage_box.empty()
     return master_gdf, boundary_kind_note, boundary_src_note
 
 
@@ -1381,6 +1402,14 @@ def optimize_fleet_selection(
     else:
         if session_state.get('_opt_cache_key') != opt_cache_key:
             stage_bar = st.empty()
+            stage_progress = st.progress(0, text="Preparing optimization…")
+
+            def set_stage(step_pct, message):
+                stage_bar.info(message)
+                try:
+                    stage_progress.progress(int(step_pct), text=message)
+                except Exception:
+                    stage_progress.progress(int(step_pct))
 
             def has_meaningful_overlap(geom_a, geom_b, tol=1e-9):
                 if geom_a is None or geom_b is None or geom_a.is_empty or geom_b.is_empty:
@@ -1527,7 +1556,7 @@ def optimize_fleet_selection(
             )
 
             if true_shared_call_mode:
-                stage_bar.info('🤝 Optimising shared call coverage…')
+                set_stage(20, 'Building overlap constraints and shared call coverage model…')
                 r_best, g_best, chrono_r, chrono_g = optimization_module.solve_mclp(
                     resp_matrix,
                     guard_matrix,
@@ -1543,9 +1572,10 @@ def optimize_fleet_selection(
                 r_best = list(r_best)
                 g_best = list(g_best)
             else:
-                stage_bar.info('🦅 Optimising Guardian fleet…')
+                set_stage(20, 'Building overlap constraints and optimising Guardian fleet…')
                 if k_guardian > 0:
                     if guard_strategy == 'Maximize Call Coverage':
+                        set_stage(45, 'Solving Guardian fleet placement…')
                         _, g_best, _, chrono_g = optimization_module.solve_mclp(
                             resp_matrix,
                             guard_matrix,
@@ -1560,6 +1590,7 @@ def optimize_fleet_selection(
                             incompatible_gg=guard_overlap_pairs,
                         )
                     else:
+                        set_stage(45, 'Selecting Guardian stations from coverage geometry…')
                         g_best, chrono_g = greedy_area(
                             guard_geos,
                             k_guardian,
@@ -1571,7 +1602,7 @@ def optimize_fleet_selection(
                 else:
                     g_best, chrono_g = [], []
 
-                stage_bar.info('🚁 Optimising Responder fleet…')
+                set_stage(70, 'Optimising Responder fleet…')
                 if k_responder > 0:
                     if complement_mode and g_best and total_calls > 0:
                         guard_claimed, guard_claims_by_idx = build_guard_serviceable_claims(g_best)
@@ -1586,6 +1617,7 @@ def optimize_fleet_selection(
                         forbidden_resp = set()
 
                     if resp_strategy == 'Maximize Call Coverage':
+                        set_stage(85, 'Solving Responder fleet placement…')
                         r_best, _, chrono_r, _ = optimization_module.solve_mclp(
                             resp_matrix_eff,
                             guard_matrix,
@@ -1603,6 +1635,7 @@ def optimize_fleet_selection(
                         if complement_mode:
                             r_best = [s for s in r_best if s not in set(g_best)]
                     else:
+                        set_stage(85, 'Selecting Responder stations from coverage geometry…')
                         excl_resp = set(g_best) if complement_mode else set()
                         cross_guard_geos = [guard_geos[i] for i in g_best] if complement_mode else None
                         r_best, chrono_r = greedy_area(
@@ -1618,8 +1651,10 @@ def optimize_fleet_selection(
 
             if not complement_mode:
                 guard_claims_by_idx = {}
+            set_stage(100, 'Finalizing optimization recommendations…')
             best_combo = (tuple(r_best), tuple(g_best))
             stage_bar.empty()
+            stage_progress.empty()
             if true_shared_call_mode:
                 st.toast('✅ Shared optimisation complete!', icon='✅')
             elif shared_mode:

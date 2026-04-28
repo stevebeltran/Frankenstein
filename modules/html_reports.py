@@ -2623,8 +2623,6 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
             f'          <div style="font-size:0.56rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:3px;">At Capacity<span class="tip" data-tip="This unit is at its modeled call-handling ceiling for the current profile.">?</span></div>'
 
-            f'          <div style="font-size:0.72rem;font-weight:800;color:{card_title};line-height:1.2;margin-top:3px;">{int(d_calls_unanswered_yr):,} calls unanswered</div>'
-
             f'          <div style="font-size:0.70rem;color:{text_muted};margin-top:2px;">{d_max_cap:.1f} calls/day capacity ({int(d_total_flights_possible_yr):,}/yr)</div>'
 
             f'          <div style="font-size:0.70rem;color:{text_muted};margin-top:2px;">{mins_per_flight:.1f} min/flight</div>'

@@ -963,7 +963,7 @@ def build_demo_calls(city_poly, total_estimated_pop, generate_clustered_calls, b
         weighted_annual_cfs = sum(int(weight) for weight in boundary_weights)
         if weighted_annual_cfs > 0:
             annual_cfs = weighted_annual_cfs
-    simulated_points_count = min(max(int(annual_cfs), 365), 36500)
+    simulated_points_count = max(int(round(annual_cfs)), 0)
     np.random.seed(42)
     random.seed(42)
     call_points = []

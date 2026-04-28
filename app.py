@@ -5563,6 +5563,35 @@ body{{background:transparent;overflow:hidden}}
             "bounded_station_avg_distance_miles",
             optimization.mean_covered_distance_miles,
         )
+        def _station_avg_dist_and_cap(idx, d_type):
+            if d_type == 'RESPONDER':
+                avg_dist_local = float(station_metadata[idx].get('avg_dist_r', 0) or 0)
+                speed_local = CONFIG["RESPONDER_SPEED"]
+                flight_min_local = CONFIG["RESPONDER_FLIGHT_MIN"]
+                charge_min_local = CONFIG["RESPONDER_CHARGE_MIN"]
+                cov_local = resp_matrix[idx]
+            else:
+                avg_dist_local = float(station_metadata[idx].get('avg_dist_g', 0) or 0)
+                speed_local = CONFIG["GUARDIAN_SPEED"]
+                flight_min_local = CONFIG["GUARDIAN_FLIGHT_MIN"]
+                charge_min_local = CONFIG["GUARDIAN_CHARGE_MIN"]
+                cov_local = guard_matrix[idx]
+            avg_time_local = (avg_dist_local / speed_local) * 60 if speed_local > 0 else 0.0
+            max_cap_local = calculate_max_flights_per_day(
+                avg_time_local + 10.0,
+                flight_minutes=flight_min_local,
+                downtime_minutes=charge_min_local,
+            )
+            return cov_local, avg_dist_local, avg_time_local, max_cap_local
+
+        _station_cov_cache = {}
+        _station_cap_cache = {}
+        _selected_keys = []
+        for _idx, _d_type in ordered_deployments_raw:
+            _cov_local, _avg_dist_local, _avg_time_local, _max_cap_local = _station_avg_dist_and_cap(_idx, _d_type)
+            _station_cov_cache[(_idx, _d_type)] = _cov_local
+            _station_cap_cache[(_idx, _d_type)] = float(_max_cap_local) * 365.0
+            _selected_keys.append((_idx, _d_type))
         for idx, d_type in ordered_deployments_raw:
             if d_type == 'RESPONDER':
                 cov_array = resp_matrix[idx]; cost = CONFIG["RESPONDER_COST"]
@@ -5660,6 +5689,20 @@ body{{background:transparent;overflow:hidden}}
                 _weighted_zone_calls = float(np.sum(d['cov_array'] / np.maximum(_cover_counts, 1)))
                 _concurrent_weighted_zone_calls = max(0.0, _weighted_zone_calls - _exclusive_weighted_zone_calls)
                 _weighted_zone_perc  = (_weighted_zone_calls / total_calls) if total_calls > 0 else 0.0
+                _ring_capacity_yr = 0.0
+                if _raw_zone_calls > 0:
+                    for _peer_idx, _peer_type in _selected_keys:
+                        _peer_cov = _station_cov_cache.get((_peer_idx, _peer_type))
+                        if _peer_cov is None:
+                            continue
+                        _overlap_calls = float(np.sum(d['cov_array'] & _peer_cov))
+                        if _overlap_calls <= 0:
+                            continue
+                        _ring_capacity_yr += _station_cap_cache.get((_peer_idx, _peer_type), 0.0) * (_overlap_calls / _raw_zone_calls)
+                _calls_unanswered_yr = max(0.0, float(_raw_zone_calls) - _ring_capacity_yr)
+                _calls_unanswered_day = _calls_unanswered_yr / 365.0
+                _handled_calls_yr = max(0.0, float(_raw_zone_calls) - _calls_unanswered_yr)
+                _handled_calls_day = _handled_calls_yr / 365.0
 
                 # ── UTILIZATION: based on overlap-adjusted station load ───────────
                 # Shared calls are split across overlapping active drones so adding
@@ -5693,7 +5736,9 @@ body{{background:transparent;overflow:hidden}}
                     downtime_minutes=CONFIG["GUARDIAN_CHARGE_MIN"] if _is_guard else CONFIG["RESPONDER_CHARGE_MIN"],
                 )
                 # Alternate type cap (for cross-type deficit recommendation)
-                _alt_travel_cost = avg_time_min
+                _alt_avg_dist    = float(station_metadata[idx].get('avg_dist_g' if d_type == 'RESPONDER' else 'avg_dist_r', 0) or 0)
+                _alt_speed       = CONFIG["GUARDIAN_SPEED"] if _alt_is_guard else CONFIG["RESPONDER_SPEED"]
+                _alt_travel_cost = (_alt_avg_dist / _alt_speed) * 60 if _alt_speed > 0 else 0.0
                 _alt_response_cost = _alt_travel_cost + _MIN_SCENE_MIN
                 _alt_max_flights  = calculate_max_flights_per_day(
                     _alt_response_cost,
@@ -5749,10 +5794,8 @@ body{{background:transparent;overflow:hidden}}
 
                 # ── ANNUAL CAPACITY VALUE: directly tied to handled calls ────────
                 _cost_delta        = CONFIG["OFFICER_COST_PER_CALL"] - CONFIG["DRONE_COST_PER_CALL"]
-                _handled_calls_day = min(_weighted_dispatchable_calls_day, _max_flights_cap)
-                _handled_calls_yr  = _handled_calls_day * 365.0
-                _unserv_calls_day = max(0.0, _raw_calls_in_range_day - _handled_calls_day)
-                _unserv_calls_yr  = _unserv_calls_day * 365
+                _unserv_calls_day = _calls_unanswered_day
+                _unserv_calls_yr  = _calls_unanswered_yr
                 _deflected_calls_day = _handled_calls_day * deflection_rate
                 _deflected_calls_yr  = _handled_calls_yr * deflection_rate
 
@@ -5803,8 +5846,8 @@ body{{background:transparent;overflow:hidden}}
                 d['dispatchable_calls_yr']  = _dispatchable_calls_yr
                 d['weighted_dispatchable_calls_day'] = _weighted_dispatchable_calls_day
                 d['weighted_dispatchable_calls_yr']  = _weighted_dispatchable_calls_yr
-                d['calls_handle_day']    = min(_dispatchable_calls_day, _max_flights_cap)
-                d['calls_handle_yr']     = min(_dispatchable_calls_yr, _max_flights_cap * 365.0)
+                d['calls_handle_day']    = _handled_calls_day
+                d['calls_handle_yr']     = _handled_calls_yr
                 d['calls_unanswered_day']= _unserv_calls_day
                 d['calls_unanswered_yr'] = _unserv_calls_yr
                 d['marginal_flights']    = _excl_flights

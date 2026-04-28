@@ -2299,16 +2299,10 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         max_patrol_hours = _GUARDIAN_DAILY_HOURS if is_guardian else _RESPONDER_DAILY_HOURS
         max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
         loiter_delta_mins = abs(CONFIG["GUARDIAN_FLIGHT_MIN"] - CONFIG["RESPONDER_FLIGHT_MIN"])
-        scene_hours_annual = (d_calls_handle_yr * loiter_delta_mins) / 60.0
         loiter_compare_text = (
             f"+{loiter_delta_mins:.0f} min vs Responder"
             if is_guardian
             else f"-{loiter_delta_mins:.0f} min vs Guardian"
-        )
-        loiter_value_text = (
-            f"+{scene_hours_annual:.1f} scene-hrs/yr"
-            if is_guardian
-            else f"-{scene_hours_annual:.1f} scene-hrs/yr"
         )
         loiter_color = "#F0B429" if is_guardian else "#00D2FF"
         loiter_comp_color = "#F0B429" if is_guardian else "#00D2FF"
@@ -2354,6 +2348,12 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_weighted_dispatchable_calls_yr = float(d.get("weighted_dispatchable_calls_yr", d_dispatchable_calls_yr) or 0)
 
         d_calls_handle_yr = float(d.get("handled_calls_yr", d.get("calls_handle_yr", 0)) or 0)
+        scene_hours_annual = (d_calls_handle_yr * loiter_delta_mins) / 60.0
+        loiter_value_text = (
+            f"+{scene_hours_annual:.1f} scene-hrs/yr"
+            if is_guardian
+            else f"-{scene_hours_annual:.1f} scene-hrs/yr"
+        )
 
         d_calls_unanswered_yr = float(d.get("calls_unanswered_yr", 0) or 0)
 

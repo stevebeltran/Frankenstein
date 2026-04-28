@@ -2613,7 +2613,25 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
             f'        <div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:3px;">Handled / Attributed<span class="tip" data-tip="Handled is the annual dispatchable call volume this unit can physically serve after capacity limits. Attributed is the annual dispatchable demand credited to this unit after overlap is shared across covering drones.">?</span></div>'
 
-            f'        <div style="font-size:1.30rem;font-weight:900;color:{card_title};line-height:1.05;">{int(d_calls_handle_yr):,} / {int(d_weighted_dispatchable_calls_yr):,}</div>'
+            f'        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:2px;">'
+
+            f'          <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:6px;padding:6px 8px;text-align:center;">'
+
+            f'            <div style="font-size:0.56rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px;">Handled</div>'
+
+            f'            <div style="font-size:1.05rem;font-weight:900;color:{card_title};line-height:1.05;">{int(d_calls_handle_yr):,}</div>'
+
+            f'          </div>'
+
+            f'          <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:6px;padding:6px 8px;text-align:center;">'
+
+            f'            <div style="font-size:0.56rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px;">Attributed</div>'
+
+            f'            <div style="font-size:1.05rem;font-weight:900;color:{card_title};line-height:1.05;">{int(d_weighted_dispatchable_calls_yr):,}</div>'
+
+            f'          </div>'
+
+            f'        </div>'
 
             f'        <div style="font-size:0.60rem;color:{status_color};font-weight:700;margin-top:3px;">{status_text}</div>'
 
@@ -2729,7 +2747,25 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
             f'        <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Handled / Attributed<span class="tip" data-tip="Handled is the annual dispatchable call volume this unit can physically serve after capacity limits. Attributed is the annual dispatchable demand credited to this unit after overlap is shared across covering drones.">?</span></div>'
 
-            f'        <div style="font-size:1.35rem; font-weight:900; color:{card_title}; line-height:1.05;">{int(d_calls_handle_yr):,} / {int(d_weighted_dispatchable_calls_yr):,}</div>'
+            f'        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:2px;">'
+
+            f'          <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:6px; padding:6px 8px; text-align:center;">'
+
+            f'            <div style="font-size:0.56rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:2px;">Handled</div>'
+
+            f'            <div style="font-size:1.00rem; font-weight:900; color:{card_title}; line-height:1.05;">{int(d_calls_handle_yr):,}</div>'
+
+            f'          </div>'
+
+            f'          <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:6px; padding:6px 8px; text-align:center;">'
+
+            f'            <div style="font-size:0.56rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:2px;">Attributed</div>'
+
+            f'            <div style="font-size:1.00rem; font-weight:900; color:{card_title}; line-height:1.05;">{int(d_weighted_dispatchable_calls_yr):,}</div>'
+
+            f'          </div>'
+
+            f'        </div>'
 
             f'        <div style="font-size:0.62rem; color:{status_color}; font-weight:800; margin-top:4px;">{status_text}</div>'
 

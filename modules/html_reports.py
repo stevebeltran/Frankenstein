@@ -2607,9 +2607,9 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
             f'      <div>'
 
-            f'        <div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:3px;">Handled / Attributed<span class="tip" data-tip="Handled is the annual dispatchable call volume this unit can physically serve after capacity limits. Attributed is the annual dispatchable demand credited to this unit after overlap is shared across covering drones.">?</span></div>'
+            f'        <div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:3px;">Attributed Dispatchable Calls<span class="tip" data-tip="Overlap-shared annual dispatchable demand credited to this unit. This is the demand share used for utilization and value calculations.">?</span></div>'
 
-            f'        <div style="font-size:1.30rem;font-weight:900;color:{card_title};line-height:1.05;">{int(d_calls_handle_yr):,} / {int(d_weighted_dispatchable_calls_yr):,}</div>'
+            f'        <div style="font-size:1.30rem;font-weight:900;color:{card_title};line-height:1.05;">{int(d_weighted_dispatchable_calls_yr):,}</div>'
 
             f'      </div>'
 
@@ -2741,9 +2741,9 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
             f'      <div>'
 
-            f'        <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Handled / Attributed<span class="tip" data-tip="Handled is the annual dispatchable call volume this unit can physically serve after capacity limits. Attributed is the annual dispatchable demand credited to this unit after overlap is shared across covering drones.">?</span></div>'
+            f'        <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Attributed Dispatchable Calls<span class="tip" data-tip="Overlap-shared annual dispatchable demand credited to this unit. This is the demand share used for utilization and value calculations.">?</span></div>'
 
-            f'        <div style="font-size:1.35rem; font-weight:900; color:{card_title}; line-height:1.05;">{int(d_calls_handle_yr):,} / {int(d_weighted_dispatchable_calls_yr):,}</div>'
+            f'        <div style="font-size:1.35rem; font-weight:900; color:{card_title}; line-height:1.05;">{int(d_weighted_dispatchable_calls_yr):,}</div>'
 
             f'      </div>'
 
@@ -2903,8 +2903,8 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
       <div style="font-size:0.95rem;font-weight:900;color:{card_title};">{d_time:.1f} min</div>
     </div>
     <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
-      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Calls This Unit Can Handle<span class="tip" data-tip="Attributed dispatchable calls this unit can physically handle per year after overlap is shared evenly across covering units.">?</span></div>
-      <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{int(d_calls_handle_yr):,}</div>
+      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Attributed Dispatchable Calls<span class="tip" data-tip="Overlap-shared annual dispatchable demand credited to this unit.">?</span></div>
+      <div style="font-size:0.88rem;font-weight:800;color:{card_title};">{int(d_weighted_dispatchable_calls_yr):,}</div>
     </div>
     <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">
       <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Dispatches Avoided/day<span class="tip" data-tip="Calls per day closed without dispatching an officer: drone-handled calls times the deflection rate.">?</span></div>
@@ -2965,8 +2965,8 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
       <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_time:.1f} min</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Calls This Unit Can Handle<span class="tip" data-tip="Attributed dispatchable calls this unit can physically handle per year after overlap is shared evenly across covering units.">?</span></div>
-      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{int(d_calls_handle_yr):,}</div>
+      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Attributed Dispatchable Calls<span class="tip" data-tip="Overlap-shared annual dispatchable demand credited to this unit.">?</span></div>
+      <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{int(d_weighted_dispatchable_calls_yr):,}</div>
     </div>
     <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px;">
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Dispatches Avoided/day<span class="tip" data-tip="Calls per day closed without dispatching an officer: drone-handled calls times the deflection rate.">?</span></div>

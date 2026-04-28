@@ -339,6 +339,10 @@ def _render_public_report_route():
             [data-testid="stGithubButton"],
             [data-testid="stActionButton"],
             [data-testid="stBaseButton-header"],
+            [data-testid="stHeaderActionElements"],
+            [data-testid="stHeaderActions"],
+            [data-testid="stDeployButton"],
+            [data-testid="stAppDeployButton"],
             [data-testid*="github"],
             [data-testid*="Github"],
             .stDeployButton,
@@ -346,13 +350,11 @@ def _render_public_report_route():
             .viewerBadge_link__,
             .viewerBadge_text__,
             #stDecoration,
-            a[href*="github.com"],
-            a[href*="streamlit.io"],
-            [aria-label*="GitHub"],
-            [aria-label*="github"],
-            [title*="GitHub"],
-            [title*="github"],
-            iframe[title="streamlit_analytics"] { display: none !important; }
+            iframe[title="streamlit_analytics"] {
+                display: none !important;
+                visibility: hidden !important;
+                pointer-events: none !important;
+            }
             .main .block-container { padding: 0 !important; max-width: 100% !important; }
             .stApp { background: #07101c !important; }
         </style>
@@ -369,18 +371,27 @@ def _render_public_report_route():
                     '[data-testid="stGithubButton"]',
                     '[data-testid="stActionButton"]',
                     '[data-testid="stBaseButton-header"]',
+                    '[data-testid="stHeaderActionElements"]',
+                    '[data-testid="stHeaderActions"]',
+                    '[data-testid="stDeployButton"]',
+                    '[data-testid="stAppDeployButton"]',
                     '[data-testid*="github"]',
                     '[data-testid*="Github"]',
                     '.stDeployButton',
                     '.viewerBadge_container__',
                     '.viewerBadge_link__',
                     '.viewerBadge_text__',
-                    'a[href*="github.com"]',
-                    'a[href*="streamlit.io"]',
-                    '[aria-label*="GitHub"]',
-                    '[aria-label*="github"]',
-                    '[title*="GitHub"]',
-                    '[title*="github"]'
+                    'iframe[title="streamlit_analytics"]',
+                    'header a[href*="github.com"]',
+                    'header a[href*="streamlit.io"]',
+                    'header [aria-label*="GitHub"]',
+                    'header [aria-label*="github"]',
+                    'header [aria-label*="Streamlit"]',
+                    'header [title*="GitHub"]',
+                    'header [title*="github"]',
+                    'header [title*="Streamlit"]',
+                    'button[title*="GitHub"]',
+                    'button[title*="github"]'
                 ];
 
                 function stripChrome(root) {
@@ -403,6 +414,7 @@ def _render_public_report_route():
                 run();
                 new MutationObserver(run).observe(document.documentElement, { childList: true, subtree: true });
                 window.addEventListener('load', run);
+                window.addEventListener('DOMContentLoaded', run);
                 setInterval(run, 1000);
             })();
         </script>
@@ -2959,7 +2971,17 @@ try:
     var sel = [
         'header', '[data-testid="stHeader"]', '[data-testid="stToolbar"]',
         '[data-testid="stDecoration"]', '[data-testid="stStatusWidget"]',
-        '#MainMenu', 'footer', '.stDeployButton'
+        '[data-testid="stGithubButton"]', '[data-testid="stActionButton"]',
+        '[data-testid="stBaseButton-header"]', '[data-testid="stHeaderActionElements"]',
+        '[data-testid="stHeaderActions"]', '[data-testid="stDeployButton"]',
+        '[data-testid="stAppDeployButton"]', '.stDeployButton',
+        '.viewerBadge_container__', '.viewerBadge_link__', '.viewerBadge_text__',
+        '#MainMenu', 'footer', 'iframe[title="streamlit_analytics"]',
+        'header a[href*="github.com"]', 'header a[href*="streamlit.io"]',
+        'header [aria-label*="GitHub"]', 'header [aria-label*="github"]',
+        'header [aria-label*="Streamlit"]', 'header [title*="GitHub"]',
+        'header [title*="github"]', 'header [title*="Streamlit"]',
+        'button[title*="GitHub"]', 'button[title*="github"]'
     ];
     function hide() {
         try {
@@ -2974,6 +2996,9 @@ try:
     hide();
     try {
         new MutationObserver(hide).observe(window.parent.document.body, {childList:true, subtree:true});
+    } catch(e) {}
+    try {
+        setInterval(hide, 1000);
     } catch(e) {}
 })();
 </script>

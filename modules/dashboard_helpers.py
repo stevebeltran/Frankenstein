@@ -1317,7 +1317,7 @@ def prepare_runtime_context(
         inferred_daily = session_state.get('inferred_daily_calls_override') or full_daily_calls or 1
         inferred_daily = max(1, int(inferred_daily))
         calls_per_day = st.slider('Total Daily Calls (citywide)', 1, max(100, inferred_daily * 3), inferred_daily, help='Total 911 calls per day citywide used to project annual dispatch volume, officer hours saved, and ROI.')
-        st.caption(f'Derived from the full uploaded CAD total ({full_total_calls:,} incidents), not the optimization sample.')
+        st.caption(f'Derived from the full uploaded CAD total ({full_total_calls:,} incidents).')
         st.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>DFR Dispatch Rate (%)</div>", unsafe_allow_html=True)
         st.markdown("<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>What % of in-range calls will the drone be sent to?</div>", unsafe_allow_html=True)
         dfr_dispatch_rate = st.slider('DFR Dispatch Rate', 1, 100, session_state.get('dfr_rate', 20), label_visibility='collapsed', help='Percentage of in-range calls the drone is dispatched to. Higher rates increase coverage and savings projections.') / 100.0

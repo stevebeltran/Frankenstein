@@ -402,11 +402,23 @@ def _render_public_report_route():
                     });
                 }
 
+                function walk(root) {
+                    if (!root) return;
+                    stripChrome(root);
+                    try {
+                        root.querySelectorAll('*').forEach(function (el) {
+                            if (el.shadowRoot) {
+                                walk(el.shadowRoot);
+                            }
+                        });
+                    } catch (e) {}
+                }
+
                 function run() {
-                    stripChrome(document);
+                    walk(document);
                     if (window.parent && window.parent !== window) {
                         try {
-                            stripChrome(window.parent.document);
+                            walk(window.parent.document);
                         } catch (e) {}
                     }
                 }
@@ -2983,14 +2995,24 @@ try:
         'header [title*="github"]', 'header [title*="Streamlit"]',
         'button[title*="GitHub"]', 'button[title*="github"]'
     ];
-    function hide() {
+    function sweep(root) {
+        if (!root) return;
         try {
-            var doc = window.parent.document;
             sel.forEach(function(s) {
-                doc.querySelectorAll(s).forEach(function(el) {
-                    el.style.setProperty('display', 'none', 'important');
+                root.querySelectorAll(s).forEach(function(el) {
+                    el.remove();
                 });
             });
+            root.querySelectorAll('*').forEach(function(el) {
+                if (el.shadowRoot) {
+                    sweep(el.shadowRoot);
+                }
+            });
+        } catch(e) {}
+    }
+    function hide() {
+        try {
+            sweep(window.parent.document);
         } catch(e) {}
     }
     hide();

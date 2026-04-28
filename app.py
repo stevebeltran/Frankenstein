@@ -3780,7 +3780,7 @@ def main():
                                 st.stop()
                         else:
                             st.session_state['stations_user_uploaded'] = False
-                            with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools…"):
+                            with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools; this can take 10-20 seconds…"):
                                 df_s, osm_note = generate_stations_from_calls(df_c)
                             if df_s is None or df_s.empty:
                                 df_s = _make_random_stations(df_c, n=40)
@@ -3816,6 +3816,7 @@ def main():
 
                         with st.spinner(get_jurisdiction_message()):
                             resolve_uploaded_boundaries(
+                                st,
                                 st.session_state,
                                 df_c,
                                 df_c_full,
@@ -4060,7 +4061,7 @@ def main():
                                 progress=18,
                                 logs=_upload_logs,
                             )
-                            with st.spinner("🛰 No recoverable coordinates found — preparing Census batch conversion…"):
+                            with st.spinner("🛰 No recoverable coordinates found — preparing Census batch conversion; this usually takes a few seconds…"):
                                 _push_upload_log("Building partial call frame for merge-back.")
                                 _set_upload_overlay_status(
                                     title="CENSUS REQUIRED",
@@ -4320,7 +4321,7 @@ def main():
                                 logs=_upload_logs,
                             )
                             st.session_state['stations_user_uploaded'] = False
-                            with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools…"):
+                            with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools; this can take 10-20 seconds…"):
                                 df_s, osm_note = generate_stations_from_calls(df_c)
                             if df_s is None or df_s.empty:
                                 # Final safety net: scatter stations across call bounding box
@@ -4378,6 +4379,7 @@ def main():
                         )
                         with st.spinner(get_jurisdiction_message()):
                             resolve_uploaded_boundaries(
+                                st,
                                 st.session_state,
                                 df_c,
                                 df_c_full,
@@ -6221,6 +6223,8 @@ body{{background:transparent;overflow:hidden}}
             if show_faa and faa_geojson and faa_geojson.get("features"):
                 try:
                     faa_rf.add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=not show_satellite)
+                    if len(faa_geojson.get("features", [])) >= 50:
+                        st.sidebar.caption("FAA overlap boxes are thinned to a checkerboard pattern for faster loading.")
                 except Exception as e:
                     st.sidebar.error(f"🔴 FAA render error: {str(e)[:100]}")
 

@@ -1768,6 +1768,23 @@ def _public_facility_type_is_plausible(feature_type, facility_key):
     return False
 
 
+def _public_facility_label_is_plausible(label, facility_key):
+    label = str(label or '').strip().lower()
+    if not label:
+        return False
+    if facility_key == 'Fire':
+        return any(token in label for token in ('fire station', 'fire department', 'fire hall', 'rescue station', 'fire rescue', 'station'))
+    if facility_key == 'Police':
+        return any(token in label for token in ('police', 'sheriff', 'public safety', 'law enforcement', 'precinct', 'marshal'))
+    if facility_key == 'School':
+        return any(token in label for token in ('school', 'academy', 'elementary', 'middle school', 'high school', 'campus'))
+    if facility_key == 'Library':
+        return 'library' in label
+    if facility_key == 'Government':
+        return any(token in label for token in ('city hall', 'town hall', 'public works', 'municipal', 'government', 'civic center', 'administration'))
+    return False
+
+
 def _public_facility_candidate_score(candidate, facility_type, preferred_city="", preferred_state=""):
     facility_key = _normalize_public_facility_type(facility_type)
     label = str(candidate.get('matched_address') or candidate.get('label') or '').strip().lower()
@@ -1841,18 +1858,19 @@ def search_public_facility_candidates(query_str, facility_type, limit=6, preferr
     candidates = []
     seen = set()
     provider_trace = []
+    address_search_hits = 0
 
     def _add_candidate(label, lat, lon, raw_match=''):
         try:
             lat_f = float(lat)
             lon_f = float(lon)
         except Exception:
-            return
+            return None
         dedupe_key = (round(lat_f, 6), round(lon_f, 6), str(label).strip().lower())
         if dedupe_key in seen:
-            return
+            return None
         seen.add(dedupe_key)
-        candidates.append({
+        candidate = {
             'label': str(label).strip() or str(raw_match).strip() or query_str,
             'matched_address': str(raw_match).strip() or str(label).strip() or query_str,
             'lat': lat_f,
@@ -1861,34 +1879,78 @@ def search_public_facility_candidates(query_str, facility_type, limit=6, preferr
             'feature_type': '',
             'feature_class': '',
             '_score': 0,
+        }
+        candidates.append(candidate)
+        return candidate
+
+    def _ingest_address_matches(matches, source_name, query_text):
+        nonlocal address_search_hits
+        kept = 0
+        for _match in matches or []:
+            _label = str(_match.get('matched_address') or _match.get('label') or '').strip()
+            if not _public_facility_label_is_plausible(_label, facility_key):
+                continue
+            _candidate = _add_candidate(
+                _label,
+                _match.get('lat'),
+                _match.get('lon'),
+                raw_match=_label,
+            )
+            if _candidate is not None:
+                _candidate['source'] = str(_match.get('source') or source_name or 'lookup')
+                _candidate['feature_type'] = str(_match.get('feature_type') or '').strip().lower()
+                _candidate['feature_class'] = str(_match.get('feature_class') or '').strip().lower()
+                kept += 1
+        address_search_hits += kept
+        provider_trace.append({
+            'provider': source_name,
+            'query': query_text,
+            'used': True,
+            'match_count': kept,
+            'status': 'ok',
         })
 
     for _query in queries:
         try:
-            _params = urllib.parse.urlencode({
-                'format': 'jsonv2',
-                'q': _query,
-                'limit': str(limit),
-                'countrycodes': 'us',
-                'addressdetails': '1',
-            })
-            _url = f"https://nominatim.openstreetmap.org/search?{_params}"
-            _req = urllib.request.Request(_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
-            with urllib.request.urlopen(_req, timeout=8) as _resp:
-                _data = json.loads(_resp.read().decode('utf-8'))
-            _matches = _data[:limit]
-            provider_trace.append({'provider': 'OSM', 'query': _query, 'used': True, 'match_count': len(_matches), 'status': 'ok'})
-            for _match in _matches:
-                _label = _match.get('display_name', _query)
-                _feature_type = str(_match.get('type') or '').strip().lower()
-                _feature_class = str(_match.get('class') or '').strip().lower()
-                if not _public_facility_type_is_plausible(_feature_type, facility_key):
-                    continue
-                _add_candidate(_label, _match.get('lat'), _match.get('lon'), raw_match=_label)
-                candidates[-1]['feature_type'] = _feature_type
-                candidates[-1]['feature_class'] = _feature_class
+            addr_matches = search_address_candidates(
+                _query,
+                limit=limit,
+                preferred_city=preferred_city,
+                preferred_state=preferred_state,
+            )
+            _ingest_address_matches(addr_matches, 'validated_address_search', _query)
         except Exception:
-            provider_trace.append({'provider': 'OSM', 'query': _query, 'used': True, 'match_count': 0, 'status': 'error'})
+            provider_trace.append({'provider': 'validated_address_search', 'query': _query, 'used': True, 'match_count': 0, 'status': 'error'})
+
+    if not candidates:
+        for _query in queries:
+            try:
+                _params = urllib.parse.urlencode({
+                    'format': 'jsonv2',
+                    'q': _query,
+                    'limit': str(limit),
+                    'countrycodes': 'us',
+                    'addressdetails': '1',
+                })
+                _url = f"https://nominatim.openstreetmap.org/search?{_params}"
+                _req = urllib.request.Request(_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+                with urllib.request.urlopen(_req, timeout=8) as _resp:
+                    _data = json.loads(_resp.read().decode('utf-8'))
+                _matches = _data[:limit]
+                provider_trace.append({'provider': 'OSM_POI', 'query': _query, 'used': True, 'match_count': len(_matches), 'status': 'ok'})
+                for _match in _matches:
+                    _label = _match.get('display_name', _query)
+                    _feature_type = str(_match.get('type') or '').strip().lower()
+                    _feature_class = str(_match.get('class') or '').strip().lower()
+                    if not (_public_facility_type_is_plausible(_feature_type, facility_key) or _public_facility_label_is_plausible(_label, facility_key)):
+                        continue
+                    _candidate = _add_candidate(_label, _match.get('lat'), _match.get('lon'), raw_match=_label)
+                    if _candidate is not None:
+                        _candidate['source'] = 'OSM'
+                        _candidate['feature_type'] = _feature_type
+                        _candidate['feature_class'] = _feature_class
+            except Exception:
+                provider_trace.append({'provider': 'OSM_POI', 'query': _query, 'used': True, 'match_count': 0, 'status': 'error'})
 
     for _candidate in candidates:
         _candidate['_score'] = _public_facility_candidate_score(_candidate, facility_key, preferred_city=preferred_city, preferred_state=preferred_state)

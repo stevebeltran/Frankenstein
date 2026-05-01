@@ -775,11 +775,28 @@ def manage_custom_stations(
     df_curve,
     get_address_from_latlon,
     search_address_candidates,
+    search_public_facility_candidates=None,
 ):
     n = len(df_stations_all)
     max_resp_calc = min(n, int(math.ceil(area_sq_mi / (math.pi * (r_resp_est**2)))) + 5)
     # Guardian placements should be allowed at any uploaded in-boundary station.
     max_guard_calc = n
+    public_facility_types = {'Police', 'Fire', 'School', 'Government', 'Library'}
+
+    def _looks_like_street_address(text):
+        raw = str(text or '').strip().lower()
+        if not raw or not re.search(r'\d', raw):
+            return False
+        street_tokens = (
+            ' st', ' street', ' rd', ' road', ' ave', ' avenue', ' blvd', ' boulevard',
+            ' dr', ' drive', ' ln', ' lane', ' ct', ' court', ' pkwy', ' parkway',
+            ' hwy', ' highway', ' ter', ' terrace', ' cir', ' circle', ' way', ' pl',
+            ' place', ' n ', ' s ', ' e ', ' w ',
+        )
+        return any(token in raw for token in street_tokens)
+
+    def _use_public_facility_lookup():
+        return bool(search_public_facility_candidates) and str(custom_type).strip() in public_facility_types
 
     try:
         pin_r_count = len(session_state.get('pinned_resp_names', []))
@@ -1043,12 +1060,24 @@ def manage_custom_stations(
         preferred_city = session_state.get('active_city', '')
         preferred_state = session_state.get('active_state', '')
         locality_hint = ", ".join([v for v in [preferred_city, preferred_state] if v])
-        addr_matches = search_address_candidates(
-            addr_query,
-            limit=6,
-            preferred_city=preferred_city,
-            preferred_state=preferred_state,
-        ) if len(addr_query) >= 4 else []
+        if len(addr_query) >= 4:
+            if _use_public_facility_lookup():
+                addr_matches = search_public_facility_candidates(
+                    addr_query,
+                    custom_type,
+                    limit=6,
+                    preferred_city=preferred_city,
+                    preferred_state=preferred_state,
+                )
+            else:
+                addr_matches = search_address_candidates(
+                    addr_query,
+                    limit=6,
+                    preferred_city=preferred_city,
+                    preferred_state=preferred_state,
+                )
+        else:
+            addr_matches = []
 
         def _match_in_preferred_state(match):
             if not preferred_state:
@@ -1083,7 +1112,10 @@ def manage_custom_stations(
             })
 
         if locality_hint:
-            st.caption(f'Suggestions are biased to {locality_hint}.')
+            if _use_public_facility_lookup():
+                st.caption(f'Public facility suggestions are biased to {locality_hint}.')
+            else:
+                st.caption(f'Suggestions are biased to {locality_hint}.')
 
         _geo_trace = session_state.get('_last_geocode_trace') or {}
         _geo_providers = _geo_trace.get('providers') or []
@@ -1152,12 +1184,28 @@ def manage_custom_stations(
                 try:
                     match = selected_match
                     if not match:
-                        fallback_matches = search_address_candidates(
-                            addr_to_geocode,
-                            limit=1,
-                            preferred_city=preferred_city,
-                            preferred_state=preferred_state,
-                        )
+                        if _use_public_facility_lookup():
+                            fallback_matches = search_public_facility_candidates(
+                                addr_to_geocode,
+                                custom_type,
+                                limit=1,
+                                preferred_city=preferred_city,
+                                preferred_state=preferred_state,
+                            )
+                            if not fallback_matches and _looks_like_street_address(addr_to_geocode):
+                                fallback_matches = search_address_candidates(
+                                    addr_to_geocode,
+                                    limit=1,
+                                    preferred_city=preferred_city,
+                                    preferred_state=preferred_state,
+                                )
+                        else:
+                            fallback_matches = search_address_candidates(
+                                addr_to_geocode,
+                                limit=1,
+                                preferred_city=preferred_city,
+                                preferred_state=preferred_state,
+                            )
                         match = fallback_matches[0] if fallback_matches else None
                     if match:
                         geo_lat = float(match['lat'])
@@ -1180,7 +1228,10 @@ def manage_custom_stations(
                             session_state.pop(cache_key, None)
                         st.rerun()
                     else:
-                        st.warning('Address not found. Try selecting a suggested match or include city and state.')
+                        if _use_public_facility_lookup():
+                            st.warning('Public facility not found. Try the station name, a known facility address, or switch the type if this is not a civic building.')
+                        else:
+                            st.warning('Address not found. Try selecting a suggested match or include city and state.')
                 except Exception as ge_exc:
                     st.error(f'Geocoding failed: {ge_exc}')
             else:

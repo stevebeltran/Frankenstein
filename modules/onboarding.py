@@ -737,7 +737,7 @@ def load_simulation_boundary_overlay(session_state, boundary_files, load_uploade
     return overlay_file
 
 
-def load_simulation_custom_stations(sim_uploader, active_targets, forward_geocode):
+def load_simulation_custom_stations(sim_uploader, active_targets, forward_geocode, search_public_facility_candidates=None):
     station_df = _read_station_upload(sim_uploader)
     station_df = _normalize_station_columns(station_df)
     station_df, _single_col_note = _extract_single_column_station_addresses(station_df)
@@ -746,6 +746,19 @@ def load_simulation_custom_stations(sim_uploader, active_targets, forward_geocod
     addr_col = next((c for c in station_df.columns if any(a in c for a in ['address', 'street', 'location'])), None)
     name_col = next((c for c in station_df.columns if any(n in c for n in ['name', 'station', 'facility', 'dept'])), None)
     type_col = next((c for c in station_df.columns if any(t in c for t in ['type', 'category'])), None)
+    public_facility_types = {'Police', 'Fire', 'School', 'Government', 'Library'}
+
+    def _looks_like_street_address(text):
+        raw = str(text or '').strip().lower()
+        if not raw or not re.search(r'\d', raw):
+            return False
+        street_tokens = (
+            ' st', ' street', ' rd', ' road', ' ave', ' avenue', ' blvd', ' boulevard',
+            ' dr', ' drive', ' ln', ' lane', ' ct', ' court', ' pkwy', ' parkway',
+            ' hwy', ' highway', ' ter', ' terrace', ' cir', ' circle', ' way', ' pl',
+            ' place', ' n ', ' s ', ' e ', ' w ',
+        )
+        return any(token in raw for token in street_tokens)
 
     parsed_stations = []
     ungeocoded = []
@@ -762,11 +775,30 @@ def load_simulation_custom_stations(sim_uploader, active_targets, forward_geocod
         if lat_col and lon_col and pd.notna(row[lat_col]) and pd.notna(row[lon_col]):
             station_lat, station_lon = float(row[lat_col]), float(row[lon_col])
         elif addr_col and pd.notna(row[addr_col]):
-            station_lat, station_lon = forward_geocode(addr_str)
-            if station_lat is None:
-                station_lat, station_lon = forward_geocode(
-                    f"{addr_str}, {active_targets[0]['city']}, {active_targets[0]['state']}"
+            if search_public_facility_candidates and station_type in public_facility_types:
+                city_hint = active_targets[0]['city'] if active_targets else ''
+                state_hint = active_targets[0]['state'] if active_targets else ''
+                public_matches = search_public_facility_candidates(
+                    addr_str,
+                    station_type,
+                    limit=1,
+                    preferred_city=city_hint,
+                    preferred_state=state_hint,
                 )
+                if public_matches:
+                    station_lat, station_lon = float(public_matches[0]['lat']), float(public_matches[0]['lon'])
+                elif _looks_like_street_address(addr_str):
+                    station_lat, station_lon = forward_geocode(addr_str)
+                    if station_lat is None and active_targets:
+                        station_lat, station_lon = forward_geocode(
+                            f"{addr_str}, {active_targets[0]['city']}, {active_targets[0]['state']}"
+                        )
+            else:
+                station_lat, station_lon = forward_geocode(addr_str)
+                if station_lat is None and active_targets:
+                    station_lat, station_lon = forward_geocode(
+                        f"{addr_str}, {active_targets[0]['city']}, {active_targets[0]['state']}"
+                    )
             if station_lat is None:
                 ungeocoded.append(addr_str)
             time.sleep(1)
@@ -792,6 +824,7 @@ def resolve_demo_stations(
     sim_uploader,
     active_targets,
     forward_geocode,
+    search_public_facility_candidates,
     generate_stations_from_calls,
     generate_random_points_in_polygon,
 ):
@@ -804,6 +837,7 @@ def resolve_demo_stations(
                 sim_uploader,
                 active_targets,
                 forward_geocode,
+                search_public_facility_candidates,
             )
             notices.extend([f"Could not geocode: {addr_str}" for addr_str in ungeocoded_addresses])
             if custom_station_df is not None and not custom_station_df.empty:

@@ -4725,7 +4725,52 @@ def main():
                                     logs=_upload_logs,
                                 )
 
-                                merged_full_df, merged_ready_df, merge_summary = merge_census_results(df_c_partial, result_df)
+                                def _merge_census_outputs():
+                                    merged_full_df, merged_ready_df, merge_summary = merge_census_results(df_c_partial, result_df)
+                                    if merged_ready_df is None or merged_ready_df.empty:
+                                        return merged_full_df, merged_ready_df, merge_summary, None
+                                    corrected_export_df = build_corrected_export(census_original_df, result_df)
+                                    corrected_csv = corrected_export_df.to_csv(index=False).encode('utf-8')
+                                    return merged_full_df, merged_ready_df, merge_summary, corrected_csv
+
+                                _push_upload_log("Merging Census coordinates back into the source calls file.")
+                                _set_upload_overlay_status(
+                                    title="CENSUS AUTOMATION",
+                                    status="MERGING RESULTS",
+                                    copy=(
+                                        f"Combining all Census chunk responses and restoring coordinates into the original dataset. "
+                                        f"Elapsed since Census submit started: {_format_wait(time.time() - census_started_at)}."
+                                    ),
+                                    progress=80,
+                                    logs=_upload_logs,
+                                )
+                                with ThreadPoolExecutor(max_workers=1) as _merge_pool:
+                                    _merge_future = _merge_pool.submit(_merge_census_outputs)
+                                    _merge_started_at = time.time()
+                                    _merge_last_heartbeat_at = _merge_started_at
+                                    while True:
+                                        try:
+                                            merged_full_df, merged_ready_df, merge_summary, corrected_csv = _merge_future.result(timeout=5)
+                                            break
+                                        except cf.TimeoutError:
+                                            _merge_elapsed = time.time() - _merge_started_at
+                                            if _merge_elapsed - _merge_last_heartbeat_at >= 15:
+                                                _merge_last_heartbeat_at = _merge_elapsed
+                                                _push_upload_log(
+                                                    f"Census merge is still running after {_format_wait(_merge_elapsed)}."
+                                                )
+                                            _set_upload_overlay_status(
+                                                title="CENSUS AUTOMATION",
+                                                status="MERGING RESULTS",
+                                                copy=(
+                                                    f"Combining all Census chunk responses and restoring coordinates into the original dataset. "
+                                                    f"Elapsed since merge started: {_format_wait(_merge_elapsed)}."
+                                                ),
+                                                progress=min(86, 80 + int(min(_merge_elapsed, census_stall_warn_sec) / max(1, census_stall_warn_sec) * 6)),
+                                                logs=_upload_logs,
+                                            )
+                                            continue
+
                                 if merged_ready_df is None or merged_ready_df.empty:
                                     _push_upload_log("Census returned no valid coordinates after chunk processing.")
                                     _set_upload_overlay_status(
@@ -4739,8 +4784,6 @@ def main():
                                     st.error("❌ Automated Census geocoding completed, but no valid coordinates were returned.")
                                     st.stop()
 
-                                corrected_export_df = build_corrected_export(census_original_df, result_df)
-                                corrected_csv = corrected_export_df.to_csv(index=False).encode('utf-8')
                                 st.session_state['census_corrected_bytes'] = corrected_csv
                                 st.session_state['census_corrected_name'] = "cad_calls_census_corrected.csv"
                                 st.session_state['census_conversion_summary'] = merge_summary

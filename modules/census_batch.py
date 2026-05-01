@@ -587,7 +587,12 @@ def parse_census_result_files(uploaded_files) -> pd.DataFrame:
     return result_df
 
 
-def merge_census_results(partial_calls_df: pd.DataFrame, result_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+def merge_census_results(
+    partial_calls_df: pd.DataFrame,
+    result_df: pd.DataFrame,
+    *,
+    validate_outputs: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """
     Merge CAD data with Census batch geocoding results.
 
@@ -611,25 +616,26 @@ def merge_census_results(partial_calls_df: pd.DataFrame, result_df: pd.DataFrame
         use_polars=True
     )
 
-    # Validate Census results. Parsed batch files keep source_id as text for
-    # stable joins, so coerce only the validation copy to match the schema.
-    if not result_df.empty:
-        validation_result_df = result_df.copy()
-        if 'source_id' in validation_result_df.columns:
-            validation_result_df['source_id'] = pd.to_numeric(
-                validation_result_df['source_id'],
-                errors='coerce',
-            ).astype('Int64')
-        for coord_col in ('lat', 'lon'):
-            if coord_col in validation_result_df.columns:
-                validation_result_df[coord_col] = pd.to_numeric(
-                    validation_result_df[coord_col],
+    if validate_outputs:
+        # Validate Census results. Parsed batch files keep source_id as text for
+        # stable joins, so coerce only the validation copy to match the schema.
+        if not result_df.empty:
+            validation_result_df = result_df.copy()
+            if 'source_id' in validation_result_df.columns:
+                validation_result_df['source_id'] = pd.to_numeric(
+                    validation_result_df['source_id'],
                     errors='coerce',
-                )
-        validate_census_results(validation_result_df, raise_exceptions=False)
+                ).astype('Int64')
+            for coord_col in ('lat', 'lon'):
+                if coord_col in validation_result_df.columns:
+                    validation_result_df[coord_col] = pd.to_numeric(
+                        validation_result_df[coord_col],
+                        errors='coerce',
+                    )
+            validate_census_results(validation_result_df, raise_exceptions=False)
 
-    # Validate merged data
-    validate_merged_data(merged, raise_exceptions=False)
+        # Validate merged data
+        validate_merged_data(merged, raise_exceptions=False)
 
     # Maintain backward compatibility with old summary format
     summary['rows_with_census_match'] = summary.pop('rows_geocoded', 0)
@@ -753,6 +759,22 @@ def build_corrected_export(original_df: pd.DataFrame, result_df: pd.DataFrame) -
     ].drop_duplicates(subset=['_census_merge_key'], keep='first')
     export_df = export_df.merge(matched, on='_census_merge_key', how='left')
     export_df = export_df.drop(columns=['_census_merge_key'], errors='ignore')
+    if 'lat' in export_df.columns:
+        export_df['lat'] = pd.to_numeric(export_df['lat'], errors='coerce')
+    if 'lon' in export_df.columns:
+        export_df['lon'] = pd.to_numeric(export_df['lon'], errors='coerce')
+    return export_df
+
+
+def build_corrected_export_from_merged(merged_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build the corrected Census export from an already merged dataframe.
+
+    This avoids repeating the merge work when the app already has the merged
+    output in memory.
+    """
+    export_df = pd.DataFrame() if merged_df is None else merged_df.copy().reset_index(drop=True)
+    export_df = export_df.drop(columns=['_census_merge_key', '_census_filled'], errors='ignore')
     if 'lat' in export_df.columns:
         export_df['lat'] = pd.to_numeric(export_df['lat'], errors='coerce')
     if 'lon' in export_df.columns:

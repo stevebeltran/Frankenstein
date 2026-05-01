@@ -4582,6 +4582,20 @@ def main():
                                     logs=_upload_logs,
                                 )
 
+                                def _save_census_state_for_manual():
+                                    st.session_state['census_pending'] = True
+                                    st.session_state['census_source_signature'] = current_upload_signature
+                                    st.session_state['census_partial_calls_df'] = df_c_partial
+                                    st.session_state['census_original_df'] = census_original_df
+                                    st.session_state['census_summary'] = census_summary
+                                    _zip = make_census_batch_zip(census_chunks)
+                                    st.session_state['census_batch_zip_bytes'] = _zip
+                                    st.session_state['census_batch_zip_name'] = 'census_batches.zip'
+                                    _samp = make_sample_census_batch(census_stage_df)
+                                    if _samp:
+                                        st.session_state['census_sample_bytes'] = _samp['csv_bytes']
+                                        st.session_state['census_sample_name'] = _samp['filename']
+
                                 census_result_parts = []
                                 chunk_queue = list(census_chunks)
                                 completed_chunks = 0
@@ -4626,42 +4640,57 @@ def main():
                                                 )
                                             raise
 
+                                    _census_pool = ThreadPoolExecutor(max_workers=1)
                                     try:
-                                        with ThreadPoolExecutor(max_workers=1) as _census_pool:
-                                            _chunk_future = _census_pool.submit(_submit_census_chunk)
-                                            _chunk_wait_started_at = time.time()
-                                            _chunk_last_heartbeat_at = _chunk_wait_started_at
-                                            while True:
-                                                try:
-                                                    chunk_result_df, _chunk_resp = _chunk_future.result(timeout=5)
-                                                    break
-                                                except cf.TimeoutError:
-                                                    _chunk_elapsed = time.time() - _chunk_wait_started_at
-                                                    if _chunk_elapsed - _chunk_last_heartbeat_at >= 15:
-                                                        _chunk_last_heartbeat_at = _chunk_elapsed
-                                                        _push_upload_log(
-                                                            f"Chunk {chunk_idx}/{total_chunks} is still waiting after {_format_wait(_chunk_elapsed)}."
-                                                        )
-                                                    _set_upload_overlay_status(
-                                                        title="CENSUS AUTOMATION",
-                                                        status=f"SUBMITTING CHUNK {chunk_idx} OF {total_chunks}",
-                                                        copy=(
-                                                            f"Waiting for the Census batch endpoint to return the geocoded CSV for chunk {chunk_idx} of {total_chunks}. "
-                                                            f"Elapsed since this chunk started: {_format_wait(_chunk_elapsed)}. "
-                                                            f"If the same chunk is still waiting after {_format_wait(census_stall_warn_sec)}, it is probably stalled."
-                                                        ),
-                                                        progress=min(
-                                                            76,
-                                                            42 + int(
-                                                                min(_chunk_elapsed, census_stall_warn_sec)
-                                                                / max(1, census_stall_warn_sec)
-                                                                * 34
-                                                            ),
-                                                        ),
-                                                        logs=_upload_logs,
+                                        _chunk_future = _census_pool.submit(_submit_census_chunk)
+                                        _chunk_wait_started_at = time.time()
+                                        _chunk_last_heartbeat_at = _chunk_wait_started_at
+                                        while True:
+                                            try:
+                                                chunk_result_df, _chunk_resp = _chunk_future.result(timeout=5)
+                                                break
+                                            except cf.TimeoutError:
+                                                _chunk_elapsed = time.time() - _chunk_wait_started_at
+                                                if _chunk_elapsed > census_stall_warn_sec:
+                                                    _push_upload_log(
+                                                        f"Chunk {chunk_idx}/{total_chunks} stalled after {_format_wait(_chunk_elapsed)}."
+                                                        " Switching to manual Census batch workflow."
                                                     )
-                                                    continue
+                                                    _census_pool.shutdown(wait=False)
+                                                    _save_census_state_for_manual()
+                                                    _clear_upload_overlay()
+                                                    st.warning(
+                                                        "⚠️ The Census geocoder did not respond in time. "
+                                                        "Download the batch files below, submit them at "
+                                                        "geocoding.geo.census.gov/geocoder, and upload the returned CSVs here to continue."
+                                                    )
+                                                    st.rerun()
+                                                if _chunk_elapsed - _chunk_last_heartbeat_at >= 15:
+                                                    _chunk_last_heartbeat_at = _chunk_elapsed
+                                                    _push_upload_log(
+                                                        f"Chunk {chunk_idx}/{total_chunks} is still waiting after {_format_wait(_chunk_elapsed)}."
+                                                    )
+                                                _set_upload_overlay_status(
+                                                    title="CENSUS AUTOMATION",
+                                                    status=f"SUBMITTING CHUNK {chunk_idx} OF {total_chunks}",
+                                                    copy=(
+                                                        f"Waiting for the Census batch endpoint to return the geocoded CSV for chunk {chunk_idx} of {total_chunks}. "
+                                                        f"Elapsed since this chunk started: {_format_wait(_chunk_elapsed)}. "
+                                                        f"If the same chunk is still waiting after {_format_wait(census_stall_warn_sec)}, it is probably stalled."
+                                                    ),
+                                                    progress=min(
+                                                        76,
+                                                        42 + int(
+                                                            min(_chunk_elapsed, census_stall_warn_sec)
+                                                            / max(1, census_stall_warn_sec)
+                                                            * 34
+                                                        ),
+                                                    ),
+                                                    logs=_upload_logs,
+                                                )
+                                                continue
                                     except Exception as exc:
+                                        _census_pool.shutdown(wait=False)
                                         if chunk['rows'] > 1000 and chunk.get('frame') is not None:
                                             _push_upload_log(
                                                 f"Chunk {chunk_idx}/{total_chunks} failed: {exc}. Splitting into smaller batches and retrying."
@@ -4694,16 +4723,16 @@ def main():
                                             continue
 
                                         _push_upload_log(f"Chunk {chunk_idx}/{total_chunks} failed: {exc}")
-                                        _set_upload_overlay_status(
-                                            title="CENSUS ERROR",
-                                            status=f"CHUNK {chunk_idx} FAILED",
-                                            copy="The Census batch request failed. Review the error log below and share it with Steven if needed.",
-                                            progress=42 + int(completed_chunks / max(1, total_chunks) * 34),
-                                            logs=_upload_logs,
-                                            error=True,
+                                        _save_census_state_for_manual()
+                                        _clear_upload_overlay()
+                                        st.warning(
+                                            f"⚠️ Automated Census geocoding failed on chunk {chunk_idx} of {total_chunks}. "
+                                            "Download the batch files below, submit them at "
+                                            "geocoding.geo.census.gov/geocoder, and upload the returned CSVs here to continue."
                                         )
-                                        st.error(f"❌ Automated Census geocoding failed on chunk {chunk_idx} of {total_chunks}: {exc}")
-                                        st.stop()
+                                        st.rerun()
+                                    else:
+                                        _census_pool.shutdown(wait=False)
 
                                     _matched_rows = int((chunk_result_df['lat'].notna() & chunk_result_df['lon'].notna()).sum())
                                     _push_upload_log(

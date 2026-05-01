@@ -4794,32 +4794,7 @@ def main():
                                     progress=80,
                                     logs=_upload_logs,
                                 )
-                                with ThreadPoolExecutor(max_workers=1) as _merge_pool:
-                                    _merge_future = _merge_pool.submit(_merge_census_outputs)
-                                    _merge_started_at = time.time()
-                                    _merge_last_heartbeat_at = _merge_started_at
-                                    while True:
-                                        try:
-                                            merged_full_df, merged_ready_df, merge_summary, corrected_csv = _merge_future.result(timeout=5)
-                                            break
-                                        except cf.TimeoutError:
-                                            _merge_elapsed = time.time() - _merge_started_at
-                                            if time.time() - _merge_last_heartbeat_at >= 15:
-                                                _merge_last_heartbeat_at = time.time()
-                                                _push_upload_log(
-                                                    f"Census merge is still running after {_format_wait(_merge_elapsed)}."
-                                                )
-                                            _set_upload_overlay_status(
-                                                title="CENSUS AUTOMATION",
-                                                status="MERGING RESULTS",
-                                                copy=(
-                                                    f"Combining all Census chunk responses and restoring coordinates into the original dataset. "
-                                                    f"Elapsed since merge started: {_format_wait(_merge_elapsed)}."
-                                                ),
-                                                progress=min(86, 80 + int(min(_merge_elapsed, census_stall_warn_sec) / max(1, census_stall_warn_sec) * 6)),
-                                                logs=_upload_logs,
-                                            )
-                                            continue
+                                merged_full_df, merged_ready_df, merge_summary, corrected_csv = _merge_census_outputs()
 
                                 _push_upload_log("Census merge completed. Restoring coordinates into the working dataset.")
 

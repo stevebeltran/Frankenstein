@@ -161,7 +161,7 @@ parse_census_result_files = _census_batch_mod.parse_census_result_files
 merge_census_results = _census_batch_mod.merge_census_results
 submit_census_batch_chunk = _census_batch_mod.submit_census_batch_chunk
 build_census_chunk_payload = _census_batch_mod.build_census_chunk_payload
-build_corrected_export = _census_batch_mod.build_corrected_export
+build_corrected_export_from_merged = _census_batch_mod.build_corrected_export_from_merged
 from modules.geospatial import (
     _load_uploaded_boundary_overlay, _boundary_overlay_status,
     _count_points_within_boundary, find_jurisdictions_by_coordinates
@@ -4144,13 +4144,21 @@ def main():
                             st.error("❌ Census result upload failed: missing prepared session data or no valid result rows were found.")
                             st.stop()
 
-                        merged_full_df, merged_ready_df, merge_summary = merge_census_results(partial_calls_df, result_df)
+                        merged_full_df, merged_ready_df, merge_summary = merge_census_results(
+                            partial_calls_df,
+                            result_df,
+                            validate_outputs=False,
+                        )
                         if merged_ready_df is None or merged_ready_df.empty:
                             st.error("❌ Census result upload failed: no valid coordinates were recovered from the returned result files.")
                             st.stop()
 
-                        corrected_export_df = build_corrected_export(original_df, result_df)
+                        _export_started_at = time.perf_counter()
+                        corrected_export_df = build_corrected_export_from_merged(merged_full_df)
                         corrected_csv = corrected_export_df.to_csv(index=False).encode('utf-8')
+                        _push_upload_log(
+                            f"Census corrected export built in {_format_wait(time.perf_counter() - _export_started_at)}."
+                        )
                         st.session_state['census_corrected_bytes'] = corrected_csv
                         st.session_state['census_corrected_name'] = "cad_calls_census_corrected.csv"
                         st.session_state['census_conversion_summary'] = merge_summary
@@ -4726,11 +4734,24 @@ def main():
                                 )
 
                                 def _merge_census_outputs():
-                                    merged_full_df, merged_ready_df, merge_summary = merge_census_results(df_c_partial, result_df)
+                                    _merge_export_started_at = time.perf_counter()
+                                    merged_full_df, merged_ready_df, merge_summary = merge_census_results(
+                                        df_c_partial,
+                                        result_df,
+                                        validate_outputs=False,
+                                    )
+                                    _push_upload_log(
+                                        f"Census merge helper finished in {_format_wait(time.perf_counter() - _merge_export_started_at)} "
+                                        f"using {merge_summary.get('merge_backend', 'unknown')}."
+                                    )
                                     if merged_ready_df is None or merged_ready_df.empty:
                                         return merged_full_df, merged_ready_df, merge_summary, None
-                                    corrected_export_df = build_corrected_export(census_original_df, result_df)
+                                    _corrected_export_started_at = time.perf_counter()
+                                    corrected_export_df = build_corrected_export_from_merged(merged_full_df)
                                     corrected_csv = corrected_export_df.to_csv(index=False).encode('utf-8')
+                                    _push_upload_log(
+                                        f"Census corrected export built in {_format_wait(time.perf_counter() - _corrected_export_started_at)}."
+                                    )
                                     return merged_full_df, merged_ready_df, merge_summary, corrected_csv
 
                                 _push_upload_log("Merging Census coordinates back into the source calls file.")

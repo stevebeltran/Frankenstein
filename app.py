@@ -169,7 +169,7 @@ from modules.geospatial import (
 from modules import faa_rf, optimization, html_reports
 _session_state_mod = _load_local_module("session_state")
 init_session_state = _session_state_mod.init_session_state
-from modules.dashboard_helpers import log_map_build_event_once, resolve_master_boundary, render_sidebar_jurisdiction_selector, render_data_filters, render_display_options, render_deployment_strategy, prepare_station_candidates, manage_custom_stations, prepare_runtime_context, optimize_fleet_selection
+from modules.dashboard_helpers import log_map_build_event_once, resolve_master_boundary, render_sidebar_jurisdiction_selector, render_data_filters, render_display_options, render_deployment_strategy, prepare_station_candidates, manage_custom_stations, prepare_runtime_context, optimize_fleet_selection, compute_station_suggestions, render_station_suggestions
 from modules import onboarding as _onboarding_mod
 from modules.highway_corridor import (
     STATE_PRIMARY_INTERSTATES,
@@ -5885,6 +5885,40 @@ body{{background:transparent;overflow:hidden}}
         calls_per_day = _runtime_ctx['calls_per_day']
         dfr_dispatch_rate = _runtime_ctx['dfr_dispatch_rate']
         deflection_rate = _runtime_ctx['deflection_rate']
+
+        # ── STATION SUGGESTIONS (public data only) ───────────────────────
+        _using_suggestions = not st.session_state.get('stations_user_uploaded', False)
+        _suggestions = []
+        if _using_suggestions and total_calls > 0 and station_metadata:
+            _city_area_for_suggest = city_m.area if (city_m and not city_m.is_empty) else 1.0
+            _suggestions = compute_station_suggestions(
+                resp_matrix, guard_matrix, station_metadata,
+                total_calls, _city_area_for_suggest, max_suggestions=10,
+            )
+            st.session_state['_station_suggestions'] = _suggestions
+
+            # Initialise toggle state on first encounter
+            if 'suggestion_toggles' not in st.session_state and _suggestions:
+                st.session_state['suggestion_toggles'] = {
+                    s['station_idx']: (s['rank'] <= 3) for s in _suggestions
+                }
+
+            # Apply suggestion toggles → slider counts & locked pins
+            _stg = st.session_state.get('suggestion_toggles', {})
+            _sug_resp_idx = [s['station_idx'] for s in _suggestions
+                            if _stg.get(s['station_idx']) and s['role'] == 'Responder']
+            _sug_guard_idx = [s['station_idx'] for s in _suggestions
+                             if _stg.get(s['station_idx']) and s['role'] == 'Guardian']
+            if _sug_resp_idx or _sug_guard_idx:
+                k_responder = max(k_responder, len(_sug_resp_idx))
+                k_guardian = max(k_guardian, len(_sug_guard_idx))
+                for _si in _sug_resp_idx:
+                    if _si not in locked_r_pins:
+                        locked_r_pins.append(_si)
+                for _si in _sug_guard_idx:
+                    if _si not in locked_g_pins:
+                        locked_g_pins.append(_si)
+
         # ── OPTIMIZATION ──────────────────────────────────────────────────
         _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
         opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{guard_strategy}_{resp_strategy}_{deployment_mode}_{incremental_build}_{bounds_hash}_{_station_signature}_{_pins_key}"
@@ -6998,6 +7032,50 @@ body{{background:transparent;overflow:hidden}}
                     showlegend=False,
                 ))
 
+            # ── Suggestion "?" markers on map ─────────────────────────────
+            if _using_suggestions and _suggestions and st.session_state.get('show_suggestion_markers', True):
+                _stg_map = st.session_state.get('suggestion_toggles', {})
+                _sug_on_lat, _sug_on_lon, _sug_on_text = [], [], []
+                _sug_off_lat, _sug_off_lon, _sug_off_text = [], [], []
+                for _s in _suggestions:
+                    _tip = (
+                        f"<b>#{_s['rank']} {_s['name']}</b><br>"
+                        f"{_s['role']} suggestion<br>"
+                        f"📞 {_s['call_pct']}% calls · 🗺️ {_s['land_pct']}% land"
+                    )
+                    if _stg_map.get(_s['station_idx']):
+                        _sug_on_lat.append(_s['lat'])
+                        _sug_on_lon.append(_s['lon'])
+                        _sug_on_text.append(_tip)
+                    else:
+                        _sug_off_lat.append(_s['lat'])
+                        _sug_off_lon.append(_s['lon'])
+                        _sug_off_text.append(_tip)
+                if _sug_off_lat:
+                    fig.add_trace(go.Scattermap(
+                        lat=_sug_off_lat, lon=_sug_off_lon,
+                        mode='text+markers',
+                        text=['?' for _ in _sug_off_lat],
+                        textfont=dict(size=11, color='rgba(200,200,200,0.7)', weight=700),
+                        marker=dict(size=6, color='rgba(200,200,200,0.25)'),
+                        hovertemplate='%{customdata}<extra></extra>',
+                        customdata=_sug_off_text,
+                        name='Suggested Sites',
+                        showlegend=len(_sug_on_lat) == 0,
+                    ))
+                if _sug_on_lat:
+                    fig.add_trace(go.Scattermap(
+                        lat=_sug_on_lat, lon=_sug_on_lon,
+                        mode='text+markers',
+                        text=['?' for _ in _sug_on_lat],
+                        textfont=dict(size=13, color='#00D2FF', weight=700),
+                        marker=dict(size=8, color='rgba(0,210,255,0.5)'),
+                        hovertemplate='%{customdata}<extra></extra>',
+                        customdata=_sug_on_text,
+                        name='Suggested Sites (active)',
+                        showlegend=True,
+                    ))
+
             map_cfg = dict(center=dict(lat=center_lat, lon=center_lon), zoom=dynamic_zoom, style=map_style)
             if show_satellite:
                 map_cfg["style"] = "carto-positron"
@@ -7108,6 +7186,15 @@ body{{background:transparent;overflow:hidden}}
                     key=_map_key,
                 )
 
+
+        # ── STATION SUGGESTIONS PANEL (public data, no stations file) ────────────
+        if _using_suggestions and _suggestions:
+            _sug_changed = render_station_suggestions(
+                st, st.session_state, _suggestions,
+                text_main, text_muted, card_bg, card_border, accent_color,
+            )
+            if _sug_changed:
+                st.rerun()
 
         # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────
         st.markdown("---")

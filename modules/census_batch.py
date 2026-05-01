@@ -609,11 +609,13 @@ def merge_census_results(
     Returns:
         Tuple of (merged_df, ready_df, summary_dict)
     """
-    # Use optimized merge (Polars if available, pandas fallback)
+    # Use pandas merge — Polars' internal Rayon thread pool can deadlock
+    # on Windows during Streamlit reruns, and pandas is fast enough for
+    # the typical Census batch sizes (~10-25K rows).
     merged, ready_df, summary = merge_census_results_fast(
         partial_calls_df,
         result_df,
-        use_polars=True
+        use_polars=False
     )
 
     if validate_outputs:

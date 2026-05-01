@@ -1057,15 +1057,20 @@ def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations:
             f'way["amenity"="social_facility"]({bbox});'
             f');out center;'
         )
-        # Fire all three mirrors in parallel — first successful response wins
+        # Fire all three mirrors in parallel — first successful response wins.
+        # Use an explicit shutdown so slow mirrors do not block the caller once
+        # we already have a usable response.
         data = None
-        with cf.ThreadPoolExecutor(max_workers=3) as _pool:
+        _pool = cf.ThreadPoolExecutor(max_workers=3)
+        try:
             futs = {_pool.submit(_try_mirror, url, query): url for url in osm_urls}
             for fut in cf.as_completed(futs):
                 result = fut.result()
                 if result is not None:
                     data = result
-                    break  # cancel remaining mirrors implicitly (they finish but are ignored)
+                    break
+        finally:
+            _pool.shutdown(wait=False, cancel_futures=True)
 
         if data is None:
             continue
@@ -1172,12 +1177,17 @@ def _fetch_hifld_stations_cached(min_lat: float, min_lon: float, max_lat: float,
         except Exception:
             return []
 
-    # Fetch fire + police in parallel — total wait = max(fire, police), not sum
+    # Fetch fire + police in parallel — total wait = max(fire, police), not sum.
+    # Shutdown explicitly so one slow service cannot hold the UI open after a
+    # usable answer has already been gathered.
     all_rows = []
-    with cf.ThreadPoolExecutor(max_workers=2) as _pool:
+    _pool = cf.ThreadPoolExecutor(max_workers=2)
+    try:
         futs = [_pool.submit(_fetch_one, url, lbl, fld) for url, lbl, fld in _HIFLD_SOURCES]
         for fut in cf.as_completed(futs):
             all_rows.extend(fut.result())
+    finally:
+        _pool.shutdown(wait=False, cancel_futures=True)
 
     if all_rows:
         return all_rows, f"Found {len(all_rows)} stations from HIFLD (US Federal)."
@@ -1212,7 +1222,8 @@ def generate_stations_from_calls(df_calls, max_stations=100):
     osm_rows, osm_note = None, "OSM unavailable"
     hifld_rows, hifld_note = None, "HIFLD unavailable"
 
-    with cf.ThreadPoolExecutor(max_workers=2) as pool:
+    pool = cf.ThreadPoolExecutor(max_workers=2)
+    try:
         futures = {
             'OSM': pool.submit(_fetch_osm_stations_cached, cen_lat_r, cen_lon_r, max_stations),
             'HIFLD': pool.submit(_fetch_hifld_stations_cached, min_lat_r, min_lon_r, max_lat_r, max_lon_r),
@@ -1233,6 +1244,8 @@ def generate_stations_from_calls(df_calls, max_stations=100):
                 osm_rows, osm_note = rows, note
             else:
                 hifld_rows, hifld_note = rows, note
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
     combined = []
     if osm_rows:
@@ -1662,6 +1675,212 @@ def search_address_candidates(address_str, limit=6, preferred_city="", preferred
         preferred_state=preferred_state,
         provider_signature=_get_geocoder_provider_signature(),
     )
+
+_PUBLIC_FACILITY_QUERY_TERMS = {
+    'Police': ['police department', 'police station', 'sheriff office', 'public safety'],
+    'Fire': ['fire station', 'fire department', 'fire hall', 'rescue station'],
+    'School': ['school', 'elementary school', 'middle school', 'high school', 'academy'],
+    'Government': ['city hall', 'town hall', 'public works', 'municipal building', 'municipal services', 'government center', 'civic center'],
+    'Library': ['library', 'public library', 'library branch'],
+}
+
+def _normalize_public_facility_type(facility_type):
+    raw = str(facility_type or '').strip().lower()
+    if not raw:
+        return ''
+    if 'police' in raw or 'law enforcement' in raw or 'sheriff' in raw:
+        return 'Police'
+    if 'fire' in raw or 'ems' in raw or 'ambulance' in raw or 'rescue' in raw:
+        return 'Fire'
+    if 'school' in raw or 'academy' in raw:
+        return 'School'
+    if 'library' in raw:
+        return 'Library'
+    if 'government' in raw or 'public works' in raw or 'city hall' in raw or 'town hall' in raw or 'municipal' in raw or 'civic' in raw:
+        return 'Government'
+    return ''
+
+
+def _looks_like_street_address(text):
+    raw = str(text or '').strip().lower()
+    if not raw:
+        return False
+    if not re.search(r'\d', raw):
+        return False
+    street_tokens = (
+        ' st', ' street', ' rd', ' road', ' ave', ' avenue', ' blvd', ' boulevard',
+        ' dr', ' drive', ' ln', ' lane', ' ct', ' court', ' pkwy', ' parkway',
+        ' hwy', ' highway', ' ter', ' terrace', ' cir', ' circle', ' way', ' pl',
+        ' place', ' n ', ' s ', ' e ', ' w ',
+    )
+    return any(token in raw for token in street_tokens)
+
+
+def _public_facility_query_variants(query_str, facility_type, preferred_city="", preferred_state=""):
+    query_str = str(query_str or '').strip()
+    if not query_str:
+        return []
+
+    facility_key = _normalize_public_facility_type(facility_type)
+    terms = _PUBLIC_FACILITY_QUERY_TERMS.get(facility_key, [])
+    if not terms:
+        return []
+
+    preferred_city = str(preferred_city or '').strip()
+    preferred_state = str(preferred_state or '').strip().upper()
+    variants = []
+
+    base_queries = [query_str]
+    _lower_query = query_str.lower()
+    if preferred_city and preferred_state and preferred_city.lower() not in _lower_query and preferred_state.lower() not in _lower_query:
+        base_queries.append(f"{query_str}, {preferred_city}, {preferred_state}")
+
+    for base_query in base_queries:
+        for term in terms:
+            variants.append(f"{base_query}, {term}")
+            variants.append(f"{base_query} {term}")
+
+    ordered = []
+    seen = set()
+    for variant in variants:
+        clean = re.sub(r'\s+', ' ', str(variant or '').strip())
+        key = clean.lower()
+        if clean and key not in seen:
+            seen.add(key)
+            ordered.append(clean)
+    return ordered
+
+
+def _public_facility_candidate_score(candidate, facility_type, preferred_city="", preferred_state=""):
+    facility_key = _normalize_public_facility_type(facility_type)
+    label = str(candidate.get('matched_address') or candidate.get('label') or '').strip().lower()
+    score = 100
+
+    if facility_key == 'Police':
+        if any(token in label for token in ('police', 'sheriff', 'public safety', 'law enforcement', 'precinct', 'marshal')):
+            score += 200
+        else:
+            score -= 500
+    elif facility_key == 'Fire':
+        if any(token in label for token in ('fire station', 'fire department', 'fire hall', 'rescue')):
+            score += 200
+        else:
+            score -= 500
+    elif facility_key == 'School':
+        if any(token in label for token in ('school', 'academy', 'elementary', 'middle school', 'high school')):
+            score += 180
+        else:
+            score -= 500
+    elif facility_key == 'Library':
+        if 'library' in label:
+            score += 200
+        else:
+            score -= 500
+    elif facility_key == 'Government':
+        if any(token in label for token in ('city hall', 'town hall', 'public works', 'municipal', 'government', 'civic center', 'administration')):
+            score += 180
+        else:
+            score -= 500
+
+    if preferred_state:
+        _state = preferred_state.lower()
+        _abbr_to_full = {v: k for k, v in US_STATES_ABBR.items()}
+        _full = _abbr_to_full.get(preferred_state.upper(), '').lower()
+        if f", {_state}" in label or label.endswith(f" {_state}") or (_full and _full in label):
+            score += 35
+        else:
+            score -= 20
+    if preferred_city:
+        if preferred_city.lower() in label:
+            score += 25
+        else:
+            score -= 10
+    return score
+
+
+@st.cache_data(show_spinner=False)
+def search_public_facility_candidates(query_str, facility_type, limit=6, preferred_city="", preferred_state=""):
+    query_str = str(query_str or '').strip()
+    if not query_str:
+        return []
+
+    facility_key = _normalize_public_facility_type(facility_type)
+    if not facility_key:
+        return []
+
+    limit = max(1, min(int(limit or 6), 10))
+    preferred_city = str(preferred_city or '').strip()
+    preferred_state = str(preferred_state or '').strip().upper()
+    queries = _public_facility_query_variants(query_str, facility_key, preferred_city, preferred_state)
+    if not queries:
+        return []
+
+    candidates = []
+    seen = set()
+    provider_trace = []
+
+    def _add_candidate(label, lat, lon, raw_match=''):
+        try:
+            lat_f = float(lat)
+            lon_f = float(lon)
+        except Exception:
+            return
+        dedupe_key = (round(lat_f, 6), round(lon_f, 6), str(label).strip().lower())
+        if dedupe_key in seen:
+            return
+        seen.add(dedupe_key)
+        candidates.append({
+            'label': str(label).strip() or str(raw_match).strip() or query_str,
+            'matched_address': str(raw_match).strip() or str(label).strip() or query_str,
+            'lat': lat_f,
+            'lon': lon_f,
+            'source': 'OSM',
+            '_score': 0,
+        })
+
+    for _query in queries:
+        try:
+            _params = urllib.parse.urlencode({
+                'format': 'jsonv2',
+                'q': _query,
+                'limit': str(limit),
+                'countrycodes': 'us',
+                'addressdetails': '1',
+            })
+            _url = f"https://nominatim.openstreetmap.org/search?{_params}"
+            _req = urllib.request.Request(_url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+            with urllib.request.urlopen(_req, timeout=8) as _resp:
+                _data = json.loads(_resp.read().decode('utf-8'))
+            _matches = _data[:limit]
+            provider_trace.append({'provider': 'OSM', 'query': _query, 'used': True, 'match_count': len(_matches), 'status': 'ok'})
+            for _match in _matches:
+                _label = _match.get('display_name', _query)
+                _add_candidate(_label, _match.get('lat'), _match.get('lon'), raw_match=_label)
+        except Exception:
+            provider_trace.append({'provider': 'OSM', 'query': _query, 'used': True, 'match_count': 0, 'status': 'error'})
+
+    for _candidate in candidates:
+        _candidate['_score'] = _public_facility_candidate_score(_candidate, facility_key, preferred_city=preferred_city, preferred_state=preferred_state)
+
+    candidates = [c for c in candidates if c.get('_score', -999) > 0]
+    candidates.sort(key=lambda item: (-item.get('_score', 0), item.get('matched_address', '')))
+
+    try:
+        st.session_state['_last_geocode_trace'] = {
+            'input': query_str,
+            'facility_type': facility_key,
+            'preferred_city': preferred_city,
+            'preferred_state': preferred_state,
+            'queries': queries,
+            'providers': provider_trace,
+            'candidate_count': len(candidates),
+            'top_candidate': candidates[0]['matched_address'] if candidates else '',
+            'public_facility_lookup': True,
+        }
+    except Exception:
+        pass
+
+    return [{k: v for k, v in _candidate.items() if k != '_score'} for _candidate in candidates[:limit]]
 
 @st.cache_data(show_spinner=False)
 def forward_geocode(address_str):
@@ -5102,6 +5321,7 @@ body{{background:transparent;overflow:hidden}}
                 _sim_station_file,
                 active_targets,
                 forward_geocode,
+                search_public_facility_candidates,
                 generate_stations_from_calls,
                 generate_random_points_in_polygon,
             )
@@ -5346,6 +5566,7 @@ body{{background:transparent;overflow:hidden}}
             df_curve,
             get_address_from_latlon,
             search_address_candidates,
+            search_public_facility_candidates,
         )
         k_responder = _custom_station_state['k_responder']
         k_guardian = _custom_station_state['k_guardian']

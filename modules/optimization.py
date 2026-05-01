@@ -68,6 +68,9 @@ def bounded_station_avg_distance_miles(
 @st.cache_resource
 def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash):
     gdf_calls = gpd.GeoDataFrame(df_calls, geometry=gpd.points_from_xy(df_calls.lon, df_calls.lat), crs="EPSG:4326")
+    # Drop rows with null/empty geometries – to_crs() crashes on them with a
+    # coordinate-shape mismatch inside shapely's set_coordinates.
+    gdf_calls = gdf_calls[~gdf_calls.geometry.is_empty & gdf_calls.geometry.notna()]
     gdf_calls_utm = gdf_calls.to_crs(epsg=int(epsg_code))
     try:
         # Use same 300 m buffer as build_display_calls so coverage denominator

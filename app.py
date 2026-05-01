@@ -1751,9 +1751,27 @@ def _public_facility_query_variants(query_str, facility_type, preferred_city="",
     return ordered
 
 
+def _public_facility_type_is_plausible(feature_type, facility_key):
+    feature_type = str(feature_type or '').strip().lower()
+    if not feature_type:
+        return False
+    if facility_key == 'Fire':
+        return feature_type == 'fire_station'
+    if facility_key == 'Police':
+        return feature_type in {'police', 'police_station', 'public_bldg'}
+    if facility_key == 'School':
+        return feature_type in {'school', 'college', 'university'}
+    if facility_key == 'Library':
+        return feature_type == 'library'
+    if facility_key == 'Government':
+        return feature_type in {'townhall', 'city_hall', 'public_bldg', 'government', 'civic'}
+    return False
+
+
 def _public_facility_candidate_score(candidate, facility_type, preferred_city="", preferred_state=""):
     facility_key = _normalize_public_facility_type(facility_type)
     label = str(candidate.get('matched_address') or candidate.get('label') or '').strip().lower()
+    feature_type = str(candidate.get('feature_type') or '').strip().lower()
     score = 100
 
     if facility_key == 'Police':
@@ -1781,6 +1799,11 @@ def _public_facility_candidate_score(candidate, facility_type, preferred_city=""
             score += 180
         else:
             score -= 500
+
+    if _public_facility_type_is_plausible(feature_type, facility_key):
+        score += 250
+    else:
+        score -= 600
 
     if preferred_state:
         _state = preferred_state.lower()
@@ -1835,6 +1858,8 @@ def search_public_facility_candidates(query_str, facility_type, limit=6, preferr
             'lat': lat_f,
             'lon': lon_f,
             'source': 'OSM',
+            'feature_type': '',
+            'feature_class': '',
             '_score': 0,
         })
 
@@ -1855,7 +1880,13 @@ def search_public_facility_candidates(query_str, facility_type, limit=6, preferr
             provider_trace.append({'provider': 'OSM', 'query': _query, 'used': True, 'match_count': len(_matches), 'status': 'ok'})
             for _match in _matches:
                 _label = _match.get('display_name', _query)
+                _feature_type = str(_match.get('type') or '').strip().lower()
+                _feature_class = str(_match.get('class') or '').strip().lower()
+                if not _public_facility_type_is_plausible(_feature_type, facility_key):
+                    continue
                 _add_candidate(_label, _match.get('lat'), _match.get('lon'), raw_match=_label)
+                candidates[-1]['feature_type'] = _feature_type
+                candidates[-1]['feature_class'] = _feature_class
         except Exception:
             provider_trace.append({'provider': 'OSM', 'query': _query, 'used': True, 'match_count': 0, 'status': 'error'})
 

@@ -67,10 +67,27 @@ def bounded_station_avg_distance_miles(
 
 @st.cache_resource
 def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash):
-    gdf_calls = gpd.GeoDataFrame(df_calls, geometry=gpd.points_from_xy(df_calls.lon, df_calls.lat), crs="EPSG:4326")
+    if df_calls is None or len(df_calls) == 0:
+        gdf_calls = gpd.GeoDataFrame(df_calls if df_calls is not None else pd.DataFrame(), geometry=[], crs="EPSG:4326")
+    else:
+        work_calls = df_calls.copy()
+        if 'lat' not in work_calls.columns or 'lon' not in work_calls.columns:
+            gdf_calls = gpd.GeoDataFrame(work_calls, geometry=[], crs="EPSG:4326")
+        else:
+            work_calls['lat'] = pd.to_numeric(work_calls['lat'], errors='coerce')
+            work_calls['lon'] = pd.to_numeric(work_calls['lon'], errors='coerce')
+            work_calls = work_calls.replace([np.inf, -np.inf], np.nan).dropna(subset=['lat', 'lon']).reset_index(drop=True)
+            if work_calls.empty:
+                gdf_calls = gpd.GeoDataFrame(work_calls, geometry=[], crs="EPSG:4326")
+            else:
+                gdf_calls = gpd.GeoDataFrame(
+                    work_calls,
+                    geometry=gpd.points_from_xy(work_calls.lon, work_calls.lat),
+                    crs="EPSG:4326",
+                )
     # Drop rows with null/empty geometries – to_crs() crashes on them with a
     # coordinate-shape mismatch inside shapely's set_coordinates.
-    gdf_calls = gdf_calls[~gdf_calls.geometry.is_empty & gdf_calls.geometry.notna()]
+    gdf_calls = gdf_calls[gdf_calls.geometry.notna() & ~gdf_calls.geometry.is_empty].copy()
     gdf_calls_utm = gdf_calls.to_crs(epsg=int(epsg_code))
     try:
         # Use same 300 m buffer as build_display_calls so coverage denominator
@@ -360,4 +377,3 @@ def compute_all_elbow_curves(n_calls, _resp_matrix, _guard_matrix, _geos_r, _geo
         'Guardian (Calls)':  pad(c_g),
         'Guardian (Area)':   pad(a_g)
     })
-

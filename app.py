@@ -1785,6 +1785,41 @@ def _public_facility_label_is_plausible(label, facility_key):
     return False
 
 
+@st.cache_data(show_spinner=False)
+def _reverse_geocode_public_facility_meta(lat, lon):
+    try:
+        url = f"https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&zoom=18&addressdetails=1&namedetails=1"
+        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _public_facility_candidate_is_plausible(candidate, facility_key):
+    try:
+        lat = float(candidate.get('lat'))
+        lon = float(candidate.get('lon'))
+    except Exception:
+        return False
+
+    reverse_meta = _reverse_geocode_public_facility_meta(lat, lon) or {}
+    reverse_type = str(reverse_meta.get('type') or '').strip().lower()
+    reverse_class = str(reverse_meta.get('class') or '').strip().lower()
+    display_name = str(reverse_meta.get('display_name') or '').strip().lower()
+    address_blob = ' '.join(
+        str(value).strip().lower()
+        for value in (reverse_meta.get('address') or {}).values()
+        if value
+    )
+    combined = ' '.join([reverse_type, reverse_class, display_name, address_blob]).strip()
+
+    if any(bad in combined for bad in ('golf course', 'golf_course', 'house', 'residential', 'apartment', 'apartments')):
+        return False
+    return True
+
+
 def _public_facility_candidate_score(candidate, facility_type, preferred_city="", preferred_state=""):
     facility_key = _normalize_public_facility_type(facility_type)
     label = str(candidate.get('matched_address') or candidate.get('label') or '').strip().lower()
@@ -1900,6 +1935,9 @@ def search_public_facility_candidates(query_str, facility_type, limit=6, preferr
                 _candidate['source'] = str(_match.get('source') or source_name or 'lookup')
                 _candidate['feature_type'] = str(_match.get('feature_type') or '').strip().lower()
                 _candidate['feature_class'] = str(_match.get('feature_class') or '').strip().lower()
+                if not _public_facility_candidate_is_plausible(_candidate, facility_key):
+                    candidates.pop()
+                    continue
                 kept += 1
         address_search_hits += kept
         provider_trace.append({
@@ -1949,6 +1987,9 @@ def search_public_facility_candidates(query_str, facility_type, limit=6, preferr
                         _candidate['source'] = 'OSM'
                         _candidate['feature_type'] = _feature_type
                         _candidate['feature_class'] = _feature_class
+                        if not _public_facility_candidate_is_plausible(_candidate, facility_key):
+                            candidates.pop()
+                            continue
             except Exception:
                 provider_trace.append({'provider': 'OSM_POI', 'query': _query, 'used': True, 'match_count': 0, 'status': 'error'})
 

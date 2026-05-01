@@ -4595,28 +4595,64 @@ def main():
                                         progress=42 + int(completed_chunks / max(1, total_chunks) * 34),
                                         logs=_upload_logs,
                                     )
-                                    try:
-                                        chunk_result_df, _chunk_resp = submit_census_batch_chunk(
-                                            chunk['csv_bytes'],
-                                            chunk['filename'],
-                                            timeout=census_timeout_sec,
-                                            retries=census_retries,
-                                            attempt_logger=_push_upload_log,
-                                        )
-                                    except TypeError as exc:
-                                        if "unexpected keyword argument 'attempt_logger'" in str(exc):
-                                            _push_upload_log(
-                                                "Live Census module is still using the older submit_census_batch_chunk signature; "
-                                                "retrying without per-attempt logs."
-                                            )
-                                            chunk_result_df, _chunk_resp = submit_census_batch_chunk(
+                                    def _submit_census_chunk():
+                                        try:
+                                            return submit_census_batch_chunk(
                                                 chunk['csv_bytes'],
                                                 chunk['filename'],
                                                 timeout=census_timeout_sec,
                                                 retries=census_retries,
+                                                attempt_logger=_push_upload_log,
                                             )
-                                        else:
+                                        except TypeError as exc:
+                                            if "unexpected keyword argument 'attempt_logger'" in str(exc):
+                                                _push_upload_log(
+                                                    "Live Census module is still using the older submit_census_batch_chunk signature; "
+                                                    "retrying without per-attempt logs."
+                                                )
+                                                return submit_census_batch_chunk(
+                                                    chunk['csv_bytes'],
+                                                    chunk['filename'],
+                                                    timeout=census_timeout_sec,
+                                                    retries=census_retries,
+                                                )
                                             raise
+
+                                    try:
+                                        with ThreadPoolExecutor(max_workers=1) as _census_pool:
+                                            _chunk_future = _census_pool.submit(_submit_census_chunk)
+                                            _chunk_wait_started_at = time.time()
+                                            _chunk_last_heartbeat_at = _chunk_wait_started_at
+                                            while True:
+                                                try:
+                                                    chunk_result_df, _chunk_resp = _chunk_future.result(timeout=5)
+                                                    break
+                                                except cf.TimeoutError:
+                                                    _chunk_elapsed = time.time() - _chunk_wait_started_at
+                                                    if _chunk_elapsed - _chunk_last_heartbeat_at >= 15:
+                                                        _chunk_last_heartbeat_at = _chunk_elapsed
+                                                        _push_upload_log(
+                                                            f"Chunk {chunk_idx}/{total_chunks} is still waiting after {_format_wait(_chunk_elapsed)}."
+                                                        )
+                                                    _set_upload_overlay_status(
+                                                        title="CENSUS AUTOMATION",
+                                                        status=f"SUBMITTING CHUNK {chunk_idx} OF {total_chunks}",
+                                                        copy=(
+                                                            f"Waiting for the Census batch endpoint to return the geocoded CSV for chunk {chunk_idx} of {total_chunks}. "
+                                                            f"Elapsed since this chunk started: {_format_wait(_chunk_elapsed)}. "
+                                                            f"If the same chunk is still waiting after {_format_wait(census_stall_warn_sec)}, it is probably stalled."
+                                                        ),
+                                                        progress=min(
+                                                            76,
+                                                            42 + int(
+                                                                min(_chunk_elapsed, census_stall_warn_sec)
+                                                                / max(1, census_stall_warn_sec)
+                                                                * 34
+                                                            ),
+                                                        ),
+                                                        logs=_upload_logs,
+                                                    )
+                                                    continue
                                     except Exception as exc:
                                         if chunk['rows'] > 1000 and chunk.get('frame') is not None:
                                             _push_upload_log(

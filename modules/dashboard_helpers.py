@@ -1738,3 +1738,154 @@ def optimize_fleet_selection(
         'best_combo': best_combo,
         'guard_claims_by_idx': guard_claims_by_idx if complement_mode else {},
     }
+
+
+# ── STATION SUGGESTION ENGINE ────────────────────────────────────────────────
+
+def compute_station_suggestions(
+    resp_matrix, guard_matrix, station_metadata, total_calls, city_area,
+    max_suggestions=10,
+):
+    """Rank stations by greedy marginal call coverage and return top suggestions.
+
+    Each suggestion includes solo call-coverage %, solo land-coverage %, and a
+    default role assignment (2 Responder : 1 Guardian repeating pattern).
+    """
+    if total_calls == 0 or not station_metadata:
+        return []
+
+    n_stations = len(station_metadata)
+    covered = np.zeros(total_calls, dtype=bool)
+    suggestions = []
+    used = set()
+
+    # Greedy ranking: pick station with best marginal gain each round
+    for rank in range(min(max_suggestions, n_stations)):
+        best_idx = -1
+        best_marginal = -1
+        for i in range(n_stations):
+            if i in used:
+                continue
+            marginal = int(np.sum(resp_matrix[i] & ~covered))
+            if marginal > best_marginal:
+                best_marginal = marginal
+                best_idx = i
+        if best_idx < 0 or best_marginal == 0:
+            break
+
+        used.add(best_idx)
+        covered |= resp_matrix[best_idx]
+
+        meta = station_metadata[best_idx]
+        solo_call_pct = (np.sum(resp_matrix[best_idx]) / total_calls * 100)
+        solo_land_pct = (meta['clipped_2m'].area / city_area * 100) if city_area > 0 else 0
+
+        # Role pattern: R, R, G, R, R, G, R, R, G, R  (≈2:1 ratio)
+        role = 'Guardian' if (rank % 3 == 2) else 'Responder'
+
+        suggestions.append({
+            'rank': rank + 1,
+            'station_idx': best_idx,
+            'name': meta['name'],
+            'lat': meta['lat'],
+            'lon': meta['lon'],
+            'call_pct': round(solo_call_pct, 1),
+            'land_pct': round(solo_land_pct, 1),
+            'marginal_calls': best_marginal,
+            'role': role,
+        })
+
+    return suggestions
+
+
+def render_station_suggestions(st, session_state, suggestions, text_main, text_muted,
+                               card_bg, card_border, accent_color):
+    """Render a compact 2×5 suggestion card grid below the map.
+
+    Returns True if any toggle changed (caller should rerun).
+    """
+    if not suggestions:
+        return False
+
+    # Initialise toggle state on first render
+    if 'suggestion_toggles' not in session_state:
+        session_state['suggestion_toggles'] = {
+            s['station_idx']: (s['rank'] <= 3) for s in suggestions
+        }
+    if 'show_suggestion_markers' not in session_state:
+        session_state['show_suggestion_markers'] = True
+
+    toggles = session_state['suggestion_toggles']
+    changed = False
+
+    n_on = sum(1 for v in toggles.values() if v)
+    st.markdown(
+        f"<div style='margin-top:12px; margin-bottom:6px; display:flex; align-items:center; "
+        f"justify-content:space-between;'>"
+        f"<span style='font-size:0.85rem; font-weight:700; color:{text_main};'>"
+        f"Suggested Station Placements"
+        f"<span style='font-size:0.7rem; font-weight:400; color:{text_muted}; margin-left:8px;'>"
+        f"({n_on} selected from public data)</span></span></div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Two rows of 5 cards ──────────────────────────────────────────────
+    for row_start in (0, 5):
+        row_items = suggestions[row_start:row_start + 5]
+        if not row_items:
+            break
+        cols = st.columns(5, gap="small")
+        for ci, s in enumerate(row_items):
+            idx = s['station_idx']
+            is_on = toggles.get(idx, False)
+            role = s['role']
+            role_color = '#00D2FF' if role == 'Responder' else '#FFD700'
+            role_abbr = 'R' if role == 'Responder' else 'G'
+            border_col = role_color if is_on else card_border
+            bg = card_bg if is_on else 'rgba(30,30,40,0.4)'
+            opacity = '1.0' if is_on else '0.55'
+
+            # Truncate name
+            display_name = s['name']
+            if len(display_name) > 22:
+                display_name = display_name[:20] + '…'
+
+            with cols[ci]:
+                st.markdown(
+                    f"<div style='border:1px solid {border_col}; border-radius:6px; "
+                    f"padding:6px 8px; background:{bg}; opacity:{opacity}; "
+                    f"min-height:72px; font-size:0.7rem; line-height:1.3;'>"
+                    f"<div style='display:flex; justify-content:space-between; align-items:center;'>"
+                    f"<span style='font-weight:700; color:{text_main};'>#{s['rank']}</span>"
+                    f"<span style='background:{role_color}; color:#000; font-size:0.55rem; "
+                    f"font-weight:800; padding:1px 5px; border-radius:3px;'>{role_abbr}</span></div>"
+                    f"<div style='color:{text_main}; font-weight:600; margin:2px 0; "
+                    f"white-space:nowrap; overflow:hidden; text-overflow:ellipsis;' "
+                    f"title='{s['name']}'>{display_name}</div>"
+                    f"<div style='color:{text_muted}; font-size:0.62rem;'>"
+                    f"📞 {s['call_pct']}% calls · 🗺️ {s['land_pct']}% land</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                new_val = st.checkbox(
+                    'On' if is_on else 'Off',
+                    value=is_on,
+                    key=f"suggest_toggle_{idx}",
+                    label_visibility="collapsed",
+                )
+                if new_val != is_on:
+                    toggles[idx] = new_val
+                    changed = True
+
+    # Master toggle to hide map markers
+    show_markers = st.checkbox(
+        'Show suggested locations on map',
+        value=session_state.get('show_suggestion_markers', True),
+        key='_suggest_markers_toggle',
+    )
+    if show_markers != session_state.get('show_suggestion_markers', True):
+        session_state['show_suggestion_markers'] = show_markers
+        changed = True
+
+    session_state['suggestion_toggles'] = toggles
+    return changed

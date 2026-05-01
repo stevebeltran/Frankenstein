@@ -4754,8 +4754,8 @@ def main():
                                             break
                                         except cf.TimeoutError:
                                             _merge_elapsed = time.time() - _merge_started_at
-                                            if _merge_elapsed - _merge_last_heartbeat_at >= 15:
-                                                _merge_last_heartbeat_at = _merge_elapsed
+                                            if time.time() - _merge_last_heartbeat_at >= 15:
+                                                _merge_last_heartbeat_at = time.time()
                                                 _push_upload_log(
                                                     f"Census merge is still running after {_format_wait(_merge_elapsed)}."
                                                 )
@@ -4770,6 +4770,8 @@ def main():
                                                 logs=_upload_logs,
                                             )
                                             continue
+
+                                _push_upload_log("Census merge completed. Restoring coordinates into the working dataset.")
 
                                 if merged_ready_df is None or merged_ready_df.empty:
                                     _push_upload_log("Census returned no valid coordinates after chunk processing.")

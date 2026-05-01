@@ -197,6 +197,21 @@ def _normalize_headerless_excel_frame(df: pd.DataFrame) -> pd.DataFrame:
     return norm
 
 
+def _deduplicate_columns(df):
+    """Rename duplicate column names by appending _2, _3, etc."""
+    seen = {}
+    new_cols = []
+    for c in df.columns:
+        if c in seen:
+            seen[c] += 1
+            new_cols.append(f"{c}_{seen[c]}")
+        else:
+            seen[c] = 1
+            new_cols.append(c)
+    df.columns = new_cols
+    return df
+
+
 def load_raw_call_table(uploaded_file) -> pd.DataFrame:
     fname = str(uploaded_file.name or '').lower()
     if fname.endswith(_EXCEL_EXTS):
@@ -234,6 +249,7 @@ def load_raw_call_table(uploaded_file) -> pd.DataFrame:
             raw_df = pd.DataFrame(rows_data, columns=real_headers)
             raw_df = raw_df.dropna(how='all')
             raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
+            raw_df = _deduplicate_columns(raw_df)
             if _looks_like_headerless_excel_columns(headers_raw) or _looks_like_headerless_cad_export_frame(raw_df):
                 raw_df = _normalize_headerless_excel_frame(raw_df)
             return raw_df.reset_index(drop=True)
@@ -243,6 +259,7 @@ def load_raw_call_table(uploaded_file) -> pd.DataFrame:
             best_df = None
             for _, sheet_df in all_sheets.items():
                 sheet_df.columns = [str(c).lower().strip() for c in sheet_df.columns]
+                sheet_df = _deduplicate_columns(sheet_df)
                 score = 0
                 for col in sheet_df.columns:
                     if col in ('latitude', 'longitude', 'priority', 'location', 'address'):
@@ -258,6 +275,7 @@ def load_raw_call_table(uploaded_file) -> pd.DataFrame:
             if best_df is None:
                 best_df = pd.read_excel(io.BytesIO(raw_bytes), engine=engine, dtype=str)
             best_df.columns = [str(c).lower().strip() for c in best_df.columns]
+            best_df = _deduplicate_columns(best_df)
             if _looks_like_headerless_cad_export_frame(best_df):
                 best_df = _normalize_headerless_excel_frame(best_df)
             return best_df.reset_index(drop=True)

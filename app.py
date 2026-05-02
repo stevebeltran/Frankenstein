@@ -146,9 +146,31 @@ from modules.public_reports import (
 from modules.image_utils import (
     get_base64_of_bin_file, get_themed_logo_base64, get_transparent_product_base64
 )
-from modules.notifications import (
-    _notify_email, _log_to_sheets, _log_login_to_sheets, _publish_public_report_to_sheets
-)
+NOTIFICATIONS_AVAILABLE = True
+try:
+    from modules.notifications import (
+        _notify_email, _log_to_sheets, _log_login_to_sheets, _publish_public_report_to_sheets,
+        _log_qr_scan_to_sheets,
+    )
+except Exception as _notifications_import_error:
+    NOTIFICATIONS_AVAILABLE = False
+
+    def _notify_email(*args, **kwargs):
+        return None
+
+    def _log_to_sheets(*args, **kwargs):
+        return None
+
+    def _log_login_to_sheets(*args, **kwargs):
+        return None
+
+    def _publish_public_report_to_sheets(*args, **kwargs):
+        return None
+
+    def _log_qr_scan_to_sheets(*args, **kwargs):
+        return None
+
+    print(f"Notifications disabled at startup: {_notifications_import_error}")
 from modules.cad_parser import (
     aggressive_parse_calls, _extract_file_meta, _get_annualized_calls
 )
@@ -305,45 +327,40 @@ def _render_public_report_route():
     _qr_mailto = f"mailto:{_qr_rep_email}?subject={_qr_lead_subject}&body={_qr_lead_body}"
 
     try:
-        from modules.notifications import _log_qr_scan_to_sheets
-
-        try:
-            _headers = dict(st.context.headers)
-        except Exception:
-            _headers = {}
-        _ua = _headers.get("User-Agent", _headers.get("user-agent", ""))
-        _lang = _headers.get("Accept-Language", _headers.get("accept-language", ""))
-        _ip = (
-            _headers.get("X-Forwarded-For", "")
-            or _headers.get("x-forwarded-for", "")
-            or _headers.get("Remote-Addr", "")
-        ).split(",")[0].strip()
-
-        _ua_lower = _ua.lower()
-        if "iphone" in _ua_lower or "ipad" in _ua_lower:
-            _device = "iOS"
-        elif "android" in _ua_lower:
-            _device = "Android"
-        elif "mobile" in _ua_lower:
-            _device = "Mobile"
-        elif _ua:
-            _device = "Desktop"
-        else:
-            _device = ""
-
-        _log_qr_scan_to_sheets(
-            report_id=_report_id,
-            city=_scan_meta.get("city", ""),
-            state=_scan_meta.get("state", ""),
-            rep_name=_scan_meta.get("rep_name", ""),
-            rep_email=_scan_meta.get("rep_email", ""),
-            device=_device,
-            user_agent=_ua,
-            language=_lang,
-            ip=_ip,
-        )
+        _headers = dict(st.context.headers)
     except Exception:
-        pass
+        _headers = {}
+    _ua = _headers.get("User-Agent", _headers.get("user-agent", ""))
+    _lang = _headers.get("Accept-Language", _headers.get("accept-language", ""))
+    _ip = (
+        _headers.get("X-Forwarded-For", "")
+        or _headers.get("x-forwarded-for", "")
+        or _headers.get("Remote-Addr", "")
+    ).split(",")[0].strip()
+
+    _ua_lower = _ua.lower()
+    if "iphone" in _ua_lower or "ipad" in _ua_lower:
+        _device = "iOS"
+    elif "android" in _ua_lower:
+        _device = "Android"
+    elif "mobile" in _ua_lower:
+        _device = "Mobile"
+    elif _ua:
+        _device = "Desktop"
+    else:
+        _device = ""
+
+    _log_qr_scan_to_sheets(
+        report_id=_report_id,
+        city=_scan_meta.get("city", ""),
+        state=_scan_meta.get("state", ""),
+        rep_name=_scan_meta.get("rep_name", ""),
+        rep_email=_scan_meta.get("rep_email", ""),
+        device=_device,
+        user_agent=_ua,
+        language=_lang,
+        ip=_ip,
+    )
 
     st.set_page_config(layout="wide", page_title="BRINC DFR", page_icon="https://brincdrones.com/favicon.ico")
     st.markdown("""

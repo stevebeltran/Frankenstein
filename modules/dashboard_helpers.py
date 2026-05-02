@@ -1317,10 +1317,18 @@ def manage_custom_stations(
     pinned_guard_names = list(session_state.get('pinned_guard_names', []))
     pinned_resp_names = list(session_state.get('pinned_resp_names', []))
     session_state['show_lock_stations'] = False
-    if len(pinned_guard_names) > k_guardian:
-        st.sidebar.warning(f'Guardian Count was raised to honor {len(pinned_guard_names)} locked Guardian station(s).')
-    if len(pinned_resp_names) > k_responder:
-        st.sidebar.warning(f'Responder Count was raised to honor {len(pinned_resp_names)} locked Responder station(s).')
+    if k_responder < len(pinned_resp_names) or k_guardian < len(pinned_guard_names):
+        if k_responder < len(pinned_resp_names):
+            session_state['k_resp'] = len(pinned_resp_names)
+            st.sidebar.warning(
+                f'Cannot reduce Responder Count below {len(pinned_resp_names)} locked Responder station(s).'
+            )
+        if k_guardian < len(pinned_guard_names):
+            session_state['k_guard'] = len(pinned_guard_names)
+            st.sidebar.warning(
+                f'Cannot reduce Guardian Count below {len(pinned_guard_names)} locked Guardian station(s).'
+            )
+        st.rerun()
 
     return {
         'k_responder': k_responder,

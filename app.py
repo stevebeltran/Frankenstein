@@ -7118,13 +7118,16 @@ body{{background:transparent;overflow:hidden}}
                 if _sug_off_lat:
                     fig.add_trace(go.Scattermap(
                         lat=_sug_off_lat, lon=_sug_off_lon,
-                        mode='text+markers',
-                        text=['?' for _ in _sug_off_lat],
-                        textfont=dict(size=11, color='rgba(200,200,200,0.7)', weight=700),
-                        marker=dict(size=6, color='rgba(200,200,200,0.25)'),
+                        mode='markers',
+                        marker=dict(
+                            size=9,
+                            color='rgba(154,160,180,0.9)',
+                            opacity=0.95,
+                            line=dict(width=0),
+                        ),
                         hovertemplate='%{customdata}<extra></extra>',
                         customdata=_sug_off_text,
-                        name='Suggested Sites',
+                        name='Suggested Sites (off)',
                         showlegend=len(_sug_on_lat) == 0,
                     ))
                 if _sug_on_lat:

@@ -12,7 +12,7 @@ import pandas as pd
 from shapely.geometry import box
 from shapely.ops import unary_union
 
-from modules.config import calculate_max_flights_per_day, US_STATES_ABBR
+from modules.config import calculate_max_flights_per_day, US_STATES_ABBR, text_muted
 from modules.versioning import __version__ as _app_version
 
 
@@ -361,7 +361,15 @@ def render_data_filters(st, df_stations_all, df_calls, df_calls_full):
 
 def render_display_options(st):
     disp_expander = st.sidebar.expander('👁️ Display Options', expanded=False)
+    
+    def section_header(label):
+        st.markdown(
+            f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>{label}</div>",
+            unsafe_allow_html=True,
+        )
+
     with disp_expander:
+        section_header('🗺️ Map & Boundaries')
         show_satellite = st.toggle(
             'Satellite Imagery',
             value=False,
@@ -380,6 +388,8 @@ def render_display_options(st):
             key='use_county_boundary',
             help='Redraw the map using the county boundary instead of the city/place boundary.',
         )
+
+        section_header('✈️ Safety & Airspace')
         show_faa = st.toggle(
             'FAA LAANC Airspace',
             value=False,
@@ -398,6 +408,8 @@ def render_display_options(st):
             key='show_obstacles_b',
             help='FAA Digital Obstacle File: obstacles > 200 ft AGL. Diamond markers.',
         )
+
+        section_header('📶 Infrastructure')
         show_coverage = st.toggle(
             '4G LTE Coverage',
             value=False,
@@ -410,6 +422,8 @@ def render_display_options(st):
             key='show_cell_towers_b',
             help='OpenCelliD cell tower locations. Useful for data-link RF validation.',
         )
+
+        section_header('🚨 Incident Analysis')
         show_heatmap = st.toggle(
             '911 Call Heatmap',
             value=False,
@@ -422,6 +436,8 @@ def render_display_options(st):
             key='show_dots_b',
             help='Show individual 911 call locations as dots on the map.',
         )
+
+        section_header('🛠️ Deployment Tools')
         show_station_suggestions = st.toggle(
             'Suggested Station Placements',
             value=True,
@@ -442,6 +458,9 @@ def render_display_options(st):
             key='simulate_traffic_b',
             help='Apply traffic-based travel delays to ground response estimates and related metrics.',
         )
+        traffic_level = st.slider('Traffic Congestion', 0, 100, 40, help='Simulates road congestion intensity. Higher values extend ground response times and related financial estimates.') if simulate_traffic else 40
+
+        section_header('📊 Interface & Privacy')
         show_health = st.toggle(
             'Health Score',
             value=False,
@@ -461,7 +480,6 @@ def render_display_options(st):
             key='simple_cards_b',
             help='Show a compact card with just the key numbers: name, type, response time, annual savings, and CapEx.',
         )
-        traffic_level = st.slider('Traffic Congestion', 0, 100, 40, help='Simulates road congestion intensity. Higher values extend ground response times and related financial estimates.') if simulate_traffic else 40
 
     return {
         'show_satellite': show_satellite,

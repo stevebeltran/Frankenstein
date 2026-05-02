@@ -2299,21 +2299,20 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         max_patrol_hours = _GUARDIAN_DAILY_HOURS if is_guardian else _RESPONDER_DAILY_HOURS
         max_single_flight = CONFIG["GUARDIAN_FLIGHT_MIN"] if is_guardian else CONFIG["RESPONDER_FLIGHT_MIN"]
         d_alt_time = float(d.get("alt_avg_time_min", 0) or 0)
-        travel_delta_min = abs(d_time - d_alt_time)
-        current_label = "Guardian" if is_guardian else "Responder"
-        other_label = "Responder" if is_guardian else "Guardian"
-        if d_alt_time > 0 and travel_delta_min > 0.05:
-            if d_time <= d_alt_time:
-                travel_compare_text = f"{current_label} faster by {travel_delta_min:.1f} min"
-                travel_detail_text = f"{current_label} {d_time:.1f} min vs {other_label} {d_alt_time:.1f} min"
+        guardian_time = d_time if is_guardian else d_alt_time
+        responder_time = d_alt_time if is_guardian else d_time
+        travel_delta_min = abs(guardian_time - responder_time)
+        if guardian_time > 0 and responder_time > 0 and travel_delta_min > 0.05:
+            if guardian_time <= responder_time:
+                travel_compare_text = f"Guardian faster by {travel_delta_min:.1f} min"
                 travel_color = "#2ecc71"
             else:
-                travel_compare_text = f"{other_label} faster by {travel_delta_min:.1f} min"
-                travel_detail_text = f"{current_label} {d_time:.1f} min vs {other_label} {d_alt_time:.1f} min"
+                travel_compare_text = f"Responder faster by {travel_delta_min:.1f} min"
                 travel_color = "#F0B429"
+            travel_detail_text = f"Guardian {guardian_time:.1f} min vs Responder {responder_time:.1f} min"
         else:
-            travel_compare_text = f"{current_label} arrival time"
-            travel_detail_text = f"{current_label} {d_time:.1f} min"
+            travel_compare_text = "Arrival time"
+            travel_detail_text = f"Guardian {guardian_time:.1f} min vs Responder {responder_time:.1f} min"
             travel_color = "#00D2FF"
 
 

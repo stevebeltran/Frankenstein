@@ -183,6 +183,11 @@ __build_datetime__ = _versioning_mod.__build_datetime__
 __build_line_count__ = _versioning_mod.__build_line_count__
 _render_version_badge = _versioning_mod._render_version_badge
 
+_ui_components_mod = sys.modules.get("modules.ui_components")
+if _ui_components_mod is not None:
+    _ui_components_mod.__version__ = __version__
+    _ui_components_mod.__build_datetime__ = __build_datetime__
+
 # Populate FAQ_CHANGELOG with version info (after versioning module is loaded)
 FAQ_CHANGELOG.clear()
 FAQ_CHANGELOG.append({

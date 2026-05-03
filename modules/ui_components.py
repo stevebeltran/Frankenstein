@@ -12,7 +12,7 @@ import urllib.parse
 from typing import Any, Callable, Dict, Optional
 
 import streamlit as st
-from streamlit_extras import components
+import streamlit.components.v1 as components
 
 
 # ─ FAQ Changelog ───────────────────────────────────────────────────────────

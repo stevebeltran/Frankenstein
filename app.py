@@ -6013,9 +6013,6 @@ body{{background:transparent;overflow:hidden}}
                 if _suggestion_modes.get(s['station_idx']) == 'Guardian'
             ]
 
-            _resp_suggestions = [s for s in _suggestions if s['role'] == 'Responder']
-            _guard_suggestions = [s for s in _suggestions if s['role'] == 'Guardian']
-
             _slider_changed = (
                 _prev_suggestion_sync is None
                 or k_responder != _prev_resp_count
@@ -6035,6 +6032,14 @@ body{{background:transparent;overflow:hidden}}
             elif _slider_changed and not _modes_changed:
                 _resp_target = max(int(k_responder or 0) - _custom_resp_lock_count, 0)
                 _guard_target = max(int(k_guardian or 0) - _custom_guard_lock_count, 0)
+                _resp_suggestions = [
+                    s for s in _suggestions
+                    if _suggestion_modes.get(s['station_idx']) in {'Responder', 'Off'}
+                ]
+                _guard_suggestions = [
+                    s for s in _suggestions
+                    if _suggestion_modes.get(s['station_idx']) in {'Guardian', 'Off'}
+                ]
                 _suggestion_modes, _resp_changed = _apply_role_target(_resp_suggestions, _resp_target)
                 _suggestion_modes, _guard_changed = _apply_role_target(_guard_suggestions, _guard_target)
                 if _resp_changed or _guard_changed:

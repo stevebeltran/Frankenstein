@@ -3360,7 +3360,8 @@ def generate_community_impact_dashboard_html(
 
     saved_min  = float(avg_time_saved_min or 0)
 
-    ground_min = drone_min + saved_min
+    # Ensure ground responder is never faster than drone (responder cannot be faster than drone arrival)
+    ground_min = max(drone_min, drone_min + saved_min)
 
     drone_wins_pct = min(99, max(CONFIG['DRONE_WINS_FLOOR'], round(calls_covered_perc * CONFIG['DRONE_WINS_MULTIPLIER']))) if calls_covered_perc > 0 else 0
 

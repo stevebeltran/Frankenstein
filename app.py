@@ -7899,7 +7899,7 @@ body{{background:transparent;overflow:hidden}}
                 df_calls_full=df_calls_full,
                 facility_counts=_cid_fac_counts or None,
             )
-            components.html(_cid_html, height=3600, scrolling=False)
+            components.html(_cid_html, height=3150, scrolling=False)
             st.markdown("<div style='margin-top:-52px;'></div>", unsafe_allow_html=True)
 
         _show_school_safety_section = st.toggle(

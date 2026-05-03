@@ -16,17 +16,11 @@ import html
 import hmac
 import json
 import urllib.parse
+from typing import Callable
 
 import streamlit as st
 import streamlit.components.v1 as components
 
-from modules.notifications import _log_qr_scan_to_sheets
-from modules.public_reports import (
-    _get_query_params_dict,
-    _public_report_html_path,
-    _public_report_metadata_path,
-    _sign_public_report_id,
-)
 import modules.versioning as _versioning
 
 
@@ -45,112 +39,6 @@ FAQ_CHANGELOG = [
         "summary": "Added an in-app FAQ launcher in the upper-left with a compact versioned release-notes footer.",
     },
 ]
-
-
-def _render_public_report_route():
-    _params = _get_query_params_dict()
-    _report_id = str(_params.get("public_report", "")).strip()
-    _sig = str(_params.get("sig", "")).strip()
-    if not _report_id:
-        return False
-
-    try:
-        _expected_sig = _sign_public_report_id(_report_id)
-        _html_path = _public_report_html_path(_report_id)
-        _meta_path = _public_report_metadata_path(_report_id)
-    except ValueError:
-        st.error("Invalid public report link.")
-        st.stop()
-
-    if not _sig or not hmac.compare_digest(_sig, _expected_sig):
-        st.error("Invalid public report link.")
-        st.stop()
-
-    if not _html_path.exists():
-        st.warning("This public report is not available yet.")
-        st.stop()
-
-    _scan_meta = {}
-    if _meta_path.exists():
-        try:
-            _scan_meta = json.loads(_meta_path.read_text(encoding="utf-8"))
-        except Exception:
-            _scan_meta = {}
-
-    _qr_city = str(_scan_meta.get("city", "") or "").strip()
-    _qr_state = str(_scan_meta.get("state", "") or "").strip()
-    _qr_rep_name = str(_scan_meta.get("rep_name", "") or "").strip() or "BRINC Representative"
-    _qr_rep_email = str(_scan_meta.get("rep_email", "") or "").strip() or "sales@brincdrones.com"
-    _qr_loc = ", ".join([x for x in [_qr_city, _qr_state] if x]).strip() or "your jurisdiction"
-    _qr_lead_subject = urllib.parse.quote(f"DFR demo request - {_qr_loc}")
-    _qr_lead_body = urllib.parse.quote(
-        f"Hi {_qr_rep_name},\n\nI would like a custom DFR coverage analysis for {_qr_loc}.\n\nAgency:\nBest callback number:\n\nThanks,"
-    )
-    _qr_mailto = f"mailto:{_qr_rep_email}?subject={_qr_lead_subject}&body={_qr_lead_body}"
-
-    try:
-        _headers = dict(st.context.headers)
-    except Exception:
-        _headers = {}
-    _ua = _headers.get("User-Agent", _headers.get("user-agent", ""))
-    _lang = _headers.get("Accept-Language", _headers.get("accept-language", ""))
-    _ip = (
-        _headers.get("X-Forwarded-For", "")
-        or _headers.get("x-forwarded-for", "")
-        or _headers.get("Remote-Addr", "")
-    ).split(",")[0].strip()
-
-    _ua_lower = _ua.lower()
-    if "iphone" in _ua_lower or "ipad" in _ua_lower:
-        _device = "iOS"
-    elif "android" in _ua_lower:
-        _device = "Android"
-    elif "mobile" in _ua_lower:
-        _device = "Mobile"
-    elif _ua:
-        _device = "Desktop"
-    else:
-        _device = ""
-
-    _log_qr_scan_to_sheets(
-        report_id=_report_id,
-        city=_scan_meta.get("city", ""),
-        state=_scan_meta.get("state", ""),
-        rep_name=_scan_meta.get("rep_name", ""),
-        rep_email=_scan_meta.get("rep_email", ""),
-        device=_device,
-        user_agent=_ua,
-        language=_lang,
-        ip=_ip,
-    )
-
-    st.set_page_config(layout="wide", page_title="BRINC DFR", page_icon="https://brincdrones.com/favicon.ico")
-    st.markdown(
-        """
-        <style>
-            header, footer, #MainMenu,
-            [data-testid="stToolbar"],
-            [data-testid="stDecoration"],
-            [data-testid="stStatusWidget"],
-            [data-testid="stSidebar"],
-            [data-testid="stGithubButton"],
-            [data-testid="stActionButton"],
-            [data-testid="stBaseButton-header"],
-            [data-testid="stHeaderActionElements"],
-            [data-testid="stHeaderActions"],
-            [data-testid="stHeader"],
-            [data-testid="collapsedControl"] {display:none !important;}
-            .block-container {padding-top: 0.8rem; max-width: 100%;}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    if _qr_mailto:
-        st.markdown(f'<meta http-equiv="refresh" content="0; url={_qr_mailto}">', unsafe_allow_html=True)
-
-    st.stop()
-
 
 # ─ UI Rendering Functions ──────────────────────────────────────────────────
 

@@ -1812,6 +1812,7 @@ def compute_station_suggestions(
             'rank': rank + 1,
             'station_idx': best_idx,
             'name': meta['name'],
+            'address': meta.get('address', ''),
             'lat': meta['lat'],
             'lon': meta['lon'],
             'call_pct': round(solo_call_pct, 1),
@@ -1887,10 +1888,8 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
             bg = card_bg if mode != 'Off' else 'rgba(30,30,40,0.4)'
             opacity = '1.0' if mode != 'Off' else '0.55'
 
-            # Truncate name
-            display_name = s['name']
-            if len(display_name) > 22:
-                display_name = display_name[:20] + '…'
+            # Use address if available, otherwise fall back to name
+            display_text = s.get('address', '') or s['name']
 
             with cols[ci]:
                 st.markdown(
@@ -1901,9 +1900,8 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
                     f"<span style='font-weight:700; color:{text_main};'>#{s['rank']}</span>"
                     f"<span style='background:{mode_color}; color:#000; font-size:0.55rem; "
                     f"font-weight:800; padding:1px 5px; border-radius:3px;'>{mode_abbr}</span></div>"
-                    f"<div style='color:{text_main}; font-weight:600; margin:2px 0; "
-                    f"white-space:nowrap; overflow:hidden; text-overflow:ellipsis;' "
-                    f"title='{s['name']}'>{display_name}</div>"
+                    f"<div style='color:{text_main}; font-weight:600; margin:2px 0; word-wrap:break-word; white-space:normal;'>"
+                    f"{display_text}</div>"
                     f"<div style='color:{text_muted}; font-size:0.62rem;'>"
                     f"📞 {s['call_pct']}% calls · 🗺️ {s['land_pct']}% land</div>"
                     f"</div>",

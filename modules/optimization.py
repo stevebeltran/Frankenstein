@@ -172,6 +172,7 @@ def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, e
         dist_c = ((row['lon'] - center_lon) ** 2 + (row['lat'] - center_lat) ** 2) ** 0.5
         station_metadata.append({
             'name': row['name'], 'lat': row['lat'], 'lon': row['lon'],
+            'address': row.get('address', ''),
             'clipped_2m': clipped_2m, 'clipped_guard': clipped_guard,
             'avg_dist_r': avg_dist_r,
             'avg_dist_g': avg_dist_g,

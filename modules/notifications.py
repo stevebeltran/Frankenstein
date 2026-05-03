@@ -213,7 +213,7 @@ def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=8) as server:
             server.login(gmail_address, app_password)
             server.sendmail(gmail_address, notify_address, msg.as_string())
-    except:
+    except (smtplib.SMTPException, OSError, TimeoutError):
         pass
 
 
@@ -369,7 +369,7 @@ def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, emai
                      increment_exports=True,
                      city=city,
                      fleet_capex=d.get('fleet_capex'))
-    except:
+    except Exception:
         pass
 
 
@@ -394,7 +394,7 @@ def _log_login_to_sheets(email, name):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         sheet.append_row([timestamp, email, name, "LOGIN"])
         _upsert_user(spreadsheet, email, name, increment_logins=True)
-    except:
+    except Exception:
         pass
 
 
@@ -432,7 +432,7 @@ def _log_qr_scan_to_sheets(report_id, city, state, rep_name, rep_email,
             city, state, rep_name, rep_email,
             device, language, ip, user_agent,
         ])
-    except:
+    except Exception:
         pass
 
 
@@ -497,5 +497,5 @@ def _publish_public_report_to_sheets(report_id, department, city, state, rep_nam
             sheet.append_row(row)
         else:
             sheet.update(f"A{row_idx}:{end_col}{row_idx}", [row])
-    except:
+    except Exception:
         pass

@@ -2612,37 +2612,33 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
             f'  <div style="background:{status_bg};border:1px solid {status_border};border-radius:6px;padding:7px 9px;">'
 
-            f'    <div style="display:grid;grid-template-columns:minmax(0,1.08fr) minmax(238px,1fr);gap:8px;align-items:start;">'
+            f'    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;align-items:start;">'
 
-            f'      <div style="min-width:0;">'
+            f'      <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:6px;padding:5px 7px;min-width:0;">'
 
-            f'        <div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:3px;">Attributed Dispatchable Calls<span class="tip" data-tip="Overlap-shared annual dispatchable demand credited to this unit. This is the demand share used for utilization and value calculations.">?</span></div>'
+            f'        <div style="font-size:0.54rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px;">Attributed Dispatchable Calls<span class="tip" data-tip="Overlap-shared annual dispatchable demand credited to this unit. This is the demand share used for utilization and value calculations.">?</span></div>'
 
-            f'        <div style="font-size:1.30rem;font-weight:900;color:{card_title};line-height:1.05;">{int(d_weighted_dispatchable_calls_yr):,}</div>'
+            f'        <div style="font-size:0.80rem;font-weight:900;color:{card_title};line-height:1.05;">{int(d_weighted_dispatchable_calls_yr):,}</div>'
 
             f'      </div>'
 
-            f'      <div style="min-width:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;align-items:start;">'
+            f'      <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:6px;padding:5px 7px;min-width:0;">'
 
-            f'        <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:6px;padding:5px 7px;min-width:0;">'
+            f'        <div style="font-size:0.54rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px;">Capacity<span class="tip" data-tip="This unit is at its modeled call-handling ceiling for the current profile.">?</span></div>'
 
-            f'          <div style="font-size:0.56rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px;">Capacity<span class="tip" data-tip="This unit is at its modeled call-handling ceiling for the current profile.">?</span></div>'
+            f'        <div style="font-size:0.64rem;color:{text_muted};margin-top:1px;line-height:1.12;">{d_max_cap:.1f} calls/day capacity ({int(d_total_flights_possible_yr):,}/yr)</div>'
 
-            f'          <div style="font-size:0.65rem;color:{text_muted};margin-top:1px;line-height:1.12;">{d_max_cap:.1f} calls/day capacity ({int(d_total_flights_possible_yr):,}/yr)</div>'
+            f'        <div style="font-size:0.64rem;color:{text_muted};margin-top:1px;line-height:1.12;">{mins_per_flight:.1f} min/flight</div>'
 
-            f'          <div style="font-size:0.65rem;color:{text_muted};margin-top:1px;line-height:1.12;">{mins_per_flight:.1f} min/flight</div>'
+            f'      </div>'
 
-            f'        </div>'
+            f'      <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:6px;padding:5px 7px;min-width:0;">'
 
-            f'        <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:6px;padding:5px 7px;min-width:0;">'
+            f'        <div style="font-size:0.54rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px;">Arrival advantage<span class="tip" data-tip="Average station-to-call travel time compared between Guardian and Responder at the same station. The faster unit arrives first.">?</span></div>'
 
-            f'          <div style="font-size:0.56rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px;">Arrival advantage<span class="tip" data-tip="Average station-to-call travel time compared between Guardian and Responder at the same station. The faster unit arrives first.">?</span></div>'
+            f'        <div style="font-size:0.72rem;font-weight:900;color:{travel_color};line-height:1.05;">{travel_compare_text}</div>'
 
-            f'          <div style="font-size:0.80rem;font-weight:900;color:{travel_color};line-height:1.05;">{travel_compare_text}</div>'
-
-            f'          <div style="font-size:0.55rem;color:{text_muted};margin-top:1px;line-height:1.15;">{travel_detail_text}</div>'
-
-            f'        </div>'
+            f'        <div style="font-size:0.54rem;color:{text_muted};margin-top:1px;line-height:1.15;">{travel_detail_text}</div>'
 
             f'      </div>'
 
@@ -2746,39 +2742,35 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
             f'  <div style="background:{status_bg}; border:1px solid {status_border}; border-radius:6px; padding:7px 9px;">'
 
-            f'    <div style="display:grid; grid-template-columns:minmax(0,1.08fr) minmax(238px,1fr); gap:8px; align-items:start;">'
+            f'    <div style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; align-items:start;">'
 
-            f'      <div style="min-width:0;">'
+            f'      <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:6px; padding:5px 7px; min-width:0;">'
 
-            f'        <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Attributed Dispatchable Calls<span class="tip" data-tip="Overlap-shared annual dispatchable demand credited to this unit. This is the demand share used for utilization and value calculations.">?</span></div>'
+            f'        <div style="font-size:0.54rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:2px;">Attributed Dispatchable Calls<span class="tip" data-tip="Overlap-shared annual dispatchable demand credited to this unit. This is the demand share used for utilization and value calculations.">?</span></div>'
 
-            f'        <div style="font-size:1.35rem; font-weight:900; color:{card_title}; line-height:1.05;">{int(d_weighted_dispatchable_calls_yr):,}</div>'
+            f'        <div style="font-size:0.80rem; font-weight:900; color:{card_title}; line-height:1.05;">{int(d_weighted_dispatchable_calls_yr):,}</div>'
 
             f'      </div>'
 
-            f'      <div style="min-width:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:5px; align-items:start;">'
+            f'      <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:6px; padding:5px 7px; min-width:0;">'
 
-            f'        <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:6px; padding:5px 7px; min-width:0;">'
+            f'        <div style="font-size:0.54rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:2px;">Capacity<span class="tip" data-tip="This unit is at its modeled call-handling ceiling for the current profile.">?</span></div>'
 
-            f'          <div style="font-size:0.56rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:2px;">Capacity<span class="tip" data-tip="This unit is at its modeled call-handling ceiling for the current profile.">?</span></div>'
+            f'        <div style="font-size:0.64rem; font-weight:800; color:{card_title}; line-height:1.12; margin-top:1px;">{int(d_calls_unanswered_yr):,} calls unanswered</div>'
 
-            f'          <div style="font-size:0.70rem; font-weight:800; color:{card_title}; line-height:1.12; margin-top:1px;">{int(d_calls_unanswered_yr):,} calls unanswered</div>'
+            f'        <div style="font-size:0.64rem; color:{text_muted}; margin-top:1px; line-height:1.12;">{d_max_cap:.1f} calls/day capacity ({int(d_total_flights_possible_yr):,}/yr)</div>'
 
-            f'          <div style="font-size:0.65rem; color:{text_muted}; margin-top:1px; line-height:1.12;">{d_max_cap:.1f} calls/day capacity ({int(d_total_flights_possible_yr):,}/yr)</div>'
+            f'        <div style="font-size:0.64rem; color:{text_muted}; margin-top:1px; line-height:1.12;">{mins_per_flight:.1f} min/flight</div>'
 
-            f'          <div style="font-size:0.65rem; color:{text_muted}; margin-top:1px; line-height:1.12;">{mins_per_flight:.1f} min/flight</div>'
+            f'      </div>'
 
-            f'        </div>'
+            f'      <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:6px; padding:5px 7px; min-width:0;">'
 
-            f'        <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:6px; padding:5px 7px; min-width:0;">'
+            f'        <div style="font-size:0.54rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:2px;">Arrival advantage<span class="tip" data-tip="Average station-to-call travel time compared between Guardian and Responder at the same station. The faster unit arrives first.">?</span></div>'
 
-            f'          <div style="font-size:0.56rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:2px;">Arrival advantage<span class="tip" data-tip="Average station-to-call travel time compared between Guardian and Responder at the same station. The faster unit arrives first.">?</span></div>'
+            f'        <div style="font-size:0.72rem; font-weight:900; color:{travel_color}; line-height:1.05;">{travel_compare_text}</div>'
 
-            f'          <div style="font-size:0.80rem; font-weight:900; color:{travel_color}; line-height:1.05;">{travel_compare_text}</div>'
-
-            f'          <div style="font-size:0.55rem; color:{text_muted}; margin-top:1px; line-height:1.15;">{travel_detail_text}</div>'
-
-            f'        </div>'
+            f'        <div style="font-size:0.54rem; color:{text_muted}; margin-top:1px; line-height:1.15;">{travel_detail_text}</div>'
 
             f'      </div>'
 

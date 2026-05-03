@@ -7,6 +7,7 @@ for the simulation page.
 
 import streamlit as st
 
+from modules.config import accent_color
 from modules.image_utils import get_themed_logo_base64, get_transparent_product_base64
 
 

@@ -18,6 +18,7 @@ import json
 import urllib.parse
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from modules.notifications import _log_qr_scan_to_sheets
 from modules.public_reports import (
@@ -142,18 +143,6 @@ def _render_public_report_route():
         st.markdown(f'<meta http-equiv="refresh" content="0; url={_qr_mailto}">', unsafe_allow_html=True)
 
     st.stop()
-
-
-def _render_in_app_faq():
-from typing import Any, Callable, Dict, Optional
-
-import streamlit as st
-from streamlit_extras import components
-
-
-# ─ FAQ Changelog ───────────────────────────────────────────────────────────
-# Note: FAQ_CHANGELOG version/timestamp are populated by app.py after import
-FAQ_CHANGELOG = []
 
 
 # ─ UI Rendering Functions ──────────────────────────────────────────────────

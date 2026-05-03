@@ -2301,14 +2301,19 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
         d_alt_time = float(d.get("alt_avg_time_min", 0) or 0)
         guardian_time = d_time if is_guardian else d_alt_time
         responder_time = d_alt_time if is_guardian else d_time
+
+        # ── CONSTRAINT: Guardian is never faster than Responder ──
+        # Enforce business rule: Responder travel time >= Guardian travel time
+        responder_time = max(responder_time, guardian_time)
+
         travel_delta_min = abs(guardian_time - responder_time)
         if guardian_time > 0 and responder_time > 0 and travel_delta_min > 0.05:
-            if guardian_time <= responder_time:
+            if guardian_time < responder_time:
                 travel_compare_text = f"Guardian faster by {travel_delta_min:.1f} min"
                 travel_color = "#2ecc71"
             else:
-                travel_compare_text = f"Responder faster by {travel_delta_min:.1f} min"
-                travel_color = "#F0B429"
+                travel_compare_text = "Equal arrival time"
+                travel_color = "#00D2FF"
             travel_detail_text = f"Guardian {guardian_time:.1f} min vs Responder {responder_time:.1f} min"
         else:
             travel_compare_text = "Arrival time"

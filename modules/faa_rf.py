@@ -19,6 +19,16 @@ def _normalize_display_text(value):
 
 
 def generate_mock_faa_grid(minx, miny, maxx, maxy):
+    """Generate a mock FAA airspace grid for visualization.
+
+    Creates a GeoDataFrame with airspace cells covering the specified bounding box.
+    Used when regulatory layer data is not available.
+
+    Args:
+        minx, miny, maxx, maxy: Bounding box coordinates (WGS84 degrees)
+
+    Returns:
+        GeoDataFrame with airspace grid cells"""
     features = []
     x_steps = np.linspace(minx, maxx, 20)
     y_steps = np.linspace(miny, maxy, 20)
@@ -390,6 +400,17 @@ def get_nearest_airfield(lat, lon, airfields):
     return "No data"
 
 def generate_random_points_in_polygon(polygon, num_points):
+    """Generate random points uniformly distributed within a polygon.
+
+    Uses rejection sampling to ensure all points fall within the polygon boundary.
+    Used for simulating call locations within jurisdiction boundaries.
+
+    Args:
+        polygon: Shapely Polygon or MultiPolygon
+        num_points: Number of points to generate
+
+    Returns:
+        List of Shapely Points"""
     # Flatten MultiPolygon to its largest component so bbox sampling stays efficient
     if isinstance(polygon, MultiPolygon):
         polygon = max(polygon.geoms, key=lambda p: p.area)
@@ -404,6 +425,17 @@ def generate_random_points_in_polygon(polygon, num_points):
     return points
 
 def generate_clustered_calls(polygon, num_points):
+    """Generate clustered call points representing realistic geographic distribution.
+
+    Creates clusters of calls within the polygon to simulate real-world patterns
+    (multiple incidents in high-activity areas).
+
+    Args:
+        polygon: Shapely Polygon or MultiPolygon
+        num_points: Total number of points to generate
+
+    Returns:
+        List of Shapely Points"""
     if isinstance(polygon, MultiPolygon):
         polygon = max(polygon.geoms, key=lambda p: p.area)
     points = []
@@ -424,6 +456,15 @@ def generate_clustered_calls(polygon, num_points):
     return points
 
 def estimate_grants(population):
+    """Estimate eligible grant funding based on population.
+
+    Uses federal grant eligibility formulas for public safety equipment (UAV systems).
+
+    Args:
+        population: Jurisdiction population
+
+    Returns:
+        Estimated grant funding amount in dollars"""
     if population > 1000000: return "$1.5M - $3.0M+"
     elif population > 500000: return "$500k - $1.5M"
     elif population > 250000: return "$250k - $500k"

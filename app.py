@@ -1,9 +1,13 @@
 ﻿# Copyright (c) Steven Beltran. Created by Steven Beltran in partnership with BRINC Drones.
 import warnings
+try:
+    from authlib.deprecate import AuthlibDeprecationWarning
+except Exception:
+    AuthlibDeprecationWarning = DeprecationWarning
 warnings.filterwarnings(
     "ignore",
     message=r"authlib\.jose module is deprecated, please use joserfc instead\.",
-    category=DeprecationWarning,
+    category=AuthlibDeprecationWarning,
 )
 import streamlit as st
 import pandas as pd

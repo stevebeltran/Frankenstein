@@ -7,6 +7,7 @@ import numpy as np
 from shapely.geometry import Point, Polygon, MultiPolygon, box
 from shapely.ops import unary_union
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 import os, glob, json, re, zipfile, io, math, urllib.request, urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 import tempfile
@@ -14,7 +15,7 @@ import tempfile
 from modules.config import STATE_FIPS, US_STATES_ABBR, KNOWN_POPULATIONS
 
 
-def _load_uploaded_boundary_overlay(uploaded_files):
+def _load_uploaded_boundary_overlay(uploaded_files: List[Any]) -> Tuple[Optional[Any], str, str]:
     """Read uploaded shapefile sidecars into EPSG:4326 for display-only map overlays."""
     if not uploaded_files:
         return None, "", ""
@@ -60,7 +61,7 @@ def _load_uploaded_boundary_overlay(uploaded_files):
         return _gdf[['DISPLAY_NAME', 'geometry']].copy(), _label, Path(_by_ext['.shp'].name).name
 
 
-def _boundary_overlay_status(boundary_geom_4326, overlay_gdf, epsg_code):
+def _boundary_overlay_status(boundary_geom_4326: Optional[Any], overlay_gdf: Optional[gpd.GeoDataFrame], epsg_code: Optional[int]) -> str:
     if boundary_geom_4326 is None or boundary_geom_4326.is_empty or overlay_gdf is None or overlay_gdf.empty:
         return None
     try:
@@ -94,7 +95,7 @@ def _boundary_overlay_status(boundary_geom_4326, overlay_gdf, epsg_code):
         return None
 
 
-def _count_points_within_boundary(df_calls, boundary_geom_4326):
+def _count_points_within_boundary(df_calls: pd.DataFrame, boundary_geom_4326: Any) -> int:
     """Count calls (points) that fall within a boundary polygon."""
     if df_calls is None or df_calls.empty or boundary_geom_4326 is None:
         return 0
@@ -106,7 +107,7 @@ def _count_points_within_boundary(df_calls, boundary_geom_4326):
         return 0
 
 
-def find_jurisdictions_by_coordinates(df_calls, min_call_share=0.001, min_call_count=3):
+def find_jurisdictions_by_coordinates(df_calls: pd.DataFrame, min_call_share: float = 0.001, min_call_count: int = 3) -> List[Dict[str, Any]]:
     """
     Purely coordinate-driven jurisdiction lookup.
 
@@ -209,7 +210,7 @@ def find_jurisdictions_by_coordinates(df_calls, min_call_share=0.001, min_call_c
         return None
 
 
-def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, seed=42, bounds_hash=''):
+def build_display_calls(df_calls_full: pd.DataFrame, _city_m: str, epsg_code: int, max_points: int = 300000, seed: int = 42, bounds_hash: str = '') -> pd.DataFrame:
     if df_calls_full is None or len(df_calls_full) == 0:
         return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
@@ -276,7 +277,7 @@ def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, se
     return display_calls.to_crs(epsg=4326)
 
 
-def get_address_from_latlon(lat, lon):
+def get_address_from_latlon(lat: float, lon: float) -> str:
     url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=18&addressdetails=1"
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_DFR_Optimizer_App/2.0'})

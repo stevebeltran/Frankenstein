@@ -14,6 +14,7 @@ import math
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import pyproj
 from modules.config import STATE_FIPS, US_STATES_ABBR, KNOWN_POPULATIONS
@@ -30,7 +31,7 @@ def _safe_notna_ratio(values) -> float:
     except Exception:
         return 0.0
 
-def _extract_file_meta(raw_df, res_df, filename=""):
+def _extract_file_meta(raw_df: pd.DataFrame, res_df: pd.DataFrame, filename: str = "") -> Dict[str, Any]:
     """
     Compute and return a dict of data-matrix statistics from a parsed CAD upload.
     Call this once per file inside aggressive_parse_calls() and store the result
@@ -106,7 +107,7 @@ def _extract_file_meta(raw_df, res_df, filename=""):
     except Exception:
         pass
     return meta
-def _deduplicate_columns(df):
+def _deduplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Rename duplicate column names by appending _2, _3, etc."""
     seen = {}
     new_cols = []
@@ -121,7 +122,7 @@ def _deduplicate_columns(df):
     return df
 
 
-def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
+def aggressive_parse_calls(uploaded_files: List[Any], require_valid_coordinates: bool = True) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     all_calls_list = []
     CV = {
         'date': ['received date','incident date','call date','call creation date','calldatetime','call datetime','calltime','timestamp','date','datetime','date time','dispatch date','time received','incdate','date_rept','date_occu','createdtime','created_time','receivedtime','received_time','eventtime','event_time','incidenttime','incident_time','reportedtime','reported_time','entrytime','entry_time','time_central','time_stamp','created'],

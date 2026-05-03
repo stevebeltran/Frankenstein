@@ -2612,7 +2612,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
             f'  <div style="background:{status_bg};border:1px solid {status_border};border-radius:6px;padding:7px 9px;">'
 
-            f'    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(132px,150px);gap:8px;align-items:start;">'
+            f'    <div style="display:grid;grid-template-columns:minmax(0,1.05fr) minmax(220px,1fr);gap:8px;align-items:start;">'
 
             f'      <div style="min-width:0;">'
 
@@ -2622,9 +2622,9 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
             f'      </div>'
 
-            f'      <div style="min-width:0;display:flex;flex-direction:column;gap:5px;">'
+            f'      <div style="min-width:0;display:flex;gap:5px;flex-wrap:wrap;">'
 
-            f'        <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:6px;padding:5px 7px;">'
+            f'        <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:6px;padding:5px 7px;flex:1 1 118px;min-width:118px;">'
 
             f'          <div style="font-size:0.56rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px;">Capacity<span class="tip" data-tip="This unit is at its modeled call-handling ceiling for the current profile.">?</span></div>'
 
@@ -2634,7 +2634,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
             f'        </div>'
 
-            f'        <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:6px;padding:5px 7px;">'
+            f'        <div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:6px;padding:5px 7px;flex:1 1 118px;min-width:118px;">'
 
             f'          <div style="font-size:0.56rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px;">Arrival advantage<span class="tip" data-tip="Average station-to-call travel time compared between Guardian and Responder at the same station. The faster unit arrives first.">?</span></div>'
 

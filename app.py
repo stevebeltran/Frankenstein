@@ -7221,9 +7221,11 @@ body{{background:transparent;overflow:hidden}}
                         lat=_sug_off_lat, lon=_sug_off_lon,
                         mode='markers',
                         marker=dict(
-                            size=9,
-                            color='rgba(154,160,180,0.9)',
+                            size=11,
+                            color='#FFD400',
+                            symbol='diamond',
                             opacity=0.95,
+                            line=dict(width=1.5, color='#111111'),
                         ),
                         hovertemplate='%{customdata}<extra></extra>',
                         customdata=_sug_off_text,
@@ -7233,10 +7235,14 @@ body{{background:transparent;overflow:hidden}}
                 if _sug_on_lat:
                     fig.add_trace(go.Scattermap(
                         lat=_sug_on_lat, lon=_sug_on_lon,
-                        mode='text+markers',
-                        text=['?' for _ in _sug_on_lat],
-                        textfont=dict(size=13, color='#00D2FF', weight=700),
-                        marker=dict(size=8, color='rgba(0,210,255,0.5)'),
+                        mode='markers',
+                        marker=dict(
+                            size=15,
+                            color='#00E5FF',
+                            symbol='diamond',
+                            opacity=1.0,
+                            line=dict(width=2, color='#111111'),
+                        ),
                         hovertemplate='%{customdata}<extra></extra>',
                         customdata=_sug_on_text,
                         name='Suggested Sites (active)',

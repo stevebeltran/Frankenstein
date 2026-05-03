@@ -2427,13 +2427,19 @@ init_session_state(st.session_state, _slugify, _build_public_report_url)
 
 def main():
     _render_in_app_faq()
-    _render_in_app_faq()
-    
-    # Route based on data state
     if not st.session_state['csvs_ready']:
         render_onboarding_page()
     else:
         render_simulation_page()
+
+# ── Public Report Route ───────────────────────────────────────────────────────
+# Check for public QR report mode before initializing main app
+_render_public_report_route(
+    get_query_params_dict=_get_query_params_dict,
+    sign_public_report_id=_sign_public_report_id,
+    public_report_html_path=_public_report_html_path,
+    public_report_metadata_path=_public_report_metadata_path,
+    log_qr_scan_to_sheets=_log_qr_scan_to_sheets,
     log_to_sheets=_log_to_sheets,
     notify_email=_notify_email,
 )

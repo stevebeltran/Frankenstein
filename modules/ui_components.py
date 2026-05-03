@@ -1,3 +1,10 @@
+"""Shared UI helpers for the BRINC app.
+
+This module keeps the FAQ launcher and public-report route logic in one place so
+app.py can import them without depending on optional third-party packages.
+"""
+
+from __future__ import annotations
 """
 UI component rendering functions for Streamlit application.
 
@@ -9,16 +16,29 @@ import html
 import hmac
 import json
 import urllib.parse
-from typing import Any, Callable, Dict, Optional
+from typing import Callable
 
 import streamlit as st
 import streamlit.components.v1 as components
 
+import modules.versioning as _versioning
 
-# ─ FAQ Changelog ───────────────────────────────────────────────────────────
-# Note: FAQ_CHANGELOG version/timestamp are populated by app.py after import
-FAQ_CHANGELOG = []
 
+def _versioning_value(name: str, default: str = "unknown") -> str:
+    return str(getattr(_versioning, name, default))
+
+
+__version__ = _versioning_value("__version__")
+__build_datetime__ = _versioning_value("__build_datetime__")
+
+
+FAQ_CHANGELOG = [
+    {
+        "version": __version__,
+        "timestamp": __build_datetime__,
+        "summary": "Added an in-app FAQ launcher in the upper-left with a compact versioned release-notes footer.",
+    },
+]
 
 # ─ UI Rendering Functions ──────────────────────────────────────────────────
 
@@ -70,10 +90,13 @@ def _render_in_app_faq() -> None:
             """
         )
 
+    _current_version = _versioning_value("__version__")
+    _current_build_datetime = _versioning_value("__build_datetime__")
+
     _changelog_lines = "".join(
-        f'<div class="faq-changelog-line">v{html.escape(str(_entry["version"]))} | '
-        f'{html.escape(str(_entry["timestamp"]))} | '
-        f'{html.escape(str(_entry["summary"]))}</div>'
+        f'<div class="faq-changelog-line">v{html.escape(str(_entry.get("version", _current_version)))} | '
+        f'{html.escape(str(_entry.get("timestamp", _current_build_datetime)))} | '
+        f'{html.escape(str(_entry.get("summary", "")))}</div>'
         for _entry in FAQ_CHANGELOG
     )
 
@@ -196,7 +219,7 @@ def _render_in_app_faq() -> None:
                     {''.join(_faq_html_parts)}
                     <div class="faq-footer">
                         <div class="faq-footer-label">Version &amp; Changelog</div>
-                        <div class="faq-version-line">Current version: v{html.escape(__version__)} | Build time: {html.escape(__build_datetime__)}</div>
+                        <div class="faq-version-line">Current version: v{html.escape(_current_version)} | Build time: {html.escape(_current_build_datetime)}</div>
                         {_changelog_lines}
                     </div>
                 </div>
@@ -207,6 +230,7 @@ def _render_in_app_faq() -> None:
     )
 
 
+__all__ = ["FAQ_CHANGELOG", "_render_in_app_faq", "_render_public_report_route"]
 def _render_public_report_route(
     get_query_params_dict: Callable,
     sign_public_report_id: Callable,

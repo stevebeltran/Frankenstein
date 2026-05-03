@@ -13,9 +13,9 @@ def render_simulation_page() -> None:
     Displays interactive map, station optimization controls, coverage analysis,
     and export options for simulated/measured stations.
     """
-components.html("""
-<script>
-(function() {
+    components.html("""
+    <script>
+    (function() {
         try {
             window._brincHasData = true;
             var doc = window.parent.document;
@@ -319,6 +319,66 @@ components.html("""
             idx: (mode != 'Off') for idx, mode in _suggestion_modes.items()
         }
 
+        def _suggestion_modes_sig(mode_map):
+            return tuple(sorted((int(idx), str(mode)) for idx, mode in mode_map.items()))
+
+        def _apply_role_target(role_suggestions, target_count):
+            target_count = max(0, int(target_count or 0))
+            current_modes = dict(st.session_state.get('suggestion_modes', {}) or {})
+            active_roles = [
+                s for s in role_suggestions
+                if current_modes.get(s['station_idx'], 'Off') != 'Off'
+            ]
+            changed = False
+
+            if len(active_roles) > target_count:
+                keep_ids = {
+                    s['station_idx']
+                    for s in active_roles[:target_count]
+                }
+                for s in role_suggestions:
+                    idx = s['station_idx']
+                    new_mode = s['role'] if idx in keep_ids else 'Off'
+                    if current_modes.get(idx, 'Off') != new_mode:
+                        current_modes[idx] = new_mode
+                        changed = True
+                    st.session_state[f'suggest_mode_{idx}'] = current_modes.get(idx, 'Off')
+                st.session_state['suggestion_modes'] = current_modes
+                st.session_state['suggestion_toggles'] = {
+                    idx: (mode != 'Off') for idx, mode in current_modes.items()
+                }
+                return current_modes, changed
+
+            if len(active_roles) < target_count:
+                for s in role_suggestions:
+                    idx = s['station_idx']
+                    if current_modes.get(idx, 'Off') == 'Off':
+                        current_modes[idx] = s['role']
+                        st.session_state[f'suggest_mode_{idx}'] = s['role']
+                        changed = True
+                        active_roles.append(s)
+                        if len(active_roles) >= target_count:
+                            break
+
+            for s in role_suggestions:
+                idx = s['station_idx']
+                st.session_state[f'suggest_mode_{idx}'] = current_modes.get(idx, 'Off')
+            st.session_state['suggestion_modes'] = current_modes
+            st.session_state['suggestion_toggles'] = {
+                idx: (mode != 'Off') for idx, mode in current_modes.items()
+            }
+            return current_modes, changed
+
+        _prev_suggestion_sync = st.session_state.get('_suggestion_sync_sig')
+        _prev_resp_count = _prev_guard_count = None
+        _prev_modes_sig = None
+        if _prev_suggestion_sync is not None:
+            _prev_resp_count, _prev_guard_count, _prev_modes_sig = _prev_suggestion_sync
+
+        _curr_modes_sig = _suggestion_modes_sig(_suggestion_modes)
+        _custom_resp_lock_count = len(pinned_resp_names)
+        _custom_guard_lock_count = len(pinned_guard_names)
+
         _sug_resp_idx = [
             s['station_idx'] for s in _suggestions
             if _suggestion_modes.get(s['station_idx']) == 'Responder'
@@ -327,15 +387,61 @@ components.html("""
             s['station_idx'] for s in _suggestions
             if _suggestion_modes.get(s['station_idx']) == 'Guardian'
         ]
-        locked_r_pins = list(dict.fromkeys(locked_r_pins + _sug_resp_idx))
-        locked_g_pins = list(dict.fromkeys(locked_g_pins + _sug_guard_idx))
-        desired_resp_count = len(locked_r_pins)
-        desired_guard_count = len(locked_g_pins)
-        if desired_resp_count != k_responder or desired_guard_count != k_guardian:
-            k_responder = desired_resp_count
-            k_guardian = desired_guard_count
+
+        _slider_changed = (
+            _prev_suggestion_sync is None
+            or k_responder != _prev_resp_count
+            or k_guardian != _prev_guard_count
+        )
+        _modes_changed = (
+            _prev_suggestion_sync is None
+            or _curr_modes_sig != _prev_modes_sig
+        )
+
+        if _prev_suggestion_sync is None:
+            # Initialize the suggestion counts from the current selection state.
+            k_responder = _custom_resp_lock_count + len(_sug_resp_idx)
+            k_guardian = _custom_guard_lock_count + len(_sug_guard_idx)
             st.session_state['k_resp'] = k_responder
             st.session_state['k_guard'] = k_guardian
+        elif _slider_changed and not _modes_changed:
+            _resp_target = max(int(k_responder or 0) - _custom_resp_lock_count, 0)
+            _guard_target = max(int(k_guardian or 0) - _custom_guard_lock_count, 0)
+            _resp_suggestions = [
+                s for s in _suggestions
+                if _suggestion_modes.get(s['station_idx']) in {'Responder', 'Off'}
+            ]
+            _guard_suggestions = [
+                s for s in _suggestions
+                if _suggestion_modes.get(s['station_idx']) in {'Guardian', 'Off'}
+            ]
+            _suggestion_modes, _resp_changed = _apply_role_target(_resp_suggestions, _resp_target)
+            _suggestion_modes, _guard_changed = _apply_role_target(_guard_suggestions, _guard_target)
+            if _resp_changed or _guard_changed:
+                st.session_state['suggestion_modes'] = _suggestion_modes
+                st.session_state['suggestion_toggles'] = {
+                    idx: (mode != 'Off') for idx, mode in _suggestion_modes.items()
+                }
+                _curr_modes_sig = _suggestion_modes_sig(_suggestion_modes)
+        else:
+            k_responder = _custom_resp_lock_count + len(_sug_resp_idx)
+            k_guardian = _custom_guard_lock_count + len(_sug_guard_idx)
+            st.session_state['k_resp'] = k_responder
+            st.session_state['k_guard'] = k_guardian
+
+        locked_r_pins = list(dict.fromkeys(locked_r_pins + [
+            s['station_idx'] for s in _suggestions
+            if _suggestion_modes.get(s['station_idx']) == 'Responder'
+        ]))
+        locked_g_pins = list(dict.fromkeys(locked_g_pins + [
+            s['station_idx'] for s in _suggestions
+            if _suggestion_modes.get(s['station_idx']) == 'Guardian'
+        ]))
+        st.session_state['_suggestion_sync_sig'] = (
+            int(k_responder or 0),
+            int(k_guardian or 0),
+            _curr_modes_sig,
+        )
 
     # ── OPTIMIZATION ──────────────────────────────────────────────────
     _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
@@ -1493,22 +1599,28 @@ components.html("""
             if _sug_off_lat:
                 fig.add_trace(go.Scattermap(
                     lat=_sug_off_lat, lon=_sug_off_lon,
-                    mode='text+markers',
-                    text=['?' for _ in _sug_off_lat],
-                    textfont=dict(size=11, color='rgba(200,200,200,0.7)', weight=700),
-                    marker=dict(size=6, color='rgba(200,200,200,0.25)'),
+                    mode='markers',
+                    marker=dict(
+                        size=11,
+                        color='#FFD400',
+                        symbol='diamond',
+                        opacity=0.95,
+                    ),
                     hovertemplate='%{customdata}<extra></extra>',
                     customdata=_sug_off_text,
-                    name='Suggested Sites',
+                    name='Suggested Sites (off)',
                     showlegend=len(_sug_on_lat) == 0,
                 ))
             if _sug_on_lat:
                 fig.add_trace(go.Scattermap(
                     lat=_sug_on_lat, lon=_sug_on_lon,
-                    mode='text+markers',
-                    text=['?' for _ in _sug_on_lat],
-                    textfont=dict(size=13, color='#00D2FF', weight=700),
-                    marker=dict(size=8, color='rgba(0,210,255,0.5)'),
+                    mode='markers',
+                    marker=dict(
+                        size=15,
+                        color='#00E5FF',
+                        symbol='diamond',
+                        opacity=1.0,
+                    ),
                     hovertemplate='%{customdata}<extra></extra>',
                     customdata=_sug_on_text,
                     name='Suggested Sites (active)',
@@ -2162,7 +2274,7 @@ components.html("""
             df_calls_full=df_calls_full,
             facility_counts=_cid_fac_counts or None,
         )
-        components.html(_cid_html, height=3600, scrolling=False)
+        components.html(_cid_html, height=3150, scrolling=False)
         st.markdown("<div style='margin-top:-52px;'></div>", unsafe_allow_html=True)
 
     _show_school_safety_section = st.toggle(

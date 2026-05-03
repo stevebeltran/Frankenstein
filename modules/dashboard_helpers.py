@@ -12,7 +12,7 @@ import pandas as pd
 from shapely.geometry import box
 from shapely.ops import unary_union
 
-from modules.config import calculate_max_flights_per_day, US_STATES_ABBR
+from modules.config import calculate_max_flights_per_day, US_STATES_ABBR, text_muted
 from modules.versioning import __version__ as _app_version
 
 
@@ -361,7 +361,15 @@ def render_data_filters(st, df_stations_all, df_calls, df_calls_full):
 
 def render_display_options(st):
     disp_expander = st.sidebar.expander('👁️ Display Options', expanded=False)
+    
+    def section_header(label):
+        st.markdown(
+            f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>{label}</div>",
+            unsafe_allow_html=True,
+        )
+
     with disp_expander:
+        section_header('🗺️ Map & Boundaries')
         show_satellite = st.toggle(
             'Satellite Imagery',
             value=False,
@@ -380,6 +388,8 @@ def render_display_options(st):
             key='use_county_boundary',
             help='Redraw the map using the county boundary instead of the city/place boundary.',
         )
+
+        section_header('✈️ Safety & Airspace')
         show_faa = st.toggle(
             'FAA LAANC Airspace',
             value=False,
@@ -398,6 +408,8 @@ def render_display_options(st):
             key='show_obstacles_b',
             help='FAA Digital Obstacle File: obstacles > 200 ft AGL. Diamond markers.',
         )
+
+        section_header('📶 Infrastructure')
         show_coverage = st.toggle(
             '4G LTE Coverage',
             value=False,
@@ -410,6 +422,8 @@ def render_display_options(st):
             key='show_cell_towers_b',
             help='OpenCelliD cell tower locations. Useful for data-link RF validation.',
         )
+
+        section_header('🚨 Incident Analysis')
         show_heatmap = st.toggle(
             '911 Call Heatmap',
             value=False,
@@ -422,6 +436,8 @@ def render_display_options(st):
             key='show_dots_b',
             help='Show individual 911 call locations as dots on the map.',
         )
+
+        section_header('🛠️ Deployment Tools')
         show_station_suggestions = st.toggle(
             'Suggested Station Placements',
             value=True,
@@ -442,6 +458,9 @@ def render_display_options(st):
             key='simulate_traffic_b',
             help='Apply traffic-based travel delays to ground response estimates and related metrics.',
         )
+        traffic_level = st.slider('Traffic Congestion', 0, 100, 40, help='Simulates road congestion intensity. Higher values extend ground response times and related financial estimates.') if simulate_traffic else 40
+
+        section_header('📊 Interface & Privacy')
         show_health = st.toggle(
             'Health Score',
             value=False,
@@ -461,7 +480,6 @@ def render_display_options(st):
             key='simple_cards_b',
             help='Show a compact card with just the key numbers: name, type, response time, annual savings, and CapEx.',
         )
-        traffic_level = st.slider('Traffic Congestion', 0, 100, 40, help='Simulates road congestion intensity. Higher values extend ground response times and related financial estimates.') if simulate_traffic else 40
 
     return {
         'show_satellite': show_satellite,
@@ -1299,10 +1317,18 @@ def manage_custom_stations(
     pinned_guard_names = list(session_state.get('pinned_guard_names', []))
     pinned_resp_names = list(session_state.get('pinned_resp_names', []))
     session_state['show_lock_stations'] = False
-    if len(pinned_guard_names) > k_guardian:
-        st.sidebar.warning(f'Guardian Count was raised to honor {len(pinned_guard_names)} locked Guardian station(s).')
-    if len(pinned_resp_names) > k_responder:
-        st.sidebar.warning(f'Responder Count was raised to honor {len(pinned_resp_names)} locked Responder station(s).')
+    if k_responder < len(pinned_resp_names) or k_guardian < len(pinned_guard_names):
+        if k_responder < len(pinned_resp_names):
+            session_state['k_resp'] = len(pinned_resp_names)
+            st.sidebar.warning(
+                f'Cannot reduce Responder Count below {len(pinned_resp_names)} locked Responder station(s).'
+            )
+        if k_guardian < len(pinned_guard_names):
+            session_state['k_guard'] = len(pinned_guard_names)
+            st.sidebar.warning(
+                f'Cannot reduce Guardian Count below {len(pinned_guard_names)} locked Guardian station(s).'
+            )
+        st.rerun()
 
     return {
         'k_responder': k_responder,
@@ -1869,11 +1895,6 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
             bg = card_bg if mode != 'Off' else 'rgba(30,30,40,0.4)'
             opacity = '1.0' if mode != 'Off' else '0.55'
 
-            # Truncate name
-            display_name = s['name']
-            if len(display_name) > 22:
-                display_name = display_name[:20] + '…'
-
             with cols[ci]:
                 st.markdown(
                     f"<div style='border:1px solid {border_col}; border-radius:6px; "
@@ -1884,8 +1905,8 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
                     f"<span style='background:{mode_color}; color:#000; font-size:0.55rem; "
                     f"font-weight:800; padding:1px 5px; border-radius:3px;'>{mode_abbr}</span></div>"
                     f"<div style='color:{text_main}; font-weight:600; margin:2px 0; "
-                    f"white-space:nowrap; overflow:hidden; text-overflow:ellipsis;' "
-                    f"title='{s['name']}'>{display_name}</div>"
+                    f"white-space:normal; overflow:visible; text-overflow:unset; word-break:break-word;' "
+                    f"title='{s['name']}'>{s['name']}</div>"
                     f"<div style='color:{text_muted}; font-size:0.62rem;'>"
                     f"📞 {s['call_pct']}% calls · 🗺️ {s['land_pct']}% land</div>"
                     f"</div>",

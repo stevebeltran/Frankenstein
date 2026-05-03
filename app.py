@@ -1,9 +1,13 @@
 ﻿# Copyright (c) Steven Beltran. Created by Steven Beltran in partnership with BRINC Drones.
 import warnings
+try:
+    from authlib.deprecate import AuthlibDeprecationWarning
+except Exception:
+    AuthlibDeprecationWarning = DeprecationWarning
 warnings.filterwarnings(
     "ignore",
     message=r"authlib\.jose module is deprecated, please use joserfc instead\.",
-    category=DeprecationWarning,
+    category=AuthlibDeprecationWarning,
 )
 
 # Standard library imports
@@ -181,6 +185,11 @@ __build_revision__ = _versioning_mod.__build_revision__
 __build_datetime__ = _versioning_mod.__build_datetime__
 __build_line_count__ = _versioning_mod.__build_line_count__
 _render_version_badge = _versioning_mod._render_version_badge
+
+_ui_components_mod = sys.modules.get("modules.ui_components")
+if _ui_components_mod is not None:
+    _ui_components_mod.__version__ = __version__
+    _ui_components_mod.__build_datetime__ = __build_datetime__
 
 # Populate FAQ_CHANGELOG with version info (after versioning module is loaded)
 FAQ_CHANGELOG.clear()
@@ -2445,6 +2454,5 @@ _render_public_report_route(
 )
 
 main()
-
 
 

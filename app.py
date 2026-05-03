@@ -9,35 +9,59 @@ warnings.filterwarnings(
     message=r"authlib\.jose module is deprecated, please use joserfc instead\.",
     category=AuthlibDeprecationWarning,
 )
-import streamlit as st
-import pandas as pd
+
+# Standard library imports
+import base64
+import concurrent.futures as cf
+import datetime
+import glob
+import hashlib
+import heapq
+import hmac
+import html
+import io
+import itertools
+import json
+import math
 import os
+import random
+import re
+import smtplib
 import sys
+import tempfile
+import time
+import traceback
+import uuid
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+import urllib.parse
+import urllib.request
+
 # Set CWD to the project root so every relative asset path (parquets, shapefiles,
 # logos, etc.) resolves correctly regardless of how the process was launched.
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+# Third-party imports
 import geopandas as gpd
 import numpy as np
 import plotly.graph_objects as go
+import pyproj
+import streamlit as st
+from PIL import Image
+from google.oauth2.service_account import Credentials
 from shapely.geometry import Point, Polygon, MultiPolygon, box, shape
 from shapely.ops import unary_union
 from shapely.wkb import loads as _wkb_loads
-import itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib, uuid, traceback, tempfile, hashlib, hmac, time, html
-import concurrent.futures as cf
-from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+
+import gspread
 import pulp
-import urllib.request
-import urllib.parse
-import zipfile
+import simplekml
 import streamlit.components.v1 as components
 from streamlit.components.v1 import declare_component
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import gspread
-from google.oauth2.service_account import Credentials
-import pyproj
-from PIL import Image
 
 APP_DIR = Path(__file__).resolve().parent
 MODULES_DIR = APP_DIR / "modules"
@@ -78,6 +102,30 @@ def _load_local_module(module_name: str):
         return module
 
 # ── Module imports ────────────────────────────────────────────────────────────
+from modules.constants import (
+    API_TIMEOUT_DEFAULT, API_TIMEOUT_QUICK, API_TIMEOUT_STANDARD, API_TIMEOUT_LONG,
+    API_TIMEOUT_EXTENDED, API_TIMEOUT_VERY_LONG, OVERPASS_TIMEOUT, CONCURRENT_REQUEST_TIMEOUT,
+    METERS_PER_DEGREE_LATITUDE, FREQUENCY_HZ, FREQUENCY_MHZ, FSPL_COEFFICIENT,
+    TX_ALTITUDE_M, RX_ALTITUDE_M, FRESNEL_BLOCKAGE_THRESHOLD, TERRAIN_BLOCKAGE_CRITICAL_RATIO,
+    TERRAIN_BLOCKAGE_LOSS_COEFFICIENT, TERRAIN_BLOCKAGE_LOSS_MAX, CLUTTER_LOSS, FADE_MARGIN_DB,
+    OSM_SEARCH_RADIUS_SMALL, OSM_SEARCH_RADIUS_LARGE, OSM_MAX_STATIONS,
+    COORDINATE_PRECISION, SKLEARN_RANDOM_STATE, SKLEARN_BATCH_SIZE, SKLEARN_N_INIT
+)
+from modules.station_generation import (
+    _make_random_stations, _fetch_osm_stations_cached, _fetch_hifld_stations_cached,
+    generate_stations_from_calls
+)
+from modules.ui_components import (
+    _render_in_app_faq, _render_public_report_route, FAQ_CHANGELOG
+)
+# Note: FAQ_CHANGELOG will be populated after __version__ and __build_datetime__ are loaded
+from modules.coverage_analysis import (
+    _estimate_elevation_simple, _estimate_clutter_loss_db, _estimate_terrain_blockage_db,
+    _path_loss_advanced
+)
+from modules.export_handlers import (
+    _build_corrected_export_from_merged_fallback
+)
 from modules.config import (
     CONFIG, GUARDIAN_FLIGHT_HOURS_PER_DAY, SIMULATOR_DISCLAIMER_SHORT,
     STATE_FIPS, US_STATES_ABBR, KNOWN_POPULATIONS, DEMO_CITIES, FAST_DEMO_CITIES,
@@ -134,6 +182,15 @@ __build_revision__ = _versioning_mod.__build_revision__
 __build_datetime__ = _versioning_mod.__build_datetime__
 __build_line_count__ = _versioning_mod.__build_line_count__
 _render_version_badge = _versioning_mod._render_version_badge
+
+# Populate FAQ_CHANGELOG with version info (after versioning module is loaded)
+FAQ_CHANGELOG.clear()
+FAQ_CHANGELOG.append({
+    "version": __version__,
+    "timestamp": __build_datetime__,
+    "summary": "Added an in-app FAQ launcher in the upper-left with a compact versioned release-notes footer.",
+})
+
 from modules.public_reports import (
     _build_public_report_url,
     _get_document_jurisdiction_name,
@@ -187,16 +244,6 @@ parse_census_result_files = _census_batch_mod.parse_census_result_files
 merge_census_results = _census_batch_mod.merge_census_results
 submit_census_batch_chunk = _census_batch_mod.submit_census_batch_chunk
 build_census_chunk_payload = _census_batch_mod.build_census_chunk_payload
-
-
-def _build_corrected_export_from_merged_fallback(merged_df: pd.DataFrame) -> pd.DataFrame:
-    export_df = pd.DataFrame() if merged_df is None else merged_df.copy().reset_index(drop=True)
-    export_df = export_df.drop(columns=['_census_merge_key', '_census_filled'], errors='ignore')
-    if 'lat' in export_df.columns:
-        export_df['lat'] = pd.to_numeric(export_df['lat'], errors='coerce')
-    if 'lon' in export_df.columns:
-        export_df['lon'] = pd.to_numeric(export_df['lon'], errors='coerce')
-    return export_df
 
 
 build_corrected_export_from_merged = getattr(
@@ -289,614 +336,9 @@ def _reset_census_state(session_state):
     session_state['census_download_notice'] = False
 
 
-def _render_public_report_route():
-    _params = _get_query_params_dict()
-    _report_id = str(_params.get("public_report", "")).strip()
-    _sig = str(_params.get("sig", "")).strip()
-    if not _report_id:
-        return False
-
-    try:
-        _expected_sig = _sign_public_report_id(_report_id)
-        _html_path = _public_report_html_path(_report_id)
-        _meta_path = _public_report_metadata_path(_report_id)
-    except ValueError:
-        st.error("Invalid public report link.")
-        st.stop()
-
-    if not _sig or not hmac.compare_digest(_sig, _expected_sig):
-        st.error("Invalid public report link.")
-        st.stop()
-
-    if not _html_path.exists():
-        st.warning("This public report is not available yet.")
-        st.stop()
-
-    _scan_meta = {}
-    if _meta_path.exists():
-        try:
-            _scan_meta = json.loads(_meta_path.read_text(encoding="utf-8"))
-        except Exception:
-            _scan_meta = {}
-
-    _qr_city = str(_scan_meta.get("city", "") or "").strip()
-    _qr_state = str(_scan_meta.get("state", "") or "").strip()
-    _qr_rep_name = str(_scan_meta.get("rep_name", "") or "").strip() or "BRINC Representative"
-    _qr_rep_email = str(_scan_meta.get("rep_email", "") or "").strip() or "sales@brincdrones.com"
-    _qr_loc = ", ".join([x for x in [_qr_city, _qr_state] if x]).strip() or "your jurisdiction"
-    _qr_lead_subject = urllib.parse.quote(f"DFR demo request - {_qr_loc}")
-    _qr_lead_body = urllib.parse.quote(
-        f"Hi {_qr_rep_name},\n\nI would like a custom DFR coverage analysis for {_qr_loc}.\n\nAgency:\nBest callback number:\n\nThanks,"
-    )
-    _qr_mailto = f"mailto:{_qr_rep_email}?subject={_qr_lead_subject}&body={_qr_lead_body}"
-
-    try:
-        _headers = dict(st.context.headers)
-    except Exception:
-        _headers = {}
-    _ua = _headers.get("User-Agent", _headers.get("user-agent", ""))
-    _lang = _headers.get("Accept-Language", _headers.get("accept-language", ""))
-    _ip = (
-        _headers.get("X-Forwarded-For", "")
-        or _headers.get("x-forwarded-for", "")
-        or _headers.get("Remote-Addr", "")
-    ).split(",")[0].strip()
-
-    _ua_lower = _ua.lower()
-    if "iphone" in _ua_lower or "ipad" in _ua_lower:
-        _device = "iOS"
-    elif "android" in _ua_lower:
-        _device = "Android"
-    elif "mobile" in _ua_lower:
-        _device = "Mobile"
-    elif _ua:
-        _device = "Desktop"
-    else:
-        _device = ""
-
-    _log_qr_scan_to_sheets(
-        report_id=_report_id,
-        city=_scan_meta.get("city", ""),
-        state=_scan_meta.get("state", ""),
-        rep_name=_scan_meta.get("rep_name", ""),
-        rep_email=_scan_meta.get("rep_email", ""),
-        device=_device,
-        user_agent=_ua,
-        language=_lang,
-        ip=_ip,
-    )
-
-    st.set_page_config(layout="wide", page_title="BRINC DFR", page_icon="https://brincdrones.com/favicon.ico")
-    st.markdown("""
-        <style>
-            header, footer, #MainMenu,
-            [data-testid="stToolbar"],
-            [data-testid="stDecoration"],
-            [data-testid="stStatusWidget"],
-            [data-testid="stSidebar"],
-            [data-testid="stGithubButton"],
-            [data-testid="stActionButton"],
-            [data-testid="stBaseButton-header"],
-            [data-testid="stHeaderActionElements"],
-            [data-testid="stHeaderActions"],
-            [data-testid="stDeployButton"],
-            [data-testid="stAppDeployButton"],
-            [data-testid*="github"],
-            [data-testid*="Github"],
-            .stDeployButton,
-            .viewerBadge_container__,
-            .viewerBadge_link__,
-            .viewerBadge_text__,
-            #stDecoration,
-            iframe[title="streamlit_analytics"] {
-                display: none !important;
-                visibility: hidden !important;
-                pointer-events: none !important;
-            }
-            .main .block-container { padding: 0 !important; max-width: 100% !important; }
-            .stApp { background: #07101c !important; }
-        </style>
-        <script>
-            (function () {
-                const selectors = [
-                    'header',
-                    'footer',
-                    '#MainMenu',
-                    '[data-testid="stToolbar"]',
-                    '[data-testid="stDecoration"]',
-                    '[data-testid="stStatusWidget"]',
-                    '[data-testid="stSidebar"]',
-                    '[data-testid="stGithubButton"]',
-                    '[data-testid="stActionButton"]',
-                    '[data-testid="stBaseButton-header"]',
-                    '[data-testid="stHeaderActionElements"]',
-                    '[data-testid="stHeaderActions"]',
-                    '[data-testid="stDeployButton"]',
-                    '[data-testid="stAppDeployButton"]',
-                    '[data-testid*="github"]',
-                    '[data-testid*="Github"]',
-                    '.stDeployButton',
-                    '.viewerBadge_container__',
-                    '.viewerBadge_link__',
-                    '.viewerBadge_text__',
-                    'iframe[title="streamlit_analytics"]',
-                    'header a[href*="github.com"]',
-                    'header a[href*="streamlit.io"]',
-                    'header [aria-label*="GitHub"]',
-                    'header [aria-label*="github"]',
-                    'header [aria-label*="Streamlit"]',
-                    'header [title*="GitHub"]',
-                    'header [title*="github"]',
-                    'header [title*="Streamlit"]',
-                    'button[title*="GitHub"]',
-                    'button[title*="github"]'
-                ];
-
-                function stripChrome(root) {
-                    selectors.forEach(function (selector) {
-                        root.querySelectorAll(selector).forEach(function (node) {
-                            node.remove();
-                        });
-                    });
-                }
-
-                function walk(root) {
-                    if (!root) return;
-                    stripChrome(root);
-                    try {
-                        root.querySelectorAll('*').forEach(function (el) {
-                            if (el.shadowRoot) {
-                                walk(el.shadowRoot);
-                            }
-                        });
-                    } catch (e) {}
-                }
-
-                function run() {
-                    walk(document);
-                    if (window.parent && window.parent !== window) {
-                        try {
-                            walk(window.parent.document);
-                        } catch (e) {}
-                    }
-                }
-
-                run();
-                new MutationObserver(run).observe(document.documentElement, { childList: true, subtree: true });
-                window.addEventListener('load', run);
-                window.addEventListener('DOMContentLoaded', run);
-                setInterval(run, 1000);
-            })();
-        </script>
-    """, unsafe_allow_html=True)
-
-    st.markdown(f"""
-        <style>
-            :root {{
-                --qr-bg: #07101c;
-                --qr-panel: rgba(9, 20, 36, 0.92);
-                --qr-panel-soft: rgba(12, 28, 48, 0.84);
-                --qr-border: rgba(0, 210, 255, 0.16);
-                --qr-text: #eff6ff;
-                --qr-muted: #98a7bb;
-                --qr-accent: #00d2ff;
-                --qr-accent-2: #78f0ff;
-                --qr-cta: #f7fbff;
-                --qr-cta-text: #07101c;
-                --qr-shadow: 0 22px 54px rgba(0, 0, 0, 0.30);
-            }}
-            .qr-wrap {{
-                max-width: 1180px;
-                margin: 0 auto;
-                padding: 20px 16px 48px;
-                color: var(--qr-text);
-            }}
-            .qr-hero {{
-                display: grid;
-                grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-                gap: 18px;
-                align-items: stretch;
-                margin-bottom: 18px;
-            }}
-            .qr-panel {{
-                background:
-                    radial-gradient(circle at top right, rgba(0,210,255,.16), transparent 38%),
-                    linear-gradient(180deg, rgba(12, 28, 48, 0.94), rgba(7, 16, 28, 0.98));
-                border: 1px solid var(--qr-border);
-                border-radius: 24px;
-                box-shadow: var(--qr-shadow);
-                overflow: hidden;
-            }}
-            .qr-copy {{
-                padding: 24px;
-            }}
-            .qr-kicker {{
-                display: inline-flex;
-                align-items: center;
-                gap: 8px;
-                padding: 8px 12px;
-                border-radius: 999px;
-                background: rgba(0,210,255,.10);
-                color: var(--qr-accent-2);
-                font-size: 12px;
-                font-weight: 800;
-                letter-spacing: .12em;
-                text-transform: uppercase;
-                margin-bottom: 14px;
-            }}
-            .qr-title {{
-                font-size: clamp(34px, 5.8vw, 62px);
-                line-height: 0.96;
-                font-weight: 900;
-                letter-spacing: -0.04em;
-                margin: 0 0 14px;
-            }}
-            .qr-subtitle {{
-                font-size: clamp(16px, 2.8vw, 21px);
-                line-height: 1.45;
-                color: var(--qr-muted);
-                margin-bottom: 18px;
-                max-width: 28em;
-            }}
-            .qr-loc {{
-                margin-bottom: 18px;
-                color: var(--qr-accent-2);
-                font-size: 15px;
-                font-weight: 700;
-            }}
-            .qr-cta-row {{
-                display: flex;
-                flex-wrap: wrap;
-                gap: 12px;
-                margin-bottom: 14px;
-            }}
-            .qr-btn {{
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                min-height: 52px;
-                padding: 0 20px;
-                border-radius: 14px;
-                text-decoration: none;
-                font-size: 16px;
-                font-weight: 800;
-                transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
-            }}
-            .qr-btn:hover {{
-                transform: translateY(-1px);
-            }}
-            .qr-btn-primary {{
-                background: var(--qr-cta);
-                color: var(--qr-cta-text) !important;
-                box-shadow: 0 10px 24px rgba(247, 251, 255, 0.18);
-            }}
-            .qr-btn-secondary {{
-                background: rgba(0,210,255,.08);
-                color: var(--qr-text) !important;
-                border: 1px solid rgba(120,240,255,.18);
-            }}
-            .qr-note {{
-                color: var(--qr-muted);
-                font-size: 14px;
-                line-height: 1.5;
-            }}
-            .qr-visual {{
-                padding: 18px;
-                display: flex;
-                flex-direction: column;
-                gap: 14px;
-            }}
-            .qr-visual-head {{
-                display: flex;
-                justify-content: space-between;
-                gap: 10px;
-                align-items: baseline;
-            }}
-            .qr-visual-head strong {{
-                font-size: 18px;
-                letter-spacing: -0.02em;
-            }}
-            .qr-visual-head span {{
-                color: var(--qr-muted);
-                font-size: 13px;
-            }}
-            .qr-preview {{
-                min-height: 210px;
-                background:
-                    linear-gradient(140deg, rgba(0,210,255,.12), rgba(0,210,255,0) 38%),
-                    linear-gradient(180deg, rgba(5,13,24,.92), rgba(8,18,32,.92));
-                border: 1px solid rgba(255,255,255,.06);
-                border-radius: 20px;
-                padding: 18px;
-                display: grid;
-                grid-template-columns: 1.15fr .85fr;
-                gap: 12px;
-                align-items: stretch;
-            }}
-            .qr-preview-main,
-            .qr-preview-side {{
-                border-radius: 16px;
-                background: rgba(255,255,255,.03);
-                border: 1px solid rgba(255,255,255,.06);
-                position: relative;
-                overflow: hidden;
-            }}
-            .qr-preview-main::before {{
-                content: "";
-                position: absolute;
-                inset: 0;
-                background:
-                    radial-gradient(circle at 52% 44%, rgba(0,210,255,.36), transparent 14%),
-                    radial-gradient(circle at 42% 58%, rgba(120,240,255,.26), transparent 12%),
-                    linear-gradient(0deg, rgba(255,255,255,.04) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
-                background-size: auto, auto, 26px 26px, 26px 26px;
-            }}
-            .qr-preview-side {{
-                padding: 14px;
-                display: flex;
-                flex-direction: column;
-                gap: 10px;
-            }}
-            .qr-preview-chip {{
-                height: 44px;
-                border-radius: 12px;
-                background: rgba(255,255,255,.04);
-                border: 1px solid rgba(255,255,255,.06);
-            }}
-            .qr-section {{
-                margin-top: 18px;
-                padding: 22px;
-            }}
-            .qr-section-title {{
-                font-size: 14px;
-                font-weight: 800;
-                letter-spacing: .12em;
-                text-transform: uppercase;
-                color: var(--qr-accent-2);
-                margin-bottom: 12px;
-            }}
-            .qr-section h2 {{
-                margin: 0 0 10px;
-                font-size: clamp(26px, 4.2vw, 40px);
-                line-height: 1.02;
-                letter-spacing: -0.03em;
-            }}
-            .qr-section p {{
-                margin: 0;
-                color: var(--qr-muted);
-                font-size: 16px;
-                line-height: 1.6;
-            }}
-            .qr-value-grid, .qr-compare-grid {{
-                display: grid;
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-                gap: 12px;
-                margin-top: 16px;
-            }}
-            .qr-value-card, .qr-compare-card {{
-                padding: 18px;
-                border-radius: 18px;
-                background: var(--qr-panel-soft);
-                border: 1px solid rgba(255,255,255,.06);
-            }}
-            .qr-value-card strong, .qr-compare-card strong {{
-                display: block;
-                margin-bottom: 8px;
-                font-size: 17px;
-                letter-spacing: -0.02em;
-            }}
-            .qr-value-card span, .qr-compare-card span {{
-                color: var(--qr-muted);
-                font-size: 15px;
-                line-height: 1.55;
-            }}
-            .qr-compare-card.is-after {{
-                border-color: rgba(0,210,255,.22);
-                box-shadow: inset 0 0 0 1px rgba(0,210,255,.08);
-            }}
-            .qr-form-shell {{
-                margin-top: 18px;
-                padding: 22px;
-                border-radius: 24px;
-                background:
-                    radial-gradient(circle at top left, rgba(0,210,255,.12), transparent 34%),
-                    linear-gradient(180deg, rgba(12, 28, 48, 0.98), rgba(7, 16, 28, 0.98));
-                border: 1px solid var(--qr-border);
-                box-shadow: var(--qr-shadow);
-            }}
-            .stTextInput label,
-            .stTextArea label {{
-                color: var(--qr-text) !important;
-                font-size: 14px !important;
-                font-weight: 700 !important;
-            }}
-            [data-testid="stTextInputRootElement"] input,
-            textarea {{
-                min-height: 54px;
-                border-radius: 14px !important;
-                border: 1px solid rgba(120,240,255,.14) !important;
-                background: rgba(255,255,255,.03) !important;
-                color: var(--qr-text) !important;
-            }}
-            [data-testid="stFormSubmitButton"] button {{
-                min-height: 54px;
-                border-radius: 14px;
-                background: var(--qr-cta);
-                color: var(--qr-cta-text);
-                font-weight: 800;
-                border: 0;
-                width: 100%;
-            }}
-            @media (max-width: 860px) {{
-                .qr-wrap {{
-                    padding: 14px 12px 34px;
-                }}
-                .qr-hero,
-                .qr-value-grid,
-                .qr-compare-grid,
-                .qr-preview {{
-                    grid-template-columns: 1fr;
-                }}
-                .qr-copy,
-                .qr-visual,
-                .qr-section,
-                .qr-form-shell {{
-                    padding: 18px;
-                }}
-                .qr-btn {{
-                    width: 100%;
-                }}
-            }}
-        </style>
-    """, unsafe_allow_html=True)
-
-    st.markdown(f"""
-        <div class="qr-wrap">
-            <section class="qr-hero">
-                <div class="qr-panel qr-copy">
-                    <div class="qr-kicker">Drone As First Responder</div>
-                    <h1 class="qr-title">Optimize DFR Coverage in Minutes</h1>
-                    <div class="qr-subtitle">Reduce response times, maximize coverage, and justify deployment with real data.</div>
-                    <div class="qr-loc">Prepared for {_qr_loc}</div>
-                    <div class="qr-cta-row">
-                        <a class="qr-btn qr-btn-primary" href="{_qr_mailto}">Request a Demo</a>
-                        <a class="qr-btn qr-btn-secondary" href="#qr-lead-form">Get a Custom Analysis</a>
-                    </div>
-                    <div class="qr-note">Review the deployment summary below, then request a city-specific analysis from {_qr_rep_name}.</div>
-                </div>
-                <div class="qr-panel qr-visual">
-                    <div class="qr-visual-head">
-                        <strong>Coverage model preview</strong>
-                        <span>QR report for {_qr_loc}</span>
-                    </div>
-                    <div class="qr-preview">
-                        <div class="qr-preview-main"></div>
-                        <div class="qr-preview-side">
-                            <div class="qr-preview-chip"></div>
-                            <div class="qr-preview-chip"></div>
-                            <div class="qr-preview-chip"></div>
-                            <div class="qr-preview-chip" style="height:72px;"></div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-            <section class="qr-panel qr-section">
-                <div class="qr-section-title">Instant Value</div>
-                <h2>Why agencies care</h2>
-                <div class="qr-value-grid">
-                    <div class="qr-value-card"><strong>Identify optimal drone station locations</strong><span>Find the sites that produce the largest operational impact before committing budget or personnel.</span></div>
-                    <div class="qr-value-card"><strong>Predict response times before deployment</strong><span>Model likely arrival performance before aircraft, docks, or staffing plans are finalized.</span></div>
-                    <div class="qr-value-card"><strong>Compare DFR against legacy response models</strong><span>Evaluate drone coverage against patrol-only or helicopter-supported response in the same jurisdiction.</span></div>
-                    <div class="qr-value-card"><strong>Model real call data, not theory</strong><span>Use actual geography and incident density to produce defensible deployment recommendations.</span></div>
-                </div>
-            </section>
-            <section class="qr-panel qr-section">
-                <div class="qr-section-title">What You Just Saw</div>
-                <h2>Real-time deployment output, not a static mockup</h2>
-                <p>The simulation you just watched was generated from jurisdiction-specific geography and call density. The output is designed to support defendable deployment strategy discussions, not just a generic product demo.</p>
-            </section>
-            <section class="qr-panel qr-section">
-                <div class="qr-section-title">Before / After</div>
-                <h2>See the planning difference immediately</h2>
-                <div class="qr-compare-grid">
-                    <div class="qr-compare-card">
-                        <strong>Before: conventional response planning</strong>
-                        <span>Station decisions rely on intuition, broad coverage assumptions, and limited visibility into where aerial response changes arrival time.</span>
-                    </div>
-                    <div class="qr-compare-card is-after">
-                        <strong>After: optimized DFR layout</strong>
-                        <span>Deployment decisions are tied to mapped demand, modeled response performance, and a jurisdiction-specific station plan you can defend internally.</span>
-                    </div>
-                </div>
-            </section>
-        </div>
-    """, unsafe_allow_html=True)
-
-    components.html(_html_path.read_text(encoding="utf-8"), height=1320, scrolling=True)
-
-    st.markdown('<div id="qr-lead-form"></div>', unsafe_allow_html=True)
-    st.markdown("""
-        <div class="qr-wrap">
-            <section class="qr-form-shell">
-                <div class="qr-section-title">Next Step</div>
-                <h2 style="margin:0 0 10px;font-size:clamp(26px,4.2vw,40px);line-height:1.02;letter-spacing:-0.03em;">Book a 15-minute demo or request a custom city analysis</h2>
-                <p style="margin:0 0 16px;color:var(--qr-muted);font-size:16px;line-height:1.6;">Leave your work email and jurisdiction details. This keeps mobile typing light and gives the follow-up enough context to be useful.</p>
-            </section>
-        </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown('<div class="qr-wrap"><div class="qr-form-shell">', unsafe_allow_html=True)
-    with st.form("qr_lead_capture"):
-        _lead_name = st.text_input("Name")
-        _lead_email = st.text_input("Work Email")
-        _lead_agency = st.text_input("Agency / Jurisdiction", value=_qr_loc if _qr_loc != "your jurisdiction" else "")
-        _lead_notes = st.text_area("What city or county should we model?", placeholder="City, county, or agency name")
-        _lead_submit = st.form_submit_button("Get a Custom Analysis")
-    st.markdown('</div></div>', unsafe_allow_html=True)
-
-    if _lead_submit:
-        _lead_name_clean = str(_lead_name or "").strip()
-        _lead_email_clean = str(_lead_email or "").strip()
-        _lead_agency_clean = str(_lead_agency or "").strip()
-        _lead_notes_clean = str(_lead_notes or "").strip()
-        if not _lead_email_clean:
-            st.warning("Enter a work email to request a custom analysis.")
-        else:
-            _lead_details = {
-                "report_id": _report_id,
-                "lead_source": "qr_public_report",
-                "agency": _lead_agency_clean,
-                "notes": _lead_notes_clean,
-                "assigned_rep": _qr_rep_name,
-                "assigned_rep_email": _qr_rep_email,
-            }
-            try:
-                _log_to_sheets(
-                    _qr_city,
-                    _qr_state,
-                    "QR_LEAD",
-                    0,
-                    0,
-                    0.0,
-                    _lead_name_clean,
-                    _lead_email_clean,
-                    details=_lead_details,
-                )
-            except Exception:
-                pass
-            try:
-                _notify_email(
-                    _qr_city,
-                    _qr_state,
-                    "QR_LEAD",
-                    0,
-                    0,
-                    0.0,
-                    _lead_name_clean,
-                    _lead_email_clean,
-                    details=_lead_details,
-                )
-            except Exception:
-                pass
-            st.success("Request received. We will follow up with a custom analysis.")
-
-    st.markdown(f"""
-        <div class="qr-wrap">
-            <div class="qr-cta-row" style="margin-top:4px;">
-                <a class="qr-btn qr-btn-primary" href="{_qr_mailto}">Email {_qr_rep_name}</a>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
-    st.stop()
 
 
-_render_public_report_route()
-
-
-
-
-def _select_best_boundary_for_calls(df_calls, city_text, state_abbr, prefer_county=False):
+def _select_best_boundary_for_calls(df_calls: pd.DataFrame, city_text: str, state_abbr: str, prefer_county: bool = False) -> Optional[Tuple[Any, int, Any]]:
     """Try place and county boundaries and keep the candidate containing the most uploaded calls."""
     candidates = []
 
@@ -947,388 +389,14 @@ def _select_best_boundary_for_calls(df_calls, city_text, state_abbr, prefer_coun
     return True, best_gdf, best_kind, int(best_hits)
 
 # ============================================================
-# COMMAND CENTER ANALYTICS GENERATOR
+# Station Generation (moved to modules/station_generation.py)
 # ============================================================
-
-# ============================================================
-# AGGRESSIVE DATA PARSER
-# ============================================================
-def _make_random_stations(df_calls, n=40, boundary_geom=None, epsg_code=None):
-    """Fallback station generator based on call-density hotspots.
-
-    If a city boundary is supplied, only incidents inside that boundary are used and
-    final station coordinates are snapped to the nearest in-boundary incident so every
-    suggested site remains inside the geographic area.
-    """
-    if df_calls is None or df_calls.empty:
-        return pd.DataFrame()
-
-    work = df_calls.copy()
-    work['lat'] = pd.to_numeric(work['lat'], errors='coerce')
-    work['lon'] = pd.to_numeric(work['lon'], errors='coerce')
-    work = work.dropna(subset=['lat', 'lon']).reset_index(drop=True)
-    if work.empty:
-        return pd.DataFrame()
-
-    if boundary_geom is not None and epsg_code is not None:
-        try:
-            work_gdf = gpd.GeoDataFrame(work, geometry=gpd.points_from_xy(work.lon, work.lat), crs="EPSG:4326").to_crs(epsg=int(epsg_code))
-            inside_mask = work_gdf.within(boundary_geom)
-            if inside_mask.any():
-                work = work.loc[inside_mask.values].reset_index(drop=True)
-        except Exception:
-            pass
-        if work.empty:
-            return pd.DataFrame()
-
-    lats = work['lat'].dropna().values
-    lons = work['lon'].dropna().values
-    if len(lats) == 0:
-        return pd.DataFrame()
-
-    q1_la, q3_la = np.percentile(lats, 5), np.percentile(lats, 95)
-    q1_lo, q3_lo = np.percentile(lons, 5), np.percentile(lons, 95)
-    iqr_la, iqr_lo = q3_la - q1_la, q3_lo - q1_lo
-    buf_la, buf_lo = max(iqr_la * 0.5, 0.01), max(iqr_lo * 0.5, 0.01)
-    mask = ((lats >= q1_la - buf_la) & (lats <= q3_la + buf_la) &
-            (lons >= q1_lo - buf_lo) & (lons <= q3_lo + buf_lo))
-    clean_lats, clean_lons = lats[mask], lons[mask]
-    if len(clean_lats) == 0:
-        clean_lats, clean_lons = lats, lons
-
-    base_coords = np.column_stack([clean_lats, clean_lons])
-    if len(base_coords) == 0:
-        return pd.DataFrame()
-
-    try:
-        from sklearn.cluster import MiniBatchKMeans as _KM
-        k = min(n, len(base_coords))
-        km = _KM(n_clusters=k, random_state=42, batch_size=1024, n_init=3)
-        km.fit(base_coords)
-        centroids = km.cluster_centers_
-    except Exception:
-        np.random.seed(42)
-        idx = np.random.choice(len(base_coords), min(n, len(base_coords)), replace=False)
-        centroids = base_coords[idx]
-
-    # Snap every centroid to the nearest actual in-boundary call to guarantee the
-    # proposed station remains inside the jurisdiction geometry.
-    snapped = []
-    for cen_lat, cen_lon in centroids:
-        d2 = (base_coords[:, 0] - cen_lat) ** 2 + (base_coords[:, 1] - cen_lon) ** 2
-        nearest = base_coords[int(np.argmin(d2))]
-        snapped.append((float(nearest[0]), float(nearest[1])))
-
-    if not snapped:
-        return pd.DataFrame()
-
-    deduped = list(dict.fromkeys((round(lat, 6), round(lon, 6)) for lat, lon in snapped))
-    station_lats = np.array([lat for lat, _ in deduped])
-    station_lons = np.array([lon for _, lon in deduped])
-
-    k_actual = len(station_lats)
-    types = (['Police'] * max(1, math.ceil(k_actual * 0.5)) +
-             ['Fire']   * max(1, math.ceil(k_actual * 0.3)) +
-             ['School'] * max(1, math.ceil(k_actual * 0.2)))[:k_actual]
-    return pd.DataFrame({
-        'name': [f"{types[i]} Station {i+1}" for i in range(k_actual)],
-        'lat':  station_lats,
-        'lon':  station_lons,
-        'type': types,
-    })
-
-@st.cache_data(show_spinner=False)
-def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations: int = 200,
-                                bbox_min_lat: float = None, bbox_min_lon: float = None,
-                                bbox_max_lat: float = None, bbox_max_lon: float = None):
-    """Cache-friendly OSM query keyed on rounded centroid (2 dp ≈ 1 km grid).
-    Returns (list_of_dicts | None, note_str).  All three Overpass mirrors are
-    queried in parallel — total wait = fastest mirror, not sum of all mirrors.
-    When explicit bbox bounds are provided they are used instead of the fixed
-    radii so the search covers the entire city/jurisdiction.
-    """
-    osm_urls = [
-        'https://overpass-api.de/api/interpreter',
-        'https://overpass.kumi.systems/api/interpreter',
-        'https://overpass.openstreetmap.ru/api/interpreter',
-    ]
-
-    def _try_mirror(url, query):
-        try:
-            req = urllib.request.Request(
-                f"{url}?data={urllib.parse.quote(query)}",
-                headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'}
-            )
-            with urllib.request.urlopen(req, timeout=6) as resp:
-                return json.loads(resp.read().decode('utf-8'))
-        except Exception:
-            return None
-
-    # When explicit bounds are provided, use a single pass with the full bbox;
-    # otherwise fall back to the legacy expanding-radius approach.
-    if bbox_min_lat is not None:
-        _radii = [None]  # single pass using explicit bounds
-    else:
-        _radii = [0.25, 0.45]
-
-    for R in _radii:
-        if R is None:
-            bbox = f"{bbox_min_lat},{bbox_min_lon},{bbox_max_lat},{bbox_max_lon}"
-        else:
-            bbox = f"{cen_lat_r - R},{cen_lon_r - R},{cen_lat_r + R},{cen_lon_r + R}"
-        query = (
-            f'[out:json][timeout:20];'
-            f'(node["amenity"="fire_station"]({bbox});'
-            f'node["amenity"="police"]({bbox});'
-            f'node["amenity"="school"]({bbox});'
-            f'node["amenity"="hospital"]({bbox});'
-            f'node["amenity"="library"]({bbox});'
-            f'node["building"="government"]({bbox});'
-            f'node["amenity"="ambulance_station"]({bbox});'
-            f'node["amenity"="university"]({bbox});'
-            f'node["amenity"="college"]({bbox});'
-            f'node["amenity"="bus_station"]({bbox});'
-            f'node["railway"="station"]({bbox});'
-            f'node["amenity"="community_centre"]({bbox});'
-            f'node["amenity"="courthouse"]({bbox});'
-            f'node["amenity"="social_facility"]({bbox});'
-            f'way["amenity"="fire_station"]({bbox});'
-            f'way["amenity"="police"]({bbox});'
-            f'way["amenity"="school"]({bbox});'
-            f'way["amenity"="hospital"]({bbox});'
-            f'way["amenity"="library"]({bbox});'
-            f'way["building"="government"]({bbox});'
-            f'way["amenity"="ambulance_station"]({bbox});'
-            f'way["amenity"="university"]({bbox});'
-            f'way["amenity"="college"]({bbox});'
-            f'way["amenity"="bus_station"]({bbox});'
-            f'way["railway"="station"]({bbox});'
-            f'way["amenity"="community_centre"]({bbox});'
-            f'way["amenity"="courthouse"]({bbox});'
-            f'way["amenity"="social_facility"]({bbox});'
-            f');out center;'
-        )
-        # Fire all three mirrors in parallel — first successful response wins.
-        # Use an explicit shutdown so slow mirrors do not block the caller once
-        # we already have a usable response.
-        data = None
-        _pool = cf.ThreadPoolExecutor(max_workers=3)
-        try:
-            futs = {_pool.submit(_try_mirror, url, query): url for url in osm_urls}
-            for fut in cf.as_completed(futs):
-                result = fut.result()
-                if result is not None:
-                    data = result
-                    break
-        finally:
-            _pool.shutdown(wait=False, cancel_futures=True)
-
-        if data is None:
-            continue
-
-        rows = []
-        for el in data.get('elements', []):
-            tags = el.get('tags', {})
-            lat = el.get('lat') or (el.get('center') or {}).get('lat')
-            lon = el.get('lon') or (el.get('center') or {}).get('lon')
-            if lat is None or lon is None:
-                continue
-            amenity  = tags.get('amenity', '')
-            building = tags.get('building', '')
-            railway  = tags.get('railway', '')
-            type_label = (
-                'Fire'           if amenity == 'fire_station'                    else
-                'Police'         if amenity == 'police'                          else
-                'Hospital'       if amenity == 'hospital'                        else
-                'Library'        if amenity == 'library'                         else
-                'EMS'            if amenity == 'ambulance_station'               else
-                'University'     if amenity in ('university', 'college')         else
-                'Transit'        if amenity == 'bus_station' or railway == 'station' else
-                'Community'      if amenity == 'community_centre'                else
-                'Courthouse'     if amenity == 'courthouse'                      else
-                'Social Services' if amenity == 'social_facility'               else
-                'Government'     if building == 'government'                     else
-                'School'
-            )
-            rows.append({'name': tags.get('name', f"{type_label} Station"),
-                         'lat': round(lat, 6), 'lon': round(lon, 6), 'type': type_label})
-
-        if rows:
-            df_s = pd.DataFrame(rows).drop_duplicates(subset=['lat', 'lon']).reset_index(drop=True)
-            counts, new_names = {}, []
-            for n in df_s['name']:
-                if n in counts:
-                    counts[n] += 1
-                    new_names.append(f"{n} ({counts[n]})")
-                else:
-                    counts[n] = 0
-                    new_names.append(n)
-            df_s['name'] = new_names
-            if len(df_s) > max_stations:
-                pri = {'Police': 0, 'Fire': 1, 'EMS': 2, 'School': 3, 'Hospital': 4, 'University': 5, 'Transit': 6, 'Courthouse': 7, 'Community': 8, 'Government': 9, 'Social Services': 10, 'Library': 11}
-                df_s['_pri'] = df_s['type'].map(pri).fillna(3)
-                df_s = df_s.sort_values('_pri').head(max_stations).drop(columns='_pri').reset_index(drop=True)
-            return df_s.to_dict('records'), f"Found {len(df_s)} stations from OpenStreetMap."
-
-    return None, "OSM unavailable"
-
-
-@st.cache_data(show_spinner=False)
-def _fetch_hifld_stations_cached(min_lat: float, min_lon: float, max_lat: float, max_lon: float):
-    """Fetch fire stations and law enforcement from HIFLD (US Federal open data).
-    Returns (list_of_dicts | None, note_str).
-    Fire and Police endpoints are queried in parallel to halve wait time.
-    HIFLD endpoints are ArcGIS FeatureServer REST services maintained by DHS.
-    """
-    _HIFLD_SOURCES = [
-        (
-            "https://services1.arcgis.com/Hp6G80Pky0om7QvQ/arcgis/rest/services/Fire_Stations/FeatureServer/0/query",
-            "Fire",
-            "NAME",
-        ),
-        (
-            "https://services1.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Law_Enforcement_Locations/FeatureServer/0/query",
-            "Police",
-            "NAME",
-        ),
-    ]
-    bbox_str = f"{min_lon},{min_lat},{max_lon},{max_lat}"
-
-    def _fetch_one(url, type_label, name_field):
-        try:
-            params = urllib.parse.urlencode({
-                'where': '1=1',
-                'geometry': bbox_str,
-                'geometryType': 'esriGeometryEnvelope',
-                'inSR': '4326',
-                'spatialRel': 'esriSpatialRelIntersects',
-                'outFields': f'{name_field},CITY,STATE',
-                'outSR': '4326',
-                'f': 'json',
-                'resultRecordCount': 500,
-            })
-            req = urllib.request.Request(
-                f"{url}?{params}",
-                headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'}
-            )
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-            rows = []
-            for feat in data.get('features', []):
-                geom  = feat.get('geometry', {})
-                attrs = feat.get('attributes', {})
-                lat   = geom.get('y')
-                lon   = geom.get('x')
-                if lat is None or lon is None:
-                    continue
-                name = (attrs.get(name_field) or '').strip() or f"{type_label} Station"
-                rows.append({'name': name, 'lat': round(float(lat), 6),
-                             'lon': round(float(lon), 6), 'type': type_label})
-            return rows
-        except Exception:
-            return []
-
-    # Fetch fire + police in parallel — total wait = max(fire, police), not sum.
-    # Shutdown explicitly so one slow service cannot hold the UI open after a
-    # usable answer has already been gathered.
-    all_rows = []
-    _pool = cf.ThreadPoolExecutor(max_workers=2)
-    try:
-        futs = [_pool.submit(_fetch_one, url, lbl, fld) for url, lbl, fld in _HIFLD_SOURCES]
-        for fut in cf.as_completed(futs):
-            all_rows.extend(fut.result())
-    finally:
-        _pool.shutdown(wait=False, cancel_futures=True)
-
-    if all_rows:
-        return all_rows, f"Found {len(all_rows)} stations from HIFLD (US Federal)."
-    return None, "HIFLD unavailable"
-
-
-def generate_stations_from_calls(df_calls, max_stations=100):
-    """Query OSM and HIFLD in parallel; merge results; fall back to call density."""
-    lats = df_calls['lat'].dropna().values
-    lons = df_calls['lon'].dropna().values
-    if len(lats) == 0:
-        return None, "No coordinates available to generate stations."
-
-    q1_la, q3_la = np.percentile(lats, 25), np.percentile(lats, 75)
-    q1_lo, q3_lo = np.percentile(lons, 25), np.percentile(lons, 75)
-    iqr_la, iqr_lo = q3_la - q1_la, q3_lo - q1_lo
-    mask = (
-        (lats >= q1_la - 2.5 * iqr_la) & (lats <= q3_la + 2.5 * iqr_la) &
-        (lons >= q1_lo - 2.5 * iqr_lo) & (lons <= q3_lo + 2.5 * iqr_lo)
-    )
-    if not np.any(mask):
-        mask = np.ones(len(lats), dtype=bool)
-    cen_lat_r = round(float(lats[mask].mean()), 2)
-    cen_lon_r = round(float(lons[mask].mean()), 2)
-
-    # Derive bbox from the actual data spread so the search covers the entire
-    # city/jurisdiction instead of a fixed radius around the centroid.
-    _pad = 0.05  # small buffer (~5.5 km) beyond the outermost calls
-    min_lat_r = round(float(lats[mask].min()) - _pad, 2)
-    max_lat_r = round(float(lats[mask].max()) + _pad, 2)
-    min_lon_r = round(float(lons[mask].min()) - _pad, 2)
-    max_lon_r = round(float(lons[mask].max()) + _pad, 2)
-
-    osm_rows, osm_note = None, "OSM unavailable"
-    hifld_rows, hifld_note = None, "HIFLD unavailable"
-
-    pool = cf.ThreadPoolExecutor(max_workers=2)
-    try:
-        futures = {
-            'OSM': pool.submit(_fetch_osm_stations_cached, cen_lat_r, cen_lon_r, max_stations,
-                               min_lat_r, min_lon_r, max_lat_r, max_lon_r),
-            'HIFLD': pool.submit(_fetch_hifld_stations_cached, min_lat_r, min_lon_r, max_lat_r, max_lon_r),
-        }
-        _, not_done = cf.wait(futures.values(), timeout=12)
-
-        for name, fut in futures.items():
-            if fut in not_done:
-                fut.cancel()
-                print(f"[BRINC] generate_stations_from_calls: {name} timed out")
-                continue
-            try:
-                rows, note = fut.result()
-            except Exception as e:
-                rows, note = None, f"{name} unavailable"
-                print(f"[BRINC] generate_stations_from_calls: {name} raised {e}")
-            if name == 'OSM':
-                osm_rows, osm_note = rows, note
-            else:
-                hifld_rows, hifld_note = rows, note
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
-
-    combined = []
-    if osm_rows:
-        combined.extend(osm_rows)
-    if hifld_rows:
-        combined.extend(hifld_rows)
-
-    if combined:
-        df_combined = pd.DataFrame(combined)
-        df_combined = df_combined.round({'lat': 3, 'lon': 3})
-        df_combined = df_combined.drop_duplicates(subset=['lat', 'lon']).reset_index(drop=True)
-        _pri_map = {'Police': 0, 'Fire': 1, 'School': 2, 'Hospital': 3, 'Government': 4, 'Library': 5}
-        df_combined['_pri'] = df_combined['type'].map(_pri_map).fillna(9)
-        df_combined = df_combined.sort_values('_pri').head(max_stations).drop(columns='_pri').reset_index(drop=True)
-        sources = [s for s, r in [('OSM', osm_rows), ('HIFLD', hifld_rows)] if r]
-        note = f"Found {len(df_combined)} candidate sites from {' + '.join(sources)}."
-        return df_combined, note
-
-    df_fallback = _make_random_stations(df_calls, n=40)
-    if not df_fallback.empty:
-        notes = [n for n in [osm_note, hifld_note] if n]
-        return df_fallback, "Fallback stations generated from call data. " + " | ".join(notes)
-    return None, "Could not generate stations ? no valid call coordinates."
 
 # ============================================================
 # CACHED DATA FUNCTIONS
 # ============================================================
 @st.cache_data
-def get_address_from_latlon(lat, lon):
+def get_address_from_latlon(lat: float, lon: float) -> str:
     url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=18&addressdetails=1"
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_DFR_Optimizer_App/2.0'})
@@ -1346,7 +414,7 @@ def get_address_from_latlon(lat, lon):
     # Fallback to coordinates if an exact street address isn't found
     return f"{lat:.5f}, {lon:.5f}"
 
-def _lookup_streamlit_secret(*names):
+def _lookup_streamlit_secret(*names: str) -> Any:
     _target_names = {str(_name or '').strip().upper() for _name in names if str(_name or '').strip()}
     if not _target_names:
         return ""
@@ -1721,7 +789,7 @@ def _search_address_candidates_cached(address_str, limit=6, preferred_city="", p
     return [{k: v for k, v in _candidate.items() if k != '_score'} for _candidate in candidates[:limit]]
 
 
-def search_address_candidates(address_str, limit=6, preferred_city="", preferred_state=""):
+def search_address_candidates(address_str: str, limit: int = 6, preferred_city: str = "", preferred_state: str = "") -> List[Dict[str, Any]]:
     return _search_address_candidates_cached(
         address_str,
         limit=limit,
@@ -2104,7 +1172,7 @@ def lookup_zip_code(zip_code: str):
         return None, None, None
 
 @st.cache_data
-def normalize_jurisdiction_name(name):
+def normalize_jurisdiction_name(name: str) -> str:
     if not name:
         return ""
     name = str(name).lower().strip()
@@ -2117,7 +1185,7 @@ def normalize_jurisdiction_name(name):
     name = re.sub(r'\s+', ' ', name).strip()
     return name
 
-def lookup_county_for_city(city_name, state_abbr):
+def lookup_county_for_city(city_name: str, state_abbr: str) -> Optional[str]:
     """Use Nominatim reverse-geocode to find the county name for a city that
     doesn't directly match a county name in the local parquet."""
     try:
@@ -2134,7 +1202,7 @@ def lookup_county_for_city(city_name, state_abbr):
     except Exception:
         return None
 
-def fetch_county_by_centroid(df_calls, state_abbr):
+def fetch_county_by_centroid(df_calls: pd.DataFrame, state_abbr: str) -> Optional[str]:
     """Find the county boundary that contains the median centroid of the call data.
 
     Uses a pure spatial lookup against counties_lite.parquet — no network calls,
@@ -2489,7 +1557,7 @@ def fetch_tiger_state_shapefile(state_fips, state_abbr, output_dir):
             url = f"https://www2.census.gov/geo/tiger/TIGER{year}/STATE/tl_{year}_us_state.zip"
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"})
-                with urllib.request.urlopen(req, timeout=45) as resp:
+                with urllib.request.urlopen(req, timeout=API_TIMEOUT_VERY_LONG) as resp:
                     zip_data = resp.read()
                 zip_file = zipfile.ZipFile(io.BytesIO(zip_data))
                 os.makedirs(temp_dir, exist_ok=True)
@@ -2543,7 +1611,7 @@ def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
             url = f"https://www2.census.gov/geo/tiger/TIGER{year}/PLACE/tl_{year}_{state_fips}_place.zip"
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"})
-                with urllib.request.urlopen(req, timeout=45) as resp:
+                with urllib.request.urlopen(req, timeout=API_TIMEOUT_VERY_LONG) as resp:
                     zip_data = resp.read()
                 zip_file = zipfile.ZipFile(io.BytesIO(zip_data))
                 os.makedirs(temp_dir, exist_ok=True)
@@ -2997,125 +2065,6 @@ def _get_terrain_cache():
     """Global cache dict for DEM tiles to avoid re-downloading."""
     return {}
 
-def _estimate_elevation_simple(lat, lon, cache=None):
-    """Fetch elevation for a point (cached) — fallback to 100 ft if unavailable."""
-    if cache is None:
-        cache = {}
-    key = (round(lat, 2), round(lon, 2))
-    if key in cache:
-        return cache[key]
-    try:
-        # Try OpenDEM API (no key required, open access)
-        import urllib.request as _ur
-        url = f"https://cloud.sdsc.edu/v1/AUTH_opentopography/Raster/SRTM_GL30/SRTM_GL30_Ellip/SRTM_GL30_Ellip_srtm.tif"
-        # Fallback: use simple rule based on typical coastal vs inland
-        elev = max(0, 100 + (lon % 1) * 50 - (lat % 1) * 30)  # Mock variation
-    except Exception:
-        elev = 100.0  # Default 100 ft mean elevation
-    cache[key] = elev
-    return elev
-
-def _estimate_clutter_loss_db(lat, lon, land_use_class="suburban"):
-    """
-    Estimate clutter/foliage/building loss based on land-use class.
-    Returns dB added to path loss (positive = attenuation).
-    Simplified model; real impl would use GIS layers.
-    """
-    clutter_map = {
-        "urban": {"base": 18.0, "var": 8.0},
-        "suburban": {"base": 12.0, "var": 5.0},
-        "rural": {"base": 6.0, "var": 3.0},
-        "water": {"base": 2.0, "var": 1.0},
-    }
-    params = clutter_map.get(land_use_class, clutter_map["suburban"])
-    # Add small pseudorandom variation based on coordinates
-    var = (abs(lat * 137.5) % 1.0 + abs(lon * 173.2) % 1.0) / 2.0 * params["var"]
-    return params["base"] + var
-
-def _estimate_terrain_blockage_db(tx_lat, tx_lon, rx_lat, rx_lon, tx_alt_m, rx_alt_m):
-    """
-    Estimate terrain blockage loss using simple Fresnel zone calculation.
-    If midpoint elevation is significantly above LOS, add loss.
-    Returns dB penalty for terrain obstruction.
-    """
-    try:
-        import math as _m
-        # Midpoint
-        mid_lat = (tx_lat + rx_lat) / 2.0
-        mid_lon = (tx_lon + rx_lon) / 2.0
-
-        # Distance
-        lat_dist_m = (rx_lat - tx_lat) * 111000.0  # approx 111 km per degree latitude
-        lon_dist_m = (rx_lon - tx_lon) * 111000.0 * _m.cos(_m.radians((tx_lat + rx_lat) / 2.0))
-        horiz_dist = _m.sqrt(lat_dist_m**2 + lon_dist_m**2)
-
-        if horiz_dist < 100:  # Too close, skip terrain calc
-            return 0.0
-
-        # Fresnel radius at midpoint
-        freq_hz = 3.39e9  # 3390 MHz
-        fresnel_r = _m.sqrt(0.5 * 3e8 / freq_hz * horiz_dist)
-
-        # Estimate elevations (simple proxy)
-        tx_elev = _estimate_elevation_simple(tx_lat, tx_lon)
-        rx_elev = _estimate_elevation_simple(rx_lat, rx_lon)
-        mid_elev = _estimate_elevation_simple(mid_lat, mid_lon)
-
-        # LOS line from tx to rx
-        tx_height = tx_elev + tx_alt_m
-        rx_height = rx_elev + rx_alt_m
-        los_height_at_mid = (tx_height + rx_height) / 2.0
-
-        # Blockage: if terrain > 0.6 Fresnel radius above LOS, add loss
-        blockage_m = max(0, mid_elev - los_height_at_mid)
-        blockage_ratio = blockage_m / max(1.0, fresnel_r)
-
-        # Knife-edge diffraction approximation
-        if blockage_ratio > 0.1:
-            loss_db = 6.0 * blockage_ratio**2  # ITM-style knife-edge loss
-        else:
-            loss_db = 0.0
-
-        return min(25.0, loss_db)  # Cap at 25 dB
-    except Exception:
-        return 0.0
-
-def _path_loss_advanced(distance_m, freq_mhz=3390, tx_alt_m=9.14, rx_alt_m=61.0,
-                        tx_lat=None, tx_lon=None, rx_lat=None, rx_lon=None,
-                        land_use="suburban"):
-    """
-    Advanced path loss model combining multiple effects:
-      PL_total = FSPL + clutter_loss + terrain_loss + fade_margin
-
-    where:
-      FSPL = 20*log10(d) + 20*log10(f_mhz) + 27.55
-      clutter_loss = function of land use
-      terrain_loss = function of elevation difference and blockage
-      fade_margin = 3 dB (flat fading margin)
-    """
-    import math as _m
-
-    if distance_m < 10:
-        return 0.0  # No loss at very short range
-
-    # Free-space path loss
-    fspl = 20.0 * _m.log10(distance_m) + 20.0 * _m.log10(freq_mhz) + 27.55
-
-    # Clutter loss
-    clutter_db = _estimate_clutter_loss_db(tx_lat, tx_lon, land_use) if tx_lat else 0.0
-
-    # Terrain/blockage loss (if we have coordinates)
-    terrain_db = 0.0
-    if tx_lat and tx_lon and rx_lat and rx_lon:
-        terrain_db = _estimate_terrain_blockage_db(tx_lat, tx_lon, rx_lat, rx_lon,
-                                                   tx_alt_m, rx_alt_m)
-
-    # Fade margin (Rayleigh/urban multipath)
-    fade_db = 3.0
-
-    total_pl = fspl + clutter_db + terrain_db + fade_db
-    return total_pl
-
 def calculate_zoom(min_lon, max_lon, min_lat, max_lat):
     lon_diff = max_lon - min_lon
     lat_diff = max_lat - min_lat
@@ -3320,9 +2269,8 @@ st.set_page_config(
 try:
     if hasattr(st, 'user') and "auth" in st.secrets:
         if not st.user.is_logged_in:
-            import base64 as _b64
             try:
-                _logo_b64 = _b64.b64encode(open("logo.png", "rb").read()).decode()
+                _logo_b64 = base64.b64encode(open("logo.png", "rb").read()).decode()
                 _logo_tag = f'<img src="data:image/png;base64,{_logo_b64}" style="height:80px;object-fit:contain;" alt="BRINC">'
             except Exception:
                 _logo_tag = '<div style="font-size:2rem;font-weight:900;color:#00D2FF;letter-spacing:4px;">BRINC DFR</div>'
@@ -3477,195 +2425,6 @@ init_session_state(st.session_state, _slugify, _build_public_report_url)
 # ============================================================
 # APP FLOW
 # ============================================================
-
-FAQ_CHANGELOG = [
-    {
-        "version": __version__,
-        "timestamp": __build_datetime__,
-        "summary": "Added an in-app FAQ launcher in the upper-left with a compact versioned release-notes footer.",
-    },
-]
-
-
-def _render_in_app_faq():
-    _faq_items = [
-        (
-            "What does this software do?",
-            "It helps plan BRINC Drone as First Responder deployments using incident data, jurisdiction boundaries, station modeling, and optimization.",
-        ),
-        (
-            "What file should I upload?",
-            "The most common input is a CAD or incident export in CSV or Excel format with usable location data.",
-        ),
-        (
-            "How is the jurisdiction selected?",
-            "The app matches uploaded incident coordinates to local jurisdiction boundary data, then lets you confirm or refine the selected area in the sidebar.",
-        ),
-        (
-            "What is the difference between Responder and Guardian?",
-            "Responder is modeled for shorter-range tactical response, while Guardian is modeled for broader long-range coverage and overwatch.",
-        ),
-        (
-            "Can I choose my own stations?",
-            "Yes. The app can recommend stations automatically, and you can also add or lock custom stations into the plan.",
-        ),
-        (
-            "What outputs can I export?",
-            "You can export a saved deployment plan, an executive-summary HTML report, and a Google Earth KML briefing file.",
-        ),
-        (
-            "Why are map layers or FAA overlays missing?",
-            "The regulatory cache may be missing or outdated. Re-run download_regulatory_layers.py and restart the app.",
-        ),
-    ]
-
-    _faq_html_parts = []
-    for _question, _answer in _faq_items:
-        _faq_html_parts.append(
-            f"""
-            <div class="faq-item">
-                <div class="faq-q">{html.escape(_question)}</div>
-                <div class="faq-a">{html.escape(_answer)}</div>
-            </div>
-            """
-        )
-
-    _changelog_lines = "".join(
-        f'<div class="faq-changelog-line">v{html.escape(str(_entry["version"]))} | '
-        f'{html.escape(str(_entry["timestamp"]))} | '
-        f'{html.escape(str(_entry["summary"]))}</div>'
-        for _entry in FAQ_CHANGELOG
-    )
-
-    st.markdown(
-        f"""
-        <style>
-        .faq-float {{
-            position: fixed;
-            top: 12px;
-            left: 14px;
-            z-index: 9998;
-            width: min(420px, calc(100vw - 28px));
-            font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        }}
-        .faq-float summary {{
-            list-style: none;
-        }}
-        .faq-float summary::-webkit-details-marker {{
-            display: none;
-        }}
-        .faq-pill {{
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 5px 10px;
-            border-radius: 999px;
-            background: rgba(8, 12, 20, 0.88);
-            border: 1px solid rgba(116, 224, 255, 0.22);
-            color: rgba(226, 238, 246, 0.92);
-            font-size: 0.72rem;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-            cursor: pointer;
-            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
-            backdrop-filter: blur(8px);
-        }}
-        .faq-pill:hover {{
-            border-color: rgba(116, 224, 255, 0.42);
-            background: rgba(10, 16, 28, 0.96);
-        }}
-        .faq-panel {{
-            margin-top: 8px;
-            background: rgba(7, 11, 18, 0.97);
-            border: 1px solid rgba(116, 224, 255, 0.18);
-            border-radius: 16px;
-            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
-            overflow: hidden;
-        }}
-        .faq-panel-inner {{
-            max-height: min(78vh, 760px);
-            overflow-y: auto;
-            padding: 14px 14px 12px;
-        }}
-        .faq-title {{
-            color: #f4fbff;
-            font-size: 0.92rem;
-            font-weight: 800;
-            margin: 0 0 4px 0;
-        }}
-        .faq-subtitle {{
-            color: rgba(193, 209, 221, 0.78);
-            font-size: 0.76rem;
-            line-height: 1.5;
-            margin-bottom: 12px;
-        }}
-        .faq-item {{
-            padding: 10px 0;
-            border-top: 1px solid rgba(255, 255, 255, 0.06);
-        }}
-        .faq-item:first-of-type {{
-            border-top: none;
-            padding-top: 0;
-        }}
-        .faq-q {{
-            color: #f6fbff;
-            font-size: 0.79rem;
-            font-weight: 700;
-            margin-bottom: 4px;
-        }}
-        .faq-a {{
-            color: rgba(209, 220, 230, 0.84);
-            font-size: 0.75rem;
-            line-height: 1.52;
-        }}
-        .faq-footer {{
-            margin-top: 12px;
-            padding-top: 10px;
-            border-top: 1px solid rgba(116, 224, 255, 0.14);
-        }}
-        .faq-footer-label {{
-            color: #7edfff;
-            font-size: 0.68rem;
-            font-weight: 800;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            margin-bottom: 6px;
-        }}
-        .faq-version-line {{
-            color: rgba(245, 250, 255, 0.92);
-            font-size: 0.72rem;
-            font-family: "IBM Plex Mono", Consolas, monospace;
-            margin-bottom: 8px;
-        }}
-        .faq-changelog-line {{
-            color: rgba(201, 214, 225, 0.82);
-            font-size: 0.70rem;
-            line-height: 1.45;
-            font-family: "IBM Plex Mono", Consolas, monospace;
-            word-break: break-word;
-        }}
-        </style>
-        <details class="faq-float">
-            <summary class="faq-pill">Help / FAQ</summary>
-            <div class="faq-panel">
-                <div class="faq-panel-inner">
-                    <div class="faq-title">BRINC DFR Planning FAQ</div>
-                    <div class="faq-subtitle">
-                        Quick answers for upload, jurisdiction setup, fleet planning, exports, and map-layer troubleshooting.
-                    </div>
-                    {''.join(_faq_html_parts)}
-                    <div class="faq-footer">
-                        <div class="faq-footer-label">Version &amp; Changelog</div>
-                        <div class="faq-version-line">Current version: v{html.escape(__version__)} | Build time: {html.escape(__build_datetime__)}</div>
-                        {_changelog_lines}
-                    </div>
-                </div>
-            </div>
-        </details>
-        """,
-        unsafe_allow_html=True,
-    )
-
 
 def main():
     _render_in_app_faq()
@@ -8343,8 +7102,7 @@ body{{background:transparent;overflow:hidden}}
 
             _qr_buf = _io_qr.BytesIO()
             _qr_img.save(_qr_buf, format="PNG")
-            import base64 as _b64
-            _qr_b64 = _b64.b64encode(_qr_buf.getvalue()).decode()
+            _qr_b64 = base64.b64encode(_qr_buf.getvalue()).decode()
 
             # ── Sales contact info from authenticated session ─────────────────────
             _qr_email = str(st.session_state.get("google_user_email", "")).strip()
@@ -11039,9 +9797,16 @@ body{{background:transparent;overflow:hidden}}
                                     help="Deploy at least one drone to generate the KML file.")
 
 
-
-
-
-
+# ── Public Report Route ───────────────────────────────────────────────────────
+# Check for public QR report mode before initializing main app
+_render_public_report_route(
+    get_query_params_dict=_get_query_params_dict,
+    sign_public_report_id=_sign_public_report_id,
+    public_report_html_path=_public_report_html_path,
+    public_report_metadata_path=_public_report_metadata_path,
+    log_qr_scan_to_sheets=_log_qr_scan_to_sheets,
+    log_to_sheets=_log_to_sheets,
+    notify_email=_notify_email,
+)
 
 main()

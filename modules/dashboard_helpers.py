@@ -840,10 +840,6 @@ def manage_custom_stations(
     else:
         session_state['_prev_selected_guardian'] = n_selected_guardian
 
-    # Debug: Show sync status
-    st.sidebar.write(f"DEBUG - Guardian cards: {n_selected_guardian}, prev: {prev_selected_guardian}, slider: {session_state.get('k_guard', 0)}")
-    st.sidebar.write(f"DEBUG - Responder cards: {n_selected_responder}, prev: {prev_selected_responder}, slider: {session_state.get('k_resp', 0)}")
-
     public_facility_types = {'Police', 'Fire', 'School', 'Government', 'Library'}
 
     def _looks_like_street_address(text):
@@ -896,8 +892,8 @@ def manage_custom_stations(
     val_r = min(session_state.get('k_resp', 2), max_resp_calc)
     val_g = min(session_state.get('k_guard', 0), max_guard_calc)
 
-    k_responder = st.sidebar.slider('🚁 Responder Count', 0, max(1, max_resp_calc), val_r, key='_slider_k_resp', help='Short-range tactical drones (2-3mi radius).')
-    k_guardian = st.sidebar.slider('🦅 Guardian Count', 0, max(1, max_guard_calc), val_g, key='_slider_k_guard', help='Long-range overwatch drones (5-8mi radius).')
+    k_responder = st.sidebar.slider('🚁 Responder Count', 0, max(1, max_resp_calc), val_r, key='k_resp', help='Short-range tactical drones (2-3mi radius).')
+    k_guardian = st.sidebar.slider('🦅 Guardian Count', 0, max(1, max_guard_calc), val_g, key='k_guard', help='Long-range overwatch drones (5-8mi radius).')
     session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
 
     station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []

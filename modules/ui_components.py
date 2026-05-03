@@ -20,6 +20,7 @@ from modules.public_reports import (
     _public_report_metadata_path,
     _sign_public_report_id,
 )
+import modules.versioning as _versioning
 from modules.versioning import __build_datetime__, __version__
 
 
@@ -306,7 +307,7 @@ def _render_in_app_faq():
                     {''.join(_faq_html_parts)}
                     <div class="faq-footer">
                         <div class="faq-footer-label">Version &amp; Changelog</div>
-                        <div class="faq-version-line">Current version: v{html.escape(__version__)} | Build time: {html.escape(__build_datetime__)}</div>
+                        <div class="faq-version-line">Current version: v{html.escape(str(_versioning.__version__))} | Build time: {html.escape(str(_versioning.__build_datetime__))}</div>
                         {_changelog_lines}
                     </div>
                 </div>

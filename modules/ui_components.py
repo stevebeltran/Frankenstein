@@ -34,10 +34,14 @@ def _versioning_value(name: str, default: str = "unknown") -> str:
     return str(getattr(_versioning, name, default))
 
 
+__version__ = _versioning_value("__version__")
+__build_datetime__ = _versioning_value("__build_datetime__")
+
+
 FAQ_CHANGELOG = [
     {
-        "version": _versioning_value("__version__"),
-        "timestamp": _versioning_value("__build_datetime__"),
+        "version": __version__,
+        "timestamp": __build_datetime__,
         "summary": "Added an in-app FAQ launcher in the upper-left with a compact versioned release-notes footer.",
     },
 ]

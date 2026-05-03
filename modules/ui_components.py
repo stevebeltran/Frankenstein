@@ -28,13 +28,16 @@ from modules.public_reports import (
     _sign_public_report_id,
 )
 import modules.versioning as _versioning
-from modules.versioning import __build_datetime__, __version__
+
+
+def _versioning_value(name: str, default: str = "unknown") -> str:
+    return str(getattr(_versioning, name, default))
 
 
 FAQ_CHANGELOG = [
     {
-        "version": __version__,
-        "timestamp": __build_datetime__,
+        "version": _versioning_value("__version__"),
+        "timestamp": _versioning_value("__build_datetime__"),
         "summary": "Added an in-app FAQ launcher in the upper-left with a compact versioned release-notes footer.",
     },
 ]
@@ -195,10 +198,13 @@ def _render_in_app_faq() -> None:
             """
         )
 
+    _current_version = _versioning_value("__version__")
+    _current_build_datetime = _versioning_value("__build_datetime__")
+
     _changelog_lines = "".join(
-        f'<div class="faq-changelog-line">v{html.escape(str(_entry["version"]))} | '
-        f'{html.escape(str(_entry["timestamp"]))} | '
-        f'{html.escape(str(_entry["summary"]))}</div>'
+        f'<div class="faq-changelog-line">v{html.escape(str(_entry.get("version", _current_version)))} | '
+        f'{html.escape(str(_entry.get("timestamp", _current_build_datetime)))} | '
+        f'{html.escape(str(_entry.get("summary", "")))}</div>'
         for _entry in FAQ_CHANGELOG
     )
 
@@ -321,7 +327,7 @@ def _render_in_app_faq() -> None:
                     {''.join(_faq_html_parts)}
                     <div class="faq-footer">
                         <div class="faq-footer-label">Version &amp; Changelog</div>
-                        <div class="faq-version-line">Current version: v{html.escape(str(_versioning.__version__))} | Build time: {html.escape(str(_versioning.__build_datetime__))}</div>
+                        <div class="faq-version-line">Current version: v{html.escape(_current_version)} | Build time: {html.escape(_current_build_datetime)}</div>
                         {_changelog_lines}
                     </div>
                 </div>

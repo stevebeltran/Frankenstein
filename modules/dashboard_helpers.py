@@ -1825,8 +1825,8 @@ def compute_station_suggestions(
         solo_call_pct = (np.sum(resp_matrix[best_idx]) / total_calls * 100)
         solo_land_pct = (meta['clipped_2m'].area / city_area * 100) if city_area > 0 else 0
 
-        # Role pattern: R, R, G, R, R, G, R, R, G, R  (≈2:1 ratio)
-        role = 'Guardian' if (rank % 3 == 2) else 'Responder'
+        # Role pattern: G, R, R, G, R, R, G, R, R  (≈2:1 ratio, Guardian first)
+        role = 'Guardian' if (rank % 3 == 0) else 'Responder'
 
         suggestions.append({
             'rank': rank + 1,

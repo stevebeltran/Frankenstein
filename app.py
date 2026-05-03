@@ -5964,7 +5964,7 @@ body{{background:transparent;overflow:hidden}}
 
         # ── OPTIMIZATION ──────────────────────────────────────────────────
         _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
-        opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{guard_strategy}_{resp_strategy}_{deployment_mode}_{incremental_build}_{bounds_hash}_{_station_signature}_{_pins_key}"
+        opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{guard_strategy}_{resp_strategy}_{deployment_mode}_{incremental_build}_{allow_redundancy}_{complement_mode}_{shared_mode}_{bounds_hash}_{_station_signature}_{_pins_key}"
         _opt_result = optimize_fleet_selection(
             st,
             st.session_state,
@@ -6728,7 +6728,23 @@ body{{background:transparent;overflow:hidden}}
             except Exception:
                 pass
 
-        avg_resp_time = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
+        # Use fastest available drone type for arrival advantage calculation
+        # Guardian (fastest) > Responder (second) > Ground unit (slowest)
+        _guardian_drones = [d for d in active_drones if d.get('type') == 'GUARDIAN']
+        _responder_drones = [d for d in active_drones if d.get('type') == 'RESPONDER']
+
+        if _guardian_drones:
+            # Use Guardian drones (fastest) for arrival advantage calculation
+            avg_resp_time = sum(d['avg_time_min'] for d in _guardian_drones) / len(_guardian_drones)
+            _fleet_for_advantage = _guardian_drones
+        elif _responder_drones:
+            # Use Responder drones if no Guardians
+            avg_resp_time = sum(d['avg_time_min'] for d in _responder_drones) / len(_responder_drones)
+            _fleet_for_advantage = _responder_drones
+        else:
+            # Fall back to all drones if only other types exist
+            avg_resp_time = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
+            _fleet_for_advantage = active_drones
 
         # Ground speed: only apply congestion reduction when traffic toggle is on.
         # Both avg_time_saved and gain_val use the same per-drone avg_time_min basis so
@@ -6737,9 +6753,9 @@ body{{background:transparent;overflow:hidden}}
         _effective_ground_speed = _base_ground_speed * (1.0 - float(traffic_level) / 100.0) if simulate_traffic else _base_ground_speed
 
         try:
-            if active_drones and _effective_ground_speed > 0:
+            if _fleet_for_advantage and _effective_ground_speed > 0:
                 _fleet_gnd_time = (sum(d['avg_time_min'] * d['speed_mph'] * 1.4 / _effective_ground_speed
-                                       for d in active_drones) / len(active_drones))
+                                       for d in _fleet_for_advantage) / len(_fleet_for_advantage))
                 avg_time_saved = max(0.0, _fleet_gnd_time - avg_resp_time)
             else:
                 avg_time_saved = 0.0
@@ -8850,10 +8866,21 @@ body{{background:transparent;overflow:hidden}}
             except Exception:
                 _dur_min = ''
 
-            avg_resp_time    = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
+            # Use fastest available drone type for arrival advantage calculation
+            _exp_guardian = [d for d in active_drones if d.get('type') == 'GUARDIAN']
+            _exp_responder = [d for d in active_drones if d.get('type') == 'RESPONDER']
+            if _exp_guardian:
+                avg_resp_time = sum(d['avg_time_min'] for d in _exp_guardian) / len(_exp_guardian)
+                _exp_fleet_for_adv = _exp_guardian
+            elif _exp_responder:
+                avg_resp_time = sum(d['avg_time_min'] for d in _exp_responder) / len(_exp_responder)
+                _exp_fleet_for_adv = _exp_responder
+            else:
+                avg_resp_time = sum(d['avg_time_min'] for d in active_drones) / len(active_drones) if active_drones else 0.0
+                _exp_fleet_for_adv = active_drones
             _exp_base_gs     = float(CONFIG["DEFAULT_TRAFFIC_SPEED"])
             _exp_eff_gs      = _exp_base_gs * (1.0 - float(traffic_level) / 100.0) if simulate_traffic else _exp_base_gs
-            avg_time_saved   = (max(0.0, (sum(d['avg_time_min'] * d['speed_mph'] * 1.4 / _exp_eff_gs for d in active_drones) / len(active_drones)) - avg_resp_time)) if active_drones and _exp_eff_gs > 0 else 0.0
+            avg_time_saved   = (max(0.0, (sum(d['avg_time_min'] * d['speed_mph'] * 1.4 / _exp_eff_gs for d in _exp_fleet_for_adv) / len(_exp_fleet_for_adv)) - avg_resp_time)) if _exp_fleet_for_adv and _exp_eff_gs > 0 else 0.0
             _calls_lons = (df_calls_full if df_calls_full is not None else df_calls)['lon'].dropna()
             _calls_lats = (df_calls_full if df_calls_full is not None else df_calls)['lat'].dropna()
             minx = float(_calls_lons.min()) if len(_calls_lons) else 0

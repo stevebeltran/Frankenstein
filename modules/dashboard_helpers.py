@@ -1877,11 +1877,6 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
             bg = card_bg if mode != 'Off' else 'rgba(30,30,40,0.4)'
             opacity = '1.0' if mode != 'Off' else '0.55'
 
-            # Truncate name
-            display_name = s['name']
-            if len(display_name) > 22:
-                display_name = display_name[:20] + '…'
-
             with cols[ci]:
                 st.markdown(
                     f"<div style='border:1px solid {border_col}; border-radius:6px; "
@@ -1892,8 +1887,8 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
                     f"<span style='background:{mode_color}; color:#000; font-size:0.55rem; "
                     f"font-weight:800; padding:1px 5px; border-radius:3px;'>{mode_abbr}</span></div>"
                     f"<div style='color:{text_main}; font-weight:600; margin:2px 0; "
-                    f"white-space:nowrap; overflow:hidden; text-overflow:ellipsis;' "
-                    f"title='{s['name']}'>{display_name}</div>"
+                    f"white-space:normal; overflow:visible; text-overflow:unset; word-break:break-word;' "
+                    f"title='{s['name']}'>{s['name']}</div>"
                     f"<div style='color:{text_muted}; font-size:0.62rem;'>"
                     f"📞 {s['call_pct']}% calls · 🗺️ {s['land_pct']}% land</div>"
                     f"</div>",

@@ -7,6 +7,8 @@ for the simulation page.
 
 import streamlit as st
 
+from modules.image_utils import get_themed_logo_base64, get_transparent_product_base64
+
 
 def render_onboarding_page() -> None:
     """Render the onboarding/upload page.

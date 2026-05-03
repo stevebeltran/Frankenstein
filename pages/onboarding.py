@@ -7,17 +7,17 @@ for the simulation page.
 
 import streamlit as st
 
-from modules.config import accent_color
 from modules.image_utils import get_themed_logo_base64, get_transparent_product_base64
 
 
 def render_onboarding_page() -> None:
     """Render the onboarding/upload page.
-    
+
     Displays upload interface, file handling, jurisdiction selection,
     and data preparation workflow. Sets st.session_state['csvs_ready']
     when data is ready for simulation page.
     """
+    from modules.config import accent_color
 
     # GRAB THE LOGO FOR THE UPLOAD PAGE
     logo_b64 = get_themed_logo_base64("logo.png", theme="dark")

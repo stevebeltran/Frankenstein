@@ -9,10 +9,18 @@ import streamlit as st
 
 def render_simulation_page() -> None:
     """Render the main simulation/analysis page.
-    
+
     Displays interactive map, station optimization controls, coverage analysis,
     and export options for simulated/measured stations.
     """
+    import streamlit.components.v1 as components
+    from modules.config import (
+        accent_color, card_bg, card_border, card_text, card_title,
+        budget_box_bg, budget_box_border, budget_box_shadow,
+        text_main, text_muted, legend_bg, legend_text,
+        map_boundary_color, map_incident_color, bg_main, bg_sidebar
+    )
+
     components.html("""
     <script>
     (function() {

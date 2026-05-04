@@ -3840,8 +3840,8 @@ def main():
             <div class="path-card" style="--accent:{accent_color};">
                 <span class="pc-icon">🗺</span>
                 <div class="pc-tag">Path 01</div>
-                <div class="pc-title">Simulate Any<br>US Region</div>
-                <div class="pc-desc">No data needed. Real Census boundaries + realistic 911 call distribution generated automatically. Stack multiple jurisdictions in one run.</div>
+                <div class="pc-title">Simulate a<br>Region</div>
+                <div class="pc-desc">Use this for simulation inputs and optional station files. Real Census boundaries and realistic 911 call distribution are generated automatically.</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -3985,11 +3985,11 @@ def main():
             st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
             st.file_uploader(
-                "Optional: Stations + boundary overlay files",
+                "Optional: Station + boundary overlay files",
                 accept_multiple_files=True,
                 type=['csv', 'xlsx', 'xls', 'xlsb', 'xlsm', 'brinc', 'json', 'txt', 'shp', 'shx', 'dbf', 'prj'],
                 key="sim_optional_uploader",
-                help="Drop a custom stations CSV/Excel plus optional shapefile sidecars (.shp/.shx/.dbf/.prj). Path 01 ignores CAD and .brinc files if included."
+                help="Drop a custom station file plus optional shapefile sidecars (.shp/.shx/.dbf/.prj). Path 01 ignores CAD and .brinc files if included."
             )
 
 
@@ -3997,7 +3997,7 @@ def main():
                 "TkFNRSxUWVBFLEFERFJFU1MsQ0FQQUNJVFksTk9URVMsTEFULExPTgpTYW1wbGUgMSBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjQyMCBXIFN0YXRlIFN0LCBSb2NrZm9yZCwgSUwgNjExMDEiLDIsUHJpbWFyeSBkb3dudG93biBkaXNwYXRjaCBodWIsNDIuMjcxMSwtODkuMDk0MApTYW1wbGUgMiBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjM0MDEgTiBNYWluIFN0LCBSb2NrZm9yZCwgSUwgNjExMDMiLDIsTm9ydGggc2lkZSBwYXRyb2wgYmFzZSw0Mi4zMTA1LC04OS4wODg3ClNhbXBsZSAzIFBvbGljZSBTdGF0aW9uLFBvbGljZSwiMTcwNyBTIE11bGZvcmQgUmQsIFJvY2tmb3JkLCBJTCA2MTEwOCIsMSxTb3V0aGVhc3QgY29ycmlkb3IgY292ZXJhZ2UsNDIuMjQ4OCwtODguOTk5OApTYW1wbGUgNCBQb2xpY2UgU3RhdGlvbixQb2xpY2UsIjQzNDAgVyBTdGF0ZSBTdCwgUm9ja2ZvcmQsIElMIDYxMTAyIiwxLFdlc3Qgc2lkZSByYXBpZCByZXNwb25zZSB1bml0LDQyLjI3MTIsLTg5LjEyNDEKU2FtcGxlIDEgRmlyZSBTdGF0aW9uLEZpcmUsIjcwOCBDbGludG9uIFN0LCBSb2NrZm9yZCwgSUwgNjExMDEiLDIsQ2VudHJhbCBmaXJlIGRpc3BhdGNoIC0gU3RhdGlvbiAxLDQyLjI3MjAsLTg5LjA4OTgKU2FtcGxlIDIgRmlyZSBTdGF0aW9uLEZpcmUsIjE0MDIgTiBDb3VydCBTdCwgUm9ja2ZvcmQsIElMIDYxMTAzIiwxLE5vcnRoIFJvY2tmb3JkIGZpcmUgY292ZXJhZ2UsNDIuMjk1MSwtODkuMDgyNgpTYW1wbGUgMyBGaXJlIFN0YXRpb24sRmlyZSwiMjI1MCBTIEFscGluZSBSZCwgUm9ja2ZvcmQsIElMIDYxMTA4IiwxLFNvdXRoIEFscGluZSBmaXJlIHJlc3BvbnNlLDQyLjI0MDEsLTg4Ljk5NjQKU2FtcGxlIDQgRmlyZSBTdGF0aW9uLEZpcmUsIjUyODUgU2FmZm9yZCBSZCwgUm9ja2ZvcmQsIElMIDYxMTAxIiwxLFdlc3QgZGlzdHJpY3QgZmlyZSBzdGF0aW9uLDQyLjI2OTgsLTg5LjE0MDIKU2FtcGxlIDEgRU1TIFN0YXRpb24sRU1TLCIxNDAxIEUgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwNCIsMixFYXN0IHNpZGUgRU1TIHJhcGlkIHJlc3BvbnNlLDQyLjI2OTQsLTg5LjA2MjEKU2FtcGxlIDIgRU1TIFN0YXRpb24sRU1TLCIzNzIwIENoYXJsZXMgU3QsIFJvY2tmb3JkLCBJTCA2MTEwOCIsMSxTb3V0aGVhc3QgRU1TIGNvdmVyYWdlIHpvbmUsNDIuMjUyMiwtODkuMDA1OApTYW1wbGUgMyBFTVMgU3RhdGlvbixFTVMsIjQ4MjUgTiBCZWxsIFNjaG9vbCBSZCwgUm9ja2ZvcmQsIElMIDYxMTA3IiwxLE5vcnRoZWFzdCBFTVMgcmVzcG9uc2UgaHViLDQyLjMwMjEsLTg4Ljk4OTEKU2FtcGxlIDEgR292IFN0YXRpb24sR292ZXJubWVudCwiNDI1IEUgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwNCIsMSxXaW5uZWJhZ28gQ291bnR5IGFkbWluIGJ1aWxkaW5nLDQyLjI3MTUsLTg5LjA4NDgKU2FtcGxlIDIgR292IFN0YXRpb24sR292ZXJubWVudCwiMzAwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMSIsMSxDaXR5IEhhbGwgLSBSb2NrZm9yZCBtdW5pY2lwYWwgY2VudGVyLDQyLjI3MTEsLTg5LjA5NTcKU2FtcGxlIDMgR292IFN0YXRpb24sR292ZXJubWVudCwiNjUwIFcgU3RhdGUgU3QsIFJvY2tmb3JkLCBJTCA2MTEwMiIsMSxQdWJsaWMgd29ya3MgYW5kIGVtZXJnZW5jeSBtZ210LDQyLjI3MTMsLTg5LjEwMTgK"
             )
 
-            st.caption("Upload a stations CSV/Excel, optional boundary shapefile sidecars, or download the sample template. If no stations file is uploaded, stations will be auto-generated from call data.")
+            st.caption("Upload a station file, optional boundary shapefile sidecars, or download the sample template. If no station file is uploaded, stations will be auto-generated from call data.")
 
             st.download_button(
                 label="📥 Sample stations.csv",
@@ -4102,9 +4102,9 @@ def main():
             <div class="path-card" style="--accent:#39FF14;">
                 <span class="pc-icon">📂</span>
                 <div class="pc-tag">Path 02</div>
-                <div class="pc-title">Upload CAD<br>or .brinc Save</div>
+                <div class="pc-title">Upload CAD<br>Incident Files</div>
                 <div class="pc-desc">
-                    Drop <b>any</b> CAD export CSV — no renaming needed.
+                    Drop <b>any</b> CAD incident file — no renaming needed.
                     Or, drop a previously saved <b>.brinc</b> file to instantly restore your deployment.
                 </div>
             </div>
@@ -4113,17 +4113,17 @@ def main():
             st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
             uploaded_files = st.file_uploader(
-                "Drop CAD calls + optional stations + optional boundary shapefile files",
+                "Drop CAD incident files + optional stations + optional boundary shapefile files",
                 accept_multiple_files=True,
                 type=['csv', 'xlsx', 'xls', 'xlsb', 'xlsm', 'brinc', 'json', 'txt', 'shp', 'shx', 'dbf', 'prj'],
                 label_visibility="collapsed",
-                help="Upload real CAD calls, optional stations, and optional shapefile sidecars (.shp/.shx/.dbf/.prj) for a display-only boundary overlay. OR drop a .brinc file to restore a previous session."
+                help="Upload real CAD incident files, optional stations, and optional shapefile sidecars (.shp/.shx/.dbf/.prj) for a display-only boundary overlay. Or drop a .brinc file to restore a previous session."
             )
 
             st.markdown("""
             <div class="field-footnote">
-                <b style='color:#555;'>1 file</b> — any CAD export (CSV or Excel); stations auto-built from OSM<br>
-                <b style='color:#555;'>Multiple CAD files</b> — drop several spreadsheets; they are combined automatically<br>
+                <b style='color:#555;'>1 file</b> — any CAD incident file; stations auto-built from OSM<br>
+                <b style='color:#555;'>Multiple CAD files</b> — drop several incident files; they are combined automatically<br>
                 <b style='color:#555;'>CAD + stations</b> — include a file with "station" in the name to supply custom stations<br>
                 <b style='color:#39FF14;'>.brinc file</b> — instantly restore a saved deployment<br>
                 Max 25,000 calls (sampled) · 100 stations
@@ -5026,7 +5026,7 @@ def main():
             <div class="path-card" style="--accent:#FFD700;">
                 <span class="pc-icon">⚡</span>
                 <div class="pc-tag">Path 03</div>
-                <div class="pc-title">1-Click Demo<br>Large US City</div>
+                <div class="pc-title">Launch a<br>Demo</div>
                 <div class="pc-desc">Instantly spin up a fully pre-configured scenario for a major US city. Ideal for live stakeholder presentations and platform walkthroughs.</div>
             </div>
             """, unsafe_allow_html=True)

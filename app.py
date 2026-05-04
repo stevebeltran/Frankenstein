@@ -6368,7 +6368,8 @@ body{{background:transparent;overflow:hidden}}
                     downtime_minutes=CONFIG["GUARDIAN_CHARGE_MIN"] if _is_guard else CONFIG["RESPONDER_CHARGE_MIN"],
                 )
                 # Alternate type cap (for cross-type deficit recommendation)
-                _alt_avg_dist    = float(station_metadata[idx].get('avg_dist_g' if d_type == 'RESPONDER' else 'avg_dist_r', 0) or 0)
+                # Use same distance as current drone type, but with alternate speed for fair comparison
+                _alt_avg_dist    = avg_dist  # Use the current drone's distance for fair comparison
                 _alt_speed       = CONFIG["GUARDIAN_SPEED"] if _alt_is_guard else CONFIG["RESPONDER_SPEED"]
                 _alt_travel_cost = (_alt_avg_dist / _alt_speed) * 60 if _alt_speed > 0 else 0.0
                 _alt_response_cost = _alt_travel_cost + _MIN_SCENE_MIN

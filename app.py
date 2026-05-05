@@ -6047,7 +6047,6 @@ body{{background:transparent;overflow:hidden}}
                         if current_mode != new_mode:
                             current_modes[idx] = new_mode
                             changed = True
-                        st.session_state[f'suggest_mode_{idx}'] = current_modes.get(idx, 'Off')
                     st.session_state['suggestion_modes'] = current_modes
                     st.session_state['suggestion_toggles'] = {
                         idx: (mode != 'Off') for idx, mode in current_modes.items()
@@ -6059,15 +6058,10 @@ body{{background:transparent;overflow:hidden}}
                         idx = s['station_idx']
                         if current_modes.get(idx, 'Off') == 'Off':
                             current_modes[idx] = target_role
-                            st.session_state[f'suggest_mode_{idx}'] = target_role
                             changed = True
                             active_roles.append(s)
                             if len(active_roles) >= target_count:
                                 break
-
-                for s in role_suggestions:
-                    idx = s['station_idx']
-                    st.session_state[f'suggest_mode_{idx}'] = current_modes.get(idx, 'Off')
                 st.session_state['suggestion_modes'] = current_modes
                 st.session_state['suggestion_toggles'] = {
                     idx: (mode != 'Off') for idx, mode in current_modes.items()

@@ -150,7 +150,7 @@ NOTIFICATIONS_AVAILABLE = True
 try:
     from modules.notifications import (
         _notify_email, _log_to_sheets, _log_login_to_sheets, _publish_public_report_to_sheets,
-        _log_qr_scan_to_sheets,
+        _log_qr_scan_to_sheets, _notify_crash_email,
     )
 except Exception as _notifications_import_error:
     NOTIFICATIONS_AVAILABLE = False
@@ -168,6 +168,9 @@ except Exception as _notifications_import_error:
         return None
 
     def _log_qr_scan_to_sheets(*args, **kwargs):
+        return None
+
+    def _notify_crash_email(*args, **kwargs):
         return None
 
     print(f"Notifications disabled at startup: {_notifications_import_error}")
@@ -3451,6 +3454,7 @@ try:
         _authed_name  = getattr(st.user, "name",  "") or _authed_email.split("@")[0]
         if not st.session_state.get('_oauth_logged', False):
             st.session_state['google_user_email'] = _authed_email
+            st.session_state['_last_user_email'] = _authed_email
             st.session_state['google_user_name']  = _authed_name
             # Derive brinc_user (first.last prefix) from email for backwards compatibility
             _prefix = _authed_email.split("@")[0]
@@ -4120,6 +4124,7 @@ def main():
                 label_visibility="collapsed",
                 help="Upload real CAD incident files, optional stations, and optional shapefile sidecars (.shp/.shx/.dbf/.prj) for a display-only boundary overlay. Or drop a .brinc file to restore a previous session."
             )
+            st.session_state['_last_uploaded_files'] = [getattr(f, 'name', '') for f in (uploaded_files or [])]
 
             st.markdown("""
             <div class="field-footnote">
@@ -4460,8 +4465,68 @@ def main():
                     _upload_logs.append(str(message))
                     return list(_upload_logs[-8:])
 
+                def _mark_upload_step(step_name):
+                    st.session_state['_upload_crash_step'] = str(step_name)
+
+                def _get_crash_user_email():
+                    email = str(st.session_state.get('google_user_email', '') or st.session_state.get('_last_user_email', '') or '').strip()
+                    if email:
+                        return email
+                    try:
+                        email = str(getattr(st.user, 'email', '') or '').strip()
+                    except Exception:
+                        email = ''
+                    return email
+
+                def _get_crash_city_state():
+                    city = str(st.session_state.get('active_city', '') or '').strip()
+                    state = str(st.session_state.get('active_state', '') or '').strip()
+                    return city, state
+
+                def _report_upload_crash(step_name, exc):
+                    tb_text = traceback.format_exc()
+                    _push_upload_log(f"❌ Crash at {step_name}: {exc}")
+                    _push_upload_log("Traceback captured for crash alert.")
+                    st.session_state['_last_upload_crash'] = {
+                        'step': str(step_name),
+                        'error': str(exc),
+                        'traceback': tb_text,
+                    }
+                    try:
+                        _city, _state = _get_crash_city_state()
+                        _files = list(st.session_state.get('_last_uploaded_files', []))
+                        _notify_crash_email(
+                            step_name,
+                            str(exc),
+                            tb_text,
+                            details={
+                                'source_app': 'Frankenstein',
+                                'session_id': st.session_state.get('session_id', ''),
+                                'user_email': _get_crash_user_email(),
+                                'city': _city,
+                                'state': _state,
+                                'file_count': len(_files),
+                                'upload_signature': current_upload_signature if 'current_upload_signature' in locals() else '',
+                                'upload_files': _files,
+                            },
+                        )
+                    except Exception as _crash_email_exc:
+                        _push_upload_log(f"⚠ Crash email failed: {_crash_email_exc}")
+                    try:
+                        _set_upload_overlay_status(
+                            title="UPLOAD ERROR",
+                            status="CRASH DETECTED",
+                            copy=f"An unexpected error occurred while {step_name}. The full traceback has been logged and emailed if notifications are configured.",
+                            progress=100,
+                            logs=_upload_logs,
+                            error=True,
+                        )
+                    except Exception:
+                        pass
+
                 # --- 1. INTELLIGENTLY CHECK FOR .BRINC FILE ---
                 # Browsers sometimes append .json to .brinc files on download
+                _mark_upload_step("checking for .brinc restore")
                 brinc_file = detect_brinc_file(uploaded_files)
 
                 if brinc_file:
@@ -4478,6 +4543,7 @@ def main():
 
                 else:
                     # --- 2. OTHERWISE, PROCESS AS NORMAL CSV CAD DATA ---
+                    _mark_upload_step("splitting uploaded files")
                     st.session_state['active_city'] = ""
                     st.session_state['active_state'] = ""
                     st.session_state['target_cities'] = []
@@ -4493,6 +4559,7 @@ def main():
 
                     if call_files:
                         census_auto_processed = False
+                        _mark_upload_step("inspecting call files for coordinates")
                         _push_upload_log("Starting coordinate inspection.")
                         _set_upload_overlay_status(
                             title="CAD UPLOAD",
@@ -4502,6 +4569,7 @@ def main():
                             logs=_upload_logs,
                         )
                         with st.spinner("🔍 Detecting column types in CAD export…"):
+                            _mark_upload_step("parsing CAD upload")
                             df_c = aggressive_parse_calls(call_files)
                         for _pq_item in st.session_state.get('parse_quality', []):
                             _pq_in = _pq_item.get('input_rows', 0)
@@ -4522,6 +4590,7 @@ def main():
                                 logs=_upload_logs,
                             )
                             with st.spinner("🛰 No recoverable coordinates found — preparing Census batch conversion; this usually takes a few seconds…"):
+                                _mark_upload_step("building Census staging data")
                                 _push_upload_log("Building partial call frame for merge-back.")
                                 _set_upload_overlay_status(
                                     title="CENSUS REQUIRED",
@@ -4906,6 +4975,7 @@ def main():
                         })
 
                         if station_file is not None:
+                            _mark_upload_step("loading uploaded stations file")
                             _push_upload_log("Loading uploaded stations file.")
                             _set_upload_overlay_status(
                                 title="UPLOAD PROCESSING",
@@ -4925,6 +4995,7 @@ def main():
                                 st.error(f"❌ Stations file error: {osm_note}")
                                 st.stop()
                         else:
+                            _mark_upload_step("generating stations from calls")
                             _push_upload_log("No stations file provided. Building stations automatically from call data.")
                             _set_upload_overlay_status(
                                 title="UPLOAD PROCESSING",
@@ -4948,6 +5019,7 @@ def main():
                             df_s = df_s.sample(100, random_state=42).reset_index(drop=True)
 
                         _push_upload_log("Detecting jurisdiction from call locations.")
+                        _mark_upload_step("detecting jurisdiction from calls")
                         _set_upload_overlay_status(
                             title="UPLOAD PROCESSING",
                             status="DETECTING JURISDICTION",
@@ -4983,6 +5055,7 @@ def main():
                         st.session_state['total_modeled_calls'] = len(df_c)
 
                         _push_upload_log("Resolving uploaded boundaries and final session state.")
+                        _mark_upload_step("resolving uploaded boundaries")
                         _set_upload_overlay_status(
                             title="UPLOAD PROCESSING",
                             status="FINALIZING DATASET",
@@ -11069,7 +11142,39 @@ body{{background:transparent;overflow:hidden}}
 
 
 
-main()
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as _app_crash_exc:
+        _app_crash_tb = traceback.format_exc()
+        try:
+            _notify_crash_email(
+                st.session_state.get('_upload_crash_step', 'application startup/runtime'),
+                str(_app_crash_exc),
+                _app_crash_tb,
+                details={
+                    'source_app': 'Frankenstein',
+                    'session_id': st.session_state.get('session_id', ''),
+                    'user_email': str(
+                        st.session_state.get('google_user_email', '')
+                        or st.session_state.get('_last_user_email', '')
+                        or getattr(st.user, 'email', '')
+                        or ''
+                    ).strip(),
+                    'city': str(st.session_state.get('active_city', '') or '').strip(),
+                    'state': str(st.session_state.get('active_state', '') or '').strip(),
+                    'file_count': len(st.session_state.get('_last_uploaded_files', [])),
+                    'upload_signature': st.session_state.get('census_source_signature', '') or st.session_state.get('_upload_crash_step', ''),
+                    'upload_files': [
+                        getattr(f, 'name', '')
+                        for f in (st.session_state.get('sim_optional_uploader') or st.session_state.get('uploaded_files') or [])
+                    ],
+                },
+            )
+        except Exception:
+            pass
+        print(_app_crash_tb)
+        raise
 
 
 

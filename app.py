@@ -2432,7 +2432,10 @@ def fetch_census_state_population(state_fips):
     return None
 
 SHAPEFILE_DIR = "jurisdiction_data"
-if not os.path.exists(SHAPEFILE_DIR): os.makedirs(SHAPEFILE_DIR)
+try:
+    os.makedirs(SHAPEFILE_DIR, exist_ok=True)
+except OSError:
+    pass  # Directory creation failed; will use temp storage if needed
 
 def _sanitize_boundary_token(value):
     return str(value or "").strip().replace(" ", "_").replace("/", "_")
@@ -7882,6 +7885,32 @@ body{{background:transparent;overflow:hidden}}
                 )
 
                 components.html(sim_html, height=700)
+
+        # ── CRASH / INCIDENT SIMULATOR ───────────────────────────────────────
+        if fleet_capex > 0:
+            st.markdown("---")
+            st.markdown(f"<h3 style='color:{text_main};'>💥 Crash / Incident Simulator <span class='tip' data-tip='Simulate realistic drone incident scenarios including bird strikes, motor failures, and parachute deployment. Generates FAA-compliant reports and telemetry analysis for training and compliance.'>?</span></h3>", unsafe_allow_html=True)
+            st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Simulate drone crash events for training, FAA compliance, and customer reporting. Select a scenario, configure conditions, and review the customer report, FAA checklist, telemetry analysis, and parachute performance metrics.</div>", unsafe_allow_html=True)
+
+            show_crash_sim = st.toggle("🛑 Enable Crash Simulator", value=False, key='show_crash_sim', help='Simulate drone incident scenarios including bird strikes, motor failures, battery failure, operator error, and weather events. Generates FAA-compliant reports.')
+            if show_crash_sim:
+                try:
+                    from modules.crash_simulator import render_crash_simulator
+                    _crash_city = st.session_state.get('active_city', 'Jurisdiction')
+                    _crash_state = st.session_state.get('active_state', 'US')
+                    render_crash_simulator(
+                        city=_crash_city,
+                        state=_crash_state,
+                        center_lat=center_lat,
+                        center_lon=center_lon,
+                        active_drones=active_drones,
+                        text_main=text_main,
+                        text_muted=text_muted,
+                        accent_color=accent_color,
+                        card_bg=card_bg,
+                    )
+                except Exception as e:
+                    st.error(f"Crash simulator unavailable: {str(e)}")
 
         _show_analytics_section = st.toggle(
             "Show CAD Ingestion Analytics",

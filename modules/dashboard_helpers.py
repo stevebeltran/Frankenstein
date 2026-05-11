@@ -1922,6 +1922,7 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
             display_text = s.get('address', '') or s['name']
 
             with cols[ci]:
+                session_state[widget_key] = mode
                 st.markdown(
                     f"<div style='border:1px solid {border_col}; border-radius:6px; "
                     f"padding:6px 8px; background:{bg}; opacity:{opacity}; "

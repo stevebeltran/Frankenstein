@@ -6017,14 +6017,48 @@ body{{background:transparent;overflow:hidden}}
             )
             st.session_state['_station_suggestions'] = _suggestions
 
-            _suggestion_modes = st.session_state.get('suggestion_modes', {}) or {}
+            _prev_synced_modes = st.session_state.get('_suggestion_synced_modes', {}) or {}
+            _existing_modes = st.session_state.get('suggestion_modes', {}) or {}
             _suggestion_modes = {
-                s['station_idx']: _suggestion_modes.get(
-                    s['station_idx'],
-                    s['role'] if s['rank'] <= 3 else 'Off',
+                s['station_idx']: st.session_state.get(
+                    f"suggest_mode_{s['station_idx']}",
+                    _existing_modes.get(
+                        s['station_idx'],
+                        s['role'] if s['rank'] <= 3 else 'Off',
+                    ),
                 )
                 for s in _suggestions
             }
+            _suggestion_curr_sig = tuple(sorted((int(idx), str(mode)) for idx, mode in _suggestion_modes.items()))
+            _prev_modes_sig = tuple(sorted((int(idx), str(mode)) for idx, mode in _prev_synced_modes.items()))
+
+            _custom_resp_lock_count = len(pinned_resp_names)
+            _custom_guard_lock_count = len(pinned_guard_names)
+
+            if _prev_synced_modes and _suggestion_curr_sig != _prev_modes_sig:
+                _resp_delta = 0
+                _guard_delta = 0
+                for _s in _suggestions:
+                    _idx = _s['station_idx']
+                    _prev_mode = _prev_synced_modes.get(_idx, 'Off')
+                    _curr_mode = _suggestion_modes.get(_idx, 'Off')
+                    if _prev_mode == _curr_mode:
+                        continue
+                    if _prev_mode == 'Responder':
+                        _resp_delta -= 1
+                    elif _prev_mode == 'Guardian':
+                        _guard_delta -= 1
+                    if _curr_mode == 'Responder':
+                        _resp_delta += 1
+                    elif _curr_mode == 'Guardian':
+                        _guard_delta += 1
+
+                if _resp_delta or _guard_delta:
+                    k_responder = max(int(k_responder or 0) + _resp_delta, _custom_resp_lock_count)
+                    k_guardian = max(int(k_guardian or 0) + _guard_delta, _custom_guard_lock_count)
+                    st.session_state['k_resp'] = k_responder
+                    st.session_state['k_guard'] = k_guardian
+
             st.session_state['suggestion_modes'] = _suggestion_modes
             st.session_state['suggestion_toggles'] = {
                 idx: (mode != 'Off') for idx, mode in _suggestion_modes.items()
@@ -6081,8 +6115,6 @@ body{{background:transparent;overflow:hidden}}
                 return current_modes, changed
 
             _curr_modes_sig = _suggestion_modes_sig(_suggestion_modes)
-            _custom_resp_lock_count = len(pinned_resp_names)
-            _custom_guard_lock_count = len(pinned_guard_names)
             _resp_target = max(int(k_responder or 0) - _custom_resp_lock_count, 0)
             _guard_target = max(int(k_guardian or 0) - _custom_guard_lock_count, 0)
             _resp_suggestions = [
@@ -6120,6 +6152,7 @@ body{{background:transparent;overflow:hidden}}
                 int(k_guardian or 0),
                 _curr_modes_sig,
             )
+            st.session_state['_suggestion_synced_modes'] = dict(_suggestion_modes)
 
         # ── OPTIMIZATION ──────────────────────────────────────────────────
         _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
@@ -7274,19 +7307,26 @@ body{{background:transparent;overflow:hidden}}
 
             # ── Suggestion "?" markers on map ─────────────────────────────
             if _using_suggestions and _suggestions and show_station_suggestions and st.session_state.get('show_suggestion_markers', True):
-                _stg_map = st.session_state.get('suggestion_toggles', {})
-                _sug_on_lat, _sug_on_lon, _sug_on_text = [], [], []
+                _stg_modes = st.session_state.get('suggestion_modes', {})
+                _sug_guard_lat, _sug_guard_lon, _sug_guard_text = [], [], []
+                _sug_resp_lat, _sug_resp_lon, _sug_resp_text = [], [], []
                 _sug_off_lat, _sug_off_lon, _sug_off_text = [], [], []
                 for _s in _suggestions:
+                    _mode = _stg_modes.get(_s['station_idx'], 'Off')
+                    _mode_label = _mode if _mode != 'Off' else 'Suggested site'
                     _tip = (
                         f"<b>#{_s['rank']} {_s['name']}</b><br>"
-                        f"{_s['role']} suggestion<br>"
+                        f"{_mode_label}<br>"
                         f"📞 {_s['call_pct']}% calls · 🗺️ {_s['land_pct']}% land"
                     )
-                    if _stg_map.get(_s['station_idx']):
-                        _sug_on_lat.append(_s['lat'])
-                        _sug_on_lon.append(_s['lon'])
-                        _sug_on_text.append(_tip)
+                    if _mode == 'Guardian':
+                        _sug_guard_lat.append(_s['lat'])
+                        _sug_guard_lon.append(_s['lon'])
+                        _sug_guard_text.append(_tip)
+                    elif _mode == 'Responder':
+                        _sug_resp_lat.append(_s['lat'])
+                        _sug_resp_lon.append(_s['lon'])
+                        _sug_resp_text.append(_tip)
                     else:
                         _sug_off_lat.append(_s['lat'])
                         _sug_off_lon.append(_s['lon'])
@@ -7301,18 +7341,40 @@ body{{background:transparent;overflow:hidden}}
                         hovertemplate='%{customdata}<extra></extra>',
                         customdata=_sug_off_text,
                         name='Suggested Sites',
-                        showlegend=len(_sug_on_lat) == 0,
+                        showlegend=not (_sug_guard_lat or _sug_resp_lat),
                     ))
-                if _sug_on_lat:
+                if _sug_resp_lat:
                     fig.add_trace(go.Scattermap(
-                        lat=_sug_on_lat, lon=_sug_on_lon,
-                        mode='text+markers',
-                        text=['♦' for _ in _sug_on_lat],
-                        textfont=dict(size=14, color='#00D2FF', weight=700),
-                        marker=dict(size=12, color='rgba(0, 210, 255, 0.7)'),
+                        lat=_sug_resp_lat, lon=_sug_resp_lon,
+                        mode='markers+text',
+                        text=['R' for _ in _sug_resp_lat],
+                        textfont=dict(size=14, color='#00D2FF', weight=800),
+                        marker=dict(
+                            size=15,
+                            color='rgba(0, 210, 255, 0.22)',
+                            line=dict(width=3, color='#00D2FF'),
+                            symbol='circle',
+                        ),
                         hovertemplate='%{customdata}<extra></extra>',
-                        customdata=_sug_on_text,
-                        name='Suggested Sites (active)',
+                        customdata=_sug_resp_text,
+                        name='Responder Suggestions',
+                        showlegend=True,
+                    ))
+                if _sug_guard_lat:
+                    fig.add_trace(go.Scattermap(
+                        lat=_sug_guard_lat, lon=_sug_guard_lon,
+                        mode='markers+text',
+                        text=['G' for _ in _sug_guard_lat],
+                        textfont=dict(size=14, color='#FFD700', weight=800),
+                        marker=dict(
+                            size=15,
+                            color='rgba(255, 215, 0, 0.18)',
+                            line=dict(width=3, color='#FFD700'),
+                            symbol='circle',
+                        ),
+                        hovertemplate='%{customdata}<extra></extra>',
+                        customdata=_sug_guard_text,
+                        name='Guardian Suggestions',
                         showlegend=True,
                     ))
 
@@ -7433,6 +7495,8 @@ body{{background:transparent;overflow:hidden}}
                 st, st.session_state, _suggestions,
                 text_main, text_muted, card_bg, card_border, accent_color,
             )
+            if _sug_changed:
+                st.rerun()
 
         # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────
         st.markdown("---")

@@ -1917,6 +1917,22 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
     )
 
     # ── Two rows of 5 cards ──────────────────────────────────────────────
+    st.markdown(
+        """
+        <style>
+        section.main div[data-testid="stRadio"] div[role="radiogroup"] {
+            gap: 0.2rem !important;
+        }
+        section.main div[data-testid="stRadio"] label,
+        section.main div[data-testid="stRadio"] label p,
+        section.main div[data-testid="stRadio"] label span {
+            font-size: 0.58rem !important;
+            line-height: 1.0 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     for row_start in (0, 5):
         row_items = suggestions[row_start:row_start + 5]
         if not row_items:

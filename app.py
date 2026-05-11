@@ -8937,6 +8937,7 @@ body{{background:transparent;overflow:hidden}}
             f"📄 {prop_city}, {prop_state} — Executive Summary",
             disabled=True,
             width="stretch",
+            key="html_export_wait_btn",
             help=(
                 "Deploy at least one drone to generate the executive summary."
                 if fleet_capex <= 0
@@ -8947,6 +8948,7 @@ body{{background:transparent;overflow:hidden}}
             "🌏 Google Earth Briefing File",
             disabled=True,
             width="stretch",
+            key="kml_export_wait_btn",
             help=(
                 "Deploy at least one drone to generate the KML file."
                 if not active_drones
@@ -11083,6 +11085,7 @@ body{{background:transparent;overflow:hidden}}
                     f"📄 {prop_city}, {prop_state} — Executive Summary",
                     disabled=True,
                     width="stretch",
+                    key="html_export_not_ready_btn",
                     help="Executive summary data is not ready for this run.",
                 )
         else:
@@ -11090,6 +11093,7 @@ body{{background:transparent;overflow:hidden}}
                 f"📄 {prop_city}, {prop_state} — Executive Summary",
                 disabled=True,
                 width="stretch",
+                key="html_export_no_drones_btn",
                 help="Deploy at least one drone to generate the executive summary.",
             )
 
@@ -11120,15 +11124,23 @@ body{{background:transparent;overflow:hidden}}
                                "KML", k_responder, k_guardian, calls_covered_perc,
                                prop_name, prop_email, details=export_details)
         elif active_drones:
-            _kml_export_slot.button("🌏 Google Earth Briefing File", disabled=True,
-                                    width="stretch",
-                                    help="Google Earth export is unavailable for the current geometry.")
+            _kml_export_slot.button(
+                "🌏 Google Earth Briefing File",
+                disabled=True,
+                width="stretch",
+                key="kml_export_unavailable_btn",
+                help="Google Earth export is unavailable for the current geometry.",
+            )
             if _kml_error:
                 st.sidebar.caption(f"Google Earth export issue: {_kml_error}")
         else:
-            _kml_export_slot.button("🌏 Google Earth Briefing File", disabled=True,
-                                    width="stretch",
-                                    help="Deploy at least one drone to generate the KML file.")
+            _kml_export_slot.button(
+                "🌏 Google Earth Briefing File",
+                disabled=True,
+                width="stretch",
+                key="kml_export_no_drones_btn",
+                help="Deploy at least one drone to generate the KML file.",
+            )
 
 
 

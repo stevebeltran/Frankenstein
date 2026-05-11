@@ -2490,6 +2490,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
         _display_flights_label = "calls/day capacity" if d_max_cap > 0 else "zone flights/day"
 
+        mins_per_flight = 0.0
         patrol_time_line = ""
 
         if _display_flights_day > 0:

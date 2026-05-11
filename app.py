@@ -8966,6 +8966,7 @@ body{{background:transparent;overflow:hidden}}
             f"📄 {prop_city}, {prop_state} — Executive Summary",
             disabled=True,
             width="stretch",
+            key="html_export_initial_disabled",
             help=(
                 "Deploy at least one drone to generate the executive summary."
                 if fleet_capex <= 0
@@ -11112,6 +11113,7 @@ body{{background:transparent;overflow:hidden}}
                     f"📄 {prop_city}, {prop_state} — Executive Summary",
                     disabled=True,
                     width="stretch",
+                    key="html_export_not_ready",
                     help="Executive summary data is not ready for this run.",
                 )
         else:
@@ -11119,6 +11121,7 @@ body{{background:transparent;overflow:hidden}}
                 f"📄 {prop_city}, {prop_state} — Executive Summary",
                 disabled=True,
                 width="stretch",
+                key="html_export_no_drones",
                 help="Deploy at least one drone to generate the executive summary.",
             )
 

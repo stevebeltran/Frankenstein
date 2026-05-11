@@ -70,6 +70,22 @@ PUBLIC_REPORT_HEADERS = [
 ]
 
 
+def _split_recipients(value):
+    """Return a cleaned list of email recipients from a string or iterable."""
+    if not value:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        raw_items = list(value)
+    else:
+        raw_items = str(value).replace(";", ",").split(",")
+    recipients = []
+    for item in raw_items:
+        addr = str(item or "").strip()
+        if addr:
+            recipients.append(addr)
+    return recipients
+
+
 def _sheet_col_label(index):
     """Convert a 1-based column index to an A1-style column label."""
     label = ""
@@ -176,7 +192,11 @@ def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email
         gmail_address  = st.secrets.get("GMAIL_ADDRESS", "")
         app_password   = st.secrets.get("GMAIL_APP_PASSWORD", "")
         notify_address = st.secrets.get("NOTIFY_EMAIL", gmail_address)
+        sms_address = st.secrets.get("NOTIFY_SMS_EMAIL", "")
+        recipients = _split_recipients([notify_address, sms_address])
         if not gmail_address or not app_password:
+            return
+        if not recipients:
             return
         emoji = {"HTML": "📄", "KML": "🌏", "BRINC": "💾", "MAP_BUILD": "🗺️"}.get(file_type, "📥")
         label = {"HTML": "Executive Summary", "KML": "Google Earth Briefing", "BRINC": "BRINC File", "MAP_BUILD": "Map Build"}.get(file_type, file_type.replace('_', ' ').title())
@@ -184,6 +204,16 @@ def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email
         details_html = _build_details_html(details)
         d = details or {}
         pop  = d.get('population', 0)
+        plain_body = (
+            f"BRINC {label} Notification\n"
+            f"Event: {label}\n"
+            f"Jurisdiction: {city}, {state}\n"
+            f"Population: {pop:,}\n"
+            f"Fleet: {k_resp} Responder / {k_guard} Guardian\n"
+            f"Call Coverage: {coverage:.1f}%\n"
+            f"BRINC Rep: {name if name else '—'}\n"
+            f"Rep Email: {email if email else '—'}\n"
+        )
         body = f"""
         <html><body style="font-family:Arial,sans-serif;color:#333;padding:20px;">
         <div style="max-width:560px;margin:0 auto;border:1px solid #ddd;border-radius:8px;overflow:hidden;">
@@ -209,11 +239,14 @@ def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email
 </body></html>
         """
         msg = MIMEMultipart("alternative")
-        msg["Subject"], msg["From"], msg["To"] = subject, gmail_address, notify_address
+        msg["Subject"], msg["From"], msg["To"] = subject, gmail_address, recipients[0]
+        if len(recipients) > 1:
+            msg["Cc"] = ", ".join(recipients[1:])
+        msg.attach(MIMEText(plain_body, "plain"))
         msg.attach(MIMEText(body, "html"))
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=8) as server:
             server.login(gmail_address, app_password)
-            server.sendmail(gmail_address, notify_address, msg.as_string())
+            server.sendmail(gmail_address, recipients, msg.as_string())
     except:
         pass
 
@@ -224,7 +257,9 @@ def _notify_crash_email(step, error_message, traceback_text, details=None):
         gmail_address = st.secrets.get("GMAIL_ADDRESS", "")
         app_password = st.secrets.get("GMAIL_APP_PASSWORD", "")
         notify_address = st.secrets.get("NOTIFY_EMAIL", gmail_address)
-        if not gmail_address or not app_password or not notify_address:
+        sms_address = st.secrets.get("NOTIFY_SMS_EMAIL", "")
+        recipients = _split_recipients([notify_address, sms_address])
+        if not gmail_address or not app_password or not recipients:
             return
 
         d = details or {}
@@ -243,6 +278,17 @@ def _notify_crash_email(step, error_message, traceback_text, details=None):
             ) + "</ul>"
 
         subject = f"🚨 BRINC app crash at {step}"
+        plain_body = (
+            f"BRINC Crash Alert\n"
+            f"Step: {step}\n"
+            f"Source app: {source_app}\n"
+            f"Session ID: {session_id or '-'}\n"
+            f"User email: {user_email or '-'}\n"
+            f"City/state: {city or '-'}, {state or '-'}\n"
+            f"File count: {file_count or '-'}\n"
+            f"Upload signature: {upload_sig or '-'}\n"
+            f"Error: {error_message}\n"
+        )
         body = f"""
         <html><body style="font-family:Arial,sans-serif;color:#333;padding:20px;">
         <div style="max-width:720px;margin:0 auto;border:1px solid #ddd;border-radius:8px;overflow:hidden;">
@@ -268,11 +314,14 @@ def _notify_crash_email(step, error_message, traceback_text, details=None):
         </body></html>
         """
         msg = MIMEMultipart("alternative")
-        msg["Subject"], msg["From"], msg["To"] = subject, gmail_address, notify_address
+        msg["Subject"], msg["From"], msg["To"] = subject, gmail_address, recipients[0]
+        if len(recipients) > 1:
+            msg["Cc"] = ", ".join(recipients[1:])
+        msg.attach(MIMEText(plain_body, "plain"))
         msg.attach(MIMEText(body, "html"))
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=8) as server:
             server.login(gmail_address, app_password)
-            server.sendmail(gmail_address, notify_address, msg.as_string())
+            server.sendmail(gmail_address, recipients, msg.as_string())
     except:
         pass
 

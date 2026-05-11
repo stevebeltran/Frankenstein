@@ -1107,50 +1107,60 @@ def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations:
             f'way["amenity"="social_facility"]({bbox});'
             f');out center;'
         )
-        # Fire all three mirrors in parallel — first successful response wins.
-        # Use an explicit shutdown so slow mirrors do not block the caller once
-        # we already have a usable response.
-        data = None
+        # Query all three mirrors in parallel and merge any successful payloads.
+        # Some mirrors return partial coverage, so taking only the first success
+        # can collapse the candidate pool to a single site.
+        data_sets = []
         _pool = cf.ThreadPoolExecutor(max_workers=3)
         try:
             futs = {_pool.submit(_try_mirror, url, query): url for url in osm_urls}
             for fut in cf.as_completed(futs):
                 result = fut.result()
                 if result is not None:
-                    data = result
-                    break
+                    data_sets.append(result)
         finally:
             _pool.shutdown(wait=False, cancel_futures=True)
 
-        if data is None:
+        if not data_sets:
             continue
 
         rows = []
-        for el in data.get('elements', []):
-            tags = el.get('tags', {})
-            lat = el.get('lat') or (el.get('center') or {}).get('lat')
-            lon = el.get('lon') or (el.get('center') or {}).get('lon')
-            if lat is None or lon is None:
-                continue
-            amenity  = tags.get('amenity', '')
-            building = tags.get('building', '')
-            railway  = tags.get('railway', '')
-            type_label = (
-                'Fire'           if amenity == 'fire_station'                    else
-                'Police'         if amenity == 'police'                          else
-                'Hospital'       if amenity == 'hospital'                        else
-                'Library'        if amenity == 'library'                         else
-                'EMS'            if amenity == 'ambulance_station'               else
-                'University'     if amenity in ('university', 'college')         else
-                'Transit'        if amenity == 'bus_station' or railway == 'station' else
-                'Community'      if amenity == 'community_centre'                else
-                'Courthouse'     if amenity == 'courthouse'                      else
-                'Social Services' if amenity == 'social_facility'               else
-                'Government'     if building == 'government'                     else
-                'School'
-            )
-            rows.append({'name': tags.get('name', f"{type_label} Station"),
-                         'lat': round(lat, 6), 'lon': round(lon, 6), 'type': type_label})
+        seen = set()
+        for data in data_sets:
+            for el in data.get('elements', []):
+                tags = el.get('tags', {})
+                lat = el.get('lat') or (el.get('center') or {}).get('lat')
+                lon = el.get('lon') or (el.get('center') or {}).get('lon')
+                if lat is None or lon is None:
+                    continue
+                amenity  = tags.get('amenity', '')
+                building = tags.get('building', '')
+                railway  = tags.get('railway', '')
+                type_label = (
+                    'Fire'            if amenity == 'fire_station'                     else
+                    'Police'          if amenity == 'police'                           else
+                    'Hospital'        if amenity == 'hospital'                         else
+                    'Library'         if amenity == 'library'                          else
+                    'EMS'             if amenity == 'ambulance_station'                else
+                    'University'      if amenity in ('university', 'college')          else
+                    'Transit'         if amenity == 'bus_station' or railway == 'station' else
+                    'Community'       if amenity == 'community_centre'                 else
+                    'Courthouse'      if amenity == 'courthouse'                       else
+                    'Social Services' if amenity == 'social_facility'                  else
+                    'Government'      if building == 'government'                      else
+                    'School'
+                )
+                row = {
+                    'name': tags.get('name', f"{type_label} Station"),
+                    'lat': round(float(lat), 6),
+                    'lon': round(float(lon), 6),
+                    'type': type_label,
+                }
+                dedupe_key = (row['lat'], row['lon'], row['name'].strip().lower(), row['type'])
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+                rows.append(row)
 
         if rows:
             df_s = pd.DataFrame(rows).drop_duplicates(subset=['lat', 'lon']).reset_index(drop=True)
@@ -2049,7 +2059,6 @@ def search_public_facility_candidates(query_str, facility_type, limit=6, preferr
     for _candidate in candidates:
         _candidate['_score'] = _public_facility_candidate_score(_candidate, facility_key, preferred_city=preferred_city, preferred_state=preferred_state)
 
-    candidates = [c for c in candidates if c.get('_score', -999) > 0]
     candidates.sort(key=lambda item: (-item.get('_score', 0), item.get('matched_address', '')))
 
     try:
@@ -8966,6 +8975,7 @@ body{{background:transparent;overflow:hidden}}
             f"📄 {prop_city}, {prop_state} — Executive Summary",
             disabled=True,
             width="stretch",
+            key="html_export_wait_btn",
             help=(
                 "Deploy at least one drone to generate the executive summary."
                 if fleet_capex <= 0
@@ -8976,6 +8986,7 @@ body{{background:transparent;overflow:hidden}}
             "🌏 Google Earth Briefing File",
             disabled=True,
             width="stretch",
+            key="kml_export_wait_btn",
             help=(
                 "Deploy at least one drone to generate the KML file."
                 if not active_drones
@@ -11112,6 +11123,7 @@ body{{background:transparent;overflow:hidden}}
                     f"📄 {prop_city}, {prop_state} — Executive Summary",
                     disabled=True,
                     width="stretch",
+                    key="html_export_not_ready_btn",
                     help="Executive summary data is not ready for this run.",
                 )
         else:
@@ -11119,6 +11131,7 @@ body{{background:transparent;overflow:hidden}}
                 f"📄 {prop_city}, {prop_state} — Executive Summary",
                 disabled=True,
                 width="stretch",
+                key="html_export_no_drones_btn",
                 help="Deploy at least one drone to generate the executive summary.",
             )
 
@@ -11149,15 +11162,23 @@ body{{background:transparent;overflow:hidden}}
                                "KML", k_responder, k_guardian, calls_covered_perc,
                                prop_name, prop_email, details=export_details)
         elif active_drones:
-            _kml_export_slot.button("🌏 Google Earth Briefing File", disabled=True,
-                                    width="stretch",
-                                    help="Google Earth export is unavailable for the current geometry.")
+            _kml_export_slot.button(
+                "🌏 Google Earth Briefing File",
+                disabled=True,
+                width="stretch",
+                key="kml_export_unavailable_btn",
+                help="Google Earth export is unavailable for the current geometry.",
+            )
             if _kml_error:
                 st.sidebar.caption(f"Google Earth export issue: {_kml_error}")
         else:
-            _kml_export_slot.button("🌏 Google Earth Briefing File", disabled=True,
-                                    width="stretch",
-                                    help="Deploy at least one drone to generate the KML file.")
+            _kml_export_slot.button(
+                "🌏 Google Earth Briefing File",
+                disabled=True,
+                width="stretch",
+                key="kml_export_no_drones_btn",
+                help="Deploy at least one drone to generate the KML file.",
+            )
 
 
 

@@ -1791,53 +1791,57 @@ def compute_station_suggestions(
     resp_matrix, guard_matrix, station_metadata, total_calls, city_area,
     max_suggestions=10,
 ):
-    """Rank stations by greedy marginal call coverage and return top suggestions.
+    """Rank stations by solo call and land coverage, returning top suggestions.
 
     Each suggestion includes solo call-coverage %, solo land-coverage %, and a
     default role assignment (2 Responder : 1 Guardian repeating pattern).
+    Stations are ranked independently by a combined score of call % and land %.
     """
     if total_calls == 0 or not station_metadata:
         return []
 
     n_stations = len(station_metadata)
-    covered = np.zeros(total_calls, dtype=bool)
-    suggestions = []
-    used = set()
+    scored_stations = []
 
-    # Greedy ranking: pick station with best marginal gain each round
-    for rank in range(min(max_suggestions, n_stations)):
-        best_idx = -1
-        best_marginal = -1
-        for i in range(n_stations):
-            if i in used:
-                continue
-            marginal = int(np.sum(resp_matrix[i] & ~covered))
-            if marginal > best_marginal:
-                best_marginal = marginal
-                best_idx = i
-        if best_idx < 0 or best_marginal == 0:
-            break
-
-        used.add(best_idx)
-        covered |= resp_matrix[best_idx]
-
-        meta = station_metadata[best_idx]
-        solo_call_pct = (np.sum(resp_matrix[best_idx]) / total_calls * 100)
+    # Score all stations independently by their solo coverage metrics
+    for idx in range(n_stations):
+        meta = station_metadata[idx]
+        solo_call_pct = (np.sum(resp_matrix[idx]) / total_calls * 100) if total_calls > 0 else 0
         solo_land_pct = (meta['clipped_2m'].area / city_area * 100) if city_area > 0 else 0
 
-        # Role pattern: G, R, R, G, R, R, G, R, R  (≈2:1 ratio, Guardian first)
-        role = 'Guardian' if (rank % 3 == 0) else 'Responder'
+        # Combined score: average of call % and land %
+        combined_score = (solo_call_pct + solo_land_pct) / 2
 
-        suggestions.append({
-            'rank': rank + 1,
-            'station_idx': best_idx,
+        scored_stations.append({
+            'idx': idx,
             'name': meta['name'],
             'address': meta.get('address', ''),
             'lat': meta['lat'],
             'lon': meta['lon'],
             'call_pct': round(solo_call_pct, 1),
             'land_pct': round(solo_land_pct, 1),
-            'marginal_calls': best_marginal,
+            'score': combined_score,
+        })
+
+    # Sort by combined score descending (best to worst)
+    scored_stations.sort(key=lambda x: x['score'], reverse=True)
+
+    # Build suggestions from top-ranked stations
+    suggestions = []
+    for rank, station in enumerate(scored_stations[:max_suggestions]):
+        # Role pattern: G, R, R, G, R, R, G, R, R  (≈2:1 ratio, Guardian first)
+        role = 'Guardian' if (rank % 3 == 0) else 'Responder'
+
+        suggestions.append({
+            'rank': rank + 1,
+            'station_idx': station['idx'],
+            'name': station['name'],
+            'address': station['address'],
+            'lat': station['lat'],
+            'lon': station['lon'],
+            'call_pct': station['call_pct'],
+            'land_pct': station['land_pct'],
+            'marginal_calls': int(np.sum(resp_matrix[station['idx']])),
             'role': role,
         })
 

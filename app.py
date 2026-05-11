@@ -7430,8 +7430,6 @@ body{{background:transparent;overflow:hidden}}
                 st, st.session_state, _suggestions,
                 text_main, text_muted, card_bg, card_border, accent_color,
             )
-            if _sug_changed:
-                st.rerun()
 
         # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────
         st.markdown("---")

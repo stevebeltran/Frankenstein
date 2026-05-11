@@ -94,7 +94,13 @@ def _project_point_to_epsg(lon, lat, epsg_code):
 
 @st.cache_resource
 def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash):
-    gdf_calls = _project_lonlat_dataframe(df_calls, epsg_code)
+    # CRITICAL: Use df_calls_full for coverage calculation to match displayed calls
+    # If df_calls is a sample (e.g., 25k of 50k calls), using it causes mismatch where
+    # coverage rings won't cover the extra sampled-out calls shown on the map.
+    # Use df_calls_full (all calls) for accuracy.
+    df_for_calc = df_calls_full if df_calls_full is not None and len(df_calls_full) > 0 else df_calls
+
+    gdf_calls = _project_lonlat_dataframe(df_for_calc, epsg_code)
     gdf_calls_utm = gdf_calls
     try:
         # Use same 300 m buffer as build_display_calls so coverage denominator

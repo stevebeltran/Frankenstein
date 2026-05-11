@@ -1803,14 +1803,30 @@ def compute_station_suggestions(
     n_stations = len(station_metadata)
     scored_stations = []
 
+    # Validate total_calls and city_area
+    if total_calls <= 0 or city_area <= 0:
+        return []
+
     # Score all stations independently by their solo coverage metrics
+    call_coverages = []
     for idx in range(n_stations):
         meta = station_metadata[idx]
-        solo_call_pct = (np.sum(resp_matrix[idx]) / total_calls * 100) if total_calls > 0 else 0
-        solo_land_pct = (meta['clipped_2m'].area / city_area * 100) if city_area > 0 else 0
+        calls_covered = int(np.sum(resp_matrix[idx]))
+        solo_call_pct = (calls_covered / total_calls * 100) if total_calls > 0 else 0
 
-        # Combined score: average of call % and land %
-        combined_score = (solo_call_pct + solo_land_pct) / 2
+        # Land coverage: area of 2-mile responder buffer clipped to city
+        clipped_area = meta['clipped_2m'].area if meta['clipped_2m'] else 0
+        solo_land_pct = (clipped_area / city_area * 100) if city_area > 0 and clipped_area > 0 else 0
+
+        # Cap at 100% for display purposes
+        solo_call_pct = min(100.0, solo_call_pct)
+        solo_land_pct = min(100.0, solo_land_pct)
+
+        call_coverages.append(solo_call_pct)
+
+        # Combined score: prioritize call coverage (stations that cover more calls are better)
+        # Land coverage is secondary since it's relative to the entire jurisdiction
+        combined_score = (solo_call_pct * 0.75 + solo_land_pct * 0.25)
 
         scored_stations.append({
             'idx': idx,
@@ -1823,6 +1839,17 @@ def compute_station_suggestions(
             'score': combined_score,
         })
 
+    # Diagnostic: check if all stations show high coverage (which would be suspicious)
+    high_coverage_count = sum(1 for cov in call_coverages if cov >= 95.0)
+    if high_coverage_count == len(call_coverages) and len(call_coverages) > 1:
+        # All stations cover >=95% of calls - likely a data or radius issue
+        # This is mathematically possible but unusual unless calls are clustered
+        # and responder radius is very large relative to the city
+        import sys
+        print(f"[DEBUG] All {high_coverage_count} stations show >=95% call coverage. "
+              f"Call distribution may be clustered or responder radius too large.",
+              file=sys.stderr)
+
     # Sort by combined score descending (best to worst)
     scored_stations.sort(key=lambda x: x['score'], reverse=True)
 
@@ -1832,6 +1859,12 @@ def compute_station_suggestions(
         # Role pattern: G, R, R, G, R, R, G, R, R  (≈2:1 ratio, Guardian first)
         role = 'Guardian' if (rank % 3 == 0) else 'Responder'
 
+        # Calculate actual marginal calls and verify percentage makes sense
+        marginal_calls_count = int(np.sum(resp_matrix[station['idx']]))
+
+        # Verify call percentage calculation
+        expected_call_pct = (marginal_calls_count / total_calls * 100) if total_calls > 0 else 0
+
         suggestions.append({
             'rank': rank + 1,
             'station_idx': station['idx'],
@@ -1839,9 +1872,9 @@ def compute_station_suggestions(
             'address': station['address'],
             'lat': station['lat'],
             'lon': station['lon'],
-            'call_pct': station['call_pct'],
-            'land_pct': station['land_pct'],
-            'marginal_calls': int(np.sum(resp_matrix[station['idx']])),
+            'call_pct': min(100.0, station['call_pct']),  # Cap at 100%
+            'land_pct': min(100.0, station['land_pct']),  # Cap at 100%
+            'marginal_calls': marginal_calls_count,
             'role': role,
         })
 

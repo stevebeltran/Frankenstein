@@ -897,8 +897,8 @@ def manage_custom_stations(
     val_r = min(max(0, int(val_r)), max_resp_calc)
     val_g = min(max(0, int(val_g)), max_guard_calc)
 
-    k_responder = st.sidebar.slider('🚁 Responder Count', 0, max(1, max_resp_calc), val_r, help='Short-range tactical drones (2-3mi radius).')
-    k_guardian = st.sidebar.slider('🦅 Guardian Count', 0, max(1, max_guard_calc), val_g, help='Long-range overwatch drones (5-8mi radius).')
+    k_responder = st.sidebar.slider('?? Responder Count', 0, max(1, max_resp_calc), val_r, help='Short-range tactical drones (2-3mi radius).')
+    k_guardian = st.sidebar.slider('?? Guardian Count', 0, max(1, max_guard_calc), val_g, help='Long-range overwatch drones (5-8mi radius).')
     session_state.update({'k_resp': k_responder, 'k_guard': k_guardian, 'r_resp': resp_radius_mi, 'r_guard': guard_radius_mi})
 
     station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
@@ -1356,14 +1356,18 @@ def manage_custom_stations(
     pinned_guard_names = list(session_state.get('pinned_guard_names', []))
     pinned_resp_names = list(session_state.get('pinned_resp_names', []))
     session_state['show_lock_stations'] = False
-    if len(pinned_guard_names) > k_guardian:
-        st.sidebar.warning(f'Guardian Count was raised to honor {len(pinned_guard_names)} locked Guardian station(s).')
-    if len(pinned_resp_names) > k_responder:
-        st.sidebar.warning(f'Responder Count was raised to honor {len(pinned_resp_names)} locked Responder station(s).')
+
+    # Locks are hard constraints: the effective fleet count cannot fall below
+    # the number of pinned stations for each role.
+    effective_k_guardian = max(int(k_guardian or 0), len(pinned_guard_names))
+    effective_k_responder = max(int(k_responder or 0), len(pinned_resp_names))
+    if effective_k_guardian != k_guardian or effective_k_responder != k_responder:
+        session_state['k_guard'] = effective_k_guardian
+        session_state['k_resp'] = effective_k_responder
 
     return {
-        'k_responder': k_responder,
-        'k_guardian': k_guardian,
+        'k_responder': effective_k_responder,
+        'k_guardian': effective_k_guardian,
         'pinned_guard_names': pinned_guard_names,
         'pinned_resp_names': pinned_resp_names,
         'station_names': station_names,
@@ -1810,7 +1814,7 @@ def compute_station_suggestions(
     resp_matrix, guard_matrix, station_metadata, total_calls, city_area,
     max_suggestions=10,
 ):
-    """Rank stations by greedy marginal call coverage and return top suggestions.
+    """Rank stations by call coverage and return the top suggestions.
 
     Each suggestion includes solo call-coverage %, solo land-coverage %, and a
     default role assignment (2 Responder : 1 Guardian repeating pattern).
@@ -1819,46 +1823,33 @@ def compute_station_suggestions(
         return []
 
     n_stations = len(station_metadata)
-    covered = np.zeros(total_calls, dtype=bool)
     suggestions = []
-    used = set()
+    scored = []
 
-    # Greedy ranking: pick station with best marginal gain each round
-    for rank in range(min(max_suggestions, n_stations)):
-        best_idx = -1
-        best_marginal = -1
-        for i in range(n_stations):
-            if i in used:
-                continue
-            marginal = int(np.sum(resp_matrix[i] & ~covered))
-            if marginal > best_marginal:
-                best_marginal = marginal
-                best_idx = i
-        if best_idx < 0 or best_marginal == 0:
-            break
-
-        used.add(best_idx)
-        covered |= resp_matrix[best_idx]
-
-        meta = station_metadata[best_idx]
-        solo_call_pct = (np.sum(resp_matrix[best_idx]) / total_calls * 100)
+    for i in range(n_stations):
+        meta = station_metadata[i]
+        solo_call_pct = (np.sum(resp_matrix[i]) / total_calls * 100)
         solo_land_pct = (meta['clipped_2m'].area / city_area * 100) if city_area > 0 else 0
-
-        # Role pattern: G, R, R, G, R, R, G, R, R  (≈2:1 ratio, Guardian first)
-        role = 'Guardian' if (rank % 3 == 0) else 'Responder'
-
-        suggestions.append({
-            'rank': rank + 1,
-            'station_idx': best_idx,
+        marginal_calls = int(np.sum(resp_matrix[i]))
+        scored.append({
+            'station_idx': i,
             'name': meta['name'],
             'address': meta.get('address', ''),
             'lat': meta['lat'],
             'lon': meta['lon'],
             'call_pct': round(solo_call_pct, 1),
             'land_pct': round(solo_land_pct, 1),
-            'marginal_calls': best_marginal,
-            'role': role,
+            'marginal_calls': marginal_calls,
         })
+
+    # Highest coverage percent first, then highest raw call count as a tie-breaker.
+    scored.sort(key=lambda s: (s['call_pct'], s['marginal_calls'], -s['station_idx']), reverse=True)
+
+    # Preserve the existing alternating role pattern for the top 10 cards.
+    for rank, suggestion in enumerate(scored[:min(max_suggestions, n_stations)]):
+        suggestion['rank'] = rank + 1
+        suggestion['role'] = 'Guardian' if (rank % 3 == 0) else 'Responder'
+        suggestions.append(suggestion)
 
     return suggestions
 
@@ -1913,6 +1904,24 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
     )
 
     # ── Two rows of 5 cards ──────────────────────────────────────────────
+    st.markdown(
+        """
+        <style>
+        section.main div[data-testid="stRadio"] div[role="radiogroup"] {
+            gap: 0.08rem !important;
+            flex-wrap: nowrap !important;
+        }
+        section.main div[data-testid="stRadio"] label,
+        section.main div[data-testid="stRadio"] label p,
+        section.main div[data-testid="stRadio"] label span {
+            font-size: 0.46rem !important;
+            line-height: 0.95 !important;
+            white-space: nowrap !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     for row_start in (0, 5):
         row_items = suggestions[row_start:row_start + 5]
         if not row_items:
@@ -1957,7 +1966,6 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
                 )
                 if new_mode != mode:
                     modes[idx] = new_mode
-                    session_state[widget_key] = new_mode
                     changed = True
 
     # Master toggle to hide map markers

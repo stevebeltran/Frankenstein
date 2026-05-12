@@ -149,7 +149,7 @@ NOTIFICATIONS_AVAILABLE = True
 try:
     from modules.notifications import (
         _notify_email, _log_to_sheets, _log_login_to_sheets, _publish_public_report_to_sheets,
-        _log_qr_scan_to_sheets, _notify_crash_email,
+        _log_qr_scan_to_sheets, _notify_crash_email, _write_crash_report,
     )
 except Exception as _notifications_import_error:
     NOTIFICATIONS_AVAILABLE = False
@@ -170,6 +170,9 @@ except Exception as _notifications_import_error:
         return None
 
     def _notify_crash_email(*args, **kwargs):
+        return None
+
+    def _write_crash_report(*args, **kwargs):
         return None
 
     print(f"Notifications disabled at startup: {_notifications_import_error}")
@@ -4504,9 +4507,28 @@ def main():
                         'error': str(exc),
                         'traceback': tb_text,
                     }
+                    crash_report_path = None
                     try:
                         _city, _state = _get_crash_city_state()
                         _files = list(st.session_state.get('_last_uploaded_files', []))
+                        crash_report_path = _write_crash_report(
+                            step_name,
+                            str(exc),
+                            tb_text,
+                            details={
+                                'source_app': Path(__file__).resolve().parent.name,
+                                'session_id': st.session_state.get('session_id', ''),
+                                'user_email': _get_crash_user_email(),
+                                'city': _city,
+                                'state': _state,
+                                'file_count': len(_files),
+                                'upload_signature': current_upload_signature if 'current_upload_signature' in locals() else '',
+                                'upload_files': _files,
+                            },
+                        )
+                        if crash_report_path:
+                            st.session_state['_last_crash_report_path'] = str(crash_report_path)
+                            _push_upload_log(f"Crash report saved to {crash_report_path}")
                         _notify_crash_email(
                             step_name,
                             str(exc),
@@ -4524,11 +4546,13 @@ def main():
                         )
                     except Exception as _crash_email_exc:
                         _push_upload_log(f"⚠ Crash email failed: {_crash_email_exc}")
+                    if not crash_report_path:
+                        _push_upload_log("⚠ Local crash report could not be written.")
                     try:
                         _set_upload_overlay_status(
                             title="UPLOAD ERROR",
                             status="CRASH DETECTED",
-                            copy=f"An unexpected error occurred while {step_name}. The full traceback has been logged and emailed if notifications are configured.",
+                            copy=f"An unexpected error occurred while {step_name}. The full traceback has been logged locally and emailed if notifications are configured.",
                             progress=100,
                             logs=_upload_logs,
                             error=True,
@@ -8972,6 +8996,98 @@ body{{background:transparent;overflow:hidden}}
                 else _report_wait_note
             ),
         )
+
+        def _load_recent_crash_notice():
+            crash_dir = APP_DIR / "crash_logs"
+            latest_report = crash_dir / "latest_crash.txt"
+            ack_path = crash_dir / "latest_crash_ack.json"
+            if not latest_report.exists():
+                return None
+            try:
+                report_stat = latest_report.stat()
+            except OSError:
+                return None
+
+            age_seconds = max(0.0, time.time() - report_stat.st_mtime)
+            if age_seconds > 24 * 60 * 60:
+                return None
+
+            notice_id = f"{report_stat.st_mtime_ns}:{report_stat.st_size}"
+            if ack_path.exists():
+                try:
+                    ack_data = json.loads(ack_path.read_text(encoding="utf-8"))
+                    if str(ack_data.get("notice_id", "")) == notice_id:
+                        return None
+                except Exception:
+                    pass
+
+            try:
+                report_text = latest_report.read_text(encoding="utf-8")
+            except Exception:
+                report_text = ""
+
+            def _extract_report_value(prefix):
+                for line in report_text.splitlines():
+                    if line.startswith(prefix):
+                        return line[len(prefix):].strip()
+                return ""
+
+            return {
+                "notice_id": notice_id,
+                "age_hours": age_seconds / 3600.0,
+                "timestamp": _extract_report_value("Timestamp (UTC):"),
+                "step": _extract_report_value("Step:") or "Crash recorded",
+                "error": _extract_report_value("Error:") or "Crash details are available in the local report.",
+                "path": str(latest_report),
+            }
+
+        def _acknowledge_crash_notice(notice):
+            crash_dir = APP_DIR / "crash_logs"
+            crash_dir.mkdir(parents=True, exist_ok=True)
+            ack_path = crash_dir / "latest_crash_ack.json"
+            ack_path.write_text(
+                json.dumps(
+                    {
+                        "notice_id": notice["notice_id"],
+                        "acknowledged_at_utc": datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                        "path": notice["path"],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+        _recent_crash_notice = _load_recent_crash_notice()
+        if _recent_crash_notice:
+            st.sidebar.markdown(
+                "<div style='margin-top:8px; font-size:0.68rem; color:#777; text-transform:uppercase; letter-spacing:0.12em;'>Recent crash</div>",
+                unsafe_allow_html=True,
+            )
+            _show_recent_crash = st.sidebar.toggle(
+                "Show crash details",
+                value=st.session_state.get("_show_recent_crash_notice", False),
+                key="_show_recent_crash_notice",
+                help="Show the most recent local crash report. It hides automatically after 24 hours or after acknowledgment.",
+            )
+            if _show_recent_crash:
+                st.sidebar.caption(
+                    f"Recorded {_recent_crash_notice['age_hours']:.1f} hours ago"
+                    + (f" · {_recent_crash_notice['timestamp']}" if _recent_crash_notice.get("timestamp") else "")
+                )
+                st.sidebar.code(
+                    f"{_recent_crash_notice['step']}\n{_recent_crash_notice['error']}",
+                    language="text",
+                )
+                if st.sidebar.button(
+                    "Acknowledge",
+                    key="_ack_recent_crash_notice_btn",
+                    width="stretch",
+                    help="Hide this crash notice until a newer crash is recorded.",
+                ):
+                    _acknowledge_crash_notice(_recent_crash_notice)
+                    st.session_state["_show_recent_crash_notice"] = False
+                    st.rerun()
         export_dict = {
             "city": prop_city,
             "state": prop_state,
@@ -11170,7 +11286,31 @@ if __name__ == "__main__":
         main()
     except Exception as _app_crash_exc:
         _app_crash_tb = traceback.format_exc()
+        _app_crash_report_path = None
         try:
+            _app_crash_report_path = _write_crash_report(
+                st.session_state.get('_upload_crash_step', 'application startup/runtime'),
+                str(_app_crash_exc),
+                _app_crash_tb,
+                details={
+                    'source_app': Path(__file__).resolve().parent.name,
+                    'session_id': st.session_state.get('session_id', ''),
+                    'user_email': str(
+                        st.session_state.get('google_user_email', '')
+                        or st.session_state.get('_last_user_email', '')
+                        or getattr(st.user, 'email', '')
+                        or ''
+                    ).strip(),
+                    'city': str(st.session_state.get('active_city', '') or '').strip(),
+                    'state': str(st.session_state.get('active_state', '') or '').strip(),
+                    'file_count': len(st.session_state.get('_last_uploaded_files', [])),
+                    'upload_signature': st.session_state.get('census_source_signature', '') or st.session_state.get('_upload_crash_step', ''),
+                    'upload_files': [
+                        getattr(f, 'name', '')
+                        for f in (st.session_state.get('sim_optional_uploader') or st.session_state.get('uploaded_files') or [])
+                    ],
+                },
+            )
             _notify_crash_email(
                 st.session_state.get('_upload_crash_step', 'application startup/runtime'),
                 str(_app_crash_exc),
@@ -11196,6 +11336,8 @@ if __name__ == "__main__":
             )
         except Exception:
             pass
+        if _app_crash_report_path:
+            print(f"[BRINC] Crash report saved to {_app_crash_report_path}")
         print(_app_crash_tb)
         raise
 

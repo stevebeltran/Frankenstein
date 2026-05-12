@@ -541,6 +541,36 @@ def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, emai
         pass
 
 
+def _write_crash_report(step, error_message, traceback_text, details=None):
+    """Write a local crash report and return the saved file path."""
+    try:
+        report_dir = Path(st.secrets.get("CRASH_REPORT_DIR", "") or Path(__file__).resolve().parent.parent / "crash_reports")
+        report_dir.mkdir(parents=True, exist_ok=True)
+        safe_step = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(step or "crash")).strip("._-") or "crash"
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_path = report_dir / f"{safe_step}_{timestamp}.txt"
+        d = details or {}
+        lines = [
+            f"Step: {step}",
+            f"Error: {error_message}",
+            f"Source app: {d.get('source_app', '')}",
+            f"Session ID: {d.get('session_id', '')}",
+            f"User email: {d.get('user_email', '')}",
+            f"City: {d.get('city', '')}",
+            f"State: {d.get('state', '')}",
+            f"File count: {d.get('file_count', '')}",
+            f"Upload signature: {d.get('upload_signature', '')}",
+            "",
+            "Traceback:",
+            str(traceback_text or ""),
+            "",
+        ]
+        report_path.write_text("\n".join(lines), encoding="utf-8")
+        return str(report_path)
+    except Exception:
+        return ""
+
+
 def _log_login_to_sheets(email, name):
     """Log user login to Google Sheets (separate LOGIN sheet)."""
     try:

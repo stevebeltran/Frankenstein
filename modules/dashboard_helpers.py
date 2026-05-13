@@ -1826,6 +1826,7 @@ def optimize_fleet_selection(
 def compute_station_suggestions(
     resp_matrix, guard_matrix, station_metadata, total_calls, city_area,
     max_suggestions=10,
+    rank_by='call',
 ):
     """Rank stations by call coverage and return the top suggestions.
 
@@ -1859,8 +1860,20 @@ def compute_station_suggestions(
             'marginal_calls': marginal_calls,
         })
 
-    # Highest coverage percent first, then highest raw call count as a tie-breaker.
-    scored.sort(key=lambda s: (s['call_pct'], s['marginal_calls'], -s['station_idx']), reverse=True)
+    primary_metric = 'land_pct' if str(rank_by).strip().lower().startswith('land') else 'call_pct'
+    secondary_metric = 'call_pct' if primary_metric == 'land_pct' else 'land_pct'
+
+    # Keep the cards aligned with the active deployment objective while
+    # preserving the previous call-volume tie-breaker.
+    scored.sort(
+        key=lambda s: (
+            s.get(primary_metric, 0),
+            s.get(secondary_metric, 0),
+            s['marginal_calls'],
+            -s['station_idx'],
+        ),
+        reverse=True,
+    )
 
     # Preserve the existing alternating role pattern for the top 10 cards.
     for rank, suggestion in enumerate(scored[:min(max_suggestions, n_stations)]):
@@ -1916,9 +1929,10 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
         f"<span style='font-size:0.85rem; font-weight:700; color:{text_main};'>"
         f"Suggested Station Placements"
         f"<span style='font-size:0.7rem; font-weight:400; color:{text_muted}; margin-left:8px;'>"
-        f"({n_on} selected from public data)</span></span></div>",
+        f"({n_on} shown from public data)</span></span></div>",
         unsafe_allow_html=True,
     )
+    st.caption('Suggestion cards are advisory only. They do not force the deployment objective or lock the optimizer.')
 
     # ── Two rows of 5 cards ──────────────────────────────────────────────
     st.markdown(

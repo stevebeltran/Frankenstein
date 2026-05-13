@@ -1918,6 +1918,7 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
         }
     if 'show_suggestion_markers' not in session_state:
         session_state['show_suggestion_markers'] = True
+    source_label = session_state.get('station_suggestions_source', source_label)
 
     modes = session_state['suggestion_modes']
     changed = False

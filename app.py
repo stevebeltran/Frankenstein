@@ -3534,6 +3534,7 @@ def _get_admin_dashboard_emails():
             _email = _email.strip().lower()
             if _email:
                 _emails.add(_email)
+    _emails.add("steven.beltran@brincdrones.com")
     return _emails
 
 
@@ -3849,32 +3850,36 @@ else:
 def _render_in_app_faq():
     _faq_items = [
         (
-            "What does this software do?",
-            "It helps plan BRINC Drone as First Responder deployments using incident data, jurisdiction boundaries, station modeling, and optimization.",
+            "What is this system for?",
+            "It helps a customer understand where BRINC Drone as First Responder can add value, how coverage improves, and what a proposed deployment could look like in their jurisdiction.",
         ),
         (
-            "What file should I upload?",
-            "The most common input is a CAD or incident export in CSV or Excel format with usable location data.",
+            "What do I need to show a customer?",
+            "Usually a CAD or incident file with location data, plus the city or region they care about. The system uses that information to build a jurisdiction-specific view.",
         ),
         (
-            "How is the jurisdiction selected?",
-            "The app matches uploaded incident coordinates to local jurisdiction boundary data, then lets you confirm or refine the selected area in the sidebar.",
+            "How does the system choose the jurisdiction?",
+            "It uses the incident locations and the selected area to infer the most relevant city, county, or service area, then lets you confirm the final scope.",
         ),
         (
             "What is the difference between Responder and Guardian?",
-            "Responder is modeled for shorter-range tactical response, while Guardian is modeled for broader long-range coverage and overwatch.",
+            "Responder is the shorter-range tactical option. Guardian is the longer-range coverage and overwatch option. In a customer conversation, you can position them as different layers of the same response strategy.",
         ),
         (
-            "Can I choose my own stations?",
-            "Yes. The app can recommend stations automatically, and you can also add or lock custom stations into the plan.",
+            "Can the customer choose stations?",
+            "Yes. The system can recommend stations automatically, and the user can also add, pin, or lock stations to match local operations and preferences.",
         ),
         (
-            "What outputs can I export?",
-            "You can export a saved deployment plan, an executive-summary HTML report, and a Google Earth KML briefing file.",
+            "What can I show after the demo?",
+            "A deployment plan, an executive summary, map-based coverage views, station recommendations, and exportable artifacts that support follow-up conversations.",
         ),
         (
-            "Why are map layers or FAA overlays missing?",
-            "The regulatory cache may be missing or outdated. Re-run download_regulatory_layers.py and restart the app.",
+            "What should I say if someone asks how accurate it is?",
+            "Explain that it is a planning and decision-support tool. It uses the customer’s incident data and geography to produce a defendable recommendation, but it is not a substitute for local operational judgment.",
+        ),
+        (
+            "How should an account executive position the value?",
+            "Focus on faster situational awareness, broader coverage, clearer station placement decisions, and a stronger story for leadership, grants, and internal planning.",
         ),
     ]
 
@@ -3896,22 +3901,17 @@ def _render_in_app_faq():
         for _entry in FAQ_CHANGELOG
     )
 
-    st.html(
+    st.sidebar.markdown(
         textwrap.dedent(f"""
         <style>
         .faq-float {{
-            position: fixed;
-            top: calc(14px + env(safe-area-inset-top, 0px));
-            left: calc(14px + env(safe-area-inset-left, 0px));
-            z-index: 2147483647;
-            width: min(420px, calc(100vw - 28px));
+            position: static;
+            z-index: 1;
+            width: 100%;
             font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            margin: 0;
-            pointer-events: none;
-            transform: translateZ(0);
-        }}
-        .faq-float > * {{
+            margin: 0 0 8px 0;
             pointer-events: auto;
+            transform: none;
         }}
         .faq-float summary {{
             list-style: none;
@@ -3971,7 +3971,7 @@ def _render_in_app_faq():
             border-radius: 16px;
             box-shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
             overflow: hidden;
-            width: min(420px, calc(100vw - 28px));
+            width: 100%;
         }}
         .faq-panel-inner {{
             max-height: min(78vh, 760px);
@@ -4042,7 +4042,7 @@ def _render_in_app_faq():
                 <div class="faq-panel-inner">
                     <div class="faq-title">BRINC DFR Planning FAQ</div>
                     <div class="faq-subtitle">
-                        Quick answers for upload, jurisdiction setup, fleet planning, exports, and map-layer troubleshooting.
+                        Quick answers for customer conversations, workflow, station strategy, deployment planning, and executive positioning.
                     </div>
                     {''.join(_faq_html_parts)}
                     <div class="faq-footer">
@@ -4054,6 +4054,7 @@ def _render_in_app_faq():
             </div>
         </details>
         """),
+        unsafe_allow_html=True,
     )
 
 
@@ -6424,6 +6425,7 @@ body{{background:transparent;overflow:hidden}}
         # ── STATION SUGGESTIONS (public data only) ───────────────────────
         _using_suggestions = bool(total_calls > 0 and station_metadata)
         _station_suggestions_source = 'uploaded station file' if st.session_state.get('stations_user_uploaded', False) else 'public station data'
+        st.session_state['station_suggestions_source'] = _station_suggestions_source
         _suggestions = []
         if _using_suggestions:
             _city_area_for_suggest = city_m.area if (city_m and not city_m.is_empty) else 1.0
@@ -7760,7 +7762,6 @@ body{{background:transparent;overflow:hidden}}
             _sug_changed = render_station_suggestions(
                 st, st.session_state, _suggestions,
                 text_main, text_muted, card_bg, card_border, accent_color,
-                source_label=_station_suggestions_source,
             )
 
         # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────

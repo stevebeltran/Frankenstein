@@ -6079,13 +6079,15 @@ body{{background:transparent;overflow:hidden}}
         deflection_rate = _runtime_ctx['deflection_rate']
 
         # ── STATION SUGGESTIONS (public data only) ───────────────────────
-        _using_suggestions = not st.session_state.get('stations_user_uploaded', False)
+        _using_suggestions = bool(total_calls > 0 and station_metadata)
+        _station_suggestions_source = 'uploaded station file' if st.session_state.get('stations_user_uploaded', False) else 'public station data'
         _suggestions = []
-        if _using_suggestions and total_calls > 0 and station_metadata:
+        if _using_suggestions:
             _city_area_for_suggest = city_m.area if (city_m and not city_m.is_empty) else 1.0
+            _max_suggestions = len(station_metadata) if st.session_state.get('stations_user_uploaded', False) else 10
             _suggestions = compute_station_suggestions(
                 resp_matrix, guard_matrix, station_metadata,
-                total_calls, _city_area_for_suggest, max_suggestions=10,
+                total_calls, _city_area_for_suggest, max_suggestions=_max_suggestions,
                 rank_by='land' if resp_strategy_raw == 'Land Coverage' else 'call',
             )
             st.session_state['_station_suggestions'] = _suggestions
@@ -7256,7 +7258,7 @@ body{{background:transparent;overflow:hidden}}
                 ))
 
             # ── Suggestion "?" markers on map ─────────────────────────────
-            if _using_suggestions and _suggestions and show_station_suggestions and st.session_state.get('show_suggestion_markers', True):
+            if _suggestions and show_station_suggestions and st.session_state.get('show_suggestion_markers', True):
                 _stg_map = st.session_state.get('suggestion_toggles', {})
                 _sug_on_lat, _sug_on_lon, _sug_on_text = [], [], []
                 _sug_off_lat, _sug_off_lon, _sug_off_text = [], [], []
@@ -7410,11 +7412,12 @@ body{{background:transparent;overflow:hidden}}
                 )
 
 
-        # ── STATION SUGGESTIONS PANEL (public data, no stations file) ────────────
-        if _using_suggestions and _suggestions and show_station_suggestions:
+        # ── STATION SUGGESTIONS PANEL ────────────────────────────────────────────
+        if _suggestions and show_station_suggestions:
             _sug_changed = render_station_suggestions(
                 st, st.session_state, _suggestions,
                 text_main, text_muted, card_bg, card_border, accent_color,
+                source_label=_station_suggestions_source,
             )
 
         # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────

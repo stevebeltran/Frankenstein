@@ -6054,6 +6054,7 @@ body{{background:transparent;overflow:hidden}}
             _suggestions = compute_station_suggestions(
                 resp_matrix, guard_matrix, station_metadata,
                 total_calls, _city_area_for_suggest, max_suggestions=10,
+                rank_by='land' if resp_strategy_raw == 'Land Coverage' else 'call',
             )
             st.session_state['_station_suggestions'] = _suggestions
 
@@ -6069,97 +6070,6 @@ body{{background:transparent;overflow:hidden}}
             st.session_state['suggestion_toggles'] = {
                 idx: (mode != 'Off') for idx, mode in _suggestion_modes.items()
             }
-
-            def _suggestion_modes_sig(mode_map):
-                return tuple(sorted((int(idx), str(mode)) for idx, mode in mode_map.items()))
-
-            def _apply_role_target(role_suggestions, target_count, target_role):
-                target_count = max(0, int(target_count or 0))
-                current_modes = dict(st.session_state.get('suggestion_modes', {}) or {})
-                active_roles = [
-                    s for s in role_suggestions
-                    if current_modes.get(s['station_idx'], 'Off') == target_role
-                ]
-                changed = False
-
-                if len(active_roles) > target_count:
-                    keep_ids = {
-                        s['station_idx']
-                        for s in active_roles[:target_count]
-                    }
-                    for s in role_suggestions:
-                        idx = s['station_idx']
-                        current_mode = current_modes.get(idx, 'Off')
-                        if idx in keep_ids:
-                            new_mode = target_role
-                        elif current_mode == target_role:
-                            new_mode = 'Off'
-                        else:
-                            new_mode = current_mode
-                        if current_mode != new_mode:
-                            current_modes[idx] = new_mode
-                            changed = True
-                    st.session_state['suggestion_modes'] = current_modes
-                    st.session_state['suggestion_toggles'] = {
-                        idx: (mode != 'Off') for idx, mode in current_modes.items()
-                    }
-                    return current_modes, changed
-
-                if len(active_roles) < target_count:
-                    for s in role_suggestions:
-                        idx = s['station_idx']
-                        if current_modes.get(idx, 'Off') == 'Off':
-                            current_modes[idx] = target_role
-                            changed = True
-                            active_roles.append(s)
-                            if len(active_roles) >= target_count:
-                                break
-                st.session_state['suggestion_modes'] = current_modes
-                st.session_state['suggestion_toggles'] = {
-                    idx: (mode != 'Off') for idx, mode in current_modes.items()
-                }
-                return current_modes, changed
-
-            _curr_modes_sig = _suggestion_modes_sig(_suggestion_modes)
-            _custom_resp_lock_count = len(pinned_resp_names)
-            _custom_guard_lock_count = len(pinned_guard_names)
-            _resp_target = max(int(k_responder or 0) - _custom_resp_lock_count, 0)
-            _guard_target = max(int(k_guardian or 0) - _custom_guard_lock_count, 0)
-            _resp_suggestions = [
-                s for s in _suggestions
-                if _suggestion_modes.get(s['station_idx']) in {'Responder', 'Off'}
-            ]
-            _guard_suggestions = [
-                s for s in _suggestions
-                if _suggestion_modes.get(s['station_idx']) in {'Guardian', 'Off'}
-            ]
-            _suggestion_modes, _resp_changed = _apply_role_target(_resp_suggestions, _resp_target, 'Responder')
-            _suggestion_modes, _guard_changed = _apply_role_target(_guard_suggestions, _guard_target, 'Guardian')
-            if _resp_changed or _guard_changed or st.session_state.get('_suggestion_sync_sig') is None:
-                st.session_state['suggestion_modes'] = _suggestion_modes
-                st.session_state['suggestion_toggles'] = {
-                    idx: (mode != 'Off') for idx, mode in _suggestion_modes.items()
-                }
-                _curr_modes_sig = _suggestion_modes_sig(_suggestion_modes)
-
-            k_responder = _custom_resp_lock_count + _resp_target
-            k_guardian = _custom_guard_lock_count + _guard_target
-            st.session_state['k_resp'] = k_responder
-            st.session_state['k_guard'] = k_guardian
-
-            locked_r_pins = list(dict.fromkeys(locked_r_pins + [
-                s['station_idx'] for s in _suggestions
-                if _suggestion_modes.get(s['station_idx']) == 'Responder'
-            ]))
-            locked_g_pins = list(dict.fromkeys(locked_g_pins + [
-                s['station_idx'] for s in _suggestions
-                if _suggestion_modes.get(s['station_idx']) == 'Guardian'
-            ]))
-            st.session_state['_suggestion_sync_sig'] = (
-                int(k_responder or 0),
-                int(k_guardian or 0),
-                _curr_modes_sig,
-            )
 
         # ── OPTIMIZATION ──────────────────────────────────────────────────
         _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
@@ -8370,13 +8280,15 @@ body{{background:transparent;overflow:hidden}}
                 _qr_host = st.context.headers.get("host", "") or st.context.headers.get("Host", "")
                 _qr_proto = "https" if (_qr_host and ("streamlit.app" in _qr_host or "share" in _qr_host)) else "http"
                 if not _qr_host:
-                    _qr_host = f"{_sock.gethostbyname(_sock.gethostname())}:8501"
+                    _qr_port = str(st.get_option("server.port") or os.environ.get("STREAMLIT_SERVER_PORT") or os.environ.get("PORT") or "8501").strip() or "8501"
+                    _qr_host = f"{_sock.gethostbyname(_sock.gethostname())}:{_qr_port}"
                 _qr_base = f"{_qr_proto}://{_qr_host}"
             except Exception:
                 try:
-                    _qr_base = f"http://{_sock.gethostbyname(_sock.gethostname())}:8501"
+                    _qr_port = str(st.get_option("server.port") or os.environ.get("STREAMLIT_SERVER_PORT") or os.environ.get("PORT") or "8501").strip() or "8501"
+                    _qr_base = f"http://{_sock.gethostbyname(_sock.gethostname())}:{_qr_port}"
                 except Exception:
-                    _qr_base = "http://localhost:8501"
+                    _qr_base = f"http://localhost:{str(st.get_option('server.port') or os.environ.get('STREAMLIT_SERVER_PORT') or os.environ.get('PORT') or '8501').strip() or '8501'}"
 
             # Compute area inline (may not yet be in scope)
             try:

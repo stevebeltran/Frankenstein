@@ -3559,14 +3559,21 @@ def _render_in_app_faq():
         <style>
         .faq-float {{
             position: fixed;
-            top: 12px;
-            left: 14px;
-            z-index: 9998;
+            top: calc(14px + env(safe-area-inset-top, 0px));
+            left: calc(14px + env(safe-area-inset-left, 0px));
+            z-index: 2147483647;
             width: min(420px, calc(100vw - 28px));
             font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            margin: 0;
+            pointer-events: none;
+            transform: translateZ(0);
+        }}
+        .faq-float > * {{
+            pointer-events: auto;
         }}
         .faq-float summary {{
             list-style: none;
+            margin: 0;
         }}
         .faq-float summary::-webkit-details-marker {{
             display: none;
@@ -3574,30 +3581,55 @@ def _render_in_app_faq():
         .faq-pill {{
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            padding: 5px 10px;
+            gap: 8px;
+            padding: 8px 12px;
             border-radius: 999px;
-            background: rgba(8, 12, 20, 0.88);
-            border: 1px solid rgba(116, 224, 255, 0.22);
-            color: rgba(226, 238, 246, 0.92);
-            font-size: 0.72rem;
-            font-weight: 700;
+            background: linear-gradient(180deg, rgba(7, 17, 31, 0.98), rgba(4, 10, 20, 0.96));
+            border: 1px solid rgba(0, 210, 255, 0.78);
+            color: #f5fdff;
+            font-size: 0.78rem;
+            font-weight: 800;
             letter-spacing: 0.04em;
             cursor: pointer;
-            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+            box-shadow:
+                0 0 0 1px rgba(0, 210, 255, 0.16),
+                0 10px 24px rgba(0, 0, 0, 0.28),
+                0 0 24px rgba(0, 210, 255, 0.16);
             backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
         }}
         .faq-pill:hover {{
-            border-color: rgba(116, 224, 255, 0.42);
-            background: rgba(10, 16, 28, 0.96);
+            border-color: rgba(0, 210, 255, 0.98);
+            background: linear-gradient(180deg, rgba(8, 24, 42, 0.99), rgba(5, 12, 22, 0.98));
+            box-shadow:
+                0 0 0 1px rgba(0, 210, 255, 0.24),
+                0 12px 28px rgba(0, 0, 0, 0.34),
+                0 0 28px rgba(0, 210, 255, 0.22);
+        }}
+        .faq-pill::before {{
+            content: "?";
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border-radius: 999px;
+            background: rgba(0, 210, 255, 0.18);
+            border: 1px solid rgba(0, 210, 255, 0.46);
+            color: #8eeeff;
+            font-size: 0.72rem;
+            font-weight: 900;
+            line-height: 1;
+            flex: 0 0 auto;
         }}
         .faq-panel {{
             margin-top: 8px;
             background: rgba(7, 11, 18, 0.97);
-            border: 1px solid rgba(116, 224, 255, 0.18);
+            border: 1px solid rgba(0, 210, 255, 0.22);
             border-radius: 16px;
             box-shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
             overflow: hidden;
+            width: min(420px, calc(100vw - 28px));
         }}
         .faq-panel-inner {{
             max-height: min(78vh, 760px);
@@ -3605,14 +3637,14 @@ def _render_in_app_faq():
             padding: 14px 14px 12px;
         }}
         .faq-title {{
-            color: #f4fbff;
-            font-size: 0.92rem;
+            color: #f7fdff;
+            font-size: 0.96rem;
             font-weight: 800;
             margin: 0 0 4px 0;
         }}
         .faq-subtitle {{
-            color: rgba(193, 209, 221, 0.78);
-            font-size: 0.76rem;
+            color: rgba(216, 229, 239, 0.84);
+            font-size: 0.78rem;
             line-height: 1.5;
             margin-bottom: 12px;
         }}
@@ -3625,14 +3657,14 @@ def _render_in_app_faq():
             padding-top: 0;
         }}
         .faq-q {{
-            color: #f6fbff;
-            font-size: 0.79rem;
+            color: #fbfeff;
+            font-size: 0.81rem;
             font-weight: 700;
             margin-bottom: 4px;
         }}
         .faq-a {{
-            color: rgba(209, 220, 230, 0.84);
-            font-size: 0.75rem;
+            color: rgba(220, 230, 238, 0.88);
+            font-size: 0.76rem;
             line-height: 1.52;
         }}
         .faq-footer {{
@@ -3642,7 +3674,7 @@ def _render_in_app_faq():
         }}
         .faq-footer-label {{
             color: #7edfff;
-            font-size: 0.68rem;
+            font-size: 0.69rem;
             font-weight: 800;
             letter-spacing: 0.08em;
             text-transform: uppercase;
@@ -3650,19 +3682,19 @@ def _render_in_app_faq():
         }}
         .faq-version-line {{
             color: rgba(245, 250, 255, 0.92);
-            font-size: 0.72rem;
+            font-size: 0.73rem;
             font-family: "IBM Plex Mono", Consolas, monospace;
             margin-bottom: 8px;
         }}
         .faq-changelog-line {{
             color: rgba(201, 214, 225, 0.82);
-            font-size: 0.70rem;
+            font-size: 0.71rem;
             line-height: 1.45;
             font-family: "IBM Plex Mono", Consolas, monospace;
             word-break: break-word;
         }}
         </style>
-        <details class="faq-float">
+        <details class="faq-float" open>
             <summary class="faq-pill">Help / FAQ</summary>
             <div class="faq-panel">
                 <div class="faq-panel-inner">

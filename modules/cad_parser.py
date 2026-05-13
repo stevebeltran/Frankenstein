@@ -697,6 +697,38 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
             valid = first_first_valid
         return lon, lat, float(valid)
 
+    def _coerce_coord_series(series, field):
+        """
+        Convert coordinate text into signed decimal degrees.
+
+        Handles plain numeric values as well as strings like
+        "37.10879898° N" and "113.59100342° W".
+        """
+        s = series.astype(str).str.strip()
+        numeric = pd.to_numeric(s, errors='coerce')
+        if numeric.notna().any():
+            return numeric
+
+        extracted = s.str.extract(
+            r'^\s*([+-]?\d+(?:\.\d+)?)\s*(?:\u00b0|deg|d)?\s*([NSEW])?\s*$',
+            expand=True,
+        )
+        values = pd.to_numeric(extracted[0], errors='coerce')
+        hemi = extracted[1].fillna('').str.upper()
+
+        parsed = values.copy()
+        if field == 'lat':
+            parsed = values.abs()
+            parsed = parsed.where(~hemi.eq('S'), -parsed)
+        else:
+            parsed = values.abs()
+            parsed = parsed.where(~hemi.eq('W'), -parsed)
+
+        # If a row had no hemisphere marker, preserve the original sign.
+        no_hemi = hemi.eq('')
+        parsed = parsed.where(~no_hemi, values)
+        return parsed
+
     def _infer_city_from_location_text(raw_df):
         text_cols = [c for c in raw_df.columns if c in ['location', 'address', 'incident_location', 'addr', 'street', 'input_address', 'matched_address']]
         if not text_cols:
@@ -1018,7 +1050,7 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                                if c != 'lonlat' and _coord_column_matches(c, CV[field])]
                 found = found_exact or found_loose
                 if found:
-                    res[field] = pd.to_numeric(raw_df[found[0]], errors='coerce')
+                    res[field] = _coerce_coord_series(raw_df[found[0]], field)
 
             if 'lat' not in res.columns or 'lon' not in res.columns:
                 for c in raw_df.columns:

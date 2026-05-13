@@ -3694,7 +3694,7 @@ def _render_in_app_faq():
             word-break: break-word;
         }}
         </style>
-        <details class="faq-float" open>
+        <details class="faq-float">
             <summary class="faq-pill">Help / FAQ</summary>
             <div class="faq-panel">
                 <div class="faq-panel-inner">

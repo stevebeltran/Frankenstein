@@ -806,8 +806,6 @@ def manage_custom_stations(
     n = len(df_stations_all)
     resp_state_key = '_fleet_k_resp'
     guard_state_key = '_fleet_k_guard'
-    resp_widget_key = '_k_resp_widget'
-    guard_widget_key = '_k_guard_widget'
 
     def _current_fleet_count(state_key, legacy_key, default=0):
         return int(session_state.get(state_key, session_state.get(legacy_key, default)) or 0)
@@ -915,13 +913,8 @@ def manage_custom_stations(
     val_r = min(max(0, int(val_r)), max_resp_calc)
     val_g = min(max(0, int(val_g)), max_guard_calc)
 
-    # Keep widget keys separate from the persisted fleet counts so reruns can
-    # stage new values without mutating a live widget-backed session key.
-    session_state[resp_widget_key] = val_r
-    session_state[guard_widget_key] = val_g
-
-    k_responder = st.sidebar.slider('🚁 Responder Count', 0, max(1, max_resp_calc), key=resp_widget_key, help='Short-range tactical drones (2-3mi radius).')
-    k_guardian = st.sidebar.slider('🦅 Guardian Count', 0, max(1, max_guard_calc), key=guard_widget_key, help='Long-range overwatch drones (5-8mi radius).')
+    k_responder = st.sidebar.slider('🚁 Responder Count', 0, max(1, max_resp_calc), value=val_r, help='Short-range tactical drones (2-3mi radius).')
+    k_guardian = st.sidebar.slider('🦅 Guardian Count', 0, max(1, max_guard_calc), value=val_g, help='Long-range overwatch drones (5-8mi radius).')
     _set_fleet_counts(resp_value=k_responder or 0, guard_value=k_guardian or 0)
 
     station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []

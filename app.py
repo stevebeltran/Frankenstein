@@ -3946,7 +3946,7 @@ def _render_in_app_faq():
         for _entry in FAQ_CHANGELOG
     )
 
-    st.markdown(
+    st.html(
         textwrap.dedent(f"""
         <style>
         .faq-float {{
@@ -4104,7 +4104,6 @@ def _render_in_app_faq():
             </div>
         </details>
         """),
-        unsafe_allow_html=True,
     )
 
 

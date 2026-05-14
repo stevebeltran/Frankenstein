@@ -3709,16 +3709,7 @@ def _render_live_admin_dashboard():
         _seen = _item.get("last_seen")
         _seen_text = _seen.strftime("%H:%M:%S UTC") if isinstance(_seen, datetime.datetime) else "?"
         _rows.append(
-            f"""
-            <div class="live-admin-row">
-                <div class="live-admin-main">
-                    <div class="live-admin-user">{html.escape(_item.get("name") or _item.get("email") or "Unknown")}</div>
-                    <div class="live-admin-meta">{html.escape(_item.get("email") or "—")} · session {html.escape(_item.get("session_id") or "—")}</div>
-                    <div class="live-admin-meta">{html.escape(_item.get("city") or "—")}, {html.escape(_item.get("state") or "—")} · {html.escape(_item.get("page") or "current app")}</div>
-                </div>
-                <div class="live-admin-seen">{html.escape(_seen_text)}</div>
-            </div>
-            """
+            f'<div class="live-admin-row"><div class="live-admin-main"><div class="live-admin-user">{html.escape(_item.get("name") or _item.get("email") or "Unknown")}</div><div class="live-admin-meta">{html.escape(_item.get("email") or "—")} · session {html.escape(_item.get("session_id") or "—")}</div><div class="live-admin-meta">{html.escape(_item.get("city") or "—")}, {html.escape(_item.get("state") or "—")} · {html.escape(_item.get("page") or "current app")}</div></div><div class="live-admin-seen">{html.escape(_seen_text)}</div></div>'
         )
 
     if not _rows:

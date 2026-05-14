@@ -4010,7 +4010,7 @@ def _render_in_app_faq():
     _faq_items = [
         (
             "What do I do on this page?",
-            "Upload incident data to analyze coverage and create deployment recommendations. Path 01 uses simulated data or a stations file. Path 02 accepts Calls for Service files, CAD files, and stations files (CSV format). The program uses customer data only to configure the map—no data is stored or transmitted.",
+            "Choose a data path to analyze coverage and create deployment recommendations. Path 01: simulated data or upload a stations file. Path 02: upload Calls for Service files, CAD files, and stations files (CSV format). Path 03: load a random city with pre-loaded data and stations. The program uses customer data only to configure the map—no data is stored or transmitted.",
         ),
         (
             "What is this system for?",

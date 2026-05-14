@@ -3635,7 +3635,7 @@ def _render_live_admin_dashboard():
         <style>
         .live-admin-float {{
             position: fixed;
-            top: calc(60px + env(safe-area-inset-top, 0px));
+            top: calc(78px + env(safe-area-inset-top, 0px));
             left: calc(14px + env(safe-area-inset-left, 0px));
             z-index: 2147483647;
             width: min(460px, calc(100vw - 28px));
@@ -3901,17 +3901,22 @@ def _render_in_app_faq():
         for _entry in FAQ_CHANGELOG
     )
 
-    st.sidebar.markdown(
+    st.html(
         textwrap.dedent(f"""
         <style>
         .faq-float {{
-            position: static;
-            z-index: 1;
-            width: 100%;
+            position: fixed;
+            top: calc(14px + env(safe-area-inset-top, 0px));
+            left: calc(14px + env(safe-area-inset-left, 0px));
+            z-index: 2147483647;
+            width: min(420px, calc(100vw - 28px));
             font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            margin: 0 0 8px 0;
+            margin: 0;
+            pointer-events: none;
+            transform: translateZ(0);
+        }}
+        .faq-float > * {{
             pointer-events: auto;
-            transform: none;
         }}
         .faq-float summary {{
             list-style: none;
@@ -3971,7 +3976,7 @@ def _render_in_app_faq():
             border-radius: 16px;
             box-shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
             overflow: hidden;
-            width: 100%;
+            width: min(420px, calc(100vw - 28px));
         }}
         .faq-panel-inner {{
             max-height: min(78vh, 760px);

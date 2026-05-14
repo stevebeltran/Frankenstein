@@ -3735,6 +3735,7 @@ def _render_live_admin_dashboard():
             max-width: 680px;
             margin: 14px auto 0;
             font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            position: relative;
         }}
         .live-admin-dock {{
             display: flex;
@@ -3743,6 +3744,7 @@ def _render_live_admin_dashboard():
             gap: 8px;
             flex-wrap: wrap;
             width: 100%;
+            position: relative;
         }}
         .live-admin-quickjump {{
             display: inline-flex;
@@ -3789,6 +3791,9 @@ def _render_live_admin_dashboard():
             font-size: 0.72rem;
             line-height: 1;
             flex: 0 0 auto;
+        }}
+        .live-admin-inline details {{
+            position: relative;
         }}
         .live-admin-inline summary {{
             list-style: none;
@@ -3841,13 +3846,18 @@ def _render_live_admin_dashboard():
             flex: 0 0 auto;
         }}
         .live-admin-panel {{
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
             margin-top: 8px;
             background: rgba(7, 11, 18, 0.97);
             border: 1px solid {_panel_border};
             border-radius: 16px;
             box-shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
             overflow: hidden;
-            width: min(560px, 100%);
+            width: min(560px, calc(100vw - 28px));
+            z-index: 9999;
         }}
         .live-admin-panel-inner {{
             max-height: min(78vh, 760px);
@@ -3943,7 +3953,9 @@ def _render_live_admin_dashboard():
                 max-width: calc(100vw - 28px);
             }}
             .live-admin-panel {{
-                width: 100%;
+                width: calc(100vw - 28px);
+                left: 50%;
+                transform: translateX(-50%);
             }}
         }}
         </style>

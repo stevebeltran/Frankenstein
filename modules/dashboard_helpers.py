@@ -804,6 +804,8 @@ def manage_custom_stations(
     search_public_facility_candidates=None,
 ):
     n = len(df_stations_all)
+    resp_widget_key = '_k_resp_widget'
+    guard_widget_key = '_k_guard_widget'
 
     def _queue_fleet_count_sync(resp_value=None, guard_value=None, mode='set'):
         if resp_value is not None:
@@ -898,13 +900,15 @@ def manage_custom_stations(
     val_r = min(max(0, int(val_r)), max_resp_calc)
     val_g = min(max(0, int(val_g)), max_guard_calc)
 
-    # Bind the sliders to the same session-state keys that suggestion clicks update.
-    # This makes the sidebar reflect card clicks on the next rerun.
-    session_state['k_resp'] = val_r
-    session_state['k_guard'] = val_g
+    # Keep widget keys separate from the persisted fleet counts so reruns can
+    # stage new values without mutating a live widget-backed session key.
+    session_state[resp_widget_key] = val_r
+    session_state[guard_widget_key] = val_g
 
-    k_responder = st.sidebar.slider('🚁 Responder Count', 0, max(1, max_resp_calc), key='k_resp', help='Short-range tactical drones (2-3mi radius).')
-    k_guardian = st.sidebar.slider('🦅 Guardian Count', 0, max(1, max_guard_calc), key='k_guard', help='Long-range overwatch drones (5-8mi radius).')
+    k_responder = st.sidebar.slider('🚁 Responder Count', 0, max(1, max_resp_calc), key=resp_widget_key, help='Short-range tactical drones (2-3mi radius).')
+    k_guardian = st.sidebar.slider('🦅 Guardian Count', 0, max(1, max_guard_calc), key=guard_widget_key, help='Long-range overwatch drones (5-8mi radius).')
+    session_state['k_resp'] = int(k_responder or 0)
+    session_state['k_guard'] = int(k_guardian or 0)
 
     station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
 

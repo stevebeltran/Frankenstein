@@ -4232,7 +4232,6 @@ def main():
     _presence_heartbeat_fragment()
     if not st.session_state['csvs_ready']:
         _render_in_app_faq()
-        _live_admin_dashboard_fragment()
 
         # GRAB THE LOGO FOR THE UPLOAD PAGE
         logo_b64 = get_themed_logo_base64("logo.png", theme="dark")
@@ -5732,6 +5731,7 @@ def main():
             </div>
         </div>
         """, unsafe_allow_html=True)
+        _live_admin_dashboard_fragment()
 
         if submit_demo or st.session_state.get('trigger_sim', False):
             if st.session_state.get('trigger_sim', False):

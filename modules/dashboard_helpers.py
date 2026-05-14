@@ -805,6 +805,20 @@ def manage_custom_stations(
 ):
     n = len(df_stations_all)
 
+    def _queue_fleet_count_sync(resp_value=None, guard_value=None, mode='set'):
+        if resp_value is not None:
+            _resp_key = '_pending_k_resp'
+            if mode == 'max':
+                session_state[_resp_key] = max(int(session_state.get(_resp_key, 0) or 0), int(resp_value))
+            else:
+                session_state[_resp_key] = int(resp_value)
+        if guard_value is not None:
+            _guard_key = '_pending_k_guard'
+            if mode == 'max':
+                session_state[_guard_key] = max(int(session_state.get(_guard_key, 0) or 0), int(guard_value))
+            else:
+                session_state[_guard_key] = int(guard_value)
+
     # Count selected stations from Suggested Station Placements (Guardian and Responder only)
     suggestion_modes = session_state.get('suggestion_modes', {})
     n_selected_responder = sum(1 for mode in suggestion_modes.values() if mode == 'Responder')
@@ -876,6 +890,11 @@ def manage_custom_stations(
     val_r = int(session_state.get('k_resp', current_resp_from_modes if current_resp_from_modes > 0 else 2) or 0)
     val_g = int(session_state.get('k_guard', current_guard_from_modes if current_guard_from_modes > 0 else 1) or 0)
 
+    if '_pending_k_resp' in session_state:
+        val_r = int(session_state.pop('_pending_k_resp') or 0)
+    if '_pending_k_guard' in session_state:
+        val_g = int(session_state.pop('_pending_k_guard') or 0)
+
     val_r = min(max(0, int(val_r)), max_resp_calc)
     val_g = min(max(0, int(val_g)), max_guard_calc)
 
@@ -935,9 +954,9 @@ def manage_custom_stations(
 
     def increment_fleet_count(lock_role):
         if lock_role == 'Guardian':
-            session_state['k_guard'] = int(session_state.get('k_guard', 0) or 0) + 1
+            _queue_fleet_count_sync(guard_value=int(session_state.get('k_guard', 0) or 0) + 1)
         else:
-            session_state['k_resp'] = int(session_state.get('k_resp', 0) or 0) + 1
+            _queue_fleet_count_sync(resp_value=int(session_state.get('k_resp', 0) or 0) + 1)
 
     def set_station_locks(new_guard_names, new_resp_names, ensure_capacity=True):
         valid_lock_names = set(station_names)
@@ -954,8 +973,11 @@ def manage_custom_stations(
         session_state['lock_guard_ms'] = list(guard)
         session_state['lock_resp_ms'] = list(resp)
         if ensure_capacity:
-            session_state['k_guard'] = max(session_state.get('k_guard', 0), len(guard))
-            session_state['k_resp'] = max(session_state.get('k_resp', 0), len(resp))
+            _queue_fleet_count_sync(
+                resp_value=max(session_state.get('k_resp', 0), len(resp)),
+                guard_value=max(session_state.get('k_guard', 0), len(guard)),
+                mode='max',
+            )
         session_state.pop('_auto_minimums_sig', None)
         for cache_key in ['_opt_cache_key', '_opt_best_combo', '_opt_chrono_r', '_opt_chrono_g']:
             session_state.pop(cache_key, None)
@@ -1379,8 +1401,11 @@ def manage_custom_stations(
     effective_k_guardian = max(int(k_guardian or 0), len(pinned_guard_names))
     effective_k_responder = max(int(k_responder or 0), len(pinned_resp_names))
     if effective_k_guardian != k_guardian or effective_k_responder != k_responder:
-        session_state['k_guard'] = effective_k_guardian
-        session_state['k_resp'] = effective_k_responder
+        _queue_fleet_count_sync(
+            resp_value=effective_k_responder,
+            guard_value=effective_k_guardian,
+        )
+        st.rerun()
 
     return {
         'k_responder': effective_k_responder,

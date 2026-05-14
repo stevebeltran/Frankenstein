@@ -804,8 +804,19 @@ def manage_custom_stations(
     search_public_facility_candidates=None,
 ):
     n = len(df_stations_all)
+    resp_state_key = '_fleet_k_resp'
+    guard_state_key = '_fleet_k_guard'
     resp_widget_key = '_k_resp_widget'
     guard_widget_key = '_k_guard_widget'
+
+    def _current_fleet_count(state_key, legacy_key, default=0):
+        return int(session_state.get(state_key, session_state.get(legacy_key, default)) or 0)
+
+    def _set_fleet_counts(resp_value=None, guard_value=None):
+        if resp_value is not None:
+            session_state[resp_state_key] = int(resp_value)
+        if guard_value is not None:
+            session_state[guard_state_key] = int(guard_value)
 
     def _queue_fleet_count_sync(resp_value=None, guard_value=None, mode='set'):
         if resp_value is not None:
@@ -868,8 +879,10 @@ def manage_custom_stations(
             if session_state.pop('_brinc_k_override', False):
                 pass
             elif pin_drop_used:
-                session_state['k_resp'] = max(session_state.get('k_resp', pin_r_count), pin_r_count)
-                session_state['k_guard'] = max(session_state.get('k_guard', pin_g_count), pin_g_count)
+                _set_fleet_counts(
+                    resp_value=max(_current_fleet_count(resp_state_key, 'k_resp', pin_r_count), pin_r_count),
+                    guard_value=max(_current_fleet_count(guard_state_key, 'k_guard', pin_g_count), pin_g_count),
+                )
             else:
                 resp_default = 2
                 try:
@@ -881,16 +894,18 @@ def manage_custom_stations(
                     pass
                 resp_default = max(2, min(int(resp_default), max(1, max_resp_calc)))
                 guard_default = max(1, min(1, max(1, max_guard_calc)))
-                session_state['k_resp'] = max(resp_default, pin_r_count)
-                session_state['k_guard'] = max(guard_default, pin_g_count)
+                _set_fleet_counts(
+                    resp_value=max(resp_default, pin_r_count),
+                    guard_value=max(guard_default, pin_g_count),
+                )
             session_state['_auto_minimums_sig'] = auto_sig
     except Exception:
         pass
 
     current_resp_from_modes = n_custom_responder + n_selected_responder
     current_guard_from_modes = n_custom_guardian + n_selected_guardian
-    val_r = int(session_state.get('k_resp', current_resp_from_modes if current_resp_from_modes > 0 else 2) or 0)
-    val_g = int(session_state.get('k_guard', current_guard_from_modes if current_guard_from_modes > 0 else 1) or 0)
+    val_r = _current_fleet_count(resp_state_key, 'k_resp', current_resp_from_modes if current_resp_from_modes > 0 else 2)
+    val_g = _current_fleet_count(guard_state_key, 'k_guard', current_guard_from_modes if current_guard_from_modes > 0 else 1)
 
     if '_pending_k_resp' in session_state:
         val_r = int(session_state.pop('_pending_k_resp') or 0)
@@ -907,8 +922,7 @@ def manage_custom_stations(
 
     k_responder = st.sidebar.slider('🚁 Responder Count', 0, max(1, max_resp_calc), key=resp_widget_key, help='Short-range tactical drones (2-3mi radius).')
     k_guardian = st.sidebar.slider('🦅 Guardian Count', 0, max(1, max_guard_calc), key=guard_widget_key, help='Long-range overwatch drones (5-8mi radius).')
-    session_state['k_resp'] = int(k_responder or 0)
-    session_state['k_guard'] = int(k_guardian or 0)
+    _set_fleet_counts(resp_value=k_responder or 0, guard_value=k_guardian or 0)
 
     station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
 
@@ -958,9 +972,9 @@ def manage_custom_stations(
 
     def increment_fleet_count(lock_role):
         if lock_role == 'Guardian':
-            _queue_fleet_count_sync(guard_value=int(session_state.get('k_guard', 0) or 0) + 1)
+            _queue_fleet_count_sync(guard_value=_current_fleet_count(guard_state_key, 'k_guard') + 1)
         else:
-            _queue_fleet_count_sync(resp_value=int(session_state.get('k_resp', 0) or 0) + 1)
+            _queue_fleet_count_sync(resp_value=_current_fleet_count(resp_state_key, 'k_resp') + 1)
 
     def set_station_locks(new_guard_names, new_resp_names, ensure_capacity=True):
         valid_lock_names = set(station_names)
@@ -978,8 +992,8 @@ def manage_custom_stations(
         session_state['lock_resp_ms'] = list(resp)
         if ensure_capacity:
             _queue_fleet_count_sync(
-                resp_value=max(session_state.get('k_resp', 0), len(resp)),
-                guard_value=max(session_state.get('k_guard', 0), len(guard)),
+                resp_value=max(_current_fleet_count(resp_state_key, 'k_resp'), len(resp)),
+                guard_value=max(_current_fleet_count(guard_state_key, 'k_guard'), len(guard)),
                 mode='max',
             )
         session_state.pop('_auto_minimums_sig', None)

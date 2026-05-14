@@ -16,6 +16,18 @@ from modules.config import calculate_max_flights_per_day, US_STATES_ABBR, text_m
 from modules.versioning import __version__ as _app_version
 
 
+@st.cache_resource(show_spinner=False)
+def _load_boundary_gdf_cached(boundary_path, boundary_mtime, boundary_size):
+    """Load a saved boundary once and reuse it across reruns for the same file."""
+    try:
+        gdf = gpd.read_file(boundary_path)
+        if gdf.crs is None:
+            gdf = gdf.set_crs(epsg=4269)
+        return gdf.to_crs(epsg=4326)
+    except Exception:
+        return None
+
+
 def log_map_build_event_once(session_state, log_to_sheets):
     if session_state.get('map_build_logged', False):
         return
@@ -211,10 +223,25 @@ def resolve_master_boundary(
                         master_gdf = None
                         raise ValueError('No overlapping shapefiles found')
 
-                fallback_gdf = gpd.read_file(best)
-                if fallback_gdf.crs is None:
-                    fallback_gdf = fallback_gdf.set_crs(epsg=4269)
-                fallback_gdf = fallback_gdf.to_crs(epsg=4326)
+                try:
+                    best_stat = os.stat(best)
+                except OSError:
+                    best_stat = None
+
+                # Lazy-load the selected county/parish file and keep the parsed
+                # GeoDataFrame cached for the next rerun.
+                fallback_gdf = (
+                    _load_boundary_gdf_cached(best, best_stat.st_mtime, best_stat.st_size)
+                    if best_stat is not None
+                    else None
+                )
+                if fallback_gdf is None:
+                    fallback_gdf = gpd.read_file(best)
+                    if fallback_gdf.crs is None:
+                        fallback_gdf = fallback_gdf.set_crs(epsg=4269)
+                    fallback_gdf = fallback_gdf.to_crs(epsg=4326)
+                else:
+                    fallback_gdf = fallback_gdf.copy()
                 name_col = next(
                     (column for column in ['NAME', 'DISTRICT', 'NAMELSAD'] if column in fallback_gdf.columns),
                     fallback_gdf.columns[0],

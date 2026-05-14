@@ -6397,7 +6397,19 @@ body{{background:transparent;overflow:hidden}}
         df_curve = pd.DataFrame()
         _prior_suggestions = st.session_state.get('_station_suggestions', []) or []
         if _prior_suggestions:
-            sync_station_suggestion_modes(st.session_state, _prior_suggestions)
+            _prior_modes = sync_station_suggestion_modes(st.session_state, _prior_suggestions)
+            _prior_resp_selected = sum(1 for mode in _prior_modes.values() if mode == 'Responder')
+            _prior_guard_selected = sum(1 for mode in _prior_modes.values() if mode == 'Guardian')
+            _prev_resp_selected = int(st.session_state.get('_suggestion_selected_resp_count', 0) or 0)
+            _prev_guard_selected = int(st.session_state.get('_suggestion_selected_guard_count', 0) or 0)
+            _resp_delta = _prior_resp_selected - _prev_resp_selected
+            _guard_delta = _prior_guard_selected - _prev_guard_selected
+            if _resp_delta:
+                st.session_state['k_resp'] = max(0, int(st.session_state.get('k_resp', 0) or 0) + _resp_delta)
+            if _guard_delta:
+                st.session_state['k_guard'] = max(0, int(st.session_state.get('k_guard', 0) or 0) + _guard_delta)
+            st.session_state['_suggestion_selected_resp_count'] = _prior_resp_selected
+            st.session_state['_suggestion_selected_guard_count'] = _prior_guard_selected
 
 
         _custom_station_state = manage_custom_stations(
@@ -6489,7 +6501,17 @@ body{{background:transparent;overflow:hidden}}
                 rank_by='land' if resp_strategy_raw == 'Land Coverage' else 'call',
             )
             st.session_state['_station_suggestions'] = _suggestions
-            sync_station_suggestion_modes(st.session_state, _suggestions)
+            _current_modes = sync_station_suggestion_modes(st.session_state, _suggestions)
+            st.session_state['_suggestion_selected_resp_count'] = sum(1 for mode in _current_modes.values() if mode == 'Responder')
+            st.session_state['_suggestion_selected_guard_count'] = sum(1 for mode in _current_modes.values() if mode == 'Guardian')
+            locked_g_pins = list(dict.fromkeys(locked_g_pins + [
+                s['station_idx'] for s in _suggestions
+                if _current_modes.get(s['station_idx']) == 'Guardian'
+            ]))
+            locked_r_pins = list(dict.fromkeys(locked_r_pins + [
+                s['station_idx'] for s in _suggestions
+                if _current_modes.get(s['station_idx']) == 'Responder'
+            ]))
 
         # ── OPTIMIZATION ──────────────────────────────────────────────────
         _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"

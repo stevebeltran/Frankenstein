@@ -3727,27 +3727,19 @@ def _render_live_admin_dashboard():
         _rows_html = "".join(_rows)
 
     _stale_seconds = int(_ACTIVE_SESSION_TTL_SECONDS)
-    components.html(
+    st.markdown(
         textwrap.dedent(f"""
         <style>
-        .live-admin-float {{
-            position: fixed;
-            top: calc(14px + env(safe-area-inset-top, 0px));
-            right: calc(14px + env(safe-area-inset-right, 0px));
-            z-index: 2147483647;
-            width: min(680px, calc(100vw - 28px));
+        .live-admin-inline {{
+            width: 100%;
+            max-width: 680px;
+            margin: 14px auto 0;
             font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            margin: 0;
-            pointer-events: none;
-            transform: translateZ(0);
-        }}
-        .live-admin-float > * {{
-            pointer-events: auto;
         }}
         .live-admin-dock {{
             display: flex;
             align-items: flex-start;
-            justify-content: flex-end;
+            justify-content: center;
             gap: 8px;
             flex-wrap: wrap;
             width: 100%;
@@ -3798,11 +3790,11 @@ def _render_live_admin_dashboard():
             line-height: 1;
             flex: 0 0 auto;
         }}
-        .live-admin-float summary {{
+        .live-admin-inline summary {{
             list-style: none;
             margin: 0;
         }}
-        .live-admin-float summary::-webkit-details-marker {{
+        .live-admin-inline summary::-webkit-details-marker {{
             display: none;
         }}
         .live-admin-pill {{
@@ -3855,7 +3847,7 @@ def _render_live_admin_dashboard():
             border-radius: 16px;
             box-shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
             overflow: hidden;
-            width: min(560px, calc(100vw - 28px));
+            width: min(560px, 100%);
         }}
         .live-admin-panel-inner {{
             max-height: min(78vh, 760px);
@@ -3946,8 +3938,16 @@ def _render_live_admin_dashboard():
         .live-admin-note strong {{
             color: #f5fff8;
         }}
+        @media (max-width: 700px) {{
+            .live-admin-inline {{
+                max-width: calc(100vw - 28px);
+            }}
+            .live-admin-panel {{
+                width: 100%;
+            }}
+        }}
         </style>
-        <div class="live-admin-float">
+        <div class="live-admin-inline">
             <div class="live-admin-dock">
                 <details>
                     <summary class="live-admin-pill">Live Users</summary>
@@ -3981,6 +3981,7 @@ def _render_live_admin_dashboard():
             </div>
         </div>
         """),
+        unsafe_allow_html=True,
     )
 
 

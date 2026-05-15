@@ -654,6 +654,31 @@ def resolve_uploaded_boundaries(
     session_state['master_gdf_override'] = None
 
     calls_for_boundary = df_calls_full if df_calls_full is not None and len(df_calls_full) > 0 else df_calls
+    file_meta = session_state.get('file_meta') or {}
+    file_city = str(file_meta.get('file_inferred_city', '') or '').strip()
+    file_state = str(file_meta.get('file_inferred_state', '') or '').strip().upper()
+    prefer_file_boundary = str(session_state.get('location_detection_source', '') or '').strip().lower() == 'file'
+
+    if prefer_file_boundary and file_city and file_state and file_state in state_fips:
+        set_stage(35, "Using the file-inferred city/state to resolve the boundary…")
+        boundary_success, boundary_gdf, boundary_kind, _ = select_best_boundary_for_calls(
+            calls_for_boundary,
+            file_city,
+            file_state,
+            prefer_county=False,
+        )
+        session_state['boundary_kind'] = boundary_kind
+        if boundary_success and boundary_gdf is not None:
+            set_stage(85, "Saving the resolved boundary for faster reuse next time…")
+            saved_path = save_boundary_gdf(boundary_gdf, boundary_kind, file_city, file_state)
+            session_state['boundary_source_path'] = saved_path or ''
+            session_state['active_city'] = file_city
+            session_state['active_state'] = file_state
+            set_stage(100, "Boundary resolution complete.")
+            stage_progress.empty()
+            stage_box.empty()
+            return
+
     set_stage(35, "Looking for a boundary in the local cache…")
     coord_gdf = find_jurisdictions_by_coordinates(calls_for_boundary)
 

@@ -730,7 +730,14 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
         return parsed
 
     def _infer_city_from_location_text(raw_df):
-        text_cols = [c for c in raw_df.columns if c in ['location', 'address', 'incident_location', 'addr', 'street', 'input_address', 'matched_address']]
+        text_cols = [
+            c for c in raw_df.columns
+            if c in [
+                'location', 'address', 'incident_location', 'addr', 'street',
+                'input_address', 'matched_address', 'department_name', 'department',
+                'dept', 'agency_name', 'agency'
+            ]
+        ]
         if not text_cols:
             return None
 
@@ -764,6 +771,27 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
         candidates = []
         for val in s:
             parts = [p.strip() for p in val.split(',') if p and p.strip()]
+            if len(parts) == 1:
+                dept_match = re.match(
+                    r'^(?:PD|FD|EMS|POLICE|FIRE|SHERIFF|DEPT|DEPARTMENT)\s+(.+?)\s*$',
+                    parts[0],
+                    flags=re.I,
+                )
+                if dept_match:
+                    locality = dept_match.group(1).strip()
+                    if locality and not _looks_like_street_or_intersection(locality):
+                        candidates.append(locality.title())
+                        continue
+                dept_match = re.match(
+                    r'^(.+?)\s+(?:PD|FD|EMS|POLICE|FIRE|SHERIFF|DEPT|DEPARTMENT)\s*$',
+                    parts[0],
+                    flags=re.I,
+                )
+                if dept_match:
+                    locality = dept_match.group(1).strip()
+                    if locality and not _looks_like_street_or_intersection(locality):
+                        candidates.append(locality.title())
+                        continue
             if len(parts) >= 2:
                 locality = None
                 if len(parts) >= 3 and re.match(r'^[A-Z]{2}$', parts[-2]) and re.match(r'^\d{5}(?:-\d{4})?$', parts[-1]):
@@ -810,8 +838,10 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
 
         dt_source = next((
             c for c in res.columns
-            if c == 'date time_call create' or c == 'date' or 'date time' in c or 'created' in c
+            if c == 'date time_call create' or 'date time' in c or 'datetime' in c or 'created' in c
         ), None)
+        if dt_source is None and 'date' in res.columns:
+            dt_source = 'date'
         if dt_source is not None:
             try:
                 dt_series = pd.to_datetime(res[dt_source], format='mixed', errors='coerce')
@@ -1042,6 +1072,34 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                     raw_df = _normalize_headerless_cad_export(content, delim)
                 raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
 
+                _chicago_report = _normalize_chicagoland_cfs_report(raw_df)
+                if _chicago_report is not None and not _chicago_report.empty:
+                    res = _chicago_report
+                    source_ids = pd.Series(
+                        [f"{file_idx}:{cfile.name}:{row_idx}" for row_idx in range(len(raw_df))],
+                        index=raw_df.index
+                    )
+                    res['_source_row_id'] = source_ids.reindex(res.index).values
+                    res['_source_file'] = cfile.name
+                    try:
+                        _meta = _extract_file_meta(raw_df, res, filename=cfile.name)
+                        _existing = st.session_state.get('file_meta', {})
+                        _existing_names = _existing.get('uploaded_filename', '')
+                        if _existing_names and _meta.get('uploaded_filename', '') and _meta['uploaded_filename'] not in _existing_names:
+                            _meta['uploaded_filename'] = _existing_names + ' | ' + _meta['uploaded_filename']
+                        st.session_state['file_meta'] = {**_existing, **_meta}
+                    except Exception:
+                        pass
+                    _pq['input_rows'] = len(raw_df)
+                    _pq['output_rows'] = len(res)
+                    _pq['has_lat'] = True
+                    _pq['has_lon'] = True
+                    _pq['has_date'] = 'date' in res.columns and bool(res['date'].notna().any())
+                    _pq['has_priority_col'] = True
+                    _file_parse_quality.append(_pq)
+                    all_calls_list.append(res.reset_index(drop=True))
+                    continue
+
                 # ── Census Geocoder: split combined 'lonlat' column ──────────
                 # After normalization the file has a 'lonlat' column storing
                 # "lon,lat" pairs (e.g. "-93.283,36.601").  The generic
@@ -1199,6 +1257,90 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                 index=raw_df.index
             )
             _pq['input_rows'] = len(raw_df)
+
+            if 'lat' in raw_df.columns and 'lon' in raw_df.columns:
+                _direct_lat = pd.to_numeric(raw_df['lat'], errors='coerce')
+                _direct_lon = pd.to_numeric(raw_df['lon'], errors='coerce')
+                _direct_valid_rate = (
+                    _direct_lat.between(17.5, 72) &
+                    _direct_lon.between(-180, -64)
+                ).mean()
+                if _direct_valid_rate >= 0.85:
+                    res = raw_df.copy().reset_index(drop=True)
+                    res['lat'] = _direct_lat.reset_index(drop=True)
+                    res['lon'] = _direct_lon.reset_index(drop=True)
+                    res = res.dropna(subset=['lat', 'lon'])
+                    res = res[
+                        (res['lat'].between(17.5, 72)) &
+                        (res['lon'].between(-180, -64))
+                    ].copy()
+                    if not res.empty:
+                        dt_source = None
+                        for _candidate in [
+                            c for c in raw_df.columns
+                            if c == 'date time_call create' or 'date time' in c or 'datetime' in c or 'created' in c
+                        ]:
+                            dt_source = _candidate
+                            break
+                        if dt_source is None and 'date' in raw_df.columns:
+                            dt_source = 'date'
+                        if dt_source is not None:
+                            try:
+                                dt_series = pd.to_datetime(raw_df[dt_source], format='mixed', errors='coerce')
+                                res['date'] = dt_series.dt.strftime('%Y-%m-%d')
+                                res['time'] = dt_series.dt.strftime('%H:%M:%S')
+                            except Exception:
+                                pass
+                        else:
+                            date_cols = [c for c in raw_df.columns if c == 'date']
+                            time_cols = [c for c in raw_df.columns if 'time' in c]
+                            if date_cols:
+                                try:
+                                    date_series = pd.to_datetime(raw_df[date_cols[0]], format='mixed', errors='coerce')
+                                    res['date'] = date_series.dt.strftime('%Y-%m-%d')
+                                except Exception:
+                                    pass
+                            if time_cols:
+                                res['time'] = raw_df[time_cols[0]].fillna('').astype(str).str.strip()
+                        desc_col = next((c for c in raw_df.columns if 'call type description' in c or c in ('call_type_desc', 'call type', 'nature')), None)
+                        if desc_col is not None:
+                            res['call_type_desc'] = raw_df[desc_col].fillna('').astype(str).str.strip()
+                        dept_col = next((c for c in raw_df.columns if c in ('department name', 'department', 'dept', 'agency', 'agency name')), None)
+                        if dept_col is not None:
+                            dept_vals = raw_df[dept_col].fillna('').astype(str).str.strip()
+                            res['agency'] = dept_vals.str.contains(
+                                r'\b(?:fire|ems|medic|rescue|ambulance|engine|ladder|battalion)\b',
+                                regex=True,
+                                na=False,
+                            ).map({True: 'fire', False: 'police'})
+                        else:
+                            res['agency'] = 'police'
+                        top_city_name = _infer_city_from_location_text(raw_df)
+                        if top_city_name:
+                            res['_csv_city'] = top_city_name
+                        inferred_state = _infer_state_from_text(raw_df, top_city_name)
+                        if inferred_state:
+                            res['_csv_state'] = inferred_state
+                        res['priority'] = 3
+                        res['_source_row_id'] = source_ids.reindex(raw_df.index).values
+                        res['_source_file'] = cfile.name
+                        try:
+                            _meta = _extract_file_meta(raw_df, res, filename=cfile.name)
+                            _existing = st.session_state.get('file_meta', {})
+                            _existing_names = _existing.get('uploaded_filename', '')
+                            if _existing_names and _meta.get('uploaded_filename', '') and _meta['uploaded_filename'] not in _existing_names:
+                                _meta['uploaded_filename'] = _existing_names + ' | ' + _meta['uploaded_filename']
+                            st.session_state['file_meta'] = {**_existing, **_meta}
+                        except Exception:
+                            pass
+                        _pq['output_rows'] = len(res)
+                        _pq['has_lat'] = True
+                        _pq['has_lon'] = True
+                        _pq['has_date'] = 'date' in res.columns and bool(res['date'].notna().any())
+                        _pq['has_priority_col'] = True
+                        _file_parse_quality.append(_pq)
+                        all_calls_list.append(res.reset_index(drop=True))
+                        continue
 
             if '_special_layout' in raw_df.columns and raw_df['_special_layout'].astype(str).eq('jacksonville_cfs').any():
                 res = raw_df.copy().reset_index(drop=True)
@@ -1411,6 +1553,20 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
 
             # --- COORDINATE CLEANUP: sentinel values & sign errors ---
             if not res.empty and 'lat' in res.columns and 'lon' in res.columns:
+                _preserve_direct_geo = False
+                try:
+                    _lat_geo = pd.to_numeric(res['lat'], errors='coerce')
+                    _lon_geo = pd.to_numeric(res['lon'], errors='coerce')
+                    _geo_rate = (
+                        _lat_geo.between(17.5, 72) &
+                        _lon_geo.between(-180, -64)
+                    ).mean()
+                    if _geo_rate >= 0.85:
+                        res['lat'] = _lat_geo
+                        res['lon'] = _lon_geo
+                        _preserve_direct_geo = True
+                except Exception:
+                    _preserve_direct_geo = False
                 _coord_scale_max = max(res['lat'].abs().max(), res['lon'].abs().max())
                 if _coord_scale_max <= 1000:
                     # Drop obvious sentinel/null-coordinate rows before any further processing.
@@ -1438,7 +1594,7 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                                 res.loc[res['lon'] > 0, 'lon'] = -res.loc[res['lon'] > 0, 'lon']
 
             # --- COORDINATE CONVERSION (MICRODEGREES / STATE PLANE / LARGE-INTEGER DETECTOR) ---
-            if not res.empty and 'lat' in res.columns and 'lon' in res.columns:
+            if not res.empty and 'lat' in res.columns and 'lon' in res.columns and not locals().get('_preserve_direct_geo', False):
                 res = res[(res['lat'] != 0) & (res['lon'] != 0)].dropna(subset=['lat', 'lon'])
                 if not res.empty:
                     max_val = max(res['lat'].abs().max(), res['lon'].abs().max())

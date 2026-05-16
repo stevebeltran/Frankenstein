@@ -183,6 +183,7 @@ def find_jurisdictions_by_coordinates(df_calls, min_call_share=0.001, min_call_c
                     if not already:
                         results.append({
                             'DISPLAY_NAME': display,
+                            'boundary_kind': kind,
                             'data_count': int(cnt),
                             'geometry': row.geometry.iloc[0],
                         })

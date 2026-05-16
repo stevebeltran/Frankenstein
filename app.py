@@ -6713,26 +6713,6 @@ body{{background:transparent;overflow:hidden}}
         # ── MAP BUILD EVENT: log to sheets once per session ──────────────────────
         log_map_build_event_once(st.session_state, _log_to_sheets)
 
-        if st.session_state.get('census_download_notice'):
-            _census_conv = st.session_state.get('census_conversion_summary') or {}
-            _census_ready = int(_census_conv.get('rows_ready', len(df_calls_full)) or len(df_calls_full))
-            _census_total = int(st.session_state.get('total_original_calls', _census_ready) or _census_ready)
-            st.sidebar.info(
-                "Coordinates restored via Census batch geocoding.\n\n"
-                f"{_census_ready:,} of {_census_total:,} records now have usable coordinates."
-            )
-            if st.session_state.get('census_corrected_bytes'):
-                st.sidebar.download_button(
-                    "⬇️ Download Corrected Calls File",
-                    data=st.session_state['census_corrected_bytes'],
-                    file_name=st.session_state.get('census_corrected_name') or "cad_calls_census_corrected.csv",
-                    mime="text/csv",
-                    key="sidebar_download_corrected_census_calls_btn",
-                    width="stretch",
-                    help="Download the corrected calls file so the Census conversion does not need to run again in a future browser session.",
-                )
-            st.sidebar.caption("This corrected data is only stored for the current browser session.")
-
         # ── Import quality report ─────────────────────────────────────────────
         _pq_report = st.session_state.get('parse_quality', [])
         if _pq_report and st.session_state.get('data_source') == 'cad_upload':
@@ -9836,6 +9816,7 @@ body{{background:transparent;overflow:hidden}}
         _brinc_export_slot = st.sidebar.empty()
         _html_export_slot = st.sidebar.empty()
         _kml_export_slot = st.sidebar.empty()
+        _census_export_slot = st.sidebar.empty()
 
         _report_notice_slot.info(_report_wait_note)
         _brinc_export_slot.button(
@@ -12147,6 +12128,26 @@ body{{background:transparent;overflow:hidden}}
                 key="kml_export_no_drones_btn",
                 help="Deploy at least one drone to generate the KML file.",
             )
+
+        if st.session_state.get('census_download_notice'):
+            _census_conv = st.session_state.get('census_conversion_summary') or {}
+            _census_ready = int(_census_conv.get('rows_ready', len(df_calls_full)) or len(df_calls_full))
+            _census_total = int(st.session_state.get('total_original_calls', _census_ready) or _census_ready)
+            st.sidebar.info(
+                "Coordinates restored via Census batch geocoding.\n\n"
+                f"{_census_ready:,} of {_census_total:,} records now have usable coordinates."
+            )
+            if st.session_state.get('census_corrected_bytes'):
+                _census_export_slot.download_button(
+                    "⬇️ Download Corrected Calls File",
+                    data=st.session_state['census_corrected_bytes'],
+                    file_name=st.session_state.get('census_corrected_name') or "cad_calls_census_corrected.csv",
+                    mime="text/csv",
+                    key="sidebar_download_corrected_census_calls_btn",
+                    width="stretch",
+                    help="Download the corrected calls file so the Census conversion does not need to run again in a future browser session.",
+                )
+            st.sidebar.caption("This corrected data is only stored for the current browser session.")
 
 
 

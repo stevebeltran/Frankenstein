@@ -135,27 +135,53 @@ _render_version_badge = _versioning_mod._render_version_badge
 
 
 def _render_transient_build_notice():
-    """Show a transient build timestamp overlay once per browser session."""
-    if st.session_state.get('_build_notice_seen_version') == __version__:
-        return
-
-    st.session_state['_build_notice_seen_version'] = __version__
-    st.markdown(
+    """Show a transient build timestamp overlay once per browser version."""
+    components.html(
         f"""
-        <style>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+</head>
+<body>
+<script>
+(function() {{
+  try {{
+    var version = {json.dumps(__version__)};
+    var buildTime = {json.dumps(__build_datetime__)};
+    var seenKey = 'brinc_build_notice_seen_version';
+    var parentWin = window.parent;
+    var doc = parentWin.document;
+    if (parentWin.localStorage && parentWin.localStorage.getItem(seenKey) === version) {{
+      return;
+    }}
+    if (parentWin.localStorage) {{
+      parentWin.localStorage.setItem(seenKey, version);
+    }}
+
+    var existing = doc.getElementById('brinc-build-notice-wrap');
+    if (existing && existing.parentNode) {{
+      existing.parentNode.removeChild(existing);
+    }}
+    var styleId = 'brinc-build-notice-style';
+    var style = doc.getElementById(styleId);
+    if (!style) {{
+      style = doc.createElement('style');
+      style.id = styleId;
+      style.textContent = `
         @keyframes brincBuildNoticeFade {{
             0% {{ opacity: 0; transform: translate(-50%, -46%) scale(0.985); }}
             10% {{ opacity: 1; transform: translate(-50%, -50%) scale(1); }}
             80% {{ opacity: 1; }}
             100% {{ opacity: 0; visibility: hidden; transform: translate(-50%, -54%) scale(0.985); }}
         }}
-        .brinc-build-notice-wrap {{
+        #brinc-build-notice-wrap {{
             position: fixed;
             inset: 0;
             z-index: 100000;
             pointer-events: none;
         }}
-        .brinc-build-notice {{
+        #brinc-build-notice-wrap .brinc-build-notice {{
             position: absolute;
             left: 50%;
             top: 50%;
@@ -171,27 +197,47 @@ def _render_transient_build_notice():
             font-family: 'IBM Plex Mono', monospace;
             animation: brincBuildNoticeFade 5s ease forwards;
         }}
-        .brinc-build-notice .label {{
+        #brinc-build-notice-wrap .brinc-build-notice .label {{
             font-size: 0.68rem;
             letter-spacing: 0.16em;
             text-transform: uppercase;
             color: rgba(191, 219, 254, 0.82);
         }}
-        .brinc-build-notice .time {{
+        #brinc-build-notice-wrap .brinc-build-notice .time {{
             margin-top: 8px;
             font-size: 1.08rem;
             font-weight: 700;
             letter-spacing: 0.02em;
         }}
-        </style>
-        <div class="brinc-build-notice-wrap" aria-hidden="true">
-            <div class="brinc-build-notice">
-                <div class="label">Last updated</div>
-                <div class="time">{html.escape(__build_datetime__)}</div>
-            </div>
-        </div>
+      `;
+      doc.head.appendChild(style);
+    }}
+
+    var wrap = doc.createElement('div');
+    wrap.id = 'brinc-build-notice-wrap';
+    wrap.setAttribute('aria-hidden', 'true');
+    wrap.innerHTML = `
+      <div class="brinc-build-notice">
+        <div class="label">Last updated</div>
+        <div class="time">${{buildTime}}</div>
+      </div>
+    `;
+    doc.body.appendChild(wrap);
+
+    parentWin.setTimeout(function() {{
+      var el = doc.getElementById('brinc-build-notice-wrap');
+      if (el && el.parentNode) {{
+        el.parentNode.removeChild(el);
+      }}
+    }}, 5000);
+  }} catch (e) {{}}
+}})();
+</script>
+</body>
+</html>
         """,
-        unsafe_allow_html=True,
+        height=0,
+        scrolling=False,
     )
 
 _public_reports_mod = _load_local_module("public_reports")

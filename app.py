@@ -135,7 +135,15 @@ _render_version_badge = _versioning_mod._render_version_badge
 
 
 def _render_transient_build_notice():
-    """Show a transient build timestamp overlay once per browser version."""
+    """Show a transient build notice on every app load for the target account."""
+    _notice_email = str(
+        st.session_state.get('google_user_email', '')
+        or st.session_state.get('_last_user_email', '')
+        or getattr(st.user, 'email', '')
+        or ''
+    ).strip().lower()
+    if _notice_email != 'steven.beltran@brincdrones.com':
+        return
     components.html(
         f"""
 <!DOCTYPE html>
@@ -149,15 +157,8 @@ def _render_transient_build_notice():
   try {{
     var version = {json.dumps(__version__)};
     var buildTime = {json.dumps(__build_datetime__)};
-    var seenKey = 'brinc_build_notice_seen_version';
     var parentWin = window.parent;
     var doc = parentWin.document;
-    if (parentWin.localStorage && parentWin.localStorage.getItem(seenKey) === version) {{
-      return;
-    }}
-    if (parentWin.localStorage) {{
-      parentWin.localStorage.setItem(seenKey, version);
-    }}
 
     var existing = doc.getElementById('brinc-build-notice-wrap');
     if (existing && existing.parentNode) {{
@@ -203,6 +204,12 @@ def _render_transient_build_notice():
             text-transform: uppercase;
             color: rgba(191, 219, 254, 0.82);
         }}
+        #brinc-build-notice-wrap .brinc-build-notice .version {{
+            margin-top: 6px;
+            font-size: 0.78rem;
+            letter-spacing: 0.08em;
+            color: rgba(226, 232, 240, 0.88);
+        }}
         #brinc-build-notice-wrap .brinc-build-notice .time {{
             margin-top: 8px;
             font-size: 1.08rem;
@@ -219,6 +226,7 @@ def _render_transient_build_notice():
     wrap.innerHTML = `
       <div class="brinc-build-notice">
         <div class="label">Last updated</div>
+        <div class="version">Version ${version}</div>
         <div class="time">${{buildTime}}</div>
       </div>
     `;

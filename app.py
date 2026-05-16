@@ -226,7 +226,7 @@ def _render_transient_build_notice():
     wrap.innerHTML = `
       <div class="brinc-build-notice">
         <div class="label">Last updated</div>
-        <div class="version">Version ${version}</div>
+        <div class="version">Version ${{version}}</div>
         <div class="time">${{buildTime}}</div>
       </div>
     `;

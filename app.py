@@ -132,6 +132,68 @@ __build_revision__ = _versioning_mod.__build_revision__
 __build_datetime__ = _versioning_mod.__build_datetime__
 __build_line_count__ = _versioning_mod.__build_line_count__
 _render_version_badge = _versioning_mod._render_version_badge
+
+
+def _render_transient_build_notice():
+    """Show a transient build timestamp overlay once per browser session."""
+    if st.session_state.get('_build_notice_seen_version') == __version__:
+        return
+
+    st.session_state['_build_notice_seen_version'] = __version__
+    st.markdown(
+        f"""
+        <style>
+        @keyframes brincBuildNoticeFade {{
+            0% {{ opacity: 0; transform: translate(-50%, -46%) scale(0.985); }}
+            10% {{ opacity: 1; transform: translate(-50%, -50%) scale(1); }}
+            80% {{ opacity: 1; }}
+            100% {{ opacity: 0; visibility: hidden; transform: translate(-50%, -54%) scale(0.985); }}
+        }}
+        .brinc-build-notice-wrap {{
+            position: fixed;
+            inset: 0;
+            z-index: 100000;
+            pointer-events: none;
+        }}
+        .brinc-build-notice {{
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            min-width: 280px;
+            padding: 18px 22px;
+            border-radius: 18px;
+            background: rgba(8, 12, 20, 0.94);
+            border: 1px solid rgba(148, 163, 184, 0.26);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+            color: #f8fafc;
+            text-align: center;
+            font-family: 'IBM Plex Mono', monospace;
+            animation: brincBuildNoticeFade 5s ease forwards;
+        }}
+        .brinc-build-notice .label {{
+            font-size: 0.68rem;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: rgba(191, 219, 254, 0.82);
+        }}
+        .brinc-build-notice .time {{
+            margin-top: 8px;
+            font-size: 1.08rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }}
+        </style>
+        <div class="brinc-build-notice-wrap" aria-hidden="true">
+            <div class="brinc-build-notice">
+                <div class="label">Last updated</div>
+                <div class="time">{html.escape(__build_datetime__)}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 _public_reports_mod = _load_local_module("public_reports")
 _build_public_report_url = _public_reports_mod._build_public_report_url
 _get_document_jurisdiction_name = _public_reports_mod._get_document_jurisdiction_name
@@ -936,6 +998,8 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+_render_transient_build_notice()
 
 
 

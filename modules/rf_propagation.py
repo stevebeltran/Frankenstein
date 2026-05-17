@@ -123,4 +123,3 @@ def _path_loss_advanced(distance_m, freq_mhz=3390, tx_alt_m=9.14, rx_alt_m=61.0,
     total_pl = fspl + clutter_db + terrain_db + fade_db
     return total_pl
 
-def calculate_zoom(min_lon, max_lon, min_lat, max_lat):

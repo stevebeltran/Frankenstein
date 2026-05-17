@@ -450,9 +450,3 @@ def generate_stations_from_calls(df_calls, max_stations=100):
         notes = [n for n in [osm_note, hifld_note] if n]
         return df_fallback, "Fallback stations generated from call data. " + " | ".join(notes)
     return None, "Could not generate stations ? no valid call coordinates."
-
-# ============================================================
-# CACHED DATA FUNCTIONS
-# ============================================================
-@st.cache_data
-def get_address_from_latlon(lat, lon):

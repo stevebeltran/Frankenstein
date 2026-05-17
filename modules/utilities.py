@@ -207,4 +207,3 @@ st.set_page_config(
 # ============================================================
 # Activates only when [auth] section is present in secrets.toml.
 # Falls through silently if auth is not configured (local dev without secrets).
-def _is_local_loopback_request() -> bool:

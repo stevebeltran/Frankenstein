@@ -1,8 +1,10 @@
 """Admin dashboard and session management functions."""
 import datetime
+import html
 import os
 import re
 import streamlit as st
+import textwrap
 import time
 
 # Import required helper

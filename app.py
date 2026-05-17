@@ -1133,15 +1133,22 @@ def _render_in_app_faq():
     _faq_items = [
         (
             "What do I do on this page?",
-            "Choose a data path to analyze coverage and create deployment recommendations. Path 01: simulated data or upload a stations file. Path 02: upload Calls for Service files, CAD files, and stations files (CSV format). Path 03: load a random city with pre-loaded data and stations. The program uses customer data only to configure the map—no data is stored or transmitted.",
+            "Choose a data path to analyze coverage and create deployment recommendations. "
+            "Path 01: simulated data or upload a stations file. "
+            "Path 02: upload Calls for Service files, CAD files, and stations files (CSV format). "
+            "Path 03: load a random city with pre-loaded data and stations. "
+            "The program uses customer data only to configure the map—no data is stored or transmitted.",
         ),
         (
             "What is this system for?",
-            "It helps a customer understand where BRINC Drone as First Responder can add value, how coverage improves, and what a proposed deployment could look like in their jurisdiction.",
+            "It helps a customer understand where BRINC Drone as First Responder can add value, "
+            "how coverage improves, and what a proposed deployment could look like in their jurisdiction.",
         ),
         (
             "What data do I need?",
-            "Usually a CAD or incident file with location data, plus the city or region they care about. If you have an existing stations file, you can upload that too. The system uses this information to build a jurisdiction-specific view.",
+            "Usually a CAD or incident file with location data, plus the city or region they care about. "
+            "If you have an existing stations file, you can upload that too. "
+            "The system uses this information to build a jurisdiction-specific view.",
         ),
         (
             "How does the system choose the jurisdiction?",
@@ -1149,23 +1156,30 @@ def _render_in_app_faq():
         ),
         (
             "What is the difference between Responder and Guardian?",
-            "Responder is the shorter-range tactical option. Guardian is the longer-range coverage and overwatch option. In a customer conversation, you can position them as different layers of the same response strategy.",
+            "Responder is the shorter-range tactical option. Guardian is the longer-range coverage "
+            "and overwatch option. In a customer conversation, you can position them as different "
+            "layers of the same response strategy.",
         ),
         (
             "Can the customer choose stations?",
-            "Yes. The system can recommend stations automatically, and the user can also add, pin, or lock stations to match local operations and preferences.",
+            "Yes. The system can recommend stations automatically, and the user can also add, pin, "
+            "or lock stations to match local operations and preferences.",
         ),
         (
             "What can I show after the demo?",
-            "A deployment plan, an executive summary, map-based coverage views, station recommendations, and exportable artifacts that support follow-up conversations.",
+            "A deployment plan, an executive summary, map-based coverage views, station recommendations, "
+            "and exportable artifacts that support follow-up conversations.",
         ),
         (
             "What should I say if someone asks how accurate it is?",
-            "Explain that it is a planning and decision-support tool. It uses the customer’s incident data and geography to produce a defendable recommendation, but it is not a substitute for local operational judgment.",
+            "Explain that it is a planning and decision-support tool. It uses the customer’s incident "
+            "data and geography to produce a defendable recommendation, but it is not a substitute for "
+            "local operational judgment.",
         ),
         (
             "How should an account executive position the value?",
-            "Focus on faster situational awareness, broader coverage, clearer station placement decisions, and a stronger story for leadership, grants, and internal planning.",
+            "Focus on faster situational awareness, broader coverage, clearer station placement decisions, "
+            "and a stronger story for leadership, grants, and internal planning.",
         ),
     ]
     _faq_html = [
@@ -1174,7 +1188,10 @@ def _render_in_app_faq():
     ]
     for _question, _answer in _faq_items:
         _faq_html.append(
-            f'<div class="faq-item"><div class="faq-q">{html.escape(_question)}</div><div class="faq-a">{html.escape(_answer)}</div></div>'
+            f'<div class="faq-item">'
+            f'<div class="faq-q">{html.escape(_question)}</div>'
+            f'<div class="faq-a">{html.escape(_answer)}</div>'
+            f'</div>'
         )
     _faq_html.append(
         f'<div class="faq-footer"><div class="faq-footer-label">Version &amp; Changelog</div><div class="faq-version-line">Current version: {html.escape(__version__)} | Build time: {html.escape(__build_datetime__)}</div>'

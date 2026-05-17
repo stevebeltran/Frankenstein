@@ -197,12 +197,3 @@ def get_circle_coords(lat, lon, r_mi=2.0):
     c_lons = lon + (r_mi/(69.172 * np.cos(np.radians(lat)))) * np.cos(angles)
     return c_lats, c_lons
 
-
-# ── 4G LTE coverage overlay ───────────────────────────────────────────────────
-# Analysis results are keyed by (state_abbr, wkb_hex) — geometry args can't be
-# serialized by @st.cache_data, so we keep a manual dict stored in a
-# @st.cache_resource singleton (one dict per worker process, persists for the
-# lifetime of the server, safe under concurrent access).
-
-@st.cache_resource
-def _get_coverage_analysis_cache() -> dict:

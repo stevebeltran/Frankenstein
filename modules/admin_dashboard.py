@@ -454,4 +454,3 @@ else:
         _render_live_admin_dashboard()
 
 
-def _render_in_app_faq():

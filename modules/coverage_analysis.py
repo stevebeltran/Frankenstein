@@ -236,8 +236,3 @@ def _build_carrier_mini_map(cinfo, boundary_geom, center_lat, center_lon, zoom, 
         height=210, showlegend=False,
     )
     return fig
-
-
-# ── RF Link Budget — 3390 MHz Friis free-space model ─────────────────────────
-
-def _get_terrain_cache():

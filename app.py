@@ -160,9 +160,44 @@ from modules.onboarding import (
     infer_simulation_targets_from_station_file, build_demo_boundaries,
     build_demo_calls, resolve_demo_stations,
 )
-from modules.helpers import (
-    _uploaded_files_signature, _reset_census_state, format_wait_duration,
-)
+try:
+    from modules.helpers import (
+        _uploaded_files_signature, _reset_census_state, format_wait_duration,
+    )
+except ImportError:
+    # Fallback if helpers module doesn't exist
+    def _uploaded_files_signature(files):
+        parts = []
+        for idx, uploaded_file in enumerate(files or []):
+            try:
+                size = len(uploaded_file.getvalue())
+            except Exception:
+                size = 0
+            parts.append(f"{idx}:{uploaded_file.name}:{size}")
+        return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest() if parts else ""
+
+    def _reset_census_state(session_state):
+        session_state['census_pending'] = False
+        session_state['census_source_signature'] = ''
+        session_state['census_stage_df'] = None
+        session_state['census_original_df'] = None
+        session_state['census_partial_calls_df'] = None
+        session_state['_census_batch_started_at'] = None
+        session_state['census_batch_zip_bytes'] = b""
+        session_state['census_batch_zip_name'] = ""
+        session_state['census_sample_bytes'] = b""
+        session_state['census_sample_name'] = ""
+        session_state['census_summary'] = {}
+        session_state['census_conversion_summary'] = {}
+        session_state['census_corrected_bytes'] = b""
+        session_state['census_corrected_name'] = ""
+        session_state['census_corrected_format'] = "csv"
+        session_state['census_download_notice'] = False
+
+    def format_wait_duration(seconds):
+        seconds = max(0, int(seconds))
+        mins, secs = divmod(seconds, 60)
+        return f"{mins}m {secs:02d}s" if mins else f"{secs}s"
 
 try:
     from modules.config import calculate_max_flights_per_day

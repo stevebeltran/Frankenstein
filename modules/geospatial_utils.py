@@ -1,8 +1,13 @@
 """Geospatial utilities - random point generation, clustering, circle coordinates."""
+import streamlit as st
 import math
 import random
 import pandas as pd
 from shapely.geometry import Polygon
+
+# Demo constants
+FAST_DEMO_STATION_COUNT = 10
+FAST_DEMO_CACHE_VERSION = "2026-05-15-fast-demo-v1"
 
 def _prepare_sampling_polygon(polygon):
     if polygon is None:

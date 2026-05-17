@@ -1,4 +1,5 @@
 """Station generation and fetching functions."""
+import streamlit as st
 import os
 import json
 import urllib.request

@@ -1,7 +1,15 @@
 """Admin dashboard and session management functions."""
 import streamlit as st
 import time
-from modules.config import get_admin_dashboard_emails
+
+# Import required helper
+def _get_query_params_dict():
+    """Get query parameters from Streamlit. Placeholder if not available."""
+    try:
+        from modules.public_reports import _get_query_params_dict as _get_qpd
+        return _get_qpd()
+    except Exception:
+        return {}
 
 def _get_admin_dashboard_emails():
     _raw_values = []

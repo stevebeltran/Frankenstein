@@ -160,6 +160,9 @@ from modules.onboarding import (
     infer_simulation_targets_from_station_file, build_demo_boundaries,
     build_demo_calls, resolve_demo_stations,
 )
+from modules.helpers import (
+    _uploaded_files_signature, _reset_census_state, format_wait_duration,
+)
 
 try:
     from modules.config import calculate_max_flights_per_day
@@ -473,35 +476,6 @@ QUICK_PIN_COMPONENT = (
     else None
 )
 
-
-def _uploaded_files_signature(files):
-    parts = []
-    for idx, uploaded_file in enumerate(files or []):
-        try:
-            size = len(uploaded_file.getvalue())
-        except Exception:
-            size = 0
-        parts.append(f"{idx}:{uploaded_file.name}:{size}")
-    return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest() if parts else ""
-
-
-def _reset_census_state(session_state):
-    session_state['census_pending'] = False
-    session_state['census_source_signature'] = ''
-    session_state['census_stage_df'] = None
-    session_state['census_original_df'] = None
-    session_state['census_partial_calls_df'] = None
-    session_state['_census_batch_started_at'] = None
-    session_state['census_batch_zip_bytes'] = b""
-    session_state['census_batch_zip_name'] = ""
-    session_state['census_sample_bytes'] = b""
-    session_state['census_sample_name'] = ""
-    session_state['census_summary'] = {}
-    session_state['census_conversion_summary'] = {}
-    session_state['census_corrected_bytes'] = b""
-    session_state['census_corrected_name'] = ""
-    session_state['census_corrected_format'] = "csv"
-    session_state['census_download_notice'] = False
 
 
 def _render_public_report_route():
@@ -1927,7 +1901,7 @@ def main():
                         corrected_export_df = build_corrected_export_from_merged(merged_full_df)
                         corrected_csv = corrected_export_df.to_csv(index=False).encode('utf-8')
                         _push_upload_log(
-                            f"Census corrected export built in {_format_wait(time.perf_counter() - _export_started_at)}."
+                            f"Census corrected export built in {format_wait_duration(time.perf_counter() - _export_started_at)}."
                         )
                         st.session_state['census_corrected_bytes'] = corrected_csv
                         st.session_state['census_corrected_name'] = "cad_calls_census_corrected.csv"
@@ -2439,11 +2413,6 @@ def main():
                                     census_started_at = time.time()
                                     st.session_state['_census_batch_started_at'] = census_started_at
 
-                                def _format_wait(seconds):
-                                    seconds = max(0, int(seconds))
-                                    mins, secs = divmod(seconds, 60)
-                                    return f"{mins}m {secs:02d}s" if mins else f"{secs}s"
-
                                 theoretical_max_wait = (
                                     census_timeout_sec * census_retries
                                     + sum(min(6, attempt * 2) for attempt in range(1, census_retries))
@@ -2454,17 +2423,17 @@ def main():
                                 _push_upload_log(
                                     "Census wait guidance: each POST waits up to "
                                     f"{census_timeout_sec}s, total worst-case per chunk is about "
-                                    f"{_format_wait(theoretical_max_wait)}, and a chunk that still has not completed after "
-                                    f"{_format_wait(census_stall_warn_sec)} should be treated as stalled."
+                                    f"{format_wait_duration(theoretical_max_wait)}, and a chunk that still has not completed after "
+                                    f"{format_wait_duration(census_stall_warn_sec)} should be treated as stalled."
                                 )
                                 _set_upload_overlay_status(
                                     title="CENSUS AUTOMATION",
                                     status="SUBMITTING BATCHES",
                                     copy=(
                                         "Sending chunked address batches directly to the Census geocoder. "
-                                        f"Elapsed since Census submit started: {_format_wait(time.time() - census_started_at)}. "
-                                        f"Each attempt can wait up to {_format_wait(census_timeout_sec)}; a healthy worst-case per chunk is about {_format_wait(theoretical_max_wait)}. "
-                                        f"If the same chunk is still waiting after {_format_wait(census_stall_warn_sec)}, treat it as stalled and cancel/retry."
+                                        f"Elapsed since Census submit started: {format_wait_duration(time.time() - census_started_at)}. "
+                                        f"Each attempt can wait up to {format_wait_duration(census_timeout_sec)}; a healthy worst-case per chunk is about {format_wait_duration(theoretical_max_wait)}. "
+                                        f"If the same chunk is still waiting after {format_wait_duration(census_stall_warn_sec)}, treat it as stalled and cancel/retry."
                                     ),
                                     progress=42,
                                     logs=_upload_logs,
@@ -2499,8 +2468,8 @@ def main():
                                         status=f"SUBMITTING CHUNK {chunk_idx} OF {total_chunks}",
                                         copy=(
                                             f"Waiting for the Census batch endpoint to return the geocoded CSV for chunk {chunk_idx} of {total_chunks}. "
-                                            f"Elapsed since Census submit started: {_format_wait(time.time() - census_started_at)}. "
-                                            f"If nothing returns after {_format_wait(census_stall_warn_sec)}, it is probably stalled."
+                                            f"Elapsed since Census submit started: {format_wait_duration(time.time() - census_started_at)}. "
+                                            f"If nothing returns after {format_wait_duration(census_stall_warn_sec)}, it is probably stalled."
                                         ),
                                         progress=42 + int(completed_chunks / max(1, total_chunks) * 34),
                                         logs=_upload_logs,
@@ -2541,7 +2510,7 @@ def main():
                                                 _chunk_elapsed = time.time() - _chunk_wait_started_at
                                                 if _chunk_elapsed > census_stall_warn_sec:
                                                     _push_upload_log(
-                                                        f"Chunk {chunk_idx}/{total_chunks} stalled after {_format_wait(_chunk_elapsed)}."
+                                                        f"Chunk {chunk_idx}/{total_chunks} stalled after {format_wait_duration(_chunk_elapsed)}."
                                                         " Switching to manual Census batch workflow."
                                                     )
                                                     _census_pool.shutdown(wait=False)
@@ -2556,15 +2525,15 @@ def main():
                                                 if _chunk_elapsed - _chunk_last_heartbeat_at >= 15:
                                                     _chunk_last_heartbeat_at = _chunk_elapsed
                                                     _push_upload_log(
-                                                        f"Chunk {chunk_idx}/{total_chunks} is still waiting after {_format_wait(_chunk_elapsed)}."
+                                                        f"Chunk {chunk_idx}/{total_chunks} is still waiting after {format_wait_duration(_chunk_elapsed)}."
                                                     )
                                                 _set_upload_overlay_status(
                                                     title="CENSUS AUTOMATION",
                                                     status=f"SUBMITTING CHUNK {chunk_idx} OF {total_chunks}",
                                                     copy=(
                                                         f"Waiting for the Census batch endpoint to return the geocoded CSV for chunk {chunk_idx} of {total_chunks}. "
-                                                        f"Elapsed since this chunk started: {_format_wait(_chunk_elapsed)}. "
-                                                        f"If the same chunk is still waiting after {_format_wait(census_stall_warn_sec)}, it is probably stalled."
+                                                        f"Elapsed since this chunk started: {format_wait_duration(_chunk_elapsed)}. "
+                                                        f"If the same chunk is still waiting after {format_wait_duration(census_stall_warn_sec)}, it is probably stalled."
                                                     ),
                                                     progress=min(
                                                         76,
@@ -2651,7 +2620,7 @@ def main():
                                     status="MERGING RESULTS",
                                     copy=(
                                         f"Combining all Census chunk responses and restoring coordinates into the original dataset. "
-                                        f"Total Census wait so far: {_format_wait(time.time() - census_started_at)}."
+                                        f"Total Census wait so far: {format_wait_duration(time.time() - census_started_at)}."
                                     ),
                                     progress=80,
                                     logs=_upload_logs,
@@ -2665,7 +2634,7 @@ def main():
                                         validate_outputs=False,
                                     )
                                     _push_upload_log(
-                                        f"Census merge helper finished in {_format_wait(time.perf_counter() - _merge_export_started_at)} "
+                                        f"Census merge helper finished in {format_wait_duration(time.perf_counter() - _merge_export_started_at)} "
                                         f"using {merge_summary.get('merge_backend', 'unknown')}."
                                     )
                                     if merged_ready_df is None or merged_ready_df.empty:
@@ -2674,7 +2643,7 @@ def main():
                                     corrected_export_df = build_corrected_export_from_merged(merged_full_df)
                                     corrected_csv = corrected_export_df.to_csv(index=False).encode('utf-8')
                                     _push_upload_log(
-                                        f"Census corrected export built in {_format_wait(time.perf_counter() - _corrected_export_started_at)}."
+                                        f"Census corrected export built in {format_wait_duration(time.perf_counter() - _corrected_export_started_at)}."
                                     )
                                     return merged_full_df, merged_ready_df, merge_summary, corrected_csv
 
@@ -2684,7 +2653,7 @@ def main():
                                     status="MERGING RESULTS",
                                     copy=(
                                         f"Combining all Census chunk responses and restoring coordinates into the original dataset. "
-                                        f"Elapsed since Census submit started: {_format_wait(time.time() - census_started_at)}."
+                                        f"Elapsed since Census submit started: {format_wait_duration(time.time() - census_started_at)}."
                                     ),
                                     progress=80,
                                     logs=_upload_logs,
@@ -2726,7 +2695,7 @@ def main():
                                     status="GEOCODING COMPLETE",
                                     copy=(
                                         f"Coordinates restored. Finalizing station discovery and jurisdiction setup now. "
-                                        f"Total Census time: {_format_wait(time.time() - census_started_at)}."
+                                        f"Total Census time: {format_wait_duration(time.time() - census_started_at)}."
                                     ),
                                     progress=88,
                                     logs=_upload_logs,

@@ -122,10 +122,26 @@ from modules.geospatial_utils import (
 from modules.utilities import (
     calculate_zoom, get_relevant_jurisdictions_cached,
     find_relevant_jurisdictions, build_display_calls,
+    _make_random_stations, _refresh_reference_population,
+    _write_crash_report, _notify_crash_email,
+    _uploaded_files_signature, _reset_census_state,
 )
 from modules.admin_dashboard import (
     _is_admin_dashboard_user, _apply_admin_fast_jump,
     _render_live_admin_dashboard, _live_admin_dashboard_fragment,
+)
+from modules.cad_parser import aggressive_parse_calls
+from modules.census_batch import (
+    build_census_staging, build_intersection_fallback_rows,
+    geocode_intersection_fallback_rows, merge_census_results,
+    build_corrected_export_from_merged, make_census_batch_chunks,
+    submit_census_batch_chunk, parse_census_result_files,
+    make_census_batch_zip, make_sample_census_batch, build_census_chunk_payload,
+)
+from modules.onboarding import (
+    split_simulation_optional_files, load_simulation_boundary_overlay,
+    infer_simulation_targets_from_station_file, build_demo_boundaries,
+    build_demo_calls, resolve_demo_stations,
 )
 
 try:

@@ -19,7 +19,25 @@ import plotly.graph_objects as go
 from shapely.geometry import Point, Polygon, MultiPolygon, box, shape
 from shapely.ops import unary_union
 from shapely.wkb import loads as _wkb_loads
-import itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib, uuid, traceback, tempfile, hashlib, hmac, time, html
+import itertools
+import glob
+import math
+import simplekml
+import heapq
+import re
+import random
+import json
+import io
+import datetime
+import base64
+import smtplib
+import uuid
+import traceback
+import tempfile
+import hashlib
+import hmac
+import time
+import html
 import concurrent.futures as cf
 from concurrent.futures import ThreadPoolExecutor
 import threading

@@ -19,7 +19,7 @@ import plotly.graph_objects as go
 from shapely.geometry import Point, Polygon, MultiPolygon, box, shape
 from shapely.ops import unary_union
 from shapely.wkb import loads as _wkb_loads
-import itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib, uuid, traceback, tempfile, hashlib, hmac, time, html
+import itertools, glob, math, simplekml, heapq, re, random, json, io, datetime, base64, smtplib, uuid, traceback, tempfile, hashlib, hmac, time, html, zoneinfo
 import concurrent.futures as cf
 from concurrent.futures import ThreadPoolExecutor
 import threading
@@ -3981,6 +3981,10 @@ def _render_live_admin_dashboard():
             font-size: 0.9rem;
             font-weight: 800;
         }}
+        .live-admin-stat-value.chicago-time {{
+            color: #ff4444;
+            font-weight: 900;
+        }}
         .live-admin-row {{
             display: flex;
             justify-content: space-between;
@@ -4060,7 +4064,7 @@ def _render_live_admin_dashboard():
                                 </div>
                                 <div class="live-admin-stat">
                                     <div class="live-admin-stat-label">Updated</div>
-                                    <div class="live-admin-stat-value">{html.escape(datetime.datetime.now(datetime.timezone.utc).strftime("%H:%M:%S"))} UTC</div>
+                                    <div class="live-admin-stat-value chicago-time">{html.escape(datetime.datetime.now(zoneinfo.ZoneInfo("America/Chicago")).strftime("%H:%M:%S"))} CST</div>
                                 </div>
                             </div>
                             {_rows_html}

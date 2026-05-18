@@ -5975,14 +5975,14 @@ def generate_fernandina_beach_public_service_report_html(stations, *, city="Fern
             "value": "$2.03/hr",
             "support": "FEMA's 2025 Schedule of Equipment Rates lists a 'Boat, removable engine' at $2.03 per hour for the reference outboard motor entry.",
             "source": "https://www.fema.gov/sites/default/files/documents/fema_pa_schedule-equipment-rates_2025.pdf",
-            "detail": "That gives a public-sector benchmark for fuel-and-op cost on small rescue craft or support boats.",
+            "detail": "This is the operating benchmark for keeping rescue craft launch-ready: fuel, engine wear, and the cost of standing by for the next swimmer rescue, flotation drop, or nearshore assist.",
         },
         {
             "label": "First-aid replenishment",
             "value": "$195.44",
             "support": "A GSA Advantage pricing list shows an emergency first-aid kit at $195.44 per unit.",
             "source": "https://www.gsaadvantage.gov/ref_text/GS07F0395V/0X1UT7.3SS7RW_GS-07F-0357M_TEXTFILE.PDF",
-            "detail": "Consumables and kits get used up faster in beach rescue work because the shoreline is wet, sandy, and high-turnover.",
+            "detail": "This reflects the consumable side of a beach rescue mission: bandages, gloves, trauma supplies, flotation-support gear, and the routine replacement that follows repeated shoreline calls.",
         },
         {
             "label": "Tide / current monitoring",

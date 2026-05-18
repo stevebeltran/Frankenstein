@@ -77,7 +77,9 @@ def _load_local_module(module_name: str):
         return module
 
 
-def _load_fernandina_beach_station_rows(session_state=None):
+def _load_fernandina_beach_station_rows(station_rows=None, session_state=None):
+    if isinstance(station_rows, list) and station_rows:
+        return station_rows
     if session_state is not None:
         for key in ("df_stations", "custom_stations"):
             station_df = session_state.get(key)
@@ -9701,7 +9703,10 @@ body{{background:transparent;overflow:hidden}}
             and str(prop_state or "").strip().lower() in {"fl", "florida"}
         )
         if _is_fernandina_beach:
-            _fernandina_station_rows = _load_fernandina_beach_station_rows(st.session_state)
+            _fernandina_station_rows = _load_fernandina_beach_station_rows(
+                station_metadata if isinstance(station_metadata, list) else None,
+                st.session_state,
+            )
             _fernandina_report_html = ""
             _fernandina_report_ready = False
             if _fernandina_station_rows:

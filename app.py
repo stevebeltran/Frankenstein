@@ -130,6 +130,7 @@ _versioning_mod = _load_local_module("versioning")
 __version__ = _versioning_mod.__version__
 __build_revision__ = _versioning_mod.__build_revision__
 __build_datetime__ = _versioning_mod.__build_datetime__
+__build_timestamp__ = _versioning_mod.__build_timestamp__
 __build_line_count__ = _versioning_mod.__build_line_count__
 _render_version_badge = _versioning_mod._render_version_badge
 _public_reports_mod = _load_local_module("public_reports")
@@ -3635,7 +3636,7 @@ init_session_state(st.session_state, _slugify, _build_public_report_url)
 # TRANSIENT BUILD NOTICE
 # ============================================================
 # Show splash screen with build info for target user
-render_transient_build_notice(__version__, __build_datetime__)
+render_transient_build_notice(__version__, __build_datetime__, __build_timestamp__)
 
 # ============================================================
 # APP FLOW

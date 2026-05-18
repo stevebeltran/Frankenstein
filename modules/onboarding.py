@@ -1100,7 +1100,7 @@ def _allocate_demo_counts(weights, total_count):
     return counts
 
 
-def build_demo_calls(city_poly, total_estimated_pop, generate_clustered_calls, boundary_records=None):
+def build_demo_calls(city_poly, total_estimated_pop, generate_clustered_calls, boundary_records=None, max_preview_points=None):
     annual_cfs = int(total_estimated_pop * 0.6)
     if boundary_records:
         boundary_weights = [int(record.get('population', 0) or 0) * 0.6 for record in boundary_records]
@@ -1108,6 +1108,16 @@ def build_demo_calls(city_poly, total_estimated_pop, generate_clustered_calls, b
         if weighted_annual_cfs > 0:
             annual_cfs = weighted_annual_cfs
     simulated_points_count = max(int(round(annual_cfs)), 0)
+    preview_cap = None
+    if max_preview_points is not None:
+        try:
+            preview_cap = max(0, int(max_preview_points))
+        except Exception:
+            preview_cap = None
+    if preview_cap:
+        # Keep the live preview responsive for county-scale inputs while
+        # preserving the annual call estimate in annual_cfs.
+        simulated_points_count = min(simulated_points_count, preview_cap)
     np.random.seed(42)
     random.seed(42)
     call_points = []

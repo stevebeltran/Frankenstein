@@ -2,8 +2,20 @@
 import streamlit as st
 import math
 import random
+import numpy as np
 import pandas as pd
-from shapely.geometry import Polygon
+from shapely.geometry import Point, Polygon, MultiPolygon
+
+from modules.boundaries import (
+    STATE_FIPS,
+    fetch_census_population,
+    fetch_census_state_population,
+    fetch_place_boundary_local,
+    fetch_county_boundary_local,
+    save_boundary_gdf,
+)
+from modules.config import KNOWN_POPULATIONS
+from modules.onboarding import build_demo_calls
 
 # Demo constants
 FAST_DEMO_STATION_COUNT = 10
@@ -112,21 +124,54 @@ def load_fast_demo_payload(city_name, state_name, station_count=FAST_DEMO_STATIO
     if not city_name or not state_name:
         return None
 
-    success, temp_gdf = fetch_place_boundary_local(state_name, city_name)
-    boundary_kind = "place"
-    if not success:
+    city_name_lower = city_name.lower()
+    is_county_input = city_name_lower.endswith(" county")
+    is_township_input = city_name_lower.endswith(" township")
+    boundary_kind = "county" if is_county_input else "place"
+
+    success = False
+    temp_gdf = None
+    if is_county_input:
         success, temp_gdf = fetch_county_boundary_local(state_name, city_name)
         if not success:
-            success, temp_gdf = fetch_county_boundary_local(state_name, f"{city_name} County")
-        if success:
-            boundary_kind = "county"
+            success, temp_gdf = fetch_county_boundary_local(state_name, city_name[:-7].strip())
+    elif is_township_input:
+        success, temp_gdf = fetch_place_boundary_local(state_name, city_name)
+    else:
+        success, temp_gdf = fetch_place_boundary_local(state_name, city_name)
+        if not success:
+            success, temp_gdf = fetch_county_boundary_local(state_name, city_name)
+            if not success:
+                success, temp_gdf = fetch_county_boundary_local(state_name, f"{city_name} County")
+            if success:
+                boundary_kind = "county"
 
     if not success or temp_gdf is None or temp_gdf.empty:
         return None
 
     boundary_gdf = temp_gdf.copy()
     city_poly = boundary_gdf.geometry.union_all()
-    population = int(KNOWN_POPULATIONS.get(city_name, 0) or 0)
+    state_fips = STATE_FIPS.get(state_name, "")
+    population = 0
+    try:
+        if boundary_kind == "state":
+            population = int(fetch_census_state_population(state_fips) or 0)
+        else:
+            population = int(fetch_census_population(state_fips, city_name, is_county=is_county_input) or 0)
+    except Exception:
+        population = 0
+    if not population:
+        population = int(KNOWN_POPULATIONS.get(city_name, 0) or 0)
+    if not population:
+        try:
+            gdf_proj = boundary_gdf.to_crs(epsg=3857)
+            area_sq_mi = gdf_proj.geometry.area.sum() / 2589988.11
+            # Counties are much larger than city boundaries, so use a much
+            # lower fallback density to avoid exploding the synthetic demand.
+            default_density = 35 if boundary_kind == "state" else (120 if boundary_kind == "county" else 3500)
+            population = int(area_sq_mi * default_density)
+        except Exception:
+            population = 0
     boundary_records = [{
         "name": city_name or state_name,
         "state": state_name,

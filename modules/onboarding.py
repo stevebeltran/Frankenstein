@@ -995,7 +995,9 @@ def build_demo_boundaries(
         city_name = loc['city'].strip()
         state_name = loc['state']
         is_state = not city_name and state_name in state_fips
-        is_county = city_name.lower().endswith(' county')
+        city_name_lower = city_name.lower()
+        is_county = city_name_lower.endswith(' county')
+        is_township = city_name_lower.endswith(' township')
         boundary_kind = 'state' if is_state else ('county' if is_county else 'place')
 
         if is_state:
@@ -1009,6 +1011,10 @@ def build_demo_boundaries(
                 success, temp_gdf = fetch_county_boundary_local(state_name, city_name + ' County')
             if success:
                 boundary_kind = 'county'
+        elif is_township:
+            success, temp_gdf = fetch_place_boundary_local(state_name, city_name)
+            if success:
+                boundary_kind = 'place'
         else:
             success, temp_gdf = fetch_place_boundary_local(state_name, city_name)
             if success:

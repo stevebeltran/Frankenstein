@@ -42,8 +42,8 @@ def render_transient_build_notice(__version__, __build_datetime__):
       style.textContent = `
         @keyframes brincBuildNoticeFade {{
             0% {{ opacity: 0; transform: translate(-50%, -46%) scale(0.985); }}
-            10% {{ opacity: 1; transform: translate(-50%, -50%) scale(1); }}
-            80% {{ opacity: 1; }}
+            6% {{ opacity: 1; transform: translate(-50%, -50%) scale(1); }}
+            88% {{ opacity: 1; }}
             100% {{ opacity: 0; visibility: hidden; transform: translate(-50%, -54%) scale(0.985); }}
         }}
         #brinc-build-notice-wrap {{
@@ -66,7 +66,7 @@ def render_transient_build_notice(__version__, __build_datetime__):
             color: #f8fafc;
             text-align: center;
             font-family: 'IBM Plex Mono', monospace;
-            animation: brincBuildNoticeFade 5s ease forwards;
+            animation: brincBuildNoticeFade 8s ease forwards;
         }}
         #brinc-build-notice-wrap .brinc-build-notice .label {{
             font-size: 0.68rem;
@@ -83,8 +83,9 @@ def render_transient_build_notice(__version__, __build_datetime__):
         #brinc-build-notice-wrap .brinc-build-notice .time {{
             margin-top: 8px;
             font-size: 1.08rem;
-            font-weight: 700;
+            font-weight: 900;
             letter-spacing: 0.02em;
+            color: #ff4444;
         }}
       `;
       doc.head.appendChild(style);
@@ -97,7 +98,7 @@ def render_transient_build_notice(__version__, __build_datetime__):
       <div class="brinc-build-notice">
         <div class="label">Last updated</div>
         <div class="version">Version ${{version}}</div>
-        <div class="time">${{buildTime}}</div>
+        <div class="time">{__build_datetime__}</div>
       </div>
     `;
     doc.body.appendChild(wrap);
@@ -107,7 +108,7 @@ def render_transient_build_notice(__version__, __build_datetime__):
       if (el && el.parentNode) {{
         el.parentNode.removeChild(el);
       }}
-    }}, 5000);
+    }}, 8000);
   }} catch (e) {{}}
 }})();
 </script>

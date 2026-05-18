@@ -9703,6 +9703,8 @@ body{{background:transparent;overflow:hidden}}
             and str(prop_state or "").strip().lower() in {"fl", "florida"}
         )
         if _is_fernandina_beach:
+            _fernandina_ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            _fernandina_version_slug = _safe_export_slug(__version__, "version")
             _fernandina_station_rows = _load_fernandina_beach_station_rows(
                 station_metadata if isinstance(station_metadata, list) else None,
                 st.session_state,
@@ -9724,7 +9726,7 @@ body{{background:transparent;overflow:hidden}}
                 if _fernandina_export_slot.download_button(
                     f"🌊 {prop_city}, {prop_state} — Coastal Rescue Briefing",
                     data=_fernandina_report_html,
-                    file_name=f"Fernandina_Beach_Coastal_Rescue_Briefing_{_safe_city_base}_{_version_slug}_{_ts}.html",
+                    file_name=f"Fernandina_Beach_Coastal_Rescue_Briefing_{_safe_city_base}_{_fernandina_version_slug}_{_fernandina_ts}.html",
                     mime="text/html",
                     width="stretch",
                 ):

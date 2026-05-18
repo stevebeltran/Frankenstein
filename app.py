@@ -3362,7 +3362,9 @@ def find_relevant_jurisdictions(calls_df, shapefile_dir, preferred_shp=None):
                 hits = gpd.sjoin(gdf_chunk, points_gdf, how="inner", predicate="intersects")
                 if not hits.empty:
                     subset = gdf_chunk.loc[hits.index.unique()].copy()
-                    subset['data_count'] = hits.index.value_counts()
+                    # Count calls per jurisdiction by grouping on the hit index
+                    call_counts = hits.index.value_counts()
+                    subset['data_count'] = subset.index.map(call_counts)
                     name_col = next((c for c in ['NAME','DISTRICT','NAMELSAD'] if c in subset.columns), subset.columns[0])
                     subset['DISPLAY_NAME'] = subset[name_col].astype(str)
                     relevant_polys.append(subset)

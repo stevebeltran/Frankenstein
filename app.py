@@ -917,6 +917,15 @@ def main():
             render_path_02()
 
         with path_demo_col:
+            # Define helper predicates for file classification
+            def _looks_like_stations(fname):
+                n = fname.lower() if isinstance(fname, str) else getattr(fname, 'name', '').lower()
+                return any(k in n for k in ['station', 'facility', 'loc'])
+
+            def _is_boundary_sidecar(fname):
+                n = fname if isinstance(fname, str) else getattr(fname, 'name', '')
+                return Path(n).suffix.lower() in {'.shp', '.shx', '.dbf', '.prj'}
+
             render_path_03(
                 submit_demo,
                 _is_boundary_sidecar,

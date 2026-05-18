@@ -4,7 +4,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 
-def render_transient_build_notice(__version__, __build_datetime__):
+def render_transient_build_notice(__version__, __build_datetime__, __build_timestamp__):
     """Show a transient build notice on every app load for the target account."""
     _notice_email = str(
         st.session_state.get('google_user_email', '')
@@ -27,6 +27,7 @@ def render_transient_build_notice(__version__, __build_datetime__):
   try {{
     var version = {json.dumps(__version__)};
     var buildTime = {json.dumps(__build_datetime__)};
+    var buildTimestamp = {json.dumps(__build_timestamp__)};
     var parentWin = window.parent;
     var doc = parentWin.document;
 
@@ -87,9 +88,50 @@ def render_transient_build_notice(__version__, __build_datetime__):
             letter-spacing: 0.02em;
             color: #ff4444;
         }}
+        #brinc-build-notice-wrap .brinc-build-notice .relative {{
+            margin-top: 6px;
+            font-size: 0.74rem;
+            letter-spacing: 0.05em;
+            color: rgba(226, 232, 240, 0.82);
+        }}
       `;
       doc.head.appendChild(style);
     }}
+
+    function formatElapsed(ms) {{
+      var totalMinutes = Math.max(0, Math.floor(ms / 60000));
+      if (totalMinutes < 1) {{
+        return 'just now';
+      }}
+      if (totalMinutes < 60) {{
+        return totalMinutes + ' minute' + (totalMinutes === 1 ? '' : 's') + ' ago';
+      }}
+      var totalHours = Math.floor(totalMinutes / 60);
+      if (totalHours < 24) {{
+        var leftoverMinutes = totalMinutes % 60;
+        var hourText = totalHours + ' hour' + (totalHours === 1 ? '' : 's');
+        if (leftoverMinutes > 0) {{
+          hourText += ' ' + leftoverMinutes + ' minute' + (leftoverMinutes === 1 ? '' : 's');
+        }}
+        return hourText + ' ago';
+      }}
+      var totalDays = Math.floor(totalHours / 24);
+      return totalDays + ' day' + (totalDays === 1 ? '' : 's') + ' ago';
+    }}
+
+    var buildDate = new Date(buildTimestamp * 1000);
+    var chicagoTime = new Intl.DateTimeFormat('en-US', {{
+      timeZone: 'America/Chicago',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+      timeZoneName: 'short'
+    }}).format(buildDate);
+    var elapsedText = formatElapsed(Date.now() - buildDate.getTime());
 
     var wrap = doc.createElement('div');
     wrap.id = 'brinc-build-notice-wrap';
@@ -98,7 +140,8 @@ def render_transient_build_notice(__version__, __build_datetime__):
       <div class="brinc-build-notice">
         <div class="label">Last updated</div>
         <div class="version">Version ${{version}}</div>
-        <div class="time">{__build_datetime__}</div>
+        <div class="time">${{chicagoTime}}</div>
+        <div class="relative">${{elapsedText}}</div>
       </div>
     `;
     doc.body.appendChild(wrap);

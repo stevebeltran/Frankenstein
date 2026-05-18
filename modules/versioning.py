@@ -153,6 +153,7 @@ _BUILD_INFO = _compute_build_info()
 __version__ = _BUILD_INFO["version"]
 __build_revision__ = _BUILD_INFO["revision"]
 __build_datetime__ = _BUILD_INFO["build_datetime"]
+__build_timestamp__ = _BUILD_INFO["build_timestamp"]
 __build_line_count__ = _BUILD_INFO["line_count"]
 
 

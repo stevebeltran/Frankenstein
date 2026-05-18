@@ -31,14 +31,6 @@ def _read_build_meta():
     return 0.0, 1
 
 
-def _write_build_meta(mtime, revision):
-    """Persist the latest app.py timestamp and revision."""
-    try:
-        _BUILD_META_PATH.write_text(f"{float(mtime)}|{int(revision)}", encoding="utf-8")
-    except OSError:
-        pass
-
-
 def _read_anchor_revision():
     """Read the revision stored when versioning was introduced."""
     try:
@@ -67,7 +59,7 @@ def _git_revision():
             text=True,
             timeout=5,
         ).strip()
-        if _count:
+        if _count != "":
             return _read_anchor_revision() + max(0, int(_count))
     except Exception:
         pass
@@ -90,38 +82,42 @@ def _git_short_hash():
     return None
 
 
-def _sync_build_meta():
-    """
-    Advance the revision when app.py has been saved since the last recorded build.
+def _git_commit_timestamp():
+    """Return the current HEAD commit timestamp when available."""
+    try:
+        _stamp = subprocess.check_output(
+            ["git", "show", "-s", "--format=%ct", "HEAD"],
+            cwd=_REPO_ROOT,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+        ).strip()
+        if _stamp:
+            return float(int(_stamp))
+    except Exception:
+        pass
+    return None
 
-    This gives a monotonic revision number that increases by 1 whenever app.py
-    changes, instead of only reflecting a read-only timestamp.
+
+def _resolve_build_meta():
     """
-    _app_mtime = float(_APP_PATH.stat().st_mtime)
-    _stored_mtime, _stored_revision = _read_build_meta()
+    Resolve build metadata from git history when available.
+
+    The version is now read-only at runtime so local app launches do not mutate
+    .build_meta. That keeps the displayed version tied to the commit history.
+    """
     _git_revision_value = _git_revision()
+    _git_timestamp_value = _git_commit_timestamp()
 
-    if _git_revision_value is not None:
-        _revision = max(_stored_revision, _git_revision_value)
-        if abs(_app_mtime - _stored_mtime) > 1e-9 or _revision != _stored_revision:
-            _write_build_meta(_app_mtime, _revision)
-        return _app_mtime, _revision
+    if _git_revision_value is not None and _git_timestamp_value is not None:
+        return _git_timestamp_value, _git_revision_value
 
-    if _stored_mtime <= 0:
-        _write_build_meta(_app_mtime, 1)
-        return _app_mtime, 1
+    _stored_mtime, _stored_revision = _read_build_meta()
+    if _stored_mtime > 0:
+        return _stored_mtime, _stored_revision
 
-    # Preserve the highest revision even if app.py is restored with an older mtime.
-    if _app_mtime < (_stored_mtime - 1e-9):
-        _write_build_meta(_app_mtime, _stored_revision)
-        return _app_mtime, _stored_revision
-
-    if _app_mtime > (_stored_mtime + 1e-9):
-        _stored_revision += 1
-        _write_build_meta(_app_mtime, _stored_revision)
-        return _app_mtime, _stored_revision
-
-    return _stored_mtime, _stored_revision
+    _fallback_timestamp = float(datetime.datetime.now().timestamp())
+    return _fallback_timestamp, 1
 
 
 def _count_app_lines():
@@ -134,7 +130,7 @@ def _count_app_lines():
 
 def _compute_build_info():
     """Compute the version string and related build metadata."""
-    _mtime, _revision = _sync_build_meta()
+    _mtime, _revision = _resolve_build_meta()
     _dt = datetime.datetime.fromtimestamp(_mtime)
     _monster_idx = min(max(_revision - 1, 0) // 50, len(_MONSTER_NAMES) - 1)
     _monster_name = _MONSTER_NAMES[_monster_idx]

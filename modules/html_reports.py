@@ -6406,6 +6406,18 @@ def generate_fernandina_beach_public_service_report_html(stations, *, city="Fern
     font-size: 13px;
     color: #475569;
   }}
+  .recommendation-callout {{
+    margin-top: 14px;
+    padding: 16px 18px;
+    border-radius: 16px;
+    border: 1px solid rgba(88,214,255,.28);
+    background: linear-gradient(135deg, rgba(88,214,255,.12), rgba(245,197,66,.10));
+    color: #0b1220;
+    box-shadow: 0 12px 26px rgba(15, 23, 42, .08);
+  }}
+  .recommendation-callout strong {{
+    color: #083b50;
+  }}
   @media (max-width: 980px) {{
     .meta, .two, .station-grid {{ grid-template-columns: 1fr; }}
     h1 {{ font-size: 30px; }}
@@ -6526,7 +6538,9 @@ def generate_fernandina_beach_public_service_report_html(stations, *, city="Fern
         <li><strong>2 units:</strong> best when one drone must stay available while the other is flying, charging, or staged at another beach access point.</li>
         <li><strong>3 units:</strong> best when the customer wants a north-center-south posture with surge redundancy for peak season, special events, and bad surf days.</li>
       </ul>
-      <p><strong>Recommended if the customer buys only one unit:</strong> <strong>1 Guardian</strong>, because the longer flight time and wider operating reach make it the strongest single-aircraft choice for peak-season overwatch, crowd monitoring, and locating a missing swimmer or beachgoer before a ground or boat response is launched.</p>
+      <div class="recommendation-callout">
+        <strong>Recommended if the customer buys only one unit:</strong> <strong>1 Guardian</strong>. The longer flight time and wider operating reach make it the strongest single-aircraft choice for peak-season overwatch, crowd monitoring, and locating a missing swimmer or beachgoer before a ground or boat response is launched.
+      </div>
       <p class="footer-note">For a coastal community, the value of additional aircraft is not just more flights. It is faster beach overwatch, less dead time between missions, and a command posture that can keep coverage alive during busy weekends and tide-driven surges.</p>
     </section>
 

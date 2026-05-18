@@ -213,6 +213,8 @@ from modules.geospatial import (
     _count_points_within_boundary, find_jurisdictions_by_coordinates
 )
 from modules import faa_rf, optimization, html_reports
+_transient_notice_mod = _load_local_module("transient_notice")
+render_transient_build_notice = _transient_notice_mod.render_transient_build_notice
 _session_state_mod = _load_local_module("session_state")
 init_session_state = _session_state_mod.init_session_state
 _dashboard_helpers_mod = _load_local_module("dashboard_helpers")
@@ -3626,6 +3628,12 @@ except Exception:
 # ============================================================
 # This MUST run before any st.session_state checks to prevent KeyError
 init_session_state(st.session_state, _slugify, _build_public_report_url)
+
+# ============================================================
+# TRANSIENT BUILD NOTICE
+# ============================================================
+# Show splash screen with build info for target user
+render_transient_build_notice(__version__, __build_datetime__)
 
 # ============================================================
 # APP FLOW

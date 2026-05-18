@@ -5756,6 +5756,369 @@ if (stations.length === 0) {{
     return html
 
 
+def generate_fernandina_beach_public_service_report_html(stations, *, city="Fernandina Beach", state="FL"):
+
+    """Generate a Fernandina Beach-only coastal rescue and beach safety briefing."""
+
+    import html as _html
+
+    def _esc(value):
+        return _html.escape("" if value is None else str(value), quote=True)
+
+    def _num(value, digits=2):
+        try:
+            return f"{float(value):.{digits}f}"
+        except Exception:
+            return f"{0.0:.{digits}f}"
+
+    def _get_row_value(row, *keys):
+        for key in keys:
+            if key in row and row.get(key) not in (None, ""):
+                return row.get(key)
+        lowered = {str(k).strip().lower(): v for k, v in row.items()}
+        for key in keys:
+            if key.lower() in lowered and lowered[key.lower()] not in (None, ""):
+                return lowered[key.lower()]
+        return ""
+
+    def _to_float(value, default=0.0):
+        try:
+            if value in (None, ""):
+                return float(default)
+            return float(value)
+        except Exception:
+            return float(default)
+
+    def _haversine_miles(lat1, lon1, lat2, lon2):
+        r_mi = 3958.8
+        phi1 = math.radians(lat1)
+        phi2 = math.radians(lat2)
+        d_phi = math.radians(lat2 - lat1)
+        d_lam = math.radians(lon2 - lon1)
+        a = math.sin(d_phi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lam / 2.0) ** 2
+        return 2.0 * r_mi * math.asin(math.sqrt(max(0.0, min(1.0, a))))
+
+    station_rows = list(stations or [])
+    norm_rows = []
+    pairwise_rows = []
+    coords = []
+
+    for idx, row in enumerate(station_rows):
+        row = row or {}
+        name = str(_get_row_value(row, "name") or f"Station {idx + 1}").strip()
+        kind = str(_get_row_value(row, "type") or "Public Safety").strip()
+        address = str(_get_row_value(row, "address") or "").strip()
+        capacity = _get_row_value(row, "capacity")
+        notes = str(_get_row_value(row, "notes") or "").strip()
+        lat = _to_float(_get_row_value(row, "lat"))
+        lon = _to_float(_get_row_value(row, "lon"))
+        coords.append((name, lat, lon))
+        norm_rows.append({
+            "name": name,
+            "type": kind,
+            "address": address,
+            "capacity": capacity,
+            "notes": notes,
+            "lat": lat,
+            "lon": lon,
+        })
+
+    for i in range(len(coords)):
+        for j in range(i + 1, len(coords)):
+            a_name, a_lat, a_lon = coords[i]
+            b_name, b_lat, b_lon = coords[j]
+            pairwise_rows.append({
+                "a": a_name,
+                "b": b_name,
+                "distance": _haversine_miles(a_lat, a_lon, b_lat, b_lon),
+            })
+
+    max_span = max((item["distance"] for item in pairwise_rows), default=0.0)
+    if len(coords) >= 3:
+        centroid_lat = sum(lat for _, lat, _ in coords) / len(coords)
+        centroid_lon = sum(lon for _, _, lon in coords) / len(coords)
+    elif coords:
+        centroid_lat = sum(lat for _, lat, _ in coords) / len(coords)
+        centroid_lon = sum(lon for _, _, lon in coords) / len(coords)
+    else:
+        centroid_lat = centroid_lon = 0.0
+
+    station_cards = []
+    for idx, item in enumerate(norm_rows):
+        role_text = {
+            "Police": "Coastal rescue / patrol base",
+            "Fire": "Rescue and medical support base",
+            "EMS": "Water rescue and triage support",
+        }.get(item["type"], "Public safety node")
+        station_cards.append(
+            f"""
+            <div class="station-card">
+              <div class="station-top">
+                <div>
+                  <div class="station-name">{_esc(item["name"])}</div>
+                  <div class="station-role">{_esc(role_text)}</div>
+                </div>
+                <div class="station-index">0{idx + 1}</div>
+              </div>
+              <div class="station-meta">{_esc(item["type"])}{f' · {_esc(item["capacity"])} capacity' if item["capacity"] not in (None, "") else ""}</div>
+              <div class="station-meta">{_esc(item["address"]) if item["address"] else "Address not provided"}</div>
+              <div class="station-meta">Lat {_num(item["lat"], 6)} · Lon {_num(item["lon"], 6)}</div>
+              <div class="station-notes">{_esc(item["notes"]) if item["notes"] else "Designed for beach and waterfront public service coverage."}</div>
+            </div>
+            """
+        )
+
+    pairwise_list = "".join(
+        f"<li><strong>{_esc(item['a'])}</strong> to <strong>{_esc(item['b'])}</strong>: {_num(item['distance'], 2)} miles</li>"
+        for item in pairwise_rows
+    ) or "<li>No pairwise spacing data available.</li>"
+
+    source_items = [
+        (
+            "U.S. Coast Guard 2024 Recreational Boating Statistics",
+            "https://www.uscgboating.org/library/accident-statistics/Recreational-Boating-Statistics-2024.pdf",
+            "Latest Coast Guard boating statistics page with 2024 incident, fatality, injury, and damage totals.",
+        ),
+        (
+            "U.S. Coast Guard 2025 Life Jacket Wear Rate Study",
+            "https://uscgboating.org/multimedia/news-detail.php?id=580",
+            "Official Coast Guard note on the latest life-jacket observation study and drowning patterns.",
+        ),
+        (
+            "NOAA / NWS Beach Safety",
+            "https://www.weather.gov/safety/beach",
+            "National Weather Service beach safety guidance for surf zone hazards, lifeguards, and public warnings.",
+        ),
+        (
+            "NOAA / NWS Rip Current Safety",
+            "https://www.weather.gov/safety/ripcurrent",
+            "Official surf-zone guidance for rip currents and beach rescue operations.",
+        ),
+    ]
+
+    source_html = "".join(
+        f'<li><a href="{_esc(url)}" target="_blank" rel="noopener noreferrer">{_esc(title)}</a> - {_esc(desc)}</li>'
+        for title, url, desc in source_items
+    )
+
+    coastal_rules = [
+        "Prioritize lifeguard support, swimmer overwatch, and throw-drop flotation before committing a boat or ground unit.",
+        "Use payloads for life jackets, floatation aids, and small rescue kits when conditions keep the shoreline team from reaching the victim quickly.",
+        "Treat seasonal tide swings, rip-current days, and crowded beach windows as staffing multipliers rather than isolated incidents.",
+        "Keep the mission centered on rescue, boating safety, beach safety, and public service - not law enforcement.",
+        "Add animal-encounter readiness for stingray, jellyfish, turtle nesting, bird strikes, stranded marine life, and pet-related beach calls.",
+    ]
+
+    coastal_costs = [
+        "Seasonal patrol labor and overtime for beach weekends, holidays, and tide-driven crowd surges.",
+        "Boat fuel, saltwater maintenance, and accelerated wear on rescue craft and launch equipment.",
+        "Payload replenishment for PFD drops, flotation gear, radios, and first-aid consumables.",
+        "Training time for surf rescue, swimmer extraction, marine radio procedure, and wildlife-safe response.",
+        "Weather and tide monitoring time that keeps patrols staged at the right beach access points.",
+    ]
+
+    report_title = f"{_esc(city)}, {_esc(state)} Coastal Rescue & Beach Safety Briefing"
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{report_title}</title>
+<style>
+  :root {{
+    --bg: #08131f;
+    --panel: #0f1f2f;
+    --panel-2: #13283c;
+    --text: #eff6ff;
+    --muted: #a8b6c7;
+    --accent: #58d6ff;
+    --accent-2: #7dd3fc;
+    --gold: #f5c542;
+    --line: rgba(255,255,255,.08);
+  }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    background: linear-gradient(180deg, #06111b 0%, #0a1724 28%, #f5f7fb 28%, #f5f7fb 100%);
+    color: #101828;
+  }}
+  .wrap {{ max-width: 1180px; margin: 0 auto; padding: 28px 20px 44px; }}
+  .hero {{
+    background: radial-gradient(circle at top right, rgba(88,214,255,.12), transparent 35%), linear-gradient(135deg, var(--bg), #0b1a28 70%);
+    color: var(--text);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 24px;
+    padding: 30px;
+    box-shadow: 0 24px 64px rgba(2, 6, 23, .28);
+  }}
+  .eyebrow {{
+    text-transform: uppercase;
+    letter-spacing: .18em;
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 800;
+  }}
+  h1 {{ margin: 10px 0 10px; font-size: 38px; line-height: 1.05; }}
+  .subtitle {{ margin: 0; max-width: 820px; font-size: 17px; line-height: 1.7; color: var(--muted); }}
+  .meta {{
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 20px;
+  }}
+  .metric {{
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 16px;
+    padding: 16px;
+  }}
+  .metric .k {{ font-size: 11px; text-transform: uppercase; letter-spacing: .14em; color: var(--muted); font-weight: 800; }}
+  .metric .v {{ font-size: 19px; margin-top: 8px; font-weight: 900; color: #fff; line-height: 1.25; }}
+  .grid {{ display: grid; gap: 14px; margin-top: 18px; }}
+  .two {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+  .section {{
+    background: #fff;
+    border: 1px solid #d9e2ee;
+    border-radius: 22px;
+    padding: 24px;
+    box-shadow: 0 16px 30px rgba(15, 23, 42, .05);
+    margin-top: 18px;
+  }}
+  .section h2 {{ margin: 0 0 10px; font-size: 26px; line-height: 1.15; color: #0b1220; }}
+  .section p, .section li {{ color: #334155; font-size: 16px; line-height: 1.75; }}
+  .section ul {{ margin: 12px 0 0 20px; padding: 0; }}
+  .badge {{
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(88,214,255,.12);
+    color: #0b5d78;
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+  }}
+  .station-grid {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 12px; }}
+  .station-card {{
+    border: 1px solid #d9e2ee;
+    background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
+    border-radius: 18px;
+    padding: 18px;
+    min-height: 220px;
+  }}
+  .station-top {{ display: flex; justify-content: space-between; gap: 12px; }}
+  .station-index {{
+    font-size: 12px;
+    font-weight: 900;
+    color: var(--gold);
+    background: #fff7d6;
+    border-radius: 999px;
+    padding: 6px 10px;
+    white-space: nowrap;
+    height: fit-content;
+  }}
+  .station-name {{ font-size: 20px; font-weight: 900; color: #0b1220; margin-bottom: 6px; }}
+  .station-role {{ font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; color: #0b5d78; }}
+  .station-meta {{ margin-top: 8px; font-size: 14px; color: #475569; }}
+  .station-notes {{ margin-top: 12px; padding-top: 12px; border-top: 1px dashed #d9e2ee; color: #1e293b; font-size: 15px; line-height: 1.6; }}
+  .pairwise {{ columns: 2; column-gap: 24px; }}
+  .pairwise li {{ break-inside: avoid; margin-bottom: 8px; }}
+  .source-list a {{ color: #0b5d78; text-decoration: none; font-weight: 700; }}
+  .source-list li {{ margin-bottom: 10px; }}
+  .footer-note {{
+    margin-top: 18px;
+    color: #64748b;
+    font-size: 13px;
+    line-height: 1.6;
+  }}
+  @media (max-width: 980px) {{
+    .meta, .two, .station-grid {{ grid-template-columns: 1fr; }}
+    h1 {{ font-size: 30px; }}
+    .pairwise {{ columns: 1; }}
+  }}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Fernandina Beach Only</div>
+      <h1>{report_title}</h1>
+      <p class="subtitle">A non-law-enforcement executive briefing focused on water rescue, boating safety, beach safety, seasonal tide changes, payload drops of life jackets or flotation aids, and other beach-community public service needs.</p>
+      <div class="meta">
+        <div class="metric"><div class="k">Station Count</div><div class="v">{len(norm_rows)}</div></div>
+        <div class="metric"><div class="k">Layout Span</div><div class="v">{_num(max_span, 2)} miles max separation</div></div>
+        <div class="metric"><div class="k">Centroid</div><div class="v">{_num(centroid_lat, 6)}, {_num(centroid_lon, 6)}</div></div>
+        <div class="metric"><div class="k">Mission</div><div class="v">Rescue, beach safety, public service</div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <span class="badge">Placement Advantages</span>
+      <h2>Why the three-point layout is strong</h2>
+      <p>The three stations create a compact north-central-south coverage spine. That matters for a barrier-island environment because it reduces dead zones, keeps response travel short, and gives the operator a central command node with northern and southeastern redundancy.</p>
+      <ul>
+        <li><strong>Ocean Rescue Headquarters</strong> works as the central dispatch and staging hub, which is the right place for mission control, communications, and payload readiness.</li>
+        <li><strong>Ritz Carlton</strong> gives the north Amelia Island side a faster beach and nearshore response option where visitor density and beach exposure tend to be high.</li>
+        <li><strong>Atlantic Recreational Center</strong> adds southeast corridor reach, which helps cover beach access, recreation, and near-water public service calls on the far side of the island.</li>
+        <li>The widest station-to-station span is only <strong>{_num(max_span, 2)} miles</strong>, so the network stays tight enough to reposition quickly while still covering a meaningful shoreline footprint.</li>
+      </ul>
+      <p class="footer-note">These are placement advantages based on the point geometry in the provided station file. A full shapefile overlay would let us verify exact access-point, beach, and waterway coverage.</p>
+    </section>
+
+    <section class="section">
+      <span class="badge">Station Geometry</span>
+      <h2>Station file summary</h2>
+      <div class="station-grid">
+        {''.join(station_cards) if station_cards else '<p>No station records were found.</p>'}
+      </div>
+      <div class="grid two" style="margin-top:16px;">
+        <div>
+          <h3 style="margin:0 0 8px;font-size:20px;color:#0b1220;">Spacing snapshot</h3>
+          <ul class="pairwise">{pairwise_list}</ul>
+        </div>
+        <div>
+          <h3 style="margin:0 0 8px;font-size:20px;color:#0b1220;">Operational read</h3>
+          <p>For a beach community, this geometry is useful because it supports early lifeguard overwatch, fast swimmer verification, flotation drop missions, and short repositioning cycles during busy tide or weather windows. It is also a practical shape for marine rescue support because the command node can pivot resources north or south without needing a large fixed footprint.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <span class="badge">Beach Mission</span>
+      <h2>What the report should emphasize</h2>
+      <ul>
+        {''.join(f'<li>{_esc(item)}</li>' for item in coastal_rules)}
+      </ul>
+    </section>
+
+    <section class="section">
+      <span class="badge">Seasonal Cost Drivers</span>
+      <h2>Where water-patrol cost pressure comes from</h2>
+      <p>The important cost story for this customer is not law enforcement overhead. It is season-based rescue readiness: more patrol hours, more launches, more standby time, and more consumables when tides, surf, and beach traffic peak.</p>
+      <ul>
+        {''.join(f'<li>{_esc(item)}</li>' for item in coastal_costs)}
+      </ul>
+      <p class="footer-note">This is the right section to add your calculated financials later, because it lets you layer in patrol-hour assumptions, seasonal headcount, response-time savings, and avoided launch costs without changing the narrative structure.</p>
+    </section>
+
+    <section class="section">
+      <span class="badge">USCG / NOAA Sources</span>
+      <h2>Official data base for the briefing</h2>
+      <ul class="source-list">
+        {source_html}
+      </ul>
+      <p class="footer-note">Use these sources to support the public safety framing: the Coast Guard for boating accident and life-jacket risk context, and NOAA/NWS for surf-zone, rip-current, and beach-safety guidance.</p>
+    </section>
+  </div>
+</body>
+</html>"""
+
+    return html
+
+
 
 
 

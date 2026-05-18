@@ -39,6 +39,7 @@ from PIL import Image
 
 APP_DIR = Path(__file__).resolve().parent
 MODULES_DIR = APP_DIR / "modules"
+FERNANDINA_STATIONS_CSV = Path(r"G:\My Drive\PRIVATE NO ACCESS\Python\Fernandina Beach\stations.csv")
 
 
 def _load_local_module(module_name: str):
@@ -74,6 +75,16 @@ def _load_local_module(module_name: str):
         sys.modules[full_name] = module
         module_spec.loader.exec_module(module)
         return module
+
+
+def _load_fernandina_beach_station_rows():
+    if not FERNANDINA_STATIONS_CSV.exists():
+        return []
+    try:
+        return pd.read_csv(FERNANDINA_STATIONS_CSV).to_dict("records")
+    except Exception as exc:
+        print(f"[BRINC] Fernandina Beach station file could not be loaded: {exc}")
+        return []
 
 # ── Module imports ────────────────────────────────────────────────────────────
 from modules.config import (
@@ -11964,6 +11975,44 @@ body{{background:transparent;overflow:hidden}}
                 key="pdf_export_no_drones_btn",
                 help="Deploy at least one drone to generate the static PDF.",
             )
+
+        _is_fernandina_beach = (
+            str(prop_city or "").strip().lower() == "fernandina beach"
+            and str(prop_state or "").strip().lower() in {"fl", "florida"}
+        )
+        if _is_fernandina_beach:
+            _fernandina_station_rows = _load_fernandina_beach_station_rows()
+            _fernandina_report_html = ""
+            _fernandina_report_ready = False
+            if _fernandina_station_rows:
+                try:
+                    _fernandina_report_html = html_reports.generate_fernandina_beach_public_service_report_html(
+                        _fernandina_station_rows,
+                        city=prop_city,
+                        state=prop_state,
+                    )
+                    _fernandina_report_ready = isinstance(_fernandina_report_html, str) and bool(_fernandina_report_html.strip())
+                except Exception as _fb_exc:
+                    _fernandina_report_html = ""
+                    print(f"[BRINC] Fernandina Beach report export failed: {_fb_exc}")
+            if _fernandina_report_ready:
+                if st.download_button(
+                    f"🌊 {prop_city}, {prop_state} — Coastal Rescue Briefing",
+                    data=_fernandina_report_html,
+                    file_name=f"Fernandina_Beach_Coastal_Rescue_Briefing_{_safe_city}_{_version_slug}_{_ts}.html",
+                    mime="text/html",
+                    width="stretch",
+                ):
+                    st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['FERNANDINA_PUBLIC_SERVICE']
+                    st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
+            else:
+                st.button(
+                    f"🌊 {prop_city}, {prop_state} — Coastal Rescue Briefing",
+                    disabled=True,
+                    width="stretch",
+                    key="fernandina_public_service_not_ready_btn",
+                    help="Fernandina Beach station data is not available yet.",
+                )
 
         # 3. Google Earth KML — only when drones are placed
         _kml_data = None

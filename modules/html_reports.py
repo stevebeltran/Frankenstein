@@ -7,8 +7,11 @@ import pandas as pd
 import numpy as np
 
 import json, re, io, math, datetime, base64
+from pathlib import Path
 
 import simplekml
+
+from PIL import Image, ImageDraw, ImageFont
 
 from shapely.geometry import Polygon
 
@@ -2167,6 +2170,368 @@ def _safe_df_to_records(df):
 
 
 
+
+
+def _load_pdf_font(size, bold=False):
+
+    """Load a reasonably clean truetype font for PDF rendering."""
+
+    candidates = []
+    if bold:
+        candidates.extend([
+            r"C:\Windows\Fonts\arialbd.ttf",
+            r"C:\Windows\Fonts\ARIALBD.TTF",
+            r"C:\Windows\Fonts\bahnschrift.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+        ])
+    else:
+        candidates.extend([
+            r"C:\Windows\Fonts\arial.ttf",
+            r"C:\Windows\Fonts\ARIAL.TTF",
+            r"C:\Windows\Fonts\segoeui.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        ])
+
+    for _path in candidates:
+        try:
+            if _path and Path(_path).exists():
+                return ImageFont.truetype(_path, size=size)
+        except Exception:
+            continue
+
+    try:
+        return ImageFont.truetype("arialbd.ttf" if bold else "arial.ttf", size=size)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def _text_box(draw, text, font):
+
+    bbox = draw.textbbox((0, 0), str(text), font=font)
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+
+def _draw_wrapped_text(draw, text, x, y, font, fill, max_width, line_gap=6):
+
+    """Draw text with wrapping and return the ending y position."""
+
+    text = str(text or "").strip()
+    if not text:
+        return y
+
+    paragraphs = text.splitlines() or [text]
+    cur_y = y
+    for paragraph in paragraphs:
+        words = paragraph.split()
+        if not words:
+            cur_y += _text_box(draw, "Ag", font)[1] + line_gap
+            continue
+        line = words[0]
+        for word in words[1:]:
+            trial = f"{line} {word}"
+            if _text_box(draw, trial, font)[0] <= max_width:
+                line = trial
+            else:
+                draw.text((x, cur_y), line, font=font, fill=fill)
+                cur_y += _text_box(draw, line, font)[1] + line_gap
+                line = word
+        draw.text((x, cur_y), line, font=font, fill=fill)
+        cur_y += _text_box(draw, line, font)[1] + line_gap
+    return cur_y
+
+
+def _rounded_rect(draw, box, radius, fill, outline=None, width=1):
+
+    draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
+
+
+def generate_executive_map_pdf(
+    *,
+    city,
+    state,
+    account_executive_name,
+    account_executive_email,
+    account_executive_phone,
+    active_drones,
+    station_metadata,
+    total_calls,
+    calls_covered_perc,
+    area_covered_perc,
+    area_sq_mi,
+    annual_savings,
+    avg_resp_time_min,
+):
+
+    """Render a static, clean PDF briefing focused on station placement and coverage."""
+
+    page_w, page_h = 2550, 3300
+    margin = 110
+    header_h = 250
+    footer_h = 120
+    body_top = margin + header_h
+    body_bottom = page_h - margin - footer_h
+    left_w = 1580
+    gap = 60
+    right_w = page_w - (2 * margin) - left_w - gap
+    right_x = margin + left_w + gap
+
+    bg = (246, 248, 251, 255)
+    navy = (12, 25, 44, 255)
+    navy_2 = (20, 40, 66, 255)
+    ink = (17, 24, 39, 255)
+    muted = (95, 111, 134, 255)
+    line = (214, 223, 234, 255)
+    card = (255, 255, 255, 255)
+    card_soft = (241, 245, 249, 255)
+    cyan = (0, 210, 255, 255)
+    cyan_soft = (220, 250, 255, 255)
+    gold = (245, 196, 66, 255)
+    green = (18, 169, 123, 255)
+
+    city_label = f"{str(city or 'City').strip() or 'City'}, {str(state or '').strip() or 'ST'}"
+    executive_name = str(account_executive_name or "BRINC Representative").strip() or "BRINC Representative"
+    executive_email = str(account_executive_email or "sales@brincdrones.com").strip() or "sales@brincdrones.com"
+    executive_phone = str(account_executive_phone or "").strip()
+    total_calls = int(total_calls or 0)
+    calls_covered_perc = float(calls_covered_perc or 0.0)
+    area_covered_perc = float(area_covered_perc or 0.0)
+    area_sq_mi = float(area_sq_mi or 0.0)
+    annual_savings = float(annual_savings or 0.0)
+    avg_resp_time_min = float(avg_resp_time_min or 0.0)
+
+    stations = []
+    station_metadata = list(station_metadata or [])
+    for idx, d in enumerate(active_drones or []):
+        try:
+            s_idx = int(d.get("idx", idx))
+        except Exception:
+            s_idx = idx
+        meta = station_metadata[s_idx] if 0 <= s_idx < len(station_metadata) else {}
+        d_type = str(d.get("type", "") or "").upper()
+        name = str(d.get("name", "") or meta.get("name", f"Station {idx + 1}")).strip()
+        lat = float(d.get("lat", meta.get("lat", 0.0)) or 0.0)
+        lon = float(d.get("lon", meta.get("lon", 0.0)) or 0.0)
+        radius_m = float(d.get("radius_m", 0.0) or 0.0)
+        radius_mi = radius_m / 1609.34 if radius_m > 0 else 0.0
+        raw_calls = float(meta.get("raw_calls_g" if d_type == "GUARDIAN" else "raw_calls_r", d.get("raw_zone_calls_annual", 0)) or 0.0)
+        call_pct = (raw_calls / total_calls * 100.0) if total_calls > 0 else 0.0
+        clip_geom = meta.get("clipped_guard" if d_type == "GUARDIAN" else "clipped_2m")
+        land_pct = 0.0
+        if area_sq_mi > 0 and clip_geom is not None:
+            try:
+                land_sq_mi = float(clip_geom.area) / 2589988.11
+                land_pct = land_sq_mi / area_sq_mi * 100.0
+            except Exception:
+                land_pct = 0.0
+        stations.append({
+            "rank": len(stations) + 1,
+            "name": name,
+            "type": d_type or "STATION",
+            "lat": lat,
+            "lon": lon,
+            "radius_mi": radius_mi,
+            "call_pct": round(call_pct, 1),
+            "land_pct": round(land_pct, 1),
+            "avg_time_min": float(d.get("avg_time_min", 0.0) or 0.0),
+        })
+
+    if not stations:
+        stations = [{
+            "rank": 1,
+            "name": "No stations available",
+            "type": "STATION",
+            "lat": 0.0,
+            "lon": 0.0,
+            "radius_mi": 0.0,
+            "call_pct": 0.0,
+            "land_pct": 0.0,
+            "avg_time_min": 0.0,
+        }]
+
+    stations.sort(key=lambda s: (s["call_pct"], s["land_pct"], s["name"]), reverse=True)
+    for i, s in enumerate(stations, start=1):
+        s["rank"] = i
+
+    page = Image.new("RGBA", (page_w, page_h), bg)
+    draw = ImageDraw.Draw(page)
+
+    font_title = _load_pdf_font(52, bold=True)
+    font_sub = _load_pdf_font(22, bold=False)
+    font_small = _load_pdf_font(18, bold=False)
+    font_small_bold = _load_pdf_font(18, bold=True)
+    font_metric = _load_pdf_font(30, bold=True)
+    font_metric_label = _load_pdf_font(15, bold=True)
+    font_table = _load_pdf_font(17, bold=False)
+    font_table_bold = _load_pdf_font(17, bold=True)
+    font_pin = _load_pdf_font(20, bold=True)
+    font_pin_small = _load_pdf_font(14, bold=True)
+
+    _rounded_rect(draw, (margin, margin, page_w - margin, margin + header_h), 34, card, outline=line, width=3)
+    draw.rounded_rectangle((margin, margin, page_w - margin, margin + 82), radius=34, fill=navy)
+    draw.rectangle((margin, margin + 58, page_w - margin, margin + 66), fill=cyan)
+    draw.text((margin + 36, margin + 18), "Static Deployment Map", font=font_metric_label, fill=(188, 220, 233, 255))
+    draw.text((margin + 36, margin + 88), city_label, font=font_title, fill=ink)
+    draw.text((margin + 36, margin + 156), "Station placement, call and land coverage legend, and account executive contact details.", font=font_sub, fill=muted)
+    draw.text((page_w - margin - 680, margin + 94), f"Prepared for {city_label}", font=font_metric, fill=navy)
+    draw.text((page_w - margin - 680, margin + 150), f"{len(stations)} deployed station{'s' if len(stations) != 1 else ''}", font=font_sub, fill=muted)
+
+    chip_y = body_top - 20
+    chip_h = 92
+    chip_w = (left_w - 40) // 3
+    chip_gap = 18
+    chips = [
+        ("Call coverage", f"{calls_covered_perc:.1f}%", cyan_soft, cyan),
+        ("Land coverage", f"{area_covered_perc:.1f}%", (244, 242, 216, 255), gold),
+        ("Annual savings", f"${annual_savings:,.0f}", (230, 248, 241, 255), green),
+    ]
+    for i, (label, value, fill, accent) in enumerate(chips):
+        x0 = margin + i * (chip_w + chip_gap)
+        _rounded_rect(draw, (x0, chip_y, x0 + chip_w, chip_y + chip_h), 26, fill, outline=accent, width=3)
+        draw.text((x0 + 20, chip_y + 16), label.upper(), font=font_metric_label, fill=muted)
+        draw.text((x0 + 20, chip_y + 42), value, font=font_metric, fill=ink)
+
+    map_box = (margin, body_top + 98, margin + left_w, body_bottom - 18)
+    _rounded_rect(draw, map_box, 32, card, outline=line, width=3)
+    map_x0, map_y0, map_x1, map_y1 = map_box
+    draw.text((map_x0 + 30, map_y0 + 24), f"Station placement map - {city_label}", font=font_small_bold, fill=ink)
+    draw.text((map_x0 + 30, map_y0 + 58), "Coverage rings are schematic and sized to the deployed station radius.", font=font_small, fill=muted)
+
+    legend_items = [
+        ("Responder", cyan),
+        ("Guardian", gold),
+        ("Station pin", navy_2),
+    ]
+    legend_x = map_x1 - 460
+    legend_y = map_y0 + 18
+    for i, (label, color) in enumerate(legend_items):
+        lx = legend_x + i * 150
+        draw.rounded_rectangle((lx, legend_y, lx + 130, legend_y + 34), radius=16, fill=(246, 248, 251, 255), outline=line, width=2)
+        draw.ellipse((lx + 10, legend_y + 8, lx + 26, legend_y + 24), fill=color, outline=color)
+        draw.text((lx + 36, legend_y + 7), label, font=font_pin_small, fill=ink)
+
+    inner = (map_x0 + 34, map_y0 + 108, map_x1 - 34, map_y1 - 34)
+    draw.rounded_rectangle(inner, radius=24, fill=card_soft, outline=line, width=2)
+    for frac in (0.25, 0.5, 0.75):
+        x = inner[0] + int((inner[2] - inner[0]) * frac)
+        y = inner[1] + int((inner[3] - inner[1]) * frac)
+        draw.line((x, inner[1] + 16, x, inner[3] - 16), fill=(225, 231, 239, 255), width=2)
+        draw.line((inner[0] + 16, y, inner[2] - 16, y), fill=(225, 231, 239, 255), width=2)
+
+    lats = [s["lat"] for s in stations if math.isfinite(s["lat"])]
+    lons = [s["lon"] for s in stations if math.isfinite(s["lon"])]
+    if not lats or not lons:
+        lats = [0.0]
+        lons = [0.0]
+    lat_min, lat_max = min(lats), max(lats)
+    lon_min, lon_max = min(lons), max(lons)
+    lat_span = max(lat_max - lat_min, 0.01)
+    lon_span = max(lon_max - lon_min, 0.01)
+    pad_lat = max(lat_span * 0.22, 0.02)
+    pad_lon = max(lon_span * 0.22, 0.02)
+    lat_min -= pad_lat
+    lat_max += pad_lat
+    lon_min -= pad_lon
+    lon_max += pad_lon
+    center_lat = (lat_min + lat_max) / 2.0
+    mi_per_deg_lat = 69.0
+    mi_per_deg_lon = max(1.0, 69.0 * max(math.cos(math.radians(center_lat)), 0.25))
+    px_per_mi_x = (inner[2] - inner[0] - 60) / max((lon_max - lon_min) * mi_per_deg_lon, 0.1)
+    px_per_mi_y = (inner[3] - inner[1] - 60) / max((lat_max - lat_min) * mi_per_deg_lat, 0.1)
+    px_per_mi = max(1.0, min(px_per_mi_x, px_per_mi_y))
+
+    def _map_xy(lon, lat):
+        x = inner[0] + 30 + (lon - lon_min) * mi_per_deg_lon * px_per_mi
+        y = inner[3] - 30 - (lat - lat_min) * mi_per_deg_lat * px_per_mi
+        return x, y
+
+    bbox = (inner[0] + 70, inner[1] + 70, inner[2] - 70, inner[3] - 70)
+    draw.rounded_rectangle(bbox, radius=34, outline=(183, 196, 210, 255), width=4)
+
+    type_palette = {
+        "RESPONDER": (0, 210, 255, 42),
+        "GUARDIAN": (245, 196, 66, 42),
+        "STATION": (17, 24, 39, 42),
+    }
+    type_stroke = {
+        "RESPONDER": cyan,
+        "GUARDIAN": gold,
+        "STATION": navy_2,
+    }
+    for station in stations:
+        x, y = _map_xy(station["lon"], station["lat"])
+        radius_px = max(26, int(station["radius_mi"] * px_per_mi))
+        accent = type_stroke.get(station["type"], navy_2)
+        fill = type_palette.get(station["type"], (17, 24, 39, 38))
+        draw.ellipse((x - radius_px, y - radius_px, x + radius_px, y + radius_px), outline=accent, width=5, fill=fill)
+        pin_r = 28
+        draw.ellipse((x - pin_r, y - pin_r, x + pin_r, y + pin_r), fill=card, outline=accent, width=5)
+        draw.ellipse((x - 11, y - 11, x + 11, y + 11), fill=accent, outline=accent)
+        num = str(station["rank"])
+        num_w, num_h = _text_box(draw, num, font_pin)
+        draw.text((x - num_w / 2, y - num_h / 2 - 2), num, font=font_pin, fill=card)
+        label = station["name"]
+        label = label[:28] + "..." if len(label) > 31 else label
+        label_w, label_h = _text_box(draw, label, font_small_bold)
+        lx = min(max(x + 40, bbox[0] + 8), bbox[2] - label_w - 12)
+        ly = max(min(y - 52, bbox[3] - label_h - 12), bbox[1] + 8)
+        draw.rounded_rectangle((lx - 10, ly - 6, lx + label_w + 10, ly + label_h + 8), radius=14, fill=(255, 255, 255, 230), outline=(219, 226, 235, 255), width=2)
+        draw.text((lx, ly), label, font=font_small_bold, fill=ink)
+
+    info_box = (right_x, body_top + 98, right_x + right_w, body_bottom - 18)
+    _rounded_rect(draw, info_box, 32, card, outline=line, width=3)
+    ix0, iy0, ix1, iy1 = info_box
+    draw.text((ix0 + 26, iy0 + 24), "Placement legend", font=font_small_bold, fill=ink)
+    draw.text((ix0 + 26, iy0 + 58), "Percent of calls and land covered by each deployed station.", font=font_small, fill=muted)
+
+    stat_top = iy0 + 104
+    stat_row_h = 144
+    stat_max = 8
+    display_stations = stations[:stat_max]
+    for i, station in enumerate(display_stations):
+        row_y = stat_top + i * stat_row_h
+        row_fill = card_soft if i % 2 == 0 else (248, 250, 252, 255)
+        draw.rounded_rectangle((ix0 + 20, row_y, ix1 - 20, row_y + 128), radius=20, fill=row_fill, outline=line, width=2)
+        badge = station["type"][:1] or "S"
+        badge_fill = gold if station["type"] == "GUARDIAN" else cyan if station["type"] == "RESPONDER" else navy_2
+        draw.ellipse((ix0 + 34, row_y + 32, ix0 + 82, row_y + 80), fill=badge_fill, outline=badge_fill)
+        bw, bh = _text_box(draw, badge, font_pin_small)
+        draw.text((ix0 + 58 - bw / 2, row_y + 56 - bh / 2 - 2), badge, font=font_pin_small, fill=card)
+        name = station["name"][:24] + "..." if len(station["name"]) > 27 else station["name"]
+        draw.text((ix0 + 100, row_y + 26), name, font=font_table_bold, fill=ink)
+        draw.text((ix0 + 100, row_y + 56), f"{station['lat']:.4f}, {station['lon']:.4f}", font=font_table, fill=muted)
+        call_fill = (228, 250, 255, 255)
+        land_fill = (251, 244, 215, 255)
+        draw.rounded_rectangle((ix0 + 100, row_y + 84, ix0 + 254, row_y + 112), radius=14, fill=call_fill, outline=(180, 225, 236, 255), width=2)
+        draw.rounded_rectangle((ix0 + 270, row_y + 84, ix0 + 424, row_y + 112), radius=14, fill=land_fill, outline=(230, 214, 156, 255), width=2)
+        draw.text((ix0 + 114, row_y + 88), f"Calls {station['call_pct']:.1f}%", font=font_pin_small, fill=ink)
+        draw.text((ix0 + 284, row_y + 88), f"Land {station['land_pct']:.1f}%", font=font_pin_small, fill=ink)
+
+    if len(stations) > stat_max:
+        extra = len(stations) - stat_max
+        extra_y = stat_top + stat_max * stat_row_h + 14
+        draw.rounded_rectangle((ix0 + 20, extra_y, ix1 - 20, extra_y + 66), radius=18, fill=(239, 246, 255, 255), outline=(191, 219, 254, 255), width=2)
+        draw.text((ix0 + 38, extra_y + 18), f"+ {extra} more station{'s' if extra != 1 else ''} in the fleet", font=font_small_bold, fill=navy)
+
+    contact_y = iy1 - 320
+    _rounded_rect(draw, (ix0 + 20, contact_y, ix1 - 20, iy1 - 20), 26, navy, outline=navy_2, width=3)
+    draw.text((ix0 + 42, contact_y + 26), "Account Executive", font=font_metric_label, fill=(168, 215, 232, 255))
+    draw.text((ix0 + 42, contact_y + 58), executive_name, font=font_metric, fill=card)
+    draw.text((ix0 + 42, contact_y + 120), executive_email, font=font_small_bold, fill=cyan)
+    if executive_phone:
+        draw.text((ix0 + 42, contact_y + 160), executive_phone, font=font_small_bold, fill=(230, 236, 242, 255))
+    draw.text((ix0 + 42, contact_y + 214), f"Prepared for {city_label}", font=font_small, fill=(200, 209, 219, 255))
+    draw.text((ix0 + 42, contact_y + 244), f"{avg_resp_time_min:.1f} min average response", font=font_small_bold, fill=(230, 236, 242, 255))
+
+    draw.line((margin, page_h - margin - 58, page_w - margin, page_h - margin - 58), fill=line, width=2)
+    footer_text = f"Static PDF briefing for {city_label}  ·  {total_calls:,} calls modeled  ·  {calls_covered_perc:.1f}% call coverage  ·  {area_covered_perc:.1f}% land coverage"
+    draw.text((margin, page_h - margin - 40), footer_text, font=font_small, fill=muted)
+    draw.text((page_w - margin - 380, page_h - margin - 40), "Generated from the live deployment plan", font=font_small, fill=muted)
+
+    output = io.BytesIO()
+    page.convert("RGB").save(output, format="PDF", resolution=300.0)
+    return output.getvalue()
 
 
 def format_3_lines(name_str):

@@ -5901,6 +5901,11 @@ def generate_fernandina_beach_public_service_report_html(stations, *, city="Fern
             "NOAA explains that tides and currents directly affect navigation, stranded-water risk, and coastal safety planning.",
         ),
         (
+            "Jacksonville Area Wage Benchmark",
+            "https://www.bls.gov/regions/southeast/news-release/occupationalemploymentandwages_jacksonville.htm",
+            "BLS reported a mean hourly wage of $29.86 for workers in the Jacksonville metro area in the May 2024 OEWS release, published May 2025.",
+        ),
+        (
             "FWC Sea Turtle Nesting",
             "https://myfwc.com/research/about/archive/turtle-nesting/",
             "FWC documents statewide sea turtle nesting-beach monitoring, daily survey work, and a long nesting season on Florida beaches.",
@@ -5957,11 +5962,11 @@ def generate_fernandina_beach_public_service_report_html(stations, *, city="Fern
 
     coastal_costs = [
         {
-            "label": "Seasonal patrol labor",
-            "value": "$14.60/hr",
-            "support": "BLS reports a $14.60 median hourly wage for lifeguards, ski patrol, and other recreational protective service workers (May 2023 OEWS).",
-            "source": "https://www.bls.gov/oes/2023/May/oes339092.htm",
-            "detail": "Beach-weekend, holiday, and tide-driven surges turn staffing into the largest recurring operating cost for a rescue-first beach mission.",
+            "label": "Jacksonville labor floor",
+            "value": "$29.86/hr",
+            "support": "BLS reported a mean hourly wage of $29.86 for workers in the Jacksonville metro area in the May 2024 OEWS release, published May 2025.",
+            "source": "https://www.bls.gov/regions/southeast/news-release/occupationalemploymentandwages_jacksonville.htm",
+            "detail": "This is the local labor benchmark to anchor seasonal overwatch, beach-weekend staffing, and command coverage for Fernandina Beach.",
         },
         {
             "label": "Marine ops labor",
@@ -5969,6 +5974,13 @@ def generate_fernandina_beach_public_service_report_html(stations, *, city="Fern
             "support": "BLS reports a $66,490 median annual wage for water transportation workers in May 2024; motorboat operators specifically were $51,880.",
             "source": "https://www.bls.gov/ooh/transportation-and-material-moving/water-transportation-occupations.htm",
             "detail": "A water-patrol program often has to pay for skilled marine operators, not just land-based patrol time.",
+        },
+        {
+            "label": "Multi-agency rescue deployment",
+            "value": "~$96.31/hr",
+            "support": "Illustrative direct labor floor built from Jacksonville area mean wage ($29.86/hr), EMT median wage ($41,340/yr, about $19.88/hr), water transportation workers ($66,490/yr, about $31.97/hr), and lifeguard median wage ($14.60/hr).",
+            "source": "https://www.bls.gov/regions/southeast/news-release/occupationalemploymentandwages_jacksonville.htm",
+            "detail": "That is the direct payroll floor for a coordinated beach rescue that uses lifeguard overwatch, a marine launch, medical response, and a command layer before fuel, overtime, or equipment replenishment.",
         },
         {
             "label": "Launch / engine ops",

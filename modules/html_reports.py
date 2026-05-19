@@ -2266,6 +2266,19 @@ def generate_executive_map_pdf(
 
     """Render a static, clean PDF briefing focused on station placement and coverage."""
 
+    return _generate_executive_map_pdf_map_only(
+        city=city,
+        state=state,
+        active_drones=active_drones,
+        station_metadata=station_metadata,
+        total_calls=total_calls,
+        calls_covered_perc=calls_covered_perc,
+        area_covered_perc=area_covered_perc,
+        area_sq_mi=area_sq_mi,
+        annual_savings=annual_savings,
+        avg_resp_time_min=avg_resp_time_min,
+    )
+
     page_w, page_h = 2550, 3300
     margin = 110
     header_h = 250
@@ -2528,6 +2541,196 @@ def generate_executive_map_pdf(
     footer_text = f"Static PDF briefing for {city_label}  ·  {total_calls:,} calls modeled  ·  {calls_covered_perc:.1f}% call coverage  ·  {area_covered_perc:.1f}% land coverage"
     draw.text((margin, page_h - margin - 40), footer_text, font=font_small, fill=muted)
     draw.text((page_w - margin - 380, page_h - margin - 40), "Generated from the live deployment plan", font=font_small, fill=muted)
+
+    output = io.BytesIO()
+    page.convert("RGB").save(output, format="PDF", resolution=300.0)
+    return output.getvalue()
+
+
+def _generate_executive_map_pdf_map_only(
+    *,
+    city,
+    state,
+    active_drones,
+    station_metadata,
+    total_calls,
+    calls_covered_perc,
+    area_covered_perc,
+    area_sq_mi,
+    annual_savings,
+    avg_resp_time_min,
+):
+
+    """Render a clean one-page map-only PDF with all stations framed in view."""
+
+    del total_calls, calls_covered_perc, area_covered_perc, area_sq_mi, annual_savings, avg_resp_time_min
+
+    page_w, page_h = 3300, 2550
+    margin = 90
+    header_h = 150
+    footer_h = 70
+    body_top = margin + header_h
+    body_bottom = page_h - margin - footer_h
+
+    bg = (246, 248, 251, 255)
+    navy = (12, 25, 44, 255)
+    navy_2 = (20, 40, 66, 255)
+    ink = (17, 24, 39, 255)
+    muted = (95, 111, 134, 255)
+    line = (214, 223, 234, 255)
+    card = (255, 255, 255, 255)
+    card_soft = (241, 245, 249, 255)
+    cyan = (0, 210, 255, 255)
+    gold = (245, 196, 66, 255)
+
+    city_label = f"{str(city or 'City').strip() or 'City'}, {str(state or '').strip() or 'ST'}"
+
+    stations = []
+    station_metadata = list(station_metadata or [])
+    for idx, d in enumerate(active_drones or []):
+        try:
+            s_idx = int(d.get("idx", idx))
+        except Exception:
+            s_idx = idx
+        meta = station_metadata[s_idx] if 0 <= s_idx < len(station_metadata) else {}
+        d_type = str(d.get("type", "") or "").upper()
+        name = str(d.get("name", "") or meta.get("name", f"Station {idx + 1}")).strip()
+        lat = float(d.get("lat", meta.get("lat", 0.0)) or 0.0)
+        lon = float(d.get("lon", meta.get("lon", 0.0)) or 0.0)
+        radius_m = float(d.get("radius_m", 0.0) or 0.0)
+        stations.append({
+            "rank": len(stations) + 1,
+            "name": name,
+            "type": d_type or "STATION",
+            "lat": lat,
+            "lon": lon,
+            "radius_mi": radius_m / 1609.34 if radius_m > 0 else 0.0,
+        })
+
+    if not stations:
+        stations = [{
+            "rank": 1,
+            "name": "No stations available",
+            "type": "STATION",
+            "lat": 0.0,
+            "lon": 0.0,
+            "radius_mi": 0.0,
+        }]
+
+    page = Image.new("RGBA", (page_w, page_h), bg)
+    draw = ImageDraw.Draw(page)
+
+    font_title = _load_pdf_font(50, bold=True)
+    font_sub = _load_pdf_font(21, bold=False)
+    font_small = _load_pdf_font(17, bold=False)
+    font_small_bold = _load_pdf_font(17, bold=True)
+    font_pin = _load_pdf_font(20, bold=True)
+    font_pin_small = _load_pdf_font(14, bold=True)
+
+    _rounded_rect(draw, (margin, margin, page_w - margin, page_h - margin), 34, card, outline=line, width=3)
+    draw.rounded_rectangle((margin, margin, page_w - margin, margin + 86), radius=34, fill=navy)
+    draw.rectangle((margin, margin + 58, page_w - margin, margin + 66), fill=cyan)
+    draw.text((margin + 36, margin + 18), "Executive Summary Map", font=font_small_bold, fill=(188, 220, 233, 255))
+    draw.text((margin + 36, margin + 84), city_label, font=font_title, fill=ink)
+    draw.text((margin + 36, margin + 138), "All stations are shown on one page, with extra zoom-out to keep the full fleet in frame.", font=font_sub, fill=muted)
+
+    map_box = (margin + 24, body_top, page_w - margin - 24, body_bottom)
+    map_x0, map_y0, map_x1, map_y1 = map_box
+    _rounded_rect(draw, map_box, 30, card, outline=line, width=3)
+    draw.text((map_x0 + 28, map_y0 + 18), f"Station placement map - {city_label}", font=font_small_bold, fill=ink)
+    draw.text((map_x0 + 28, map_y0 + 48), "Stations are numbered in deployment order. Type colors are shown in the legend.", font=font_small, fill=muted)
+
+    legend_items = [
+        ("Responder", cyan),
+        ("Guardian", gold),
+        ("Station", navy_2),
+    ]
+    legend_x = map_x1 - 516
+    legend_y = map_y0 + 14
+    for i, (label, color) in enumerate(legend_items):
+        lx = legend_x + i * 168
+        draw.rounded_rectangle((lx, legend_y, lx + 150, legend_y + 34), radius=16, fill=card_soft, outline=line, width=2)
+        draw.ellipse((lx + 10, legend_y + 8, lx + 26, legend_y + 24), fill=color, outline=color)
+        draw.text((lx + 36, legend_y + 7), label, font=font_pin_small, fill=ink)
+
+    inner = (map_x0 + 36, map_y0 + 88, map_x1 - 36, map_y1 - 52)
+    draw.rounded_rectangle(inner, radius=24, fill=card_soft, outline=line, width=2)
+    for frac in (0.2, 0.4, 0.6, 0.8):
+        x = inner[0] + int((inner[2] - inner[0]) * frac)
+        y = inner[1] + int((inner[3] - inner[1]) * frac)
+        draw.line((x, inner[1] + 14, x, inner[3] - 14), fill=(225, 231, 239, 255), width=2)
+        draw.line((inner[0] + 14, y, inner[2] - 14, y), fill=(225, 231, 239, 255), width=2)
+
+    lats = [s["lat"] for s in stations if math.isfinite(s["lat"])]
+    lons = [s["lon"] for s in stations if math.isfinite(s["lon"])]
+    if not lats or not lons:
+        lats = [0.0]
+        lons = [0.0]
+
+    lat_min, lat_max = min(lats), max(lats)
+    lon_min, lon_max = min(lons), max(lons)
+    lat_span = max(lat_max - lat_min, 0.001)
+    lon_span = max(lon_max - lon_min, 0.001)
+    pad_boost = 0.40 + min(0.25, len(stations) * 0.012)
+    pad_lat = max(lat_span * pad_boost, 0.03)
+    pad_lon = max(lon_span * pad_boost, 0.03)
+    lat_min -= pad_lat
+    lat_max += pad_lat
+    lon_min -= pad_lon
+    lon_max += pad_lon
+
+    center_lat = (lat_min + lat_max) / 2.0
+    mi_per_deg_lat = 69.0
+    mi_per_deg_lon = max(1.0, 69.0 * max(math.cos(math.radians(center_lat)), 0.25))
+    px_per_mi_x = (inner[2] - inner[0] - 72) / max((lon_max - lon_min) * mi_per_deg_lon, 0.1)
+    px_per_mi_y = (inner[3] - inner[1] - 72) / max((lat_max - lat_min) * mi_per_deg_lat, 0.1)
+    px_per_mi = max(1.0, min(px_per_mi_x, px_per_mi_y))
+
+    def _map_xy(lon, lat):
+        x = inner[0] + 36 + (lon - lon_min) * mi_per_deg_lon * px_per_mi
+        y = inner[3] - 36 - (lat - lat_min) * mi_per_deg_lat * px_per_mi
+        return x, y
+
+    draw.rounded_rectangle((inner[0] + 10, inner[1] + 10, inner[2] - 10, inner[3] - 10), radius=22, outline=(183, 196, 210, 255), width=3)
+
+    type_palette = {
+        "RESPONDER": (0, 210, 255, 42),
+        "GUARDIAN": (245, 196, 66, 42),
+        "STATION": (17, 24, 39, 42),
+    }
+    type_stroke = {
+        "RESPONDER": cyan,
+        "GUARDIAN": gold,
+        "STATION": navy_2,
+    }
+
+    show_labels = len(stations) <= 10
+    for station in stations:
+        x, y = _map_xy(station["lon"], station["lat"])
+        radius_px = max(24, int(round(station["radius_mi"] * px_per_mi)))
+        accent = type_stroke.get(station["type"], navy_2)
+        fill = type_palette.get(station["type"], (17, 24, 39, 38))
+        draw.ellipse((x - radius_px, y - radius_px, x + radius_px, y + radius_px), outline=accent, width=5, fill=fill)
+        pin_r = 26
+        draw.ellipse((x - pin_r, y - pin_r, x + pin_r, y + pin_r), fill=card, outline=accent, width=5)
+        draw.ellipse((x - 10, y - 10, x + 10, y + 10), fill=accent, outline=accent)
+        num = str(station["rank"])
+        num_w, num_h = _text_box(draw, num, font_pin)
+        draw.text((x - num_w / 2, y - num_h / 2 - 2), num, font=font_pin, fill=card)
+
+        if show_labels:
+            label = station["name"]
+            label = label[:28] + "..." if len(label) > 31 else label
+            label_w, label_h = _text_box(draw, label, font_small_bold)
+            lx = min(max(x + 40, inner[0] + 8), inner[2] - label_w - 12)
+            ly = max(min(y - 52, inner[3] - label_h - 12), inner[1] + 8)
+            draw.rounded_rectangle((lx - 10, ly - 6, lx + label_w + 10, ly + label_h + 8), radius=14, fill=(255, 255, 255, 230), outline=(219, 226, 235, 255), width=2)
+            draw.text((lx, ly), label, font=font_small_bold, fill=ink)
+
+    footer_text = f"{city_label}  ·  {len(stations)} station{'s' if len(stations) != 1 else ''}"
+    draw.line((margin + 28, page_h - margin - 38, page_w - margin - 28, page_h - margin - 38), fill=line, width=2)
+    draw.text((margin + 32, page_h - margin - 24), footer_text, font=font_small, fill=muted)
+    draw.text((page_w - margin - 430, page_h - margin - 24), "Map-only PDF export", font=font_small, fill=muted)
 
     output = io.BytesIO()
     page.convert("RGB").save(output, format="PDF", resolution=300.0)

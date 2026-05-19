@@ -9676,12 +9676,12 @@ body{{background:transparent;overflow:hidden}}
             ),
         )
         _pdf_export_slot.button(
-            f"📑 {prop_city}, {prop_state} — Static PDF",
+            f"📑 {prop_city}, {prop_state} — Executive Map PDF",
             disabled=True,
             width="stretch",
             key="pdf_export_wait_btn",
             help=(
-                "Deploy at least one drone to generate the static PDF."
+                "Deploy at least one drone to generate the executive map PDF."
                 if not active_drones
                 else _report_wait_note
             ),
@@ -11965,7 +11965,7 @@ body{{background:transparent;overflow:hidden}}
                 )
             except Exception as _pdf_exc:
                 _executive_pdf_bytes = None
-                print(f"[BRINC] Static PDF export failed: {_pdf_exc}")
+                print(f"[BRINC] Executive map PDF export failed: {_pdf_exc}")
         if fleet_capex > 0:
             if _export_html_ready and _html_export_slot.download_button(f"📄 {prop_city}, {prop_state} — Executive Summary",
                                                                         data=export_html,
@@ -11990,9 +11990,9 @@ body{{background:transparent;overflow:hidden}}
                     help="Executive summary data is not ready for this run.",
                 )
             if _executive_pdf_bytes:
-                if _pdf_export_slot.download_button(f"📑 {prop_city}, {prop_state} — Static PDF",
+                if _pdf_export_slot.download_button(f"📑 {prop_city}, {prop_state} — Executive Map PDF",
                                                     data=_executive_pdf_bytes,
-                                                    file_name=f"BRINC_Static_Map_{_safe_city}_{_version_slug}_{_ts}.pdf",
+                                                    file_name=f"BRINC_Executive_Map_{_safe_city}_{_version_slug}_{_ts}.pdf",
                                                     mime="application/pdf",
                                                     width="stretch"):
                     st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['PDF']
@@ -12005,11 +12005,11 @@ body{{background:transparent;overflow:hidden}}
                                    prop_name, prop_email, details=export_details)
             else:
                 _pdf_export_slot.button(
-                    f"📑 {prop_city}, {prop_state} — Static PDF",
+                    f"📑 {prop_city}, {prop_state} — Executive Map PDF",
                     disabled=True,
                     width="stretch",
                     key="pdf_export_not_ready_btn",
-                    help="Static PDF data is not ready for this run.",
+                    help="Executive map PDF data is not ready for this run.",
                 )
         else:
             _html_export_slot.button(
@@ -12020,11 +12020,11 @@ body{{background:transparent;overflow:hidden}}
                 help="Deploy at least one drone to generate the executive summary.",
             )
             _pdf_export_slot.button(
-                f"📑 {prop_city}, {prop_state} — Static PDF",
+                f"📑 {prop_city}, {prop_state} — Executive Map PDF",
                 disabled=True,
                 width="stretch",
                 key="pdf_export_no_drones_btn",
-                help="Deploy at least one drone to generate the static PDF.",
+                help="Deploy at least one drone to generate the executive map PDF.",
             )
 
         # 3. Google Earth KML — only when drones are placed

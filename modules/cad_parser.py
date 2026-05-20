@@ -1232,6 +1232,7 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                 index=raw_df.index
             )
             _pq['input_rows'] = len(raw_df)
+            _handled_direct_coords = False
 
             if 'lat' in raw_df.columns and 'lon' in raw_df.columns:
                 _direct_lat = pd.to_numeric(raw_df['lat'], errors='coerce')
@@ -1297,7 +1298,7 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                         if inferred_state:
                             res['_csv_state'] = inferred_state
                         res['priority'] = 3
-                        res['_source_row_id'] = source_ids.reindex(raw_df.index).values
+                        res['_source_row_id'] = source_ids.reindex(res.index).values
                         res['_source_file'] = cfile.name
                         try:
                             _meta = _extract_file_meta(raw_df, res, filename=cfile.name)
@@ -1315,7 +1316,11 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                         _pq['has_priority_col'] = True
                         _file_parse_quality.append(_pq)
                         all_calls_list.append(res.reset_index(drop=True))
+                        _handled_direct_coords = True
                         continue
+
+            if _handled_direct_coords:
+                continue
 
             if '_special_layout' in raw_df.columns and raw_df['_special_layout'].astype(str).isin({'jacksonville_cfs', 'jacksonville_cfs_report'}).any():
                 res = raw_df.copy().reset_index(drop=True)

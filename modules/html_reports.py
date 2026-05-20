@@ -6,7 +6,7 @@ import pandas as pd
 
 import numpy as np
 
-import json, re, io, math, datetime, base64
+import json, re, io, math, datetime, base64, html as html_lib
 from pathlib import Path
 
 import simplekml
@@ -2545,6 +2545,475 @@ def generate_executive_map_pdf(
     output = io.BytesIO()
     page.convert("RGB").save(output, format="PDF", resolution=300.0)
     return output.getvalue()
+
+
+def generate_executive_summary_pdf(
+    *,
+    city,
+    state,
+    calls_covered_perc,
+    area_covered_perc,
+    annual_savings,
+    actual_k_responder,
+    actual_k_guardian,
+    guard_radius_mi,
+    resp_radius_mi,
+    guard_strategy_raw,
+    resp_strategy_raw,
+    guard_calls_perc,
+    guard_area_perc,
+    resp_calls_perc,
+    resp_area_perc,
+    map_html_str,
+):
+
+    """Render a one-page landscape PDF focused on sections 02 and 03."""
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as exc:
+        raise RuntimeError("Playwright is required for the executive summary PDF export.") from exc
+
+    city_name = str(city or "City").strip() or "City"
+    state_name = str(state or "ST").strip() or "ST"
+    city_label = f"{city_name}, {state_name}"
+    responder_count = int(actual_k_responder or 0)
+    guardian_count = int(actual_k_guardian or 0)
+    total_units = responder_count + guardian_count
+    calls_covered_perc = float(calls_covered_perc or 0.0)
+    area_covered_perc = float(area_covered_perc or 0.0)
+    annual_savings = float(annual_savings or 0.0)
+    guard_radius_mi = float(guard_radius_mi or 0.0)
+    resp_radius_mi = float(resp_radius_mi or 0.0)
+    guard_calls_perc = float(guard_calls_perc or 0.0)
+    guard_area_perc = float(guard_area_perc or 0.0)
+    resp_calls_perc = float(resp_calls_perc or 0.0)
+    resp_area_perc = float(resp_area_perc or 0.0)
+    guard_strategy_raw = str(guard_strategy_raw or "Coverage").strip() or "Coverage"
+    resp_strategy_raw = str(resp_strategy_raw or "Coverage").strip() or "Coverage"
+    guardian_cost = int(CONFIG.get("GUARDIAN_COST", 0) or 0)
+    responder_cost = int(CONFIG.get("RESPONDER_COST", 0) or 0)
+
+    map_html_str = str(map_html_str or "").strip()
+    if not map_html_str:
+        map_html_str = (
+            "<div style='height:100%;display:flex;align-items:center;justify-content:center;"
+            "color:#64748b;font-size:14px;background:#f8fafc;border:1px solid #d9e2ec;"
+            "border-radius:16px;'>Map unavailable for this export.</div>"
+        )
+
+    html_doc = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Executive Summary PDF - {html_lib.escape(city_label)}</title>
+  <style>
+    :root {{
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --border: #d9e2ec;
+      --text: #0f172a;
+      --muted: #5f6f82;
+      --cyan: #00d2ff;
+      --gold: #ffd54a;
+      --green: #16a34a;
+    }}
+    * {{
+      box-sizing: border-box;
+    }}
+    html, body {{
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", Arial, sans-serif;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+      overflow: hidden;
+    }}
+    @page {{
+      size: letter landscape;
+      margin: 0.22in;
+    }}
+    .page {{
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }}
+    .header {{
+      background: linear-gradient(135deg, #081a2d 0%, #0d2744 100%);
+      color: #fff;
+      border-radius: 18px;
+      padding: 16px 18px 14px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: end;
+      box-shadow: 0 12px 30px rgba(8, 26, 45, 0.16);
+    }}
+    .eyebrow {{
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--cyan);
+      font-weight: 700;
+      margin-bottom: 6px;
+    }}
+    .header h1 {{
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+    }}
+    .header p {{
+      margin: 7px 0 0;
+      color: rgba(255, 255, 255, 0.76);
+      font-size: 11.5px;
+      line-height: 1.45;
+      max-width: 60ch;
+    }}
+    .chip-row {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+      align-items: stretch;
+    }}
+    .chip {{
+      min-width: 110px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }}
+    .chip .k {{
+      font-size: 9px;
+      letter-spacing: 1.3px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.68);
+      margin-bottom: 4px;
+    }}
+    .chip .v {{
+      font-size: 16px;
+      font-weight: 800;
+      line-height: 1;
+      color: #fff;
+      white-space: nowrap;
+    }}
+    .chip.gold .v {{ color: var(--gold); }}
+    .chip.cyan .v {{ color: var(--cyan); }}
+    .chip.green .v {{ color: #8ef0b0; }}
+    .main {{
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 0.95fr 1.15fr;
+      gap: 12px;
+    }}
+    .panel {{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 14px 14px 12px;
+      box-shadow: 0 6px 20px rgba(15, 23, 42, 0.05);
+      overflow: hidden;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }}
+    .section-eyebrow {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }}
+    .pg-num {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(0, 210, 255, 0.28);
+      color: var(--cyan);
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      font-weight: 800;
+      background: rgba(0, 210, 255, 0.05);
+      flex-shrink: 0;
+    }}
+    .pg-title {{
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 700;
+    }}
+    .section-note {{
+      margin: 0 0 12px;
+      font-size: 11.5px;
+      color: var(--muted);
+      line-height: 1.45;
+    }}
+    .fleet-split {{
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      flex: 1;
+      min-height: 0;
+    }}
+    .fleet-card {{
+      border-radius: 16px;
+      padding: 14px;
+      position: relative;
+      overflow: hidden;
+      min-height: 0;
+    }}
+    .fleet-card.guardian {{
+      background: linear-gradient(180deg, #07111f 0%, #04070d 100%);
+      color: #fff;
+      border: 1px solid rgba(255, 213, 74, 0.14);
+    }}
+    .fleet-card.responder {{
+      background: linear-gradient(180deg, #00131d 0%, #030c13 100%);
+      color: #fff;
+      border: 1px solid rgba(0, 210, 255, 0.14);
+    }}
+    .fc-top {{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }}
+    .fc-icon {{
+      width: 34px;
+      height: 34px;
+      border-radius: 11px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      flex: 0 0 auto;
+    }}
+    .fc-type {{
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      opacity: 0.8;
+      margin-bottom: 2px;
+      font-weight: 800;
+    }}
+    .fc-val {{
+      font-size: 22px;
+      line-height: 1;
+      font-weight: 900;
+      letter-spacing: -0.03em;
+    }}
+    .fc-sub {{
+      margin-top: 6px;
+      font-size: 11.5px;
+      color: rgba(255, 255, 255, 0.72);
+      line-height: 1.4;
+    }}
+    .fc-grid {{
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }}
+    .fc-row {{
+      padding: 8px 9px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }}
+    .fc-row .k {{
+      font-size: 9px;
+      letter-spacing: 1.1px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.6);
+      margin-bottom: 3px;
+      font-weight: 700;
+    }}
+    .fc-row .v {{
+      font-size: 15px;
+      font-weight: 800;
+      line-height: 1.05;
+      color: #fff;
+    }}
+    .fleet-card.guardian .fc-val,
+    .fleet-card.guardian .fc-row .v {{
+      color: var(--gold);
+    }}
+    .fleet-card.responder .fc-val,
+    .fleet-card.responder .fc-row .v {{
+      color: var(--cyan);
+    }}
+    .map-panel {{
+      background: linear-gradient(180deg, #fff 0%, #fbfdff 100%);
+    }}
+    .map-shell {{
+      background: #0b1320;
+      border-radius: 16px;
+      padding: 10px;
+      min-height: 0;
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }}
+    .map-shell .plotly, .map-shell .js-plotly-plot {{
+      height: 100% !important;
+      width: 100% !important;
+    }}
+    .map-shell .plot-container, .map-shell .svg-container {{
+      height: 100% !important;
+      width: 100% !important;
+    }}
+    .map-shell .modebar {{
+      display: none !important;
+    }}
+    .map-scale {{
+      width: 108%;
+      height: 100%;
+      transform: scale(0.93);
+      transform-origin: top left;
+    }}
+    .map-note {{
+      margin-top: 9px;
+      font-size: 10.5px;
+      line-height: 1.45;
+      color: var(--muted);
+    }}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div>
+        <div class="eyebrow">Executive Summary PDF</div>
+        <h1>{html_lib.escape(city_label)}</h1>
+        <p>Sections 02 and 03 condensed into a single landscape page for a clean static briefing.</p>
+      </div>
+      <div class="chip-row">
+        <div class="chip cyan">
+          <div class="k">Call coverage</div>
+          <div class="v">{calls_covered_perc:.1f}%</div>
+        </div>
+        <div class="chip gold">
+          <div class="k">Area coverage</div>
+          <div class="v">{area_covered_perc:.1f}%</div>
+        </div>
+        <div class="chip green">
+          <div class="k">Annual savings</div>
+          <div class="v">${annual_savings:,.0f}</div>
+        </div>
+        <div class="chip">
+          <div class="k">Fleet size</div>
+          <div class="v">{total_units} units</div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="panel">
+        <div class="section-eyebrow">
+          <span class="pg-num">02</span>
+          <span class="pg-title">Fleet &amp; Coverage</span>
+        </div>
+        <p class="section-note">Two-fleet architecture, operational radius, and the modeled coverage split for the active deployment.</p>
+        <div class="fleet-split">
+          <div class="fleet-card guardian">
+            <div class="fc-top">
+              <div class="fc-icon">🦅</div>
+              <div>
+                <div class="fc-type">BRINC Guardian</div>
+                <div class="fc-val">{guardian_count} Unit{'' if guardian_count == 1 else 's'}</div>
+              </div>
+            </div>
+            <div class="fc-sub">{guard_radius_mi:g}-mile operational radius · {html_lib.escape(guard_strategy_raw)}</div>
+            <div class="fc-grid">
+              <div class="fc-row">
+                <div class="k">Unit CapEx</div>
+                <div class="v">${guardian_cost:,}</div>
+              </div>
+              <div class="fc-row">
+                <div class="k">Call Coverage</div>
+                <div class="v">{guard_calls_perc:.1f}%</div>
+              </div>
+              <div class="fc-row">
+                <div class="k">Area Coverage</div>
+                <div class="v">{guard_area_perc:.1f}%</div>
+              </div>
+            </div>
+          </div>
+          <div class="fleet-card responder">
+            <div class="fc-top">
+              <div class="fc-icon">🚁</div>
+              <div>
+                <div class="fc-type">BRINC Responder</div>
+                <div class="fc-val">{responder_count} Unit{'' if responder_count == 1 else 's'}</div>
+              </div>
+            </div>
+            <div class="fc-sub">{resp_radius_mi:g}-mile operational radius · {html_lib.escape(resp_strategy_raw)}</div>
+            <div class="fc-grid">
+              <div class="fc-row">
+                <div class="k">Unit CapEx</div>
+                <div class="v">${responder_cost:,}</div>
+              </div>
+              <div class="fc-row">
+                <div class="k">Call Coverage</div>
+                <div class="v">{resp_calls_perc:.1f}%</div>
+              </div>
+              <div class="fc-row">
+                <div class="k">Area Coverage</div>
+                <div class="v">{resp_area_perc:.1f}%</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel map-panel">
+        <div class="section-eyebrow">
+          <span class="pg-num">03</span>
+          <span class="pg-title">Coverage Map</span>
+        </div>
+        <p class="section-note">Static export of the modelled coverage map. The layout is scaled to stay on one landscape page.</p>
+        <div class="map-shell">
+          <div class="map-scale">{map_html_str}</div>
+        </div>
+        <div class="map-note">Coverage rings are operational estimates. Map content is rendered statically for PDF export.</div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
+"""
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_page(
+                viewport={"width": 1600, "height": 900},
+                device_scale_factor=1,
+            )
+            page.set_content(html_doc, wait_until="networkidle")
+            page.wait_for_timeout(1200)
+            return page.pdf(
+                format="Letter",
+                landscape=True,
+                print_background=True,
+                prefer_css_page_size=True,
+                margin={"top": "0.22in", "right": "0.22in", "bottom": "0.22in", "left": "0.22in"},
+            )
+        finally:
+            browser.close()
 
 
 def _generate_executive_map_pdf_map_only(

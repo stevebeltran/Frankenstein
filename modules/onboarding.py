@@ -718,7 +718,11 @@ def resolve_uploaded_boundaries(
             'name': display_name,
             'state': file_state or str(session_state.get('active_state', '') or '').strip().upper(),
             'kind': boundary_kind,
-            'gdf': coord_gdf[['DISPLAY_NAME', 'geometry']].copy(),
+            # Preserve call counts so the sidebar can show the true jurisdiction
+            # share instead of falling back to equal weights.
+            'gdf': coord_gdf[['DISPLAY_NAME', 'data_count', 'geometry']].copy()
+            if 'data_count' in coord_gdf.columns
+            else coord_gdf[['DISPLAY_NAME', 'geometry']].copy(),
             'hits': int(top.get('data_count', 0) or 0),
         }
 

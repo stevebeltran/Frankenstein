@@ -6,7 +6,7 @@ import pandas as pd
 
 import numpy as np
 
-import json, re, io, math, datetime, base64, html as html_lib
+import os, json, re, io, math, datetime, base64, html as html_lib
 from pathlib import Path
 
 import simplekml
@@ -2602,6 +2602,24 @@ def generate_executive_summary_pdf(
             "border-radius:16px;'>Map unavailable for this export.</div>"
         )
 
+    def _resolve_playwright_chromium_executable():
+        env_path = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", "").strip()
+        if env_path and Path(env_path).is_file():
+            return env_path
+        local_appdata = os.environ.get("LOCALAPPDATA", "").strip()
+        if local_appdata:
+            base = Path(local_appdata) / "ms-playwright"
+            if base.exists():
+                preferred = []
+                for name in ("chromium-1208", "chromium_headless_shell-1208"):
+                    preferred.extend(sorted((base / name).rglob("chrome.exe")))
+                preferred.extend(sorted(base.rglob("chrome.exe")))
+                preferred.extend(sorted(base.rglob("chromium.exe")))
+                for candidate in preferred:
+                    if candidate.is_file():
+                        return str(candidate)
+        return None
+
     def _build_fallback_pdf_bytes():
         page_w, page_h = 1650, 1275  # letter landscape at 150 DPI
         bg = (245, 247, 251)
@@ -2728,11 +2746,11 @@ def generate_executive_summary_pdf(
         rr((780, 372, 968, 560), 30, (18, 36, 56), outline=cyan, width=2)
         rr((1070, 360, 1340, 620), 36, (21, 18, 5), outline=gold, width=2)
         rr((920, 700, 1230, 930), 34, (5, 32, 22), outline=green, width=2)
-        draw.text((840, 430), "Map render fallback", font=font_card, fill=(255, 255, 255))
-        draw.text((816, 470), "Playwright was unavailable on this host.", font=font_small, fill=(195, 206, 219))
-        draw.text((1100, 470), "Static PDF output preserved.", font=font_small, fill=(255, 244, 196))
-        draw.text((996, 800), "The live map is replaced by an elegant fallback so the download remains available.", font=font_small, fill=(210, 219, 230))
-        draw.text((736, 1140), "Coverage rings are operational estimates. Fallback mode guarantees a downloadable PDF.", font=font_small, fill=muted)
+        draw.text((840, 430), "Coverage summary", font=font_card, fill=(255, 255, 255))
+        draw.text((816, 470), "Static PDF output preserved.", font=font_small, fill=(195, 206, 219))
+        draw.text((1100, 470), "Executive summary format maintained.", font=font_small, fill=(255, 244, 196))
+        draw.text((996, 800), "A static layout is used when Chromium cannot be launched on the host.", font=font_small, fill=(210, 219, 230))
+        draw.text((736, 1140), "Coverage rings are operational estimates. This static version still downloads cleanly.", font=font_small, fill=muted)
 
         output = io.BytesIO()
         page.save(output, format="PDF", resolution=150.0)
@@ -3137,7 +3155,11 @@ def generate_executive_summary_pdf(
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            launch_kwargs = {"headless": True}
+            executable_path = _resolve_playwright_chromium_executable()
+            if executable_path:
+                launch_kwargs["executable_path"] = executable_path
+            browser = p.chromium.launch(**launch_kwargs)
             try:
                 page = browser.new_page(
                     viewport={"width": 1600, "height": 900},
@@ -3154,7 +3176,8 @@ def generate_executive_summary_pdf(
                 )
             finally:
                 browser.close()
-    except Exception:
+    except Exception as exc:
+        print(f"[BRINC] Executive summary PDF render fallback engaged: {exc}")
         return _build_fallback_pdf_bytes()
 
 

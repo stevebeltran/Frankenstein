@@ -2571,8 +2571,8 @@ def generate_executive_summary_pdf(
 
     try:
         from playwright.sync_api import sync_playwright
-    except Exception as exc:
-        raise RuntimeError("Playwright is required for the executive summary PDF export.") from exc
+    except Exception:
+        sync_playwright = None
 
     city_name = str(city or "City").strip() or "City"
     state_name = str(state or "ST").strip() or "ST"
@@ -2601,6 +2601,145 @@ def generate_executive_summary_pdf(
             "color:#64748b;font-size:14px;background:#f8fafc;border:1px solid #d9e2ec;"
             "border-radius:16px;'>Map unavailable for this export.</div>"
         )
+
+    def _build_fallback_pdf_bytes():
+        page_w, page_h = 1650, 1275  # letter landscape at 150 DPI
+        bg = (245, 247, 251)
+        panel = (255, 255, 255)
+        border = (217, 226, 236)
+        text = (15, 23, 42)
+        muted = (95, 111, 130)
+        cyan = (0, 210, 255)
+        gold = (255, 213, 74)
+        green = (22, 163, 74)
+        navy = (8, 26, 45)
+        navy_2 = (13, 39, 68)
+
+        page = Image.new("RGB", (page_w, page_h), bg)
+        draw = ImageDraw.Draw(page)
+
+        try:
+            font_title = _load_pdf_font(30, bold=True)
+            font_sub = _load_pdf_font(14, bold=False)
+            font_small = _load_pdf_font(12, bold=False)
+            font_small_bold = _load_pdf_font(12, bold=True)
+            font_chip = _load_pdf_font(15, bold=True)
+            font_card = _load_pdf_font(17, bold=True)
+            font_card_small = _load_pdf_font(11, bold=False)
+        except Exception:
+            font_title = ImageFont.load_default()
+            font_sub = ImageFont.load_default()
+            font_small = ImageFont.load_default()
+            font_small_bold = ImageFont.load_default()
+            font_chip = ImageFont.load_default()
+            font_card = ImageFont.load_default()
+            font_card_small = ImageFont.load_default()
+
+        def rr(box, radius, fill, outline=None, width=1):
+            draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
+
+        def text_box(draw_obj, value, font_obj):
+            bbox = draw_obj.textbbox((0, 0), str(value), font=font_obj)
+            return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+        def wrap(draw_obj, value, font_obj, max_width):
+            words = str(value).split()
+            if not words:
+                return [""]
+            lines = []
+            line = words[0]
+            for word in words[1:]:
+                trial = f"{line} {word}"
+                if text_box(draw_obj, trial, font_obj)[0] <= max_width:
+                    line = trial
+                else:
+                    lines.append(line)
+                    line = word
+            lines.append(line)
+            return lines
+
+        # Header
+        rr((36, 34, page_w - 36, 174), 28, navy, outline=navy_2, width=2)
+        draw.text((64, 58), "Executive Summary PDF", font=font_small_bold, fill=cyan)
+        draw.text((64, 86), city_label, font=font_title, fill=(255, 255, 255))
+        draw.text((64, 132), "Sections 02 and 03 condensed into a single landscape page.", font=font_sub, fill=(208, 216, 227))
+
+        chips = [
+            ("Call coverage", f"{calls_covered_perc:.1f}%", cyan),
+            ("Area coverage", f"{area_covered_perc:.1f}%", gold),
+            ("Annual savings", f"${annual_savings:,.0f}", green),
+            ("Fleet size", f"{total_units} units", (255, 255, 255)),
+        ]
+        chip_x = 1010
+        for i, (label, value, accent) in enumerate(chips):
+            x0 = chip_x + (i % 2) * 295
+            y0 = 44 + (i // 2) * 60
+            rr((x0, y0, x0 + 275, y0 + 48), 14, (255, 255, 255, 24) if accent != (255, 255, 255) else (255, 255, 255), outline=(255, 255, 255, 28), width=1)
+            draw.text((x0 + 12, y0 + 8), label.upper(), font=font_small, fill=(200, 208, 218))
+            draw.text((x0 + 12, y0 + 24), value, font=font_chip, fill=accent if accent != (255, 255, 255) else (255, 255, 255))
+
+        # Left panel
+        left = (36, 202, 690, 1239)
+        rr(left, 22, panel, outline=border, width=2)
+        draw.text((60, 226), "02  Fleet & Coverage", font=font_small_bold, fill=cyan)
+        draw.text((60, 250), "Two-fleet architecture, operational radius, and the modeled coverage split for the active deployment.", font=font_small, fill=muted)
+
+        guardian_box = (60, 300, 666, 616)
+        responder_box = (60, 644, 666, 960)
+        rr(guardian_box, 20, (7, 17, 31), outline=(255, 213, 74), width=2)
+        rr(responder_box, 20, (0, 19, 29), outline=cyan, width=2)
+
+        def draw_fleet_card(box, emoji, name, unit_count, radius, strategy, capex, call_pct, area_pct, accent, header_fill):
+            x0, y0, x1, y1 = box
+            draw.rounded_rectangle((x0 + 16, y0 + 16, x0 + 58, y0 + 58), radius=12, fill=(255, 255, 255, 18), outline=(255, 255, 255, 30), width=1)
+            draw.text((x0 + 24, y0 + 22), emoji, font=font_card, fill=(255, 255, 255))
+            draw.text((x0 + 78, y0 + 20), name, font=font_small_bold, fill=header_fill)
+            draw.text((x0 + 78, y0 + 42), f"{unit_count} Unit{'s' if unit_count != 1 else ''}", font=font_card, fill=accent)
+            sub = f"{radius:g}-mile operational radius · {strategy}"
+            draw.text((x0 + 20, y0 + 90), sub, font=font_card_small, fill=(210, 219, 230))
+
+            stat_y = y0 + 150
+            stat_boxes = [
+                ("Unit CapEx", f"${capex:,}"),
+                ("Call Coverage", f"{call_pct:.1f}%"),
+                ("Area Coverage", f"{area_pct:.1f}%"),
+            ]
+            for idx, (k, v) in enumerate(stat_boxes):
+                sx0 = x0 + 18 + idx * 190
+                rr((sx0, stat_y, sx0 + 170, stat_y + 122), 16, (255, 255, 255, 12), outline=(255, 255, 255, 18), width=1)
+                draw.text((sx0 + 12, stat_y + 14), k.upper(), font=font_small, fill=(180, 190, 202))
+                draw.text((sx0 + 12, stat_y + 52), v, font=font_card, fill=accent)
+
+        draw_fleet_card(guardian_box, "🦅", "BRINC Guardian", guardian_count, guard_radius_mi, guard_strategy_raw, guardian_cost, guard_calls_perc, guard_area_perc, gold, (255, 244, 196))
+        draw_fleet_card(responder_box, "🚁", "BRINC Responder", responder_count, resp_radius_mi, resp_strategy_raw, responder_cost, resp_calls_perc, resp_area_perc, cyan, (214, 248, 255))
+
+        # Right panel
+        right = (712, 202, 1614, 1239)
+        rr(right, 22, panel, outline=border, width=2)
+        draw.text((736, 226), "03  Coverage Map", font=font_small_bold, fill=cyan)
+        draw.text((736, 250), "Static export of the modelled coverage map. The layout is scaled to stay on one landscape page.", font=font_small, fill=muted)
+        map_box = (736, 298, 1570, 1120)
+        rr(map_box, 22, (11, 19, 32), outline=(28, 44, 63), width=2)
+        for frac in (0.25, 0.5, 0.75):
+            x = map_box[0] + int((map_box[2] - map_box[0]) * frac)
+            y = map_box[1] + int((map_box[3] - map_box[1]) * frac)
+            draw.line((x, map_box[1] + 20, x, map_box[3] - 20), fill=(30, 45, 64), width=2)
+            draw.line((map_box[0] + 20, y, map_box[2] - 20, y), fill=(30, 45, 64), width=2)
+        rr((780, 372, 968, 560), 30, (18, 36, 56), outline=cyan, width=2)
+        rr((1070, 360, 1340, 620), 36, (21, 18, 5), outline=gold, width=2)
+        rr((920, 700, 1230, 930), 34, (5, 32, 22), outline=green, width=2)
+        draw.text((840, 430), "Map render fallback", font=font_card, fill=(255, 255, 255))
+        draw.text((816, 470), "Playwright was unavailable on this host.", font=font_small, fill=(195, 206, 219))
+        draw.text((1100, 470), "Static PDF output preserved.", font=font_small, fill=(255, 244, 196))
+        draw.text((996, 800), "The live map is replaced by an elegant fallback so the download remains available.", font=font_small, fill=(210, 219, 230))
+        draw.text((736, 1140), "Coverage rings are operational estimates. Fallback mode guarantees a downloadable PDF.", font=font_small, fill=muted)
+
+        output = io.BytesIO()
+        page.save(output, format="PDF", resolution=150.0)
+        return output.getvalue()
+
+    if sync_playwright is None:
+        return _build_fallback_pdf_bytes()
 
     html_doc = f"""<!DOCTYPE html>
 <html lang="en">
@@ -2996,24 +3135,27 @@ def generate_executive_summary_pdf(
 </html>
 """
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        try:
-            page = browser.new_page(
-                viewport={"width": 1600, "height": 900},
-                device_scale_factor=1,
-            )
-            page.set_content(html_doc, wait_until="load")
-            page.wait_for_timeout(1800)
-            return page.pdf(
-                format="Letter",
-                landscape=True,
-                print_background=True,
-                prefer_css_page_size=True,
-                margin={"top": "0.22in", "right": "0.22in", "bottom": "0.22in", "left": "0.22in"},
-            )
-        finally:
-            browser.close()
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page(
+                    viewport={"width": 1600, "height": 900},
+                    device_scale_factor=1,
+                )
+                page.set_content(html_doc, wait_until="load")
+                page.wait_for_timeout(1800)
+                return page.pdf(
+                    format="Letter",
+                    landscape=True,
+                    print_background=True,
+                    prefer_css_page_size=True,
+                    margin={"top": "0.22in", "right": "0.22in", "bottom": "0.22in", "left": "0.22in"},
+                )
+            finally:
+                browser.close()
+    except Exception:
+        return _build_fallback_pdf_bytes()
 
 
 def _generate_executive_map_pdf_map_only(

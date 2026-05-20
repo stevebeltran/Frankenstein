@@ -3003,8 +3003,8 @@ def generate_executive_summary_pdf(
                 viewport={"width": 1600, "height": 900},
                 device_scale_factor=1,
             )
-            page.set_content(html_doc, wait_until="networkidle")
-            page.wait_for_timeout(1200)
+            page.set_content(html_doc, wait_until="load")
+            page.wait_for_timeout(1800)
             return page.pdf(
                 format="Letter",
                 landscape=True,

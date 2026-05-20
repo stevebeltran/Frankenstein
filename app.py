@@ -10202,7 +10202,7 @@ body{{background:transparent;overflow:hidden}}
                         font=dict(color=legend_text, size=11)
                     )
                 )
-                map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='cdn', default_height='500px', default_width='100%')
+                map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='inline', default_height='500px', default_width='100%')
                 _visible_export_rows = [d for d in active_drones if not _is_call_density_station(d)]
                 station_rows = "".join(
                     f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>"
@@ -11946,7 +11946,7 @@ body{{background:transparent;overflow:hidden}}
         # 2. Executive Summary / proposal HTML export
         _export_html_ready = isinstance(export_html, str) and export_html.lstrip().lower().startswith("<!doctype html")
         _executive_pdf_bytes = None
-        if fleet_capex > 0 and active_drones:
+        if fleet_capex > 0:
             try:
                 _executive_pdf_bytes = html_reports.generate_executive_summary_pdf(
                     city=prop_city,

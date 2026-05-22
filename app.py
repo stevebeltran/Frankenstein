@@ -9241,8 +9241,18 @@ body{{background:transparent;overflow:hidden}}
             _fallback_qr_url = f"{_qr_base}/?view=mobile&{_qr_params}"
             _tracked_report_id = str(st.session_state.get("public_report_id", "")).strip()
             _stored_public_url = str(st.session_state.get("public_report_url", "")).strip()
-            _tracked_qr_url = _build_public_report_url(_tracked_report_id) if _tracked_report_id else ""
-            _qr_url = _tracked_qr_url or _stored_public_url or _fallback_qr_url
+            _public_report_url_error = str(st.session_state.get("public_report_url_error", "") or "").strip()
+            _tracked_qr_url = ""
+            if _tracked_report_id:
+                try:
+                    _tracked_qr_url = _build_public_report_url(_tracked_report_id)
+                except ValueError as _qr_link_err:
+                    _public_report_url_error = str(_qr_link_err).strip() or _public_report_url_error
+            _qr_url = _tracked_qr_url or _stored_public_url
+            if not _qr_url and not _public_report_url_error:
+                _qr_url = _fallback_qr_url
+            if not _qr_url and _public_report_url_error:
+                raise ValueError(_public_report_url_error)
 
             # ── QR code image — high readability with BRINC logo overlay ──────────
             # Use highest error correction (H) for better phone scanning reliability
@@ -9710,6 +9720,8 @@ body{{background:transparent;overflow:hidden}}
                 '</div>'
             )
             st.markdown(_qr_banner, unsafe_allow_html=True)
+        except ValueError as _qr_err:
+            st.warning(f"📱 QR code unavailable: {_qr_err}")
         except Exception as _qr_err:
             st.caption(f"📱 QR code unavailable — install `qrcode` package. ({_qr_err})")
 

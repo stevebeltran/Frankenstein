@@ -32,6 +32,7 @@ DEFAULTS = {
     "session_id": str(uuid.uuid4())[:8],
     "public_report_id": "",
     "public_report_url": "",
+    "public_report_url_error": "",
     "data_source": "unknown",
     "map_build_logged": False,
     "boundary_kind": "place",
@@ -87,7 +88,12 @@ def init_session_state(session_state, slugify, build_public_report_url) -> None:
         public_token = uuid.uuid4().hex[:16]
         session_state["public_report_id"] = f"{city_slug}-{public_token}"
 
-    _built_public_report_url = build_public_report_url(session_state["public_report_id"])
+    _built_public_report_url = ""
+    _build_error = ""
+    try:
+        _built_public_report_url = build_public_report_url(session_state["public_report_id"])
+    except ValueError as exc:
+        _build_error = str(exc)
     _current_public_report_url = str(session_state.get("public_report_url", "") or "").strip()
     _needs_update = not _current_public_report_url
     if not _needs_update:
@@ -102,6 +108,7 @@ def init_session_state(session_state, slugify, build_public_report_url) -> None:
             _needs_update = _built_public_report_url != _current_public_report_url
     if _needs_update:
         session_state["public_report_url"] = _built_public_report_url
+    session_state["public_report_url_error"] = _build_error
 
     if "target_cities" not in session_state:
         session_state["target_cities"] = [

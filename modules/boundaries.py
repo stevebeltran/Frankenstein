@@ -142,14 +142,43 @@ def fetch_county_boundary_local(state_abbr, county_name_input):
 
     return False, None
 
+def _match_local_boundary_rows(gdf, state_fips, search_name):
+    state_rows = gdf[gdf["STATEFP"].astype(str) == str(state_fips)].copy()
+    if state_rows.empty:
+        return None
+
+    state_rows['_norm_name'] = state_rows['NAME'].astype(str).apply(normalize_jurisdiction_name)
+    if 'NAMELSAD' in state_rows.columns:
+        state_rows['_norm_lsad'] = state_rows['NAMELSAD'].astype(str).apply(normalize_jurisdiction_name)
+    else:
+        state_rows['_norm_lsad'] = state_rows['_norm_name']
+
+    match = state_rows[(state_rows['_norm_name'] == search_name) | (state_rows['_norm_lsad'] == search_name)]
+    if match.empty:
+        match = state_rows[
+            state_rows['_norm_name'].str.startswith(search_name) |
+            state_rows['_norm_lsad'].str.startswith(search_name)
+        ]
+        if not match.empty:
+            match = match.copy()
+            match['_diff'] = match['NAME'].astype(str).str.len() - len(search_name)
+            match = match.sort_values('_diff').head(1)
+
+    if match.empty:
+        return None
+
+    result = match.copy()
+    name_col = "NAMELSAD" if "NAMELSAD" in result.columns else "NAME"
+    result["NAME"] = result[name_col].astype(str)
+    return result[["NAME", "geometry"]]
+
 @st.cache_data
 def fetch_place_boundary_local(state_abbr, place_name_input):
-    """Look up a city/town/CDP boundary from the local places_lite.parquet.
-    Returns (True, GeoDataFrame) on success, (False, None) if not found or
-    the file doesn't exist yet (falls back to county lookup in caller)."""
-    local_file = "places_lite.parquet"
-    if not os.path.exists(local_file):
-        return False, None   # file not yet added — caller falls back to county
+    """Look up a city/town/CDP boundary from local parquet caches.
+    Connecticut towns fall back to county-subdivision data when needed."""
+    local_files = ["places_lite.parquet"]
+    if str(state_abbr or '').strip().upper() == "CT":
+        local_files.append("county_subdivisions_lite.parquet")
 
     state_fips = STATE_FIPS.get(state_abbr)
     if not state_fips: return False, None
@@ -157,38 +186,13 @@ def fetch_place_boundary_local(state_abbr, place_name_input):
     search_name = normalize_jurisdiction_name(place_name_input)
 
     try:
-        gdf = gpd.read_parquet(local_file)
-        state_rows = gdf[gdf["STATEFP"] == state_fips]
-
-        state_rows = state_rows.copy()
-        state_rows['_norm_name'] = state_rows['NAME'].astype(str).apply(normalize_jurisdiction_name)
-        if 'NAMELSAD' in state_rows.columns:
-            state_rows['_norm_lsad'] = state_rows['NAMELSAD'].astype(str).apply(normalize_jurisdiction_name)
-        else:
-            state_rows['_norm_lsad'] = state_rows['_norm_name']
-
-        # Exact normalized match first
-        match = state_rows[(state_rows['_norm_name'] == search_name) | (state_rows['_norm_lsad'] == search_name)]
-
-        # Partial normalized match fallback (e.g. Fort Worth / Fort Worth city)
-        if match.empty:
-            match = state_rows[
-                state_rows['_norm_name'].str.startswith(search_name) |
-                state_rows['_norm_lsad'].str.startswith(search_name)
-            ]
-            if not match.empty:
-                match = match.copy()
-                match['_diff'] = match['NAME'].astype(str).str.len() - len(search_name)
-                match = match.sort_values('_diff').head(1)
-
-        if match.empty:
-            return False, None
-
-        result = match.copy()
-        # Use NAMELSAD for display if available (e.g. "Rockford city"), else NAME
-        name_col = "NAMELSAD" if "NAMELSAD" in result.columns else "NAME"
-        result["NAME"] = result[name_col].astype(str)
-        return True, result[["NAME", "geometry"]]
+        for local_file in local_files:
+            if not os.path.exists(local_file):
+                continue
+            gdf = gpd.read_parquet(local_file)
+            match = _match_local_boundary_rows(gdf, state_fips, search_name)
+            if match is not None and not match.empty:
+                return True, match
 
     except Exception:
         return False, None

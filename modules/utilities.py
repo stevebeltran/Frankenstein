@@ -142,6 +142,13 @@ def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, se
     if df.empty:
         return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
+    # Keep visible point clouds bounded on very large uploads. The full
+    # dataframe still flows into analytics and exports; this only limits the
+    # rendered map layer.
+    effective_max_points = min(int(max_points or 0), 25000) if len(df) > 25000 else int(max_points or 0)
+    if effective_max_points <= 0:
+        effective_max_points = 25000
+
     gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon, df.lat), crs="EPSG:4326")
     try:
         gdf_m = gdf.to_crs(epsg=int(epsg_code))
@@ -155,14 +162,14 @@ def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, se
     if calls_in_city.empty:
         return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
-    if len(calls_in_city) <= max_points:
+    if len(calls_in_city) <= effective_max_points:
         return calls_in_city.to_crs(epsg=4326)
 
     sampled = calls_in_city.copy()
     minx, miny, maxx, maxy = sampled.total_bounds
     span_x = max(maxx - minx, 1.0)
     span_y = max(maxy - miny, 1.0)
-    target_cells = max(25, int(np.sqrt(max_points) * 0.7))
+    target_cells = max(25, int(np.sqrt(effective_max_points) * 0.7))
     nx = max(25, min(120, target_cells))
     ny = max(25, min(120, int(target_cells * (span_y / span_x))))
 
@@ -171,10 +178,10 @@ def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, se
     sampled['_cell'] = sampled['_gx'].astype(str) + '_' + sampled['_gy'].astype(str)
 
     counts = sampled['_cell'].value_counts()
-    alloc = np.maximum(1, np.floor(counts / counts.sum() * max_points).astype(int))
-    shortfall = int(max_points - alloc.sum())
+    alloc = np.maximum(1, np.floor(counts / counts.sum() * effective_max_points).astype(int))
+    shortfall = int(effective_max_points - alloc.sum())
     if shortfall > 0:
-        remainders = (counts / counts.sum() * max_points) - np.floor(counts / counts.sum() * max_points)
+        remainders = (counts / counts.sum() * effective_max_points) - np.floor(counts / counts.sum() * effective_max_points)
         for cell in remainders.sort_values(ascending=False).index[:shortfall]:
             alloc.loc[cell] += 1
 
@@ -187,11 +194,11 @@ def build_display_calls(df_calls_full, _city_m, epsg_code, max_points=300000, se
             parts.append(group.sample(take, random_state=seed))
 
     if not parts:
-        display_calls = sampled.sample(max_points, random_state=seed)
+        display_calls = sampled.sample(effective_max_points, random_state=seed)
     else:
         display_calls = pd.concat(parts, ignore_index=False)
-        if len(display_calls) > max_points:
-            display_calls = display_calls.sample(max_points, random_state=seed)
+        if len(display_calls) > effective_max_points:
+            display_calls = display_calls.sample(effective_max_points, random_state=seed)
 
     display_calls = display_calls.drop(columns=['_gx', '_gy', '_cell'], errors='ignore')
     return display_calls.to_crs(epsg=4326)

@@ -2434,6 +2434,24 @@ def _lookup_known_population(place_name):
     return None
 
 
+def _get_census_api_key():
+    try:
+        for key_name in ("CENSUS_API_KEY", "CENSUS_KEY"):
+            secret_value = st.secrets.get(key_name) if hasattr(st, "secrets") else None
+            if secret_value:
+                secret_text = str(secret_value or "").strip()
+                if secret_text:
+                    return secret_text
+    except Exception:
+        pass
+
+    for key_name in ("CENSUS_API_KEY", "CENSUS_KEY"):
+        env_value = str(os.getenv(key_name, "") or "").strip()
+        if env_value:
+            return env_value
+    return ""
+
+
 def _lookup_population_for_boundary(state_abbr, city_name, boundary_kind='place'):
     state_fips = STATE_FIPS.get(str(state_abbr or '').strip().upper(), '')
     if not state_fips:
@@ -2492,10 +2510,16 @@ def _refresh_reference_population(session_state, selected_names=None):
 
 @st.cache_data
 def fetch_census_population(state_fips, place_name, is_county=False):
+    params = {"get": "P1_001N,NAME"}
     if is_county:
-        url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=county:*&in=state:{state_fips}"
+        params["for"] = "county:*"
     else:
-        url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=place:*&in=state:{state_fips}"
+        params["for"] = "place:*"
+    params["in"] = f"state:{state_fips}"
+    census_api_key = _get_census_api_key()
+    if census_api_key:
+        params["key"] = census_api_key
+    url = f"https://api.census.gov/data/2020/dec/pl?{urllib.parse.urlencode(params)}"
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=15) as response:
@@ -2529,7 +2553,11 @@ def fetch_census_population(state_fips, place_name, is_county=False):
 
 @st.cache_data
 def fetch_census_state_population(state_fips):
-    url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=state:{state_fips}"
+    params = {"get": "P1_001N,NAME", "for": f"state:{state_fips}"}
+    census_api_key = _get_census_api_key()
+    if census_api_key:
+        params["key"] = census_api_key
+    url = f"https://api.census.gov/data/2020/dec/pl?{urllib.parse.urlencode(params)}"
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=10) as response:

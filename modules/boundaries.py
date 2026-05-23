@@ -196,6 +196,7 @@ def fetch_place_boundary_local(state_abbr, place_name_input):
 
     except Exception:
         return False, None
+    return False, None
 
 @st.cache_data
 def reverse_geocode_state(lat, lon):

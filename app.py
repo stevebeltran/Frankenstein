@@ -330,6 +330,8 @@ def _reset_census_state(session_state):
 def _render_public_report_route():
     _params = _get_query_params_dict()
     _report_id = str(_params.get("public_report", "")).strip()
+    if not _report_id:
+        _report_id = str(_params.get("report_id", "")).strip()
     _sig = str(_params.get("sig", "")).strip()
     if not _report_id:
         return False

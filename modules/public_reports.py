@@ -143,7 +143,11 @@ def _build_public_report_url(report_id):
     except Exception:
         _public_webapp_url = ""
     if _public_webapp_url:
-        _query = urllib.parse.urlencode({"public_report": report_id, "sig": _sig})
+        _query = urllib.parse.urlencode({
+            "report_id": report_id,
+            "public_report": report_id,
+            "sig": _sig,
+        })
         _sep = "&" if "?" in _public_webapp_url else "?"
         return f"{_public_webapp_url}{_sep}{_query}"
     _base_url = _get_request_base_url()
@@ -152,7 +156,7 @@ def _build_public_report_url(report_id):
             "Public report URL would point to a local or private host. "
             "Set PUBLIC_REPORT_WEBAPP_URL to a public deployment URL."
         )
-    return f"{_base_url}/?public_report={report_id}&sig={_sig}"
+    return f"{_base_url}/?report_id={report_id}&public_report={report_id}&sig={_sig}"
 
 
 def _public_report_html_path(report_id):

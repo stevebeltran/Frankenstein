@@ -2033,7 +2033,17 @@ def _search_public_facility_candidates_cached(query_str, facility_type, limit=6,
     preferred_state = str(preferred_state or '').strip().upper()
     queries = _public_facility_query_variants(query_str, facility_key, preferred_city, preferred_state)
     if not queries:
-        return []
+        return [], {
+            'input': query_str,
+            'facility_type': facility_key,
+            'preferred_city': preferred_city,
+            'preferred_state': preferred_state,
+            'queries': [],
+            'providers': [],
+            'candidate_count': 0,
+            'top_candidate': '',
+            'public_facility_lookup': True,
+        }
 
     candidates = []
     seen = set()
@@ -2181,16 +2191,22 @@ def forward_geocode(address_str):
 
 
 @st.cache_data(show_spinner=False)
-def forward_geocode_with_context(address_str, preferred_city='', preferred_state=''):
+def _forward_geocode_with_context_cached(address_str, preferred_city='', preferred_state=''):
     _matches = search_address_candidates(
         address_str,
         limit=1,
-        preferred_city=preferred_city or st.session_state.get('active_city', ''),
-        preferred_state=preferred_state or st.session_state.get('active_state', ''),
+        preferred_city=preferred_city or '',
+        preferred_state=preferred_state or '',
     )
     if _matches:
         return float(_matches[0]['lat']), float(_matches[0]['lon'])
     return None, None
+
+
+def forward_geocode_with_context(address_str, preferred_city='', preferred_state=''):
+    preferred_city = preferred_city or st.session_state.get('active_city', '')
+    preferred_state = preferred_state or st.session_state.get('active_state', '')
+    return _forward_geocode_with_context_cached(address_str, preferred_city, preferred_state)
 
 @st.cache_data(show_spinner=False)
 def lookup_zip_code(zip_code: str):
@@ -2376,6 +2392,7 @@ def fetch_place_boundary_local(state_abbr, place_name_input):
 
     except Exception:
         return False, None
+    return False, None
 
 @st.cache_data
 def reverse_geocode_state(lat, lon):

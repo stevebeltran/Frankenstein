@@ -931,6 +931,11 @@ def manage_custom_stations(
     k_responder = st.sidebar.slider('🚁 Responder Count', 0, max(1, max_resp_calc), value=val_r, help='Short-range tactical drones (2-3mi radius).')
     k_guardian = st.sidebar.slider('🦅 Guardian Count', 0, max(1, max_guard_calc), value=val_g, help='Long-range overwatch drones (5-8mi radius).')
     _set_fleet_counts(resp_value=k_responder or 0, guard_value=k_guardian or 0)
+    if k_guardian == 0 and session_state.get('show_station_suggestions_b', True):
+        session_state['show_station_suggestions_b'] = False
+        session_state['show_suggestion_markers'] = False
+        session_state['_suggest_markers_toggle'] = False
+        st.rerun()
 
     station_names = df_stations_all['name'].tolist() if not df_stations_all.empty else []
 

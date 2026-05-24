@@ -12182,30 +12182,41 @@ body{{background:transparent;overflow:hidden}}
         _export_html_ready = isinstance(export_html, str) and export_html.lstrip().lower().startswith("<!doctype html")
         _executive_pdf_bytes = None
         if fleet_capex > 0:
-            try:
-                _executive_pdf_bytes = html_reports.generate_executive_summary_pdf(
-                    city=prop_city,
-                    state=prop_state,
-                    calls_covered_perc=float(calls_covered_perc or 0),
-                    area_covered_perc=float(area_covered_perc or 0),
-                    annual_savings=float(annual_savings or 0),
-                    actual_k_responder=int(actual_k_responder or 0),
-                    actual_k_guardian=int(actual_k_guardian or 0),
-                    guard_radius_mi=float(guard_radius_mi or 0),
-                    resp_radius_mi=float(resp_radius_mi or 0),
-                    guard_strategy_raw=guard_strategy_raw,
-                    resp_strategy_raw=resp_strategy_raw,
-                    guard_calls_perc=float(guard_calls_perc or 0),
-                    guard_area_perc=float(guard_area_perc or 0),
-                    resp_calls_perc=float(resp_calls_perc or 0),
-                    resp_area_perc=float(resp_area_perc or 0),
-                    prepared_by_name=prop_name,
-                    prepared_date=datetime.datetime.now(),
-                    map_png_bytes=map_png_bytes,
-                )
-            except Exception as _pdf_exc:
-                _executive_pdf_bytes = None
-                print(f"[BRINC] Executive summary PDF export failed: {_pdf_exc}")
+            # Try full multi-page PDF via Chromium first, fall back to single-page PIL
+            if _export_html_ready:
+                try:
+                    _executive_pdf_bytes = html_reports.render_executive_html_to_pdf(
+                        export_html,
+                        map_png_bytes=map_png_bytes,
+                    )
+                except Exception as _pdf_full_exc:
+                    _executive_pdf_bytes = None
+                    print(f"[BRINC] Full HTML-to-PDF render failed, trying fallback: {_pdf_full_exc}")
+            if _executive_pdf_bytes is None:
+                try:
+                    _executive_pdf_bytes = html_reports.generate_executive_summary_pdf(
+                        city=prop_city,
+                        state=prop_state,
+                        calls_covered_perc=float(calls_covered_perc or 0),
+                        area_covered_perc=float(area_covered_perc or 0),
+                        annual_savings=float(annual_savings or 0),
+                        actual_k_responder=int(actual_k_responder or 0),
+                        actual_k_guardian=int(actual_k_guardian or 0),
+                        guard_radius_mi=float(guard_radius_mi or 0),
+                        resp_radius_mi=float(resp_radius_mi or 0),
+                        guard_strategy_raw=guard_strategy_raw,
+                        resp_strategy_raw=resp_strategy_raw,
+                        guard_calls_perc=float(guard_calls_perc or 0),
+                        guard_area_perc=float(guard_area_perc or 0),
+                        resp_calls_perc=float(resp_calls_perc or 0),
+                        resp_area_perc=float(resp_area_perc or 0),
+                        prepared_by_name=prop_name,
+                        prepared_date=datetime.datetime.now(),
+                        map_png_bytes=map_png_bytes,
+                    )
+                except Exception as _pdf_exc:
+                    _executive_pdf_bytes = None
+                    print(f"[BRINC] Executive summary PDF fallback also failed: {_pdf_exc}")
         if fleet_capex > 0:
             if _export_html_ready and _html_export_slot.download_button(f"📄 {prop_city}, {prop_state} — Executive Summary",
                                                                         data=export_html,

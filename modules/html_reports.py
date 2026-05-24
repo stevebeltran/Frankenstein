@@ -2547,6 +2547,255 @@ def generate_executive_map_pdf(
     return output.getvalue()
 
 
+# ── Full multi-page HTML → PDF via Playwright ────────────────────────────────
+
+# CSS injected before </style> to override layout for landscape PDF rendering.
+# This does NOT touch the on-screen or browser-print styles — it only applies
+# when Playwright renders via page.pdf() (which triggers @media print).
+_PDF_LANDSCAPE_CSS = """
+/* ── PDF-ONLY OVERRIDES (injected by render_executive_html_to_pdf) ──── */
+@page {
+  size: 11in 8.5in;           /* landscape US Letter */
+  margin: 0.35in 0.45in;
+}
+@media print {
+  /* ── Hide interactive-only elements ─────────────────────────────── */
+  .doc-sidebar { display: none !important; }
+  .copy-section-btn { display: none !important; }
+
+  /* ── Reset layout for full-width landscape ──────────────────────── */
+  .doc-main { margin-left: 0 !important; }
+  html, body {
+    background: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Section spacing tuned for landscape pages ──────────────────── */
+  .doc-section {
+    padding: 36px 48px !important;
+    page-break-after: always;
+    page-break-inside: avoid;
+    break-after: page;
+    border-bottom: none;
+    min-height: 0;
+    box-shadow: none !important;
+  }
+  .doc-section:last-child { page-break-after: auto; break-after: auto; }
+
+  /* ── Cover page — fill landscape, keep dark background ──────────── */
+  .cover-page {
+    padding: 40px 52px !important;
+    min-height: auto !important;
+    page-break-after: always;
+    break-after: page;
+  }
+  .cover-headline h1 { font-size: 44px !important; }
+  .cover-body { gap: 32px !important; }
+  .cover-right { width: 340px !important; }
+
+  /* ── Metrics grid — wider cells in landscape ────────────────────── */
+  .metrics-hero {
+    grid-template-columns: repeat(4, 1fr) !important;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+  .metric-cell .m-value { font-size: 24px !important; }
+
+  /* ── Fleet cards — let them breathe in landscape ────────────────── */
+  .fleet-split {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 20px !important;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+
+  /* ── Tables — full width, avoid breaks ──────────────────────────── */
+  table {
+    width: 100% !important;
+    table-layout: fixed;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+
+  /* ── Map — respect aspect ratio, avoid break ────────────────────── */
+  .map-wrap {
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+  .map-wrap img {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  /* ── Keep headers with their content ────────────────────────────── */
+  .section-eyebrow, .cover-headline, .sh,
+  h1, h2, h3, h4 {
+    break-after: avoid-page;
+    page-break-after: avoid;
+  }
+
+  /* ── Grant layout — stack in landscape for cleaner flow ──────────── */
+  .grant-layout {
+    grid-template-columns: 1fr 260px !important;
+    break-inside: avoid-page;
+  }
+
+  /* ── Infrastructure grid ────────────────────────────────────────── */
+  .infra-grid {
+    grid-template-columns: 1fr 1fr !important;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+
+  /* ── ROI strip ──────────────────────────────────────────────────── */
+  .roi-strip {
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+
+  /* ── Images / SVG / canvas ──────────────────────────────────────── */
+  img, svg, canvas {
+    max-width: 100% !important;
+    height: auto !important;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+
+  /* ── Footer ─────────────────────────────────────────────────────── */
+  .doc-footer {
+    padding: 20px 48px !important;
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  /* ── Links — clean for print ────────────────────────────────────── */
+  a { color: inherit !important; text-decoration: none !important; }
+
+  /* ── Eliminate scrollable containers ─────────────────────────────── */
+  * { overflow: visible !important; }
+
+  /* ── Version line ───────────────────────────────────────────────── */
+  .doc-version {
+    margin-top: 18px; padding-top: 10px;
+    border-top: 1px solid #e5e7eb;
+    color: #6b7280 !important;
+  }
+
+  /* ── Crime box — keep together ──────────────────────────────────── */
+  .crime-box {
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+
+  /* ── Disclaimer ─────────────────────────────────────────────────── */
+  .disc {
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+
+  /* ── Cover meta grid — slightly smaller for landscape ───────────── */
+  .cover-meta {
+    grid-template-columns: repeat(4, 1fr) !important;
+    break-inside: avoid;
+  }
+  .cover-meta-cell .value { font-size: 12px !important; }
+}
+"""
+
+
+def render_executive_html_to_pdf(
+    export_html: str,
+    map_png_bytes: bytes = None,
+):
+    """Convert the full executive-summary HTML into a multi-page landscape PDF.
+
+    Uses Playwright (Chromium) for pixel-perfect rendering with full control
+    over landscape orientation, margins, and background colours.
+
+    Strategy:
+      1. Replace the interactive Plotly map ``<div>`` with a static PNG so the
+         PDF doesn't need JavaScript.
+      2. Inject landscape-optimised ``@page`` / ``@media print`` CSS overrides.
+      3. Render via Playwright ``page.pdf()`` with ``landscape=True`` and
+         ``print_background=True`` so all dark backgrounds / gradients survive.
+      4. Return PDF bytes, or *None* on failure (caller falls back to PIL).
+    """
+
+    if not export_html or not isinstance(export_html, str):
+        return None
+
+    # ── 1. Swap interactive Plotly map for static PNG ─────────────────────
+    html = export_html
+    if map_png_bytes:
+        map_b64 = base64.b64encode(map_png_bytes).decode("ascii")
+        static_map_tag = (
+            f'<img src="data:image/png;base64,{map_b64}" '
+            f'style="width:100%;height:auto;border-radius:8px;display:block;" '
+            f'alt="Coverage Map">'
+        )
+        html = re.sub(
+            r'(<div class="map-wrap">).*?(</div>\s*</section>)',
+            rf'\1{static_map_tag}\2',
+            html,
+            count=1,
+            flags=re.DOTALL,
+        )
+
+    # ── 2. Inject landscape PDF CSS just before closing </style> ─────────
+    html = html.replace("</style>", _PDF_LANDSCAPE_CSS + "\n</style>", 1)
+
+    # ── 3. Render with Playwright ────────────────────────────────────────
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("[BRINC] render_executive_html_to_pdf: playwright not installed")
+        return None
+
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                ],
+            )
+            page = browser.new_page(
+                viewport={"width": 1400, "height": 900},
+            )
+            page.set_content(html, wait_until="networkidle")
+            # Small extra wait for Google Fonts to finish loading
+            page.wait_for_timeout(2000)
+
+            pdf_bytes = page.pdf(
+                landscape=True,
+                format="Letter",
+                margin={
+                    "top": "0.35in",
+                    "bottom": "0.35in",
+                    "left": "0.45in",
+                    "right": "0.45in",
+                },
+                print_background=True,
+                prefer_css_page_size=True,
+            )
+            browser.close()
+
+        if not pdf_bytes or len(pdf_bytes) < 1024:
+            print("[BRINC] Playwright PDF render produced empty output")
+            return None
+
+        return pdf_bytes
+
+    except Exception as exc:
+        print(f"[BRINC] Playwright PDF render error: {exc}")
+        return None
+
+
 def generate_executive_summary_pdf(
     *,
     city,

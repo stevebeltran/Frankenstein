@@ -452,10 +452,11 @@ def render_display_options(st):
         )
 
         section_header('🛠️ Deployment Tools')
+        if 'show_station_suggestions_ui' not in st.session_state:
+            st.session_state['show_station_suggestions_ui'] = bool(st.session_state.get('show_station_suggestions_b', True))
         show_station_suggestions = st.toggle(
             'Suggested Station Placements',
-            value=True,
-            key='show_station_suggestions_b',
+            key='show_station_suggestions_ui',
             help='Show or hide the suggested station placement workflow and its map markers.',
         )
         if 'show_rapid_response_ring_b' not in st.session_state:

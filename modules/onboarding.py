@@ -333,6 +333,102 @@ def _normalize_station_columns(station_df):
     return station_df
 
 
+_STATION_COORD_ALIASES = {
+    'lat': [
+        'latitude', 'lat', 'gps_lat', 'gps_latitude', 'y', 'y coord', 'ycoord', 'ycoor',
+        'map_y', 'point_y', 'coord_y', 'northing', 'lat_wgs', 'y_coordinate', 'addressy',
+    ],
+    'lon': [
+        'longitude', 'lon', 'long', 'gps_lon', 'gps_long', 'gps_longitude', 'x',
+        'x coord', 'xcoord', 'xcoor', 'map_x', 'point_x', 'coord_x', 'easting',
+        'lon_wgs', 'x_coordinate', 'addressx',
+    ],
+}
+
+
+def _coord_column_matches(col_name, patterns):
+    norm = str(col_name or '').strip().lower()
+    normalized = norm.replace('-', ' ').replace('_', ' ')
+    compact = re.sub(r'[^a-z0-9]+', '', norm)
+    for pattern in patterns:
+        p_norm = str(pattern).strip().lower()
+        p_normalized = p_norm.replace('-', ' ').replace('_', ' ')
+        p_compact = re.sub(r'[^a-z0-9]+', '', p_norm)
+        if len(p_compact) <= 1:
+            if p_norm == norm or p_normalized == normalized:
+                return True
+            continue
+        if p_norm in norm or p_normalized in normalized or (p_compact and p_compact in compact):
+            return True
+    return False
+
+
+def _find_station_coord_column(station_df, field):
+    exact_aliases = {
+        'lat': {'lat', 'latitude', 'gps_lat', 'gps_latitude', 'y'},
+        'lon': {'lon', 'long', 'longitude', 'gps_lon', 'gps_long', 'gps_longitude', 'x'},
+    }.get(field, set())
+    if field not in _STATION_COORD_ALIASES:
+        return None
+    for column in station_df.columns:
+        col_text = str(column).strip().lower()
+        if col_text in exact_aliases or _coord_column_matches(column, _STATION_COORD_ALIASES[field]):
+            return column
+    return None
+
+
+def _extract_station_lat_lon(station_df):
+    if station_df is None or station_df.empty:
+        return station_df, None, None
+
+    work = station_df.copy()
+    lat_col = _find_station_coord_column(work, 'lat')
+    lon_col = _find_station_coord_column(work, 'lon')
+
+    if lat_col and lon_col:
+        work['lat'] = pd.to_numeric(work[lat_col], errors='coerce')
+        work['lon'] = pd.to_numeric(work[lon_col], errors='coerce')
+        return work, lat_col, lon_col
+
+    numeric_candidates = []
+    for column in work.columns:
+        series = pd.to_numeric(work[column], errors='coerce')
+        valid_count = int(series.notna().sum())
+        if valid_count >= max(2, min(10, len(work))):
+            numeric_candidates.append((column, series, valid_count))
+
+    if len(numeric_candidates) < 2:
+        return work, lat_col, lon_col
+
+    lat_candidates = []
+    lon_candidates = []
+    for column, series, valid_count in numeric_candidates:
+        mn = float(series.min())
+        mx = float(series.max())
+        if -90 <= mn and mx <= 90:
+            lat_candidates.append((column, series, valid_count))
+        if -180 <= mn and mx <= 180:
+            lon_candidates.append((column, series, valid_count))
+
+    def _score(column, hints):
+        name = str(column).strip().lower()
+        return sum(1 for hint in hints if hint in name)
+
+    if lat_candidates:
+        lat_candidates.sort(key=lambda item: (item[2], _score(item[0], ['lat', 'y', 'north'])), reverse=True)
+        lat_col = lat_candidates[0][0]
+        work['lat'] = pd.to_numeric(work[lat_col], errors='coerce')
+
+    if lon_candidates:
+        lon_candidates = [item for item in lon_candidates if item[0] != lat_col]
+        if lon_candidates:
+            lon_candidates.sort(key=lambda item: (item[2], _score(item[0], ['lon', 'long', 'x', 'east'])), reverse=True)
+            lon_col = lon_candidates[0][0]
+            work['lon'] = pd.to_numeric(work[lon_col], errors='coerce')
+
+    return work, lat_col, lon_col
+
+
 def _extract_single_column_station_addresses(station_df):
     if station_df is None or station_df.empty or len(station_df.columns) != 1:
         return station_df, None
@@ -445,6 +541,7 @@ def load_station_file(station_file):
     stations_df = _read_station_upload(station_file)
     stations_df = _normalize_station_columns(stations_df)
     stations_df, single_col_note = _extract_single_column_station_addresses(stations_df)
+    stations_df, lat_col, lon_col = _extract_station_lat_lon(stations_df)
 
     if 'lat' not in stations_df.columns or 'lon' not in stations_df.columns:
         if single_col_note:
@@ -848,8 +945,7 @@ def load_simulation_custom_stations(sim_uploader, active_targets, forward_geocod
     station_df = _read_station_upload(sim_uploader)
     station_df = _normalize_station_columns(station_df)
     station_df, _single_col_note = _extract_single_column_station_addresses(station_df)
-    lat_col = next((c for c in station_df.columns if c in ['lat', 'latitude', 'y']), None)
-    lon_col = next((c for c in station_df.columns if c in ['lon', 'long', 'longitude', 'x']), None)
+    station_df, lat_col, lon_col = _extract_station_lat_lon(station_df)
     addr_col = next((c for c in station_df.columns if any(a in c for a in ['address', 'street', 'location'])), None)
     name_col = next((c for c in station_df.columns if any(n in c for n in ['name', 'station', 'facility', 'dept'])), None)
     type_col = next((c for c in station_df.columns if any(t in c for t in ['type', 'category'])), None)
@@ -881,8 +977,8 @@ def load_simulation_custom_stations(sim_uploader, active_targets, forward_geocod
         city_hint = active_targets[0]['city'] if active_targets else ''
         state_hint = active_targets[0]['state'] if active_targets else ''
 
-        if lat_col and lon_col and pd.notna(row[lat_col]) and pd.notna(row[lon_col]):
-            station_lat, station_lon = float(row[lat_col]), float(row[lon_col])
+        if lat_col and lon_col and pd.notna(row.get('lat')) and pd.notna(row.get('lon')):
+            station_lat, station_lon = float(row['lat']), float(row['lon'])
         elif addr_col and pd.notna(row[addr_col]):
             if search_public_facility_candidates and station_type in public_facility_types:
                 public_matches = search_public_facility_candidates(

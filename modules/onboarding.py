@@ -953,9 +953,19 @@ def resolve_demo_stations(
             notices.extend([f"Could not geocode: {addr_str}" for addr_str in ungeocoded_addresses])
             if custom_station_df is not None and not custom_station_df.empty:
                 return custom_station_df, True, notices, warnings
-            warnings.append("Could not geocode or parse your custom stations. Falling back to generated stations.")
+            warnings.append(
+                "Uploaded stations file did not yield any usable station rows. "
+                "When a stations file is present, Path 01 uses only that file and does not "
+                "generate replacement stations."
+            )
+            return pd.DataFrame(), True, notices, warnings
         except Exception as exc:
-            warnings.append(f"Error reading custom stations: {exc}. Falling back to generated stations.")
+            warnings.append(
+                f"Error reading custom stations: {exc}. "
+                "When a stations file is present, Path 01 uses only that file and does not "
+                "generate replacement stations."
+            )
+            return pd.DataFrame(), True, notices, warnings
 
     try:
         stations_df, osm_note = generate_stations_from_calls(df_calls)

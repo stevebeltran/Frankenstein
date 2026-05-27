@@ -2192,8 +2192,8 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
                     f"<div style='color:{text_main}; font-weight:600; margin:2px 0; word-wrap:break-word; white-space:normal;'>"
                     f"{display_text}</div>"
                     f"<div style='color:{text_muted}; font-size:0.62rem;'>"
-                    f"?? {display_metrics['call_count']:,} calls ? "
-                    f"{display_metrics['call_pct']}% of city calls ? ??? {display_metrics['land_pct']}% land</div>"
+                    f"Calls {display_metrics['call_count']:,} · "
+                    f"City {display_metrics['call_pct']}% · Land {display_metrics['land_pct']}%</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -2336,8 +2336,8 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                     f"<div style='color:{text_main}; font-weight:600; margin:2px 0; word-wrap:break-word; white-space:normal;'>"
                     f"{display_text}</div>"
                     f"<div style='color:{text_muted}; font-size:0.62rem;'>"
-                    f"?? {display_metrics['call_count']:,} calls ? "
-                    f"{display_metrics['call_pct']}% of city calls ? ??? {display_metrics['land_pct']}% land</div>"
+                    f"Calls {display_metrics['call_count']:,} · "
+                    f"City {display_metrics['call_pct']}% · Land {display_metrics['land_pct']}%</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )

@@ -1997,6 +1997,17 @@ def _ranked_suggestion_modes(suggestions, k_guardian=0, k_responder=0):
     return modes
 
 
+def _suggestion_widget_version(session_state):
+    try:
+        return max(0, int(session_state.get('_suggestion_widget_version', 0) or 0))
+    except Exception:
+        return 0
+
+
+def _suggestion_widget_key(session_state, idx):
+    return f"suggest_mode_{_suggestion_widget_version(session_state)}_{idx}"
+
+
 def sync_station_suggestion_modes(session_state, suggestions, k_guardian=None, k_responder=None):
     """Keep suggestion mode state aligned with either cards or slider counts."""
     if not suggestions:
@@ -2011,14 +2022,12 @@ def sync_station_suggestion_modes(session_state, suggestions, k_guardian=None, k
         normalized_existing[idx] = mode if mode in valid_modes else 'Off'
 
     widget_changed = False
-    if not session_state.get('_suggestion_seed_widget_keys'):
-        for s in suggestions:
-            idx = s['station_idx']
-            widget_key = f"suggest_mode_{idx}"
-            widget_mode = session_state.get(widget_key)
-            if widget_mode in valid_modes and widget_mode != normalized_existing.get(idx, 'Off'):
-                normalized_existing[idx] = widget_mode
-                widget_changed = True
+    for s in suggestions:
+        idx = s['station_idx']
+        widget_mode = session_state.get(_suggestion_widget_key(session_state, idx))
+        if widget_mode in valid_modes and widget_mode != normalized_existing.get(idx, 'Off'):
+            normalized_existing[idx] = widget_mode
+            widget_changed = True
 
     if widget_changed:
         synced_modes = normalized_existing
@@ -2046,7 +2055,7 @@ def sync_station_suggestion_modes(session_state, suggestions, k_guardian=None, k
                 k_responder=requested_resp,
             )
             session_state['_suggestion_sync_source'] = 'slider'
-            session_state['_suggestion_seed_widget_keys'] = True
+            session_state['_suggestion_widget_version'] = _suggestion_widget_version(session_state) + 1
             session_state['_suggestion_manual_modes'] = {}
         else:
             synced_modes = normalized_existing
@@ -2166,9 +2175,7 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
             border_col = mode_color if mode != 'Off' else card_border
             bg = card_bg if mode != 'Off' else 'rgba(30,30,40,0.4)'
             opacity = '1.0' if mode != 'Off' else '0.55'
-            widget_key = f"suggest_mode_{idx}"
-            if session_state.get('_suggestion_seed_widget_keys') and session_state.get(widget_key) != mode:
-                session_state[widget_key] = mode
+            widget_key = _suggestion_widget_key(session_state, idx)
 
             # Use address if available, otherwise fall back to name
             display_text = s.get('address', '') or s['name']
@@ -2221,7 +2228,6 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
 
     session_state['suggestion_modes'] = modes
     session_state['suggestion_toggles'] = {idx: (mode != 'Off') for idx, mode in modes.items()}
-    session_state['_suggestion_seed_widget_keys'] = False
     return changed
 
 def render_station_suggestions_grid(st, session_state, suggestions, text_main, text_muted,
@@ -2316,9 +2322,7 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                 border_col = mode_color if mode != 'Off' else card_border
                 bg = card_bg if mode != 'Off' else 'rgba(30,30,40,0.4)'
                 opacity = '1.0' if mode != 'Off' else '0.55'
-                widget_key = f"suggest_mode_{idx}"
-                if session_state.get('_suggestion_seed_widget_keys') and session_state.get(widget_key) != mode:
-                    session_state[widget_key] = mode
+                widget_key = _suggestion_widget_key(session_state, idx)
                 display_text = s.get('address', '') or s['name']
 
                 st.markdown(
@@ -2367,5 +2371,4 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
 
     session_state['suggestion_modes'] = modes
     session_state['suggestion_toggles'] = {idx: (mode != 'Off') for idx, mode in modes.items()}
-    session_state['_suggestion_seed_widget_keys'] = False
     return changed

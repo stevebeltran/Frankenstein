@@ -230,6 +230,8 @@ _transient_notice_mod = _load_local_module("transient_notice")
 render_transient_build_notice = _transient_notice_mod.render_transient_build_notice
 _session_state_mod = _load_local_module("session_state")
 init_session_state = _session_state_mod.init_session_state
+_compliance_guard_mod = _load_local_module("compliance_guard")
+get_export_disclaimer_text = _compliance_guard_mod.get_export_disclaimer_text
 _dashboard_helpers_mod = _load_local_module("dashboard_helpers")
 if not hasattr(_dashboard_helpers_mod, "render_station_suggestions_grid"):
     import importlib as _importlib
@@ -11944,7 +11946,7 @@ body{{background:transparent;overflow:hidden}}
     
         <!-- ── DISCLAIMER ─────────────────────────────────────────────── -->
         <div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:20px 60px;margin:0;font-size:11px;color:#7a5a00;line-height:1.7">
-          <strong>&#9888; SIMULATION TOOL DISCLAIMER</strong> — All figures are model estimates based on user inputs and publicly available data. Not a legal recommendation, binding proposal, contract, or guarantee. Deployments require FAA authorization and formal procurement.
+          <strong>&#9888; SIMULATION TOOL DISCLAIMER</strong> — {html.escape(get_export_disclaimer_text())}
         </div>
     
         <!-- ── FOOTER ─────────────────────────────────────────────────── -->
@@ -12304,6 +12306,9 @@ body{{background:transparent;overflow:hidden}}
                 _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
                                "KML", k_responder, k_guardian, calls_covered_perc,
                                prop_name, prop_email, details=export_details)
+            st.sidebar.caption(
+                "By downloading this file, you confirm your use complies with all applicable company policy and U.S. law."
+            )
         elif active_drones:
             _kml_export_slot.button(
                 "🌏 Google Earth Briefing File",
@@ -12314,6 +12319,9 @@ body{{background:transparent;overflow:hidden}}
             )
             if _kml_error:
                 st.sidebar.caption(f"Google Earth export issue: {_kml_error}")
+            st.sidebar.caption(
+                "By downloading this file, you confirm your use complies with all applicable company policy and U.S. law."
+            )
         else:
             _kml_export_slot.button(
                 "🌏 Google Earth Briefing File",
@@ -12321,6 +12329,9 @@ body{{background:transparent;overflow:hidden}}
                 width="stretch",
                 key="kml_export_no_drones_btn",
                 help="Deploy at least one drone to generate the KML file.",
+            )
+            st.sidebar.caption(
+                "By downloading this file, you confirm your use complies with all applicable company policy and U.S. law."
             )
 
 

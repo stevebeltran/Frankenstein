@@ -233,9 +233,8 @@ init_session_state = _session_state_mod.init_session_state
 _compliance_guard_mod = _load_local_module("compliance_guard")
 get_export_disclaimer_text = _compliance_guard_mod.get_export_disclaimer_text
 _dashboard_helpers_mod = _load_local_module("dashboard_helpers")
-if not hasattr(_dashboard_helpers_mod, "render_station_suggestions_grid"):
-    import importlib as _importlib
-    _dashboard_helpers_mod = _importlib.reload(_dashboard_helpers_mod)
+import importlib as _importlib
+_dashboard_helpers_mod = _importlib.reload(_dashboard_helpers_mod)
 log_map_build_event_once = _dashboard_helpers_mod.log_map_build_event_once
 resolve_master_boundary = _dashboard_helpers_mod.resolve_master_boundary
 render_sidebar_jurisdiction_selector = _dashboard_helpers_mod.render_sidebar_jurisdiction_selector
@@ -247,6 +246,7 @@ manage_custom_stations = _dashboard_helpers_mod.manage_custom_stations
 prepare_runtime_context = _dashboard_helpers_mod.prepare_runtime_context
 optimize_fleet_selection = _dashboard_helpers_mod.optimize_fleet_selection
 compute_station_suggestions = _dashboard_helpers_mod.compute_station_suggestions
+station_suggestion_display_metrics = _dashboard_helpers_mod.station_suggestion_display_metrics
 sync_station_suggestion_modes = _dashboard_helpers_mod.sync_station_suggestion_modes
 render_station_suggestions_grid = _dashboard_helpers_mod.render_station_suggestions_grid
 _onboarding_mod = _load_local_module("onboarding")
@@ -6878,25 +6878,6 @@ body{{background:transparent;overflow:hidden}}
         r_resp_est = st.session_state.get('r_resp', 2.0)
         r_guard_est = st.session_state.get('r_guard', 8.0)
         df_curve = pd.DataFrame()
-        _prior_suggestions = st.session_state.get('_station_suggestions', []) or []
-        if _prior_suggestions:
-            _prior_modes = sync_station_suggestion_modes(st.session_state, _prior_suggestions)
-            _prior_resp_selected = sum(1 for mode in _prior_modes.values() if mode == 'Responder')
-            _prior_guard_selected = sum(1 for mode in _prior_modes.values() if mode == 'Guardian')
-            _prev_resp_selected = int(st.session_state.get('_suggestion_selected_resp_count', 0) or 0)
-            _prev_guard_selected = int(st.session_state.get('_suggestion_selected_guard_count', 0) or 0)
-            _resp_delta = _prior_resp_selected - _prev_resp_selected
-            _guard_delta = _prior_guard_selected - _prev_guard_selected
-            if _resp_delta:
-                _current_resp_count = int(st.session_state.get('_fleet_k_resp', st.session_state.get('k_resp', 0)) or 0)
-                st.session_state['_pending_k_resp'] = max(0, _current_resp_count + _resp_delta)
-            if _guard_delta:
-                _current_guard_count = int(st.session_state.get('_fleet_k_guard', st.session_state.get('k_guard', 0)) or 0)
-                st.session_state['_pending_k_guard'] = max(0, _current_guard_count + _guard_delta)
-            st.session_state['_suggestion_selected_resp_count'] = _prior_resp_selected
-            st.session_state['_suggestion_selected_guard_count'] = _prior_guard_selected
-
-
         _custom_station_state = manage_custom_stations(
             st,
             st.session_state,
@@ -6986,7 +6967,14 @@ body{{background:transparent;overflow:hidden}}
                 rank_by='land' if resp_strategy_raw == 'Land Coverage' else 'call',
             )
             st.session_state['_station_suggestions'] = _suggestions
-            _current_modes = sync_station_suggestion_modes(st.session_state, _suggestions)
+            _current_modes = sync_station_suggestion_modes(
+                st.session_state,
+                _suggestions,
+                k_guardian=k_guardian,
+                k_responder=k_responder,
+            )
+            if st.session_state.pop('_suggestion_card_change_pending', False):
+                st.rerun()
             st.session_state['_suggestion_selected_resp_count'] = sum(1 for mode in _current_modes.values() if mode == 'Responder')
             st.session_state['_suggestion_selected_guard_count'] = sum(1 for mode in _current_modes.values() if mode == 'Guardian')
             locked_g_pins = list(dict.fromkeys(locked_g_pins + [
@@ -8153,13 +8141,17 @@ body{{background:transparent;overflow:hidden}}
             # ── Suggestion "?" markers on map ─────────────────────────────
             if _suggestions and show_station_suggestions and st.session_state.get('show_suggestion_markers', True):
                 _stg_map = st.session_state.get('suggestion_toggles', {})
+                _stg_modes = st.session_state.get('suggestion_modes', {})
                 _sug_on_lat, _sug_on_lon, _sug_on_text = [], [], []
                 _sug_off_lat, _sug_off_lon, _sug_off_text = [], [], []
                 for _s in _suggestions:
+                    _mode = _stg_modes.get(_s['station_idx'], _s.get('role', 'Off'))
+                    _display_metrics = station_suggestion_display_metrics(_s, _mode)
                     _tip = (
                         f"<b>#{_s['rank']} {_s['name']}</b><br>"
-                        f"{_s['role']} suggestion<br>"
-                        f"📞 {_s['call_pct']}% calls · 🗺️ {_s['land_pct']}% land"
+                        f"{_mode} suggestion<br>"
+                        f"📞 {_display_metrics['call_count']:,} calls · "
+                        f"{_display_metrics['call_pct']}% of city calls · 🗺️ {_display_metrics['land_pct']}% land"
                     )
                     if _stg_map.get(_s['station_idx']):
                         _sug_on_lat.append(_s['lat'])
@@ -8310,6 +8302,8 @@ body{{background:transparent;overflow:hidden}}
             _sug_changed = render_station_suggestions_grid(
                 st, st.session_state, _suggestions,
                 text_main, text_muted, card_bg, card_border, accent_color,
+                k_guardian=k_guardian,
+                k_responder=k_responder,
             )
 
         # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────

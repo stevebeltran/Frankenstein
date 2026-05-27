@@ -6,7 +6,7 @@ import pandas as pd
 
 import numpy as np
 
-import os, json, re, io, math, datetime, base64, html as html_lib
+import os, json, re, io, math, datetime, base64, html as html_lib, sys, subprocess, tempfile
 from pathlib import Path
 
 import simplekml
@@ -2587,14 +2587,51 @@ _PDF_LANDSCAPE_CSS = """
 
   /* ── Cover page — fill landscape, keep dark background ──────────── */
   .cover-page {
-    padding: 40px 52px !important;
-    min-height: auto !important;
+    padding: 30px 42px !important;
+    height: 7.8in !important;
+    max-height: 7.8in !important;
+    min-height: 0 !important;
     page-break-after: always;
     break-after: page;
   }
-  .cover-headline h1 { font-size: 44px !important; }
-  .cover-body { gap: 32px !important; }
-  .cover-right { width: 340px !important; }
+  .cover-headline { margin: 24px 0 20px !important; }
+  .cover-headline h1 { font-size: 38px !important; margin-bottom: 10px !important; }
+  .cover-population { font-size: 12px !important; margin-bottom: 8px !important; }
+  .cover-body { gap: 24px !important; margin: 20px 0 !important; align-items: center !important; }
+  .cover-right { width: 280px !important; }
+  .product-img { max-height: 3.35in !important; object-fit: contain !important; }
+  .cover-meta-cell { padding: 10px 12px !important; }
+  .cover-bottom { margin-top: 12px !important; padding-top: 12px !important; }
+  .pdf-prepared-by {
+    position: absolute !important;
+    top: 30px !important;
+    right: 42px !important;
+    max-width: 340px !important;
+    padding: 10px 14px !important;
+    border: 1px solid rgba(255, 255, 255, 0.16) !important;
+    border-radius: 8px !important;
+    background: rgba(255, 255, 255, 0.07) !important;
+    color: rgba(255, 255, 255, 0.82) !important;
+    text-align: right !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+  }
+  .pdf-prepared-by .label {
+    color: var(--cyan) !important;
+    font-size: 9px !important;
+    font-weight: 800 !important;
+    letter-spacing: 1.3px !important;
+    text-transform: uppercase !important;
+    margin-bottom: 3px !important;
+  }
+  .pdf-prepared-by .name {
+    color: #fff !important;
+    font-weight: 800 !important;
+  }
+  .pdf-prepared-by .email {
+    color: rgba(255, 255, 255, 0.68) !important;
+    word-break: break-word !important;
+  }
 
   /* ── Metrics grid — wider cells in landscape ────────────────────── */
   .metrics-hero {
@@ -2628,6 +2665,19 @@ _PDF_LANDSCAPE_CSS = """
   .map-wrap img {
     max-width: 100% !important;
     height: auto !important;
+  }
+  #map.doc-section {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+  #map .map-wrap {
+    margin-bottom: 0 !important;
+  }
+  #map .map-wrap img {
+    width: 100% !important;
+    max-height: 6.55in !important;
+    object-fit: contain !important;
+    background: #0b1320 !important;
   }
 
   /* ── Keep headers with their content ────────────────────────────── */
@@ -2676,6 +2726,7 @@ _PDF_LANDSCAPE_CSS = """
 
   /* ── Eliminate scrollable containers ─────────────────────────────── */
   * { overflow: visible !important; }
+  .cover-page { overflow: hidden !important; }
 
   /* ── Version line ───────────────────────────────────────────────── */
   .doc-version {
@@ -2706,9 +2757,196 @@ _PDF_LANDSCAPE_CSS = """
 """
 
 
+def _inject_pdf_prepared_by(html: str, prepared_by_name=None, prepared_by_email=None) -> str:
+    name = str(prepared_by_name or "").strip()
+    email = str(prepared_by_email or "").strip()
+    if not name and not email:
+        return html
+    if 'class="pdf-prepared-by"' in html:
+        return html
+
+    parts = ['<div class="pdf-prepared-by"><div class="label">Prepared by</div>']
+    if name:
+        parts.append(f'<div class="name">{html_lib.escape(name)}</div>')
+    if email:
+        parts.append(f'<div class="email">{html_lib.escape(email)}</div>')
+    parts.append('</div>')
+    prepared_by_html = "".join(parts)
+
+    cover_logo = re.search(r'(<div class="cover-logo">.*?</div>)', html, flags=re.DOTALL | re.IGNORECASE)
+    if cover_logo:
+        return html[:cover_logo.end()] + "\n" + prepared_by_html + html[cover_logo.end():]
+
+    cover_section = re.search(r'(<section\b[^>]*\bid=["\']cover["\'][^>]*>)', html, flags=re.IGNORECASE)
+    if cover_section:
+        return html[:cover_section.end()] + "\n" + prepared_by_html + html[cover_section.end():]
+
+    return prepared_by_html + html
+
+
+def _trim_executive_pdf_html_to_map(html: str) -> str:
+    """Keep the executive PDF scoped to cover, executive summary, fleet, and map."""
+
+    map_section_match = re.search(
+        r'<section\b(?=[^>]*\bid=["\']map["\'])(?=[^>]*\bclass=["\'][^"\']*\bdoc-section\b)[^>]*>.*?</section>',
+        html,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    if not map_section_match:
+        return html
+
+    return html[:map_section_match.end()] + "\n</main>\n</body></html>"
+
+
+def _render_executive_pdf_inline(html: str):
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("[BRINC] render_executive_html_to_pdf: playwright not installed")
+        return None
+
+    browser = None
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                ],
+            )
+            page = browser.new_page(viewport={"width": 1400, "height": 900})
+            page.set_content(html, wait_until="load", timeout=60000)
+            page.wait_for_timeout(1500)
+            pdf_bytes = page.pdf(
+                landscape=True,
+                format="Letter",
+                margin={
+                    "top": "0.35in",
+                    "bottom": "0.35in",
+                    "left": "0.45in",
+                    "right": "0.45in",
+                },
+                print_background=True,
+                prefer_css_page_size=True,
+            )
+            browser.close()
+            browser = None
+
+        if not pdf_bytes or len(pdf_bytes) < 1024:
+            print("[BRINC] Playwright PDF render produced empty output")
+            return None
+
+        return pdf_bytes
+    except Exception as exc:
+        print(f"[BRINC] Playwright PDF render error: {exc}")
+        return None
+    finally:
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                pass
+
+
+def _render_executive_pdf_subprocess(html: str):
+    """Run Playwright in a fresh process to avoid Streamlit/Windows event-loop policy conflicts."""
+
+    script = r'''
+import asyncio
+import sys
+
+if sys.platform.startswith("win") and hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+
+pdf_path = Path(sys.argv[1])
+html = sys.stdin.buffer.read().decode("utf-8")
+
+with sync_playwright() as pw:
+    browser = pw.chromium.launch(
+        headless=True,
+        args=[
+            "--no-sandbox",
+            "--disable-gpu",
+            "--disable-software-rasterizer",
+        ],
+    )
+    try:
+        page = browser.new_page(viewport={"width": 1400, "height": 900})
+        page.set_content(html, wait_until="load", timeout=60000)
+        page.wait_for_timeout(1500)
+        pdf_bytes = page.pdf(
+            landscape=True,
+            format="Letter",
+            margin={
+                "top": "0.35in",
+                "bottom": "0.35in",
+                "left": "0.45in",
+                "right": "0.45in",
+            },
+            print_background=True,
+            prefer_css_page_size=True,
+        )
+    finally:
+        browser.close()
+
+pdf_path.write_bytes(pdf_bytes)
+'''
+
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    env = os.environ.copy()
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="brinc_pdf_") as tmp_dir:
+            pdf_path = Path(tmp_dir) / "executive_summary.pdf"
+            result = subprocess.run(
+                [sys.executable, "-c", script, str(pdf_path)],
+                input=html.encode("utf-8"),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=120,
+                creationflags=creationflags,
+                env=env,
+            )
+            if result.returncode != 0:
+                stderr_text = result.stderr.decode("utf-8", errors="replace").strip()
+                if stderr_text:
+                    print(f"[BRINC] Playwright PDF subprocess failed: {stderr_text[-1500:]}")
+                else:
+                    print(f"[BRINC] Playwright PDF subprocess failed with exit code {result.returncode}")
+                return None
+            if not pdf_path.exists():
+                print("[BRINC] Playwright PDF subprocess produced no output file")
+                return None
+            pdf_bytes = pdf_path.read_bytes()
+            if not pdf_bytes or len(pdf_bytes) < 1024:
+                print("[BRINC] Playwright PDF subprocess produced empty output")
+                return None
+            return pdf_bytes
+    except Exception as exc:
+        print(f"[BRINC] Playwright PDF subprocess error: {exc}")
+        return None
+
+
+def _render_executive_pdf_with_playwright(html: str):
+    if os.name == "nt":
+        pdf_bytes = _render_executive_pdf_subprocess(html)
+        if pdf_bytes:
+            return pdf_bytes
+
+    return _render_executive_pdf_inline(html)
+
+
 def render_executive_html_to_pdf(
     export_html: str,
     map_png_bytes: bytes = None,
+    prepared_by_name=None,
+    prepared_by_email=None,
 ):
     """Convert the full executive-summary HTML into a multi-page landscape PDF.
 
@@ -2718,10 +2956,11 @@ def render_executive_html_to_pdf(
     Strategy:
       1. Replace the interactive Plotly map ``<div>`` with a static PNG so the
          PDF doesn't need JavaScript.
-      2. Inject landscape-optimised ``@page`` / ``@media print`` CSS overrides.
-      3. Render via Playwright ``page.pdf()`` with ``landscape=True`` and
+      2. Trim the report to the first pages through the coverage map.
+      3. Inject landscape-optimised ``@page`` / ``@media print`` CSS overrides.
+      4. Render via Playwright ``page.pdf()`` with ``landscape=True`` and
          ``print_background=True`` so all dark backgrounds / gradients survive.
-      4. Return PDF bytes, or *None* on failure (caller falls back to PIL).
+      5. Return PDF bytes, or *None* on failure.
     """
 
     if not export_html or not isinstance(export_html, str):
@@ -2729,6 +2968,7 @@ def render_executive_html_to_pdf(
 
     # ── 1. Swap interactive Plotly map for static PNG ─────────────────────
     html = export_html
+    html = _inject_pdf_prepared_by(html, prepared_by_name, prepared_by_email)
     if map_png_bytes:
         map_b64 = base64.b64encode(map_png_bytes).decode("ascii")
         static_map_tag = (
@@ -2745,56 +2985,9 @@ def render_executive_html_to_pdf(
         )
 
     # ── 2. Inject landscape PDF CSS just before closing </style> ─────────
+    html = _trim_executive_pdf_html_to_map(html)
     html = html.replace("</style>", _PDF_LANDSCAPE_CSS + "\n</style>", 1)
-
-    # ── 3. Render with Playwright ────────────────────────────────────────
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        print("[BRINC] render_executive_html_to_pdf: playwright not installed")
-        return None
-
-    try:
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-gpu",
-                    "--disable-software-rasterizer",
-                ],
-            )
-            page = browser.new_page(
-                viewport={"width": 1400, "height": 900},
-            )
-            page.set_content(html, wait_until="networkidle")
-            # Small extra wait for Google Fonts to finish loading
-            page.wait_for_timeout(2000)
-
-            pdf_bytes = page.pdf(
-                landscape=True,
-                format="Letter",
-                margin={
-                    "top": "0.35in",
-                    "bottom": "0.35in",
-                    "left": "0.45in",
-                    "right": "0.45in",
-                },
-                print_background=True,
-                prefer_css_page_size=True,
-            )
-            browser.close()
-
-        if not pdf_bytes or len(pdf_bytes) < 1024:
-            print("[BRINC] Playwright PDF render produced empty output")
-            return None
-
-        return pdf_bytes
-
-    except Exception as exc:
-        print(f"[BRINC] Playwright PDF render error: {exc}")
-        return None
-
+    return _render_executive_pdf_with_playwright(html)
 
 def generate_executive_summary_pdf(
     *,

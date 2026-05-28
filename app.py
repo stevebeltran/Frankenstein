@@ -10747,10 +10747,16 @@ body{{background:transparent;overflow:hidden}}
                     portal_deadline: str = "",
                     nofo_number: str = "",
                     status_note: str = "",
+                    expires_on: datetime.datetime | None = None,
                     require_state_agency: bool = False,
                     require_state_law_enforcement: bool = False,
                     require_tribal: bool = False,
                 ) -> str:
+                    if expires_on is not None:
+                        _now_utc = datetime.datetime.now(datetime.timezone.utc)
+                        _expires_on_utc = expires_on if expires_on.tzinfo is not None else expires_on.replace(tzinfo=datetime.timezone.utc)
+                        if _now_utc >= _expires_on_utc.astimezone(datetime.timezone.utc):
+                            return ""
                     if require_state_agency and not _grant_context_looks_like_state_agency(_grant_context_text):
                         return ""
                     if require_state_law_enforcement and not _grant_context_looks_like_state_law_enforcement(_grant_context_text):
@@ -10805,27 +10811,69 @@ body{{background:transparent;overflow:hidden}}
 
                 _current_federal_grants_html = "".join([
                     _render_federal_grant_card_html(
-                        title="DOJ/BJA Comprehensive Opioid, Stimulant, and Substance Use Program (COSSUP)",
+                        title="FY25 De-escalation and Crisis Response Training Program",
                         description=(
-                            "Supports coordinated opioid, stimulant, and substance-use response across public "
-                            "safety, overdose response, diversion, deflection, treatment access, recovery, and data-sharing."
+                            "Supports development, implementation, or expansion of de-escalation and crisis response training "
+                            "for officers and correctional personnel working with people in crisis."
                         ),
                         narrative=(
-                            "For this DFR deployment, COSSUP is the strongest federal opioid-response fit because it "
-                            "allows the agency to position BRINC as overdose-scene intelligence infrastructure that improves "
-                            "dispatcher awareness, accelerates multi-agency coordination, reduces responder risk, and supports "
-                            "deflection workflows linking law enforcement, EMS, and behavioral-health partners."
+                            "This grant fits a DFR deployment when the story centers on earlier scene intelligence, safer first-contact "
+                            "decision-making, clearer dispatch triage, and training that improves officer response to behavioral-health "
+                            "and crisis events."
                         ),
                         status_label="Open now",
                         status_tone="open",
-                        eligibility_note="Eligible applicants include states, units of local government, and Indian tribal governments",
+                        eligibility_note="Eligible applicants include law enforcement and correctional agencies, including sheriffs' departments",
                         links=[
-                            ("BJA FY25 COSSUP opportunity", "https://bja.ojp.gov/funding/opportunities/o-bja-2025-172485"),
-                            ("BJA COSSUP overview", "https://www.bja.ojp.gov/program/cossup/about"),
+                            ("BJA FY25 De-escalation and Crisis Response Training", "https://bja.ojp.gov/funding/opportunities/o-bja-2025-172495"),
+                            ("BJA program overview", "https://bja.ojp.gov/program/de-escalation-and-crisis-response-training"),
                         ],
-                        grants_gov_deadline="May 4, 2026, 11:59 p.m. ET",
-                        portal_deadline="JustGrants deadline: May 11, 2026, 8:59 p.m. ET",
-                        nofo_number="O-BJA-2025-172485",
+                        grants_gov_deadline="May 27, 2026, 11:59 p.m. ET",
+                        portal_deadline="JustGrants deadline: June 5, 2026, 8:59 p.m. ET",
+                        nofo_number="O-BJA-2025-172495",
+                        expires_on=datetime.datetime(2026, 6, 5, 20, 59, tzinfo=zoneinfo.ZoneInfo("America/New_York")),
+                    ),
+                    _render_federal_grant_card_html(
+                        title="FY25 Rural Law Enforcement Violent Crime Reduction Initiative",
+                        description=(
+                            "Supports rural agencies and prosecutors implementing a violent-crime reduction strategy to address a specific local problem."
+                        ),
+                        narrative=(
+                            "This is the strongest current fit for smaller or rural jurisdictions that want to connect aerial response, crime reduction, "
+                            "and investigative coordination to a measurable violent-crime strategy."
+                        ),
+                        status_label="Open now",
+                        status_tone="open",
+                        eligibility_note="Eligible applicants include rural local governments and law enforcement agencies described in the NOFO",
+                        links=[
+                            ("BJA FY25 RVCR opportunity", "https://bja.ojp.gov/funding/opportunities/o-bja-2025-172495"),
+                            ("BJA RVCR webinar materials", "https://bja.ojp.gov/funding/webinar/fy25-rvcr-recording"),
+                        ],
+                        grants_gov_deadline="May 27, 2026, 11:59 p.m. ET",
+                        portal_deadline="JustGrants deadline: June 5, 2026, 8:59 p.m. ET",
+                        nofo_number="O-BJA-2025-172495",
+                        expires_on=datetime.datetime(2026, 6, 5, 20, 59, tzinfo=zoneinfo.ZoneInfo("America/New_York")),
+                    ),
+                    _render_federal_grant_card_html(
+                        title="FY25 Justice Reinvestment Initiative (JRI)",
+                        description=(
+                            "Supports state and local operations that reduce crime and recidivism through data analysis and system improvements."
+                        ),
+                        narrative=(
+                            "This grant supports a broader public-safety narrative when the deployment is part of a larger system effort to reduce "
+                            "crime, improve coordination, and track outcomes across justice agencies."
+                        ),
+                        status_label="Open now",
+                        status_tone="open",
+                        eligibility_note="Eligible applicants are state and local justice-system stakeholders as defined in the NOFO",
+                        links=[
+                            ("BJA FY25 JRI funding", "https://bja.ojp.gov/program/justice-reinvestment-initiative/funding"),
+                            ("BJA JRI overview", "https://bja.ojp.gov/program/justice-reinvestment-initiative/overview"),
+                        ],
+                        grants_gov_deadline="June 3, 2026, 11:59 p.m. ET",
+                        portal_deadline="JustGrants deadline: June 10, 2026, 8:59 p.m. ET",
+                        nofo_number="O-BJA-2026-172609",
+                        expires_on=datetime.datetime(2026, 6, 10, 20, 59, tzinfo=zoneinfo.ZoneInfo("America/New_York")),
                     ),
                     _render_federal_grant_card_html(
                         title="SAMHSA Tribal Opioid Response (TOR)",
@@ -10893,44 +10941,6 @@ body{{background:transparent;overflow:hidden}}
                         require_state_agency=True,
                     ),
                 ])
-                _cossup_opportunity_url = "https://bja.ojp.gov/funding/opportunities/o-bja-2025-172485"
-                _cossup_overview_url = "https://bja.ojp.gov/program/cossup"
-                _cossup_funding_url = "https://bja.ojp.gov/program/cossup/funding"
-                _cossup_webinar_url = "https://bja.ojp.gov/events/fy25-comprehensive-opioid-stimulant-and-substance-use-site-based-program-cossup"
-                _cossup_success_url = "https://bja.ojp.gov/news/success-spotlight/bjas-cossup-brings-life-saving-interventions"
-                _cossup_kpi_url = "https://bja.ojp.gov/media/document/51081"
-                _cossup_opioid_narrative_html = f"""
-                <div class="opioid-grant-subsection" style="margin:20px 0 18px;padding:18px 20px;border-radius:12px;background:linear-gradient(180deg,#fff 0%,#f8fbff 100%);border:1px solid rgba(37,99,235,0.18);">
-                  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
-                    <div>
-                      <div style="font-size:11px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:#1d4ed8;margin-bottom:6px;">Grant Narrative Subsection B</div>
-                      <div style="font-size:18px;font-weight:800;color:#0f172a;line-height:1.3;">DOJ/BJA FY25 Comprehensive Opioid, Stimulant, and Substance Use, Site-Based Program (COSSUP)</div>
-                      <div style="font-size:12px;color:#64748b;margin-top:6px;">Opportunity ID O-BJA-2025-172485 · Solicitation status: Open · Grants.gov deadline: May 4, 2026, 11:59 p.m. Eastern · JustGrants deadline: May 11, 2026, 8:59 p.m. Eastern</div>
-                    </div>
-                    <button class="copy-section-btn grant-law" onclick="copyGrantText('grant-body-opioid', this)">Copy Opioid Grant Text</button>
-                  </div>
-                  <div id="grant-body-opioid" style="font-size:13px;color:#334155;line-height:1.7;">
-                    <p><strong>Project Title:</strong> BRINC Drones Overdose-Response and Multi-Agency Coordination Initiative — {_get_document_jurisdiction_name(st.session_state, selected_names, fallback=prop_city)}, {prop_state}</p>
-                    <p><strong>Program Fit and Funding Opportunity Alignment:</strong> The FY25 COSSUP site-based solicitation is designed to help eligible state, local, and tribal governments develop, implement, or expand coordinated responses that identify, respond to, treat, and support people impacted by illicit opioids, stimulants, and other substances [1][2]. BJA’s current overview and webinar materials emphasize cross-system collaboration among public safety, behavioral health, treatment, and community partners; law-enforcement-related activities tied to overdose response and prevention; stronger access to prevention tools and overdose reversal medications; and expanded treatment and recovery pathways in the community and, where applicable, correctional settings [1][3]. This proposal is written to match that frame directly.</p>
-                    <p><strong>Statement of Need:</strong> {_get_document_jurisdiction_name(st.session_state, selected_names, fallback=prop_city)} currently generates approximately <strong>{st.session_state.get('total_original_calls', total_calls):,} calls for service annually</strong>. Within that operating tempo, overdose calls, unconscious-person calls, welfare checks, narcotics-related incidents, and co-occurring behavioral-health events place responders into fast-moving scenes where delayed situational awareness increases risk to the patient, the public, and first responders. The proposed BRINC deployment closes that gap by moving eyes-on-scene forward to the first minutes of the event, giving dispatch, law enforcement, fire/EMS, and partner agencies a common operating picture before personnel commit to the address.</p>
-                    <p><strong>Proposed COSSUP-Supported Response Model:</strong> The applicant proposes to deploy a BRINC Drone as a First Responder network consisting of <strong>{actual_k_responder} Responder units</strong> and <strong>{actual_k_guardian} Guardian units</strong> across <strong>{jurisdiction_list}</strong>. In the modeled configuration, the network reaches <strong>{calls_covered_perc:.1f}% of historical incidents</strong>, improves average arrival speed by <strong>{avg_time_saved:.1f} minutes</strong> versus patrol response, and gives dispatchers and field supervisors live HD and thermal intelligence during suspected overdose, unsafe-entry, and multi-agency scenes. BRINC’s launch-on-dispatch workflow, live-streaming video, chain-of-custody flight logging, and integrated operational analytics allow the applicant to present the system not as a stand-alone aircraft purchase, but as overdose-scene intelligence infrastructure that supports public safety decision-making, responder protection, and coordinated care pathways.</p>
-                    <p><strong>How BRINC Advances COSSUP Priorities:</strong> First, the platform strengthens the public-safety response by letting dispatch and field commanders verify scene conditions, assess ingress/egress constraints, identify bystanders or secondary hazards, and determine whether immediate law-enforcement, EMS, fire, crisis-response, or co-responder resources are needed. Second, it supports overdose response and treatment engagement by enabling earlier, safer coordination with naloxone-equipped responders, post-overdose outreach teams, peer navigators, hospital partners, and behavioral-health providers. Third, it improves information sharing by creating time-stamped aerial records, incident-level deployment logs, and repeatable performance measures that can be shared across the public-safety and treatment ecosystem. Fourth, it helps align resources by directing the highest-cost human response only where the aerial picture shows it is necessary, which is especially important in jurisdictions facing staffing pressure, overdose-call surges, or wide geographic coverage demands [1][2][3].</p>
-                    <p><strong>Implementation and Partnerships:</strong> The applicant will use COSSUP support to formalize an overdose-response workflow that connects dispatch, law enforcement, fire/EMS, emergency communications, hospital and treatment partners, behavioral-health providers, peer-support or deflection teams, and any county or regional overdose task force already operating in the jurisdiction. The BRINC system will be integrated into standard operating procedures for overdose, possible overdose, unconscious subject, welfare check, open-air drug scene, and allied public-safety events. Where local practice supports it, the same aerial workflow can also support post-overdose follow-up, hotspot intelligence, and rapid coordination with community-based providers so that overdose survivors and families are connected to treatment, recovery support, or deflection resources rather than being left with only a traditional enforcement response.</p>
-                    <p><strong>Evidence Base and Expected Impact:</strong> BJA describes COSSUP as a flexible national program that has funded more than 500 sites in the last four years and centers collaboration across public safety, behavioral health, and treatment systems [1]. BJA’s 2021–2022 COSSUP Key Performance Indicator report summarizes data from hundreds of grantees and subawardees operating across all 50 states, two territories, and the District of Columbia, reflecting a large federal investment in naloxone training, diversion, treatment access, and recovery support [5]. BJA’s Oakland County success spotlight shows how a COSSUP-funded sheriff’s crisis-response unit used Narcan to revive an overdose victim and paired law-enforcement follow-up with community health and prevention partners [4]. This applicant’s BRINC deployment builds on that same federal logic: faster scene verification, safer first-responder approach, tighter coordination with care partners, and better operational data to document outcomes and improve future overdose-response decisions.</p>
-                    <p><strong>Performance Measurement and Sustainability:</strong> The applicant will track at minimum: (1) time from dispatch to aerial scene assessment, (2) number of overdose-related or suspected overdose incidents receiving drone support, (3) number of incidents in which aerial intelligence changed resource deployment, (4) referrals or handoffs to EMS, treatment, behavioral-health, or peer-support partners, (5) responder-safety outcomes, and (6) recurring hotspot or trend information useful for prevention and enforcement planning. Because the current deployment model projects <strong>${annual_savings:,.0f} in annual operational savings</strong> with a break-even horizon of <strong>{break_even_text.lower()}</strong>, the applicant can argue that federal start-up support will stand up an enduring response capability rather than a one-time pilot. That sustainability argument is strengthened further by BRINC’s integrated analytics, domestic manufacturing, operational training, and immediate fit with the agency’s existing dispatch-centered deployment model.</p>
-                    <p><strong>References:</strong></p>
-                    <ol style="margin:0 0 0 18px;padding:0 0 0 10px;">
-                      <li><a href="{html.escape(_cossup_opportunity_url, quote=True)}" target="_blank" style="color:#2563eb;text-decoration:none;">Bureau of Justice Assistance, FY25 Comprehensive Opioid, Stimulant, and Substance Use, Site-Based Program, Opportunity ID O-BJA-2025-172485</a></li>
-                      <li><a href="{html.escape(_cossup_overview_url, quote=True)}" target="_blank" style="color:#2563eb;text-decoration:none;">Bureau of Justice Assistance, COSSUP Overview</a></li>
-                      <li><a href="{html.escape(_cossup_webinar_url, quote=True)}" target="_blank" style="color:#2563eb;text-decoration:none;">Bureau of Justice Assistance, FY25 COSSUP Site-Based Program Webinar Page</a></li>
-                      <li><a href="{html.escape(_cossup_success_url, quote=True)}" target="_blank" style="color:#2563eb;text-decoration:none;">Bureau of Justice Assistance, “BJA's COSSUP Brings Life-Saving Interventions” Success Spotlight</a></li>
-                      <li><a href="{html.escape(_cossup_kpi_url, quote=True)}" target="_blank" style="color:#2563eb;text-decoration:none;">Bureau of Justice Assistance, Comprehensive Opioid, Stimulant, and Substance Use Program Key Performance Indicator Report, Calendar Years 2021–2022</a></li>
-                      <li><a href="{html.escape(_cossup_funding_url, quote=True)}" target="_blank" style="color:#2563eb;text-decoration:none;">Bureau of Justice Assistance, COSSUP Funding Page</a></li>
-                    </ol>
-                  </div>
-                </div>
-                """
-
                 export_html = f"""<!DOCTYPE html>
         <html lang="en"><head>
         <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -11451,7 +11461,7 @@ body{{background:transparent;overflow:hidden}}
           <div class="section-eyebrow">
             <span class="pg-num">06</span>
             <span class="pg-title">Grant Narrative</span>
-            <span class="src" data-src="Grant programs referenced: DOJ Byrne JAG · FEMA HSGP · DOJ COPS Office · DOT RAISE · DOJ Smart Policing Initiative · DOJ/BJA COSSUP · COPS AHTF · SAMHSA TOR · SAMHSA SOR. Federal opioid-program dates and eligibility are based on current public federal postings as of April 24, 2026. Financial figures are BRINC model estimates. Narrative is AI-generated — must be reviewed, localized, and fact-checked by your grants administrator before submission.">ⓘ</span>
+            <span class="src" data-src="Grant programs referenced: DOJ Byrne JAG · FEMA HSGP · DOJ COPS Office · DOT RAISE · DOJ Smart Policing Initiative · DOJ/BJA De-escalation and Crisis Response Training · DOJ/BJA Rural Law Enforcement Violent Crime Reduction Initiative · DOJ/BJA Justice Reinvestment Initiative · SAMHSA TOR · SAMHSA SOR. Federal grant dates and eligibility are based on current public federal postings as of May 28, 2026. Grant cards self-hide after their application deadline. Financial figures are BRINC model estimates. Narrative is AI-generated — must be reviewed, localized, and fact-checked by your grants administrator before submission.">ⓘ</span>
             <button class="copy-section-btn grant-law" onclick="copyGrantText('grant-body-law', this)">
               <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h-1v1H2V6h1V5H2z"/></svg>
               Copy Grant Text
@@ -11519,12 +11529,11 @@ body{{background:transparent;overflow:hidden}}
             <p><strong>Community &amp; Economic Impact:</strong> Response time improvements of <strong>{avg_time_saved:.1f} minutes</strong> translate directly to better outcomes in time-sensitive incidents: cardiac events, structure fires, crimes in progress, and missing persons cases. Studies by the International Association of Chiefs of Police (IACP) document measurable improvements in case clearance rates, property crime deterrence (15–30% reduction in areas with visible DFR patrols), and community trust metrics in agencies with active drone programs. For {prop_city}'s business community, faster emergency response reduces property damage, shortens insurance claim cycles, and improves the commercial district safety perception that drives foot traffic and investment.</p>
 
             <div class="federal-grants-wrap">
-              <h4>Current Federal Opioid-Response Grants</h4>
-              <p>Federal opioid-response funding can strengthen this executive export when the DFR program is positioned as overdose-scene intelligence, responder-safety infrastructure, and a coordination layer connecting dispatch, law enforcement, EMS, and behavioral-health partners. The entries below surface the best current-fit federal opportunities for the applicant context reflected in this export.</p>
+              <h4>Current Federal Public Safety Grants</h4>
+              <p>Current federal grant language is leaning harder toward data-backed proposals, measurable outcomes, crisis response, rural violent-crime reduction, and stronger coordination across dispatch, law enforcement, EMS, corrections, and community partners. The entries below surface the best current-fit opportunities for the applicant context reflected in this export.</p>
               {_current_federal_grants_html}
             </div>
-            {_cossup_opioid_narrative_html}
-    
+
             <p style="background:#f8f9fa;padding:15px;border-radius:8px;border:1px solid #eee;font-size:13px">
               <strong>Applicable Grant Funding Sources:</strong><br>
               <a href="https://bja.ojp.gov/program/jag/overview">DOJ Byrne JAG</a> — Technology and equipment procurement<br>

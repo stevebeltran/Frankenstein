@@ -2491,7 +2491,8 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                 bg = card_bg if mode != 'Off' else 'rgba(30,30,40,0.4)'
                 opacity = '1.0' if mode != 'Off' else '0.55'
                 border_col = card_border
-                top_accent = ring_color if mode != 'Off' and ring_color else card_border
+                indicator_color = ring_color if mode != 'Off' and ring_color else card_border
+                badge_color = ring_color if mode != 'Off' and ring_color else mode_color
                 widget_key = _suggestion_widget_key(session_state, idx)
                 station_name = str(s.get('name', '') or 'Unnamed Station')
                 station_address = str(s.get('address', '') or '').strip()
@@ -2502,7 +2503,7 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                 )
 
                 st.markdown(
-                    f"<div style='height:4px; background:{top_accent}; border-radius:6px 6px 0 0; margin-bottom:0;'></div>",
+                    f"<div style='height:8px; background:{indicator_color}; border-radius:6px 6px 0 0; margin-bottom:0;'></div>",
                     unsafe_allow_html=True,
                 )
                 st.markdown(
@@ -2511,8 +2512,13 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                     f"min-height:72px; font-size:0.7rem; line-height:1.3;'>"
                     f"<div style='display:flex; justify-content:space-between; align-items:center;'>"
                     f"<span style='font-weight:700; color:{text_main};'>#{s['rank']}</span>"
-                    f"<span style='background:{mode_color}; color:#000; font-size:0.55rem; "
+                    f"<span style='background:{badge_color}; color:#000; font-size:0.55rem; "
                     f"font-weight:800; padding:1px 5px; border-radius:3px;'>{mode_abbr}</span></div>"
+                    f"<div style='display:flex; align-items:center; gap:6px; margin:4px 0 2px;'>"
+                    f"<span style='width:10px; height:10px; border-radius:2px; background:{indicator_color}; "
+                    f"border:1px solid rgba(255,255,255,0.2); flex:0 0 auto;'></span>"
+                    f"<span style='color:{text_muted}; font-size:0.56rem; letter-spacing:0.04em; text-transform:uppercase;'>"
+                    f"Map Ring</span></div>"
                     f"<div style='color:{text_main}; font-weight:600; margin:2px 0; word-wrap:break-word; white-space:normal;'>"
                     f"{station_name}</div>"
                     f"{address_html}"

@@ -44,7 +44,7 @@ This guide walks through setting up Google Drive integration for the site survey
 
 ### 5. Share Google Drive Folder with Service Account
 
-1. Open the team folder: https://drive.google.com/drive/folders/1FXXNVLaAFWSc1HYDUx8lyaosqF9BJdgL
+1. Open the team folder (the folder ID from `GOOGLE_DRIVE_TEAM_FOLDER_ID`): `https://drive.google.com/drive/folders/<your-drive-folder-id>`
 2. Right-click the folder → "Share"
 3. Get the service account email from the JSON key file (looks like `site-survey-app@...iam.gserviceaccount.com`)
 4. Paste the email in the share dialog

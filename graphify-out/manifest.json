@@ -5,12 +5,12 @@
     "semantic_hash": "a933f7c678faf90f33967ea14a42d056"
   },
   ".claude/settings.local.json": {
-    "mtime": 1783088872.077,
-    "ast_hash": "fbfc6cec23816a8970044649d2fbc35e",
+    "mtime": 1783091491.817,
+    "ast_hash": "c63d65a66c8e7b75ea67a77d0896d469",
     "semantic_hash": ""
   },
   ".devcontainer/devcontainer.json": {
-    "mtime": 1783090099.375,
+    "mtime": 1783091491.827,
     "ast_hash": "2d88210f357123fc53b453c1a8d5575d",
     "semantic_hash": ""
   },
@@ -60,8 +60,8 @@
     "semantic_hash": "34b538a7684b19675bf735ec340275d2"
   },
   "app.py": {
-    "mtime": 1783090005.45,
-    "ast_hash": "f732cb234745eec050e19d92b1ac0816",
+    "mtime": 1783100771.57,
+    "ast_hash": "bceaa5ba9b828040f08d29c58d401fbf",
     "semantic_hash": ""
   },
   "compress_cell_coverage.py": {
@@ -80,13 +80,13 @@
     "semantic_hash": "f24cf7d392175b7cf2ef35b88ba7fa8d"
   },
   "modules/admin_dashboard.py": {
-    "mtime": 1783090116.158,
+    "mtime": 1783091492.698,
     "ast_hash": "5031fca66b44c24b7eff9003e8de63e9",
     "semantic_hash": ""
   },
   "modules/boundaries.py": {
-    "mtime": 1783090029.658,
-    "ast_hash": "7a59d6bad21f9d063bfe43700534d766",
+    "mtime": 1783091492.706,
+    "ast_hash": "5b2ffb6380019c7dd2989ffb3b59d7d8",
     "semantic_hash": ""
   },
   "modules/cad_parser.py": {
@@ -175,8 +175,8 @@
     "semantic_hash": "1d9c9ecd5375938cb0cfa5124d4d0ae0"
   },
   "modules/html_reports.py": {
-    "mtime": 1782153098.716,
-    "ast_hash": "f7ed6177710821d1f558ac9e79c57c4e",
+    "mtime": 1783100871.209,
+    "ast_hash": "808b7164affc666f12d40af1bc15c547",
     "semantic_hash": ""
   },
   "modules/image_utils.py": {
@@ -195,7 +195,7 @@
     "semantic_hash": "c9bbf76a1bae72ace37b87bca062731f"
   },
   "modules/notifications.py": {
-    "mtime": 1782153111.083,
+    "mtime": 1783091492.721,
     "ast_hash": "ca1938e55468a08419fd98a69f768e39",
     "semantic_hash": ""
   },
@@ -260,7 +260,7 @@
     "semantic_hash": "4186fb38375f9adf9c53564a10a97de8"
   },
   "modules/views_path_02.py": {
-    "mtime": 1782153111.096,
+    "mtime": 1783091492.751,
     "ast_hash": "dd5e9abb43732edf98843b4a67321d6b",
     "semantic_hash": ""
   },
@@ -270,8 +270,8 @@
     "semantic_hash": "95f077b8016ba93bfc9454b1c42a52b5"
   },
   "modules/crash_logging.py": {
-    "mtime": 1782151076.778,
-    "ast_hash": "ce22345c6b516afa0587379a89427672",
+    "mtime": 1783091492.712,
+    "ast_hash": "ed371a1ebad68742519c8340c2e0be34",
     "semantic_hash": ""
   },
   "tests/test_census_batch.py": {
@@ -320,7 +320,7 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1782153111.054,
+    "mtime": 1783091491.857,
     "ast_hash": "7c5b71ed31eae34c0fb7a5f6357fdf84",
     "semantic_hash": ""
   },
@@ -355,18 +355,13 @@
     "semantic_hash": ""
   },
   "docs/GOOGLE_DRIVE_SETUP.md": {
-    "mtime": 1783090128.724,
+    "mtime": 1783091491.875,
     "ast_hash": "4e1977828e3636582c94d91c519f5f18",
     "semantic_hash": ""
   },
-  "packages.txt": {
-    "mtime": 1781903258.086,
-    "ast_hash": "9e65ebddb17cfaa0328ff35239d45636",
-    "semantic_hash": ""
-  },
   "requirements.txt": {
-    "mtime": 1782153111.108,
-    "ast_hash": "d82fd06215129fc3f5344959e2b1ae4a",
+    "mtime": 1783100782.671,
+    "ast_hash": "239242d09acec21f6529b5c85ff2b5aa",
     "semantic_hash": ""
   },
   "deploy.jpg": {

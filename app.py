@@ -10345,7 +10345,6 @@ body{{background:transparent;overflow:hidden}}
         _report_notice_slot = st.sidebar.empty()
         _brinc_export_slot = st.sidebar.empty()
         _html_export_slot = st.sidebar.empty()
-        _pdf_export_slot = st.sidebar.empty()
         _fernandina_export_slot = st.sidebar.empty()
         _kml_export_slot = st.sidebar.empty()
 
@@ -10364,17 +10363,6 @@ body{{background:transparent;overflow:hidden}}
             help=(
                 "Deploy at least one drone to generate the executive summary."
                 if fleet_capex <= 0
-                else _report_wait_note
-            ),
-        )
-        _pdf_export_slot.button(
-            f"📑 {prop_city}, {prop_state} — Executive Summary PDF",
-            disabled=True,
-            width="stretch",
-            key="pdf_export_wait_btn",
-            help=(
-                "Deploy at least one drone to generate the executive summary PDF."
-                if not active_drones
                 else _report_wait_note
             ),
         )
@@ -10925,47 +10913,6 @@ body{{background:transparent;overflow:hidden}}
                     )
                 )
                 map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='inline', default_height='500px', default_width='100%')
-                fig_for_pdf_export = go.Figure(fig_for_export)
-                _pdf_zoom = round(max(5, float(dynamic_zoom or 0) - 1.1), 2)
-                fig_for_pdf_export.update_layout(
-                    map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=_pdf_zoom, style="carto-darkmatter"),
-                    margin=dict(l=0, r=0, t=0, b=0), height=720, showlegend=True,
-                    legend=dict(
-                        yanchor="top", y=0.98, xanchor="left", x=0.02,
-                        bgcolor=legend_bg, bordercolor="#444444", borderwidth=1,
-                        font=dict(color=legend_text, size=11)
-                    )
-                )
-                def _ensure_kaleido_browser():
-                    browser_path = os.environ.get("BROWSER_PATH", "").strip()
-                    if browser_path and Path(browser_path).is_file():
-                        return browser_path
-                    for candidate in (
-                        shutil.which("chromium"),
-                        shutil.which("chromium-browser"),
-                        shutil.which("google-chrome"),
-                        shutil.which("google-chrome-stable"),
-                    ):
-                        if candidate and Path(candidate).is_file():
-                            os.environ["BROWSER_PATH"] = candidate
-                            browser_dir = str(Path(candidate).parent)
-                            os.environ["PATH"] = browser_dir + os.pathsep + os.environ.get("PATH", "")
-                            return candidate
-                    return None
-
-                try:
-                    map_png_bytes = fig_for_pdf_export.to_image(format='png', width=1400, height=900, scale=2)
-                except Exception as _png_exc:
-                    _chrome_path = _ensure_kaleido_browser()
-                    if _chrome_path:
-                        try:
-                            map_png_bytes = fig_for_pdf_export.to_image(format='png', width=1400, height=900, scale=2)
-                        except Exception as _retry_exc:
-                            print(f"[BRINC] Executive summary map PNG retry failed: {_retry_exc}")
-                            map_png_bytes = None
-                    else:
-                        print(f"[BRINC] Executive summary map PNG render unavailable: {_png_exc}")
-                        map_png_bytes = None
                 _visible_export_rows = [d for d in active_drones if not _is_call_density_station(d)]
                 station_rows = "".join(
                     f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>"
@@ -12717,18 +12664,6 @@ body{{background:transparent;overflow:hidden}}
                            prop_name, prop_email, details=export_details)
         # 2. Executive Summary / proposal HTML export
         _export_html_ready = isinstance(export_html, str) and export_html.lstrip().lower().startswith("<!doctype html")
-        _executive_pdf_bytes = None
-        if fleet_capex > 0 and _export_html_ready:
-            try:
-                _executive_pdf_bytes = html_reports.render_executive_html_to_pdf(
-                    export_html,
-                    map_png_bytes=map_png_bytes,
-                    prepared_by_name=prop_name,
-                    prepared_by_email=prop_email,
-                )
-            except Exception as _pdf_full_exc:
-                _executive_pdf_bytes = None
-                print(f"[BRINC] Executive HTML-to-PDF render failed: {_pdf_full_exc}")
         if fleet_capex > 0:
             if _export_html_ready and _html_export_slot.download_button(f"📄 {prop_city}, {prop_state} — Executive Summary",
                                                                         data=export_html,
@@ -12752,28 +12687,6 @@ body{{background:transparent;overflow:hidden}}
                     key="html_export_not_ready_btn",
                     help="Executive summary data is not ready for this run.",
                 )
-            if _executive_pdf_bytes:
-                if _pdf_export_slot.download_button(f"📑 {prop_city}, {prop_state} — Executive Summary PDF",
-                                                    data=_executive_pdf_bytes,
-                                                    file_name=f"BRINC_Executive_Summary_{_safe_city}_{_version_slug}_{_ts}.pdf",
-                                                    mime="application/pdf",
-                                                    width="stretch"):
-                    st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['PDF']
-                    st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
-                    _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                                  "PDF", k_responder, k_guardian, calls_covered_perc,
-                                  prop_name, prop_email, details=export_details)
-                    _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                                   "PDF", k_responder, k_guardian, calls_covered_perc,
-                                   prop_name, prop_email, details=export_details)
-            else:
-                _pdf_export_slot.button(
-                    f"📑 {prop_city}, {prop_state} — Executive Summary PDF",
-                    disabled=True,
-                    width="stretch",
-                    key="pdf_export_not_ready_btn",
-                    help="Executive summary PDF data is not ready for this run.",
-                )
         else:
             _html_export_slot.button(
                 f"📄 {prop_city}, {prop_state} — Executive Summary",
@@ -12781,13 +12694,6 @@ body{{background:transparent;overflow:hidden}}
                 width="stretch",
                 key="html_export_no_drones_btn",
                 help="Deploy at least one drone to generate the executive summary.",
-            )
-            _pdf_export_slot.button(
-                f"📑 {prop_city}, {prop_state} — Executive Summary PDF",
-                disabled=True,
-                width="stretch",
-                key="pdf_export_no_drones_btn",
-                help="Deploy at least one drone to generate the executive summary PDF.",
             )
 
         # 3. Google Earth KML — only when drones are placed

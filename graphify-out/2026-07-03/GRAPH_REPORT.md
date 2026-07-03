@@ -1,16 +1,16 @@
 # Graph Report - Frankenstein  (2026-07-03)
 
 ## Corpus Check
-- 70 files · ~257,925 words
+- 70 files · ~250,002 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1317 nodes · 2224 edges · 83 communities (77 shown, 6 thin omitted)
+- 1295 nodes · 2188 edges · 83 communities (75 shown, 8 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 31 edges (avg confidence: 0.76)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `c5c8943e`
+- Built from commit: `fcc7f9c1`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -112,12 +112,12 @@
 10. `Frequently Asked Questions` - 14 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `main()` --calls--> `get_export_disclaimer_text()`  [INFERRED]
-  app.py → modules/compliance_guard.py
 - `resolve_master_boundary()` --calls--> `get_jurisdiction_message()`  [INFERRED]
   _promotion_backup_20260423_191137/modules/dashboard_helpers.py → modules/config.py
 - `render_sidebar_jurisdiction_selector()` --calls--> `get_themed_logo_base64()`  [INFERRED]
   _promotion_backup_20260423_191137/modules/dashboard_helpers.py → modules/image_utils.py
+- `main()` --calls--> `get_export_disclaimer_text()`  [INFERRED]
+  app.py → modules/compliance_guard.py
 - `resolve_uploaded_boundaries()` --calls--> `find_jurisdictions_by_coordinates()`  [INFERRED]
   _promotion_backup_20260423_191137/modules/onboarding.py → modules/geospatial.py
 - `_render_public_report_route()` --calls--> `_public_report_metadata_path()`  [INFERRED]
@@ -126,7 +126,7 @@
 ## Import Cycles
 - None detected.
 
-## Communities (83 total, 6 thin omitted)
+## Communities (83 total, 8 thin omitted)
 
 ### Community 0 - "Community 0"
 Cohesion: 0.07
@@ -134,15 +134,15 @@ Nodes (61): aggressive_parse_calls(), _deduplicate_columns(), _extract_file_meta
 
 ### Community 1 - "Community 1"
 Cohesion: 0.06
-Nodes (53): BaseModel, CrashEvent, FlightTelemetrySnapshot, get_csm_for_state(), Get CSM info for a given state abbreviation., compute_debris_radius(), compute_impact_energy(), compute_parachute_descent_velocity() (+45 more)
+Nodes (51): BaseModel, CrashEvent, FlightTelemetrySnapshot, compute_debris_radius(), compute_impact_energy(), compute_parachute_descent_velocity(), compute_parachute_drift(), parachute_outcome() (+43 more)
 
 ### Community 2 - "Community 2"
-Cohesion: 0.11
-Nodes (18): compute_station_suggestions(), _forced_custom_suggestion_modes(), Helpers for dashboard runtime behavior., _queue_suggestion_mode_delta(), _ranked_suggestion_modes(), Rank stations by the requested coverage objective and return the top suggestions, Return role-specific display metrics for a suggestion card., Assign visible suggestions from the slider counts in rank order. (+10 more)
+Cohesion: 0.06
+Nodes (35): calculate_max_flights_per_day(), get_airfield_message(), get_csm_for_state(), get_faa_message(), get_hero_message(), get_spatial_message(), Global configuration, constants, and theme variables for BRINC Drone-First Respo, Get CSM info for a given state abbreviation. (+27 more)
 
 ### Community 3 - "Community 3"
-Cohesion: 0.06
-Nodes (45): _draw_wrapped_text(), generate_executive_map_pdf(), _generate_executive_map_pdf_map_only(), generate_executive_summary_pdf(), _inject_pdf_prepared_by(), _load_pdf_font(), _parse_datetime_series(), _build_apprehension_table() (+37 more)
+Cohesion: 0.12
+Nodes (19): _parse_datetime_series(), _build_cad_charts_html(), build_high_activity_staffing_html(), _build_unit_cards_html(), _detect_datetime_series_for_labels(), estimate_high_activity_overtime(), estimate_specialty_response_savings(), format_3_lines() (+11 more)
 
 ### Community 4 - "Community 4"
 Cohesion: 0.10
@@ -157,36 +157,36 @@ Cohesion: 0.11
 Nodes (24): _allocate_demo_counts(), _coord_column_matches(), _estimate_demo_preview_points(), _extract_station_lat_lon(), _find_station_coord_column(), infer_simulation_targets_from_station_file(), _looks_like_station_upload_content(), _normalize_station_state_abbr() (+16 more)
 
 ### Community 7 - "Community 7"
-Cohesion: 0.07
-Nodes (40): _apply_admin_fast_jump(), _df_latlon_signature(), fetch_county_by_centroid(), _fetch_hifld_stations_cached(), find_relevant_jurisdictions(), forward_geocode(), forward_geocode_with_context(), _forward_geocode_with_context_cached() (+32 more)
+Cohesion: 0.05
+Nodes (56): _add_boundary_geometry_traces(), add_cell_towers_layer_to_plotly(), add_no_fly_zones_layer_to_plotly(), _apply_admin_fast_jump(), _boundary_palette(), _build_carrier_mini_map(), calculate_max_flights_per_day(), _dashed_line_coords() (+48 more)
 
 ### Community 8 - "Community 8"
-Cohesion: 0.08
-Nodes (26): add_cell_towers_layer_to_plotly(), add_no_fly_zones_layer_to_plotly(), _boundary_palette(), _build_carrier_mini_map(), calculate_max_flights_per_day(), estimate_grants(), _format_minutes_label(), generate_stations_from_calls() (+18 more)
+Cohesion: 0.12
+Nodes (17): _log_qr_scan_to_sheets(), _log_to_sheets(), _notify_email(), _render_public_report_route(), _build_sheets_row(), _log_login_to_sheets(), _log_qr_scan_to_sheets(), _log_to_sheets() (+9 more)
 
 ### Community 9 - "Community 9"
-Cohesion: 0.07
-Nodes (43): _log_qr_scan_to_sheets(), _log_to_sheets(), _notify_email(), _render_public_report_route(), BaseException, log_crash(), Log a crash to stdout and configured external sinks., _build_details_html() (+35 more)
+Cohesion: 0.06
+Nodes (48): BaseException, build_corrected_export_from_merged(), Build the corrected Census export from an already merged dataframe.      This, get_jurisdiction_message(), log_crash(), Log a crash to stdout and configured external sinks., find_jurisdictions_by_coordinates(), Purely coordinate-driven jurisdiction lookup.      Spatially joins call points (+40 more)
 
 ### Community 10 - "Community 10"
-Cohesion: 0.13
-Nodes (20): reverse_geocode_state(), build_corrected_export_from_merged(), Build the corrected Census export from an already merged dataframe.      This, render_sidebar_jurisdiction_selector(), geocode_intersection_fallback_rows(), DataFrame, Geocode intersection rows with the existing forward geocoder.      The returne, format_wait_duration() (+12 more)
+Cohesion: 0.24
+Nodes (11): forward_geocode(), forward_geocode_with_context(), _forward_geocode_with_context_cached(), _get_geocoder_provider_signature(), _get_google_maps_api_key(), _get_mapbox_api_key(), lookup_county_for_city(), _lookup_streamlit_secret() (+3 more)
 
 ### Community 11 - "Community 11"
-Cohesion: 0.08
-Nodes (26): _boundary_overlay_status(), _df_latlon_signature(), fetch_census_population(), fetch_census_state_population(), fetch_county_by_centroid(), _fetch_hifld_stations_cached(), _fetch_osm_stations_cached(), find_relevant_jurisdictions() (+18 more)
+Cohesion: 0.09
+Nodes (20): _build_public_report_url(), _df_latlon_signature(), fetch_county_by_centroid(), _fetch_hifld_stations_cached(), _fetch_osm_stations_cached(), find_relevant_jurisdictions(), generate_clustered_calls(), generate_random_points_in_polygon() (+12 more)
 
 ### Community 12 - "Community 12"
-Cohesion: 0.12
-Nodes (22): _count_points_within_boundary(), find_jurisdictions_by_coordinates(), Geospatial utilities - boundaries, geocoding, station generation., Purely coordinate-driven jurisdiction lookup.      Spatially joins call points, Count calls (points) that fall within a boundary polygon., _build_context_station_rows(), _build_public_facility_rows(), _count_points_within_boundary() (+14 more)
+Cohesion: 0.15
+Nodes (19): _count_points_within_boundary(), Count calls (points) that fall within a boundary polygon., _build_context_station_rows(), _build_public_facility_rows(), _count_points_within_boundary(), _derive_jurisdiction_lookup_contexts(), _fetch_hifld_stations_cached(), _fetch_osm_stations_cached() (+11 more)
 
 ### Community 13 - "Community 13"
-Cohesion: 0.17
-Nodes (16): fetch_county_boundary_local(), Save boundary to a type-specific shapefile base so place/county do not overwrite, save_boundary_gdf(), generate_clustered_calls(), generate_random_points_in_polygon(), load_fast_demo_payload(), _prepare_sampling_polygon(), Geospatial utilities - random point generation, clustering, circle coordinates. (+8 more)
+Cohesion: 0.27
+Nodes (8): Save boundary to a type-specific shapefile base so place/county do not overwrite, save_boundary_gdf(), generate_clustered_calls(), generate_random_points_in_polygon(), load_fast_demo_payload(), _prepare_sampling_polygon(), Geospatial utilities - random point generation, clustering, circle coordinates., Build and cache the smallest useful payload for Path 03.
 
 ### Community 14 - "Community 14"
-Cohesion: 0.10
-Nodes (22): get_address_from_latlon(), Generate a self-contained HTML block for the PDF/HTML export.      Includes th, Compute and render the Drone Apprehension Impact Value table.        Derived, Render apprehension impact table + top call types chart., Safely serialize a DataFrame to a JSON-safe list of records.      Returns an e, Estimate additional annual savings from thermal-enabled search efficiency and av, Return a best-effort parsed datetime series from common CAD field patterns., Return an HTML block for the High-Activity Staffing Pressure section. (+14 more)
+Cohesion: 0.12
+Nodes (18): get_address_from_latlon(), Generate a self-contained HTML block for the PDF/HTML export.      Includes th, Safely serialize a DataFrame to a JSON-safe list of records.      Returns an e, Estimate additional annual savings from thermal-enabled search efficiency and av, Return a best-effort parsed datetime series from common CAD field patterns., Return an HTML block for the High-Activity Staffing Pressure section., Generates the full Command Center visual suite with interactive Javascript filte, Estimate high-activity monthly staffing pressure and officer overtime replacemen (+10 more)
 
 ### Community 15 - "Community 15"
 Cohesion: 0.08
@@ -209,12 +209,12 @@ Cohesion: 0.15
 Nodes (11): build_demo_boundaries(), clear_stale_boundary_shapefiles(), _extract_single_column_station_addresses(), load_simulation_custom_stations(), load_station_file(), _normalize_display_text(), _normalize_station_columns(), Helpers for onboarding and saved deployment restore. (+3 more)
 
 ### Community 20 - "Community 20"
-Cohesion: 0.10
-Nodes (21): _get_annualized_calls(), Return raw_count scaled to a full year using the uploaded file's date span., add_cell_towers_layer_to_plotly(), add_no_fly_zones_layer_to_plotly(), _build_carrier_mini_map(), calculate_max_flights_per_day(), estimate_grants(), generate_stations_from_calls() (+13 more)
+Cohesion: 0.11
+Nodes (19): add_cell_towers_layer_to_plotly(), add_no_fly_zones_layer_to_plotly(), _build_carrier_mini_map(), calculate_max_flights_per_day(), estimate_grants(), generate_stations_from_calls(), get_circle_coords(), _get_document_jurisdiction_name() (+11 more)
 
 ### Community 21 - "Community 21"
-Cohesion: 0.22
-Nodes (16): forward_geocode(), _get_geocoder_provider_signature(), _get_google_maps_api_key(), _get_mapbox_api_key(), _lookup_streamlit_secret(), _normalize_public_facility_type(), _public_facility_candidate_is_plausible(), _public_facility_candidate_score() (+8 more)
+Cohesion: 0.18
+Nodes (19): forward_geocode(), geocode_intersection_fallback_rows(), _get_geocoder_provider_signature(), _get_google_maps_api_key(), _get_mapbox_api_key(), _lookup_streamlit_secret(), _normalize_public_facility_type(), _public_facility_candidate_is_plausible() (+11 more)
 
 ### Community 22 - "Community 22"
 Cohesion: 0.06
@@ -233,8 +233,8 @@ Cohesion: 0.12
 Nodes (23): _boundary_shp_base(), fetch_county_boundary_local(), fetch_place_boundary_local(), fetch_tiger_city_shapefile(), fetch_tiger_county_subdivision_shapefile(), fetch_tiger_state_shapefile(), generate_clustered_calls(), generate_random_points_in_polygon() (+15 more)
 
 ### Community 26 - "Community 26"
-Cohesion: 0.19
-Nodes (14): GeoDataFrame, build_display_calls(), bounded_station_avg_distance_miles(), compute_all_elbow_curves(), mean_covered_distance_miles(), precompute_spatial_data(), _project_lonlat_dataframe(), _project_point_to_epsg() (+6 more)
+Cohesion: 0.16
+Nodes (16): GeoDataFrame, _boundary_overlay_status(), build_display_calls(), Geospatial utilities - boundaries, geocoding, station generation., bounded_station_avg_distance_miles(), compute_all_elbow_curves(), mean_covered_distance_miles(), precompute_spatial_data() (+8 more)
 
 ### Community 27 - "Community 27"
 Cohesion: 0.25
@@ -274,11 +274,11 @@ Nodes (11): add_coverage_traces(), _carrier_coverage_analysis(), _coverage_geom_
 
 ### Community 36 - "Community 36"
 Cohesion: 0.20
-Nodes (10): _estimate_clutter_loss_db(), _estimate_elevation_simple(), _estimate_terrain_blockage_db(), _get_terrain_cache(), _path_loss_advanced(), Global cache dict for DEM tiles to avoid re-downloading., Fetch elevation for a point (cached) — fallback to 100 ft if unavailable., Estimate clutter/foliage/building loss based on land-use class.     Returns dB a (+2 more)
+Nodes (10): _estimate_clutter_loss_db(), _estimate_elevation_simple(), _estimate_terrain_blockage_db(), _get_terrain_cache(), _path_loss_advanced(), Global cache dict for DEM tiles to avoid re-downloading., Fetch elevation for a point (cached) — fallback to 100 ft if unavailable., Estimate clutter/foliage/building loss based on land-use class.     Returns dB (+2 more)
 
 ### Community 37 - "Community 37"
-Cohesion: 0.42
-Nodes (9): fetch_census_population(), fetch_census_state_population(), _get_census_api_key(), _lookup_known_population(), _lookup_population_for_boundary(), _normalize_population_lookup_name(), _population_lookup_aliases(), Census population data lookups and utilities. (+1 more)
+Cohesion: 0.19
+Nodes (17): reverse_geocode_state(), fetch_census_population(), fetch_census_state_population(), _get_census_api_key(), _lookup_known_population(), _lookup_population_for_boundary(), _normalize_population_lookup_name(), _population_lookup_aliases() (+9 more)
 
 ### Community 38 - "Community 38"
 Cohesion: 0.22
@@ -301,8 +301,8 @@ Cohesion: 0.31
 Nodes (9): forward_geocode(), _get_geocoder_provider_signature(), _get_google_maps_api_key(), _get_mapbox_api_key(), lookup_county_for_city(), _lookup_streamlit_secret(), Use Nominatim reverse-geocode to find the county name for a city that     doesn, search_address_candidates() (+1 more)
 
 ### Community 43 - "Community 43"
-Cohesion: 0.36
-Nodes (8): fetch_census_population(), fetch_census_state_population(), _get_census_api_key(), _lookup_known_population(), _lookup_population_for_boundary(), _normalize_population_lookup_name(), _population_lookup_aliases(), _refresh_reference_population()
+Cohesion: 0.20
+Nodes (10): _get_annualized_calls(), Return raw_count scaled to a full year using the uploaded file's date span., _build_apprehension_table(), _build_cad_charts(), Compute and render the Drone Apprehension Impact Value table.        Derived, Compute and render the Drone Apprehension Impact Value table.        Derived, Render apprehension impact table + top call types chart., Render apprehension impact table + top call types chart. (+2 more)
 
 ### Community 44 - "Community 44"
 Cohesion: 0.29
@@ -313,8 +313,8 @@ Cohesion: 0.36
 Nodes (5): _df_latlon_signature(), find_relevant_jurisdictions(), get_relevant_jurisdictions_cached(), _jurisdiction_scan_signature(), Utility functions for caching, hashing, and display calculations.
 
 ### Community 46 - "Community 46"
-Cohesion: 0.50
-Nodes (4): _build_public_report_url(), _get_public_report_secret(), _get_request_base_url(), _sign_public_report_id()
+Cohesion: 0.31
+Nodes (9): _normalize_public_facility_type(), _public_facility_candidate_is_plausible(), _public_facility_candidate_score(), _public_facility_label_is_plausible(), _public_facility_query_variants(), _public_facility_type_is_plausible(), _reverse_geocode_public_facility_meta(), search_public_facility_candidates() (+1 more)
 
 ### Community 47 - "Community 47"
 Cohesion: 0.25
@@ -325,8 +325,8 @@ Cohesion: 0.29
 Nodes (6): git, python, ruff, git, pytest, ruff
 
 ### Community 49 - "Community 49"
-Cohesion: 0.13
-Nodes (14): calculate_max_flights_per_day(), get_airfield_message(), get_faa_message(), get_hero_message(), get_jurisdiction_message(), get_spatial_message(), Global configuration, constants, and theme variables for BRINC Drone-First Respo, Return max flights/day for a repeated mission profile under a duty cycle. (+6 more)
+Cohesion: 0.38
+Nodes (7): fetch_census_population(), fetch_census_state_population(), _lookup_known_population(), _lookup_population_for_boundary(), _normalize_population_lookup_name(), _population_lookup_aliases(), _refresh_reference_population()
 
 ### Community 50 - "Community 50"
 Cohesion: 0.33
@@ -338,7 +338,7 @@ Nodes (17): 10. Can it be used without internet access?, 11. What should I do if
 
 ### Community 52 - "Community 52"
 Cohesion: 0.22
-Nodes (10): _build_corrected_export_from_merged_fallback(), _build_historical_response_time_summary(), _fetch_osm_stations_cached(), _find_response_metric_column(), _make_random_stations(), DataFrame, Fallback station generator based on call-density hotspots.      If a city bounda, Cache-friendly OSM query keyed on rounded centroid (2 dp ≈ 1 km grid).     Retur (+2 more)
+Nodes (10): _build_corrected_export_from_merged_fallback(), _build_historical_response_time_summary(), _fetch_osm_stations_cached(), _find_response_metric_column(), _make_random_stations(), DataFrame, Fallback station generator based on call-density hotspots.      If a city boun, Cache-friendly OSM query keyed on rounded centroid (2 dp ≈ 1 km grid).     Retu (+2 more)
 
 ### Community 53 - "Community 53"
 Cohesion: 0.11
@@ -355,10 +355,6 @@ Nodes (5): add_cell_towers_layer_to_plotly(), add_no_fly_zones_layer_to_plotly()
 ### Community 56 - "Community 56"
 Cohesion: 0.33
 Nodes (6): _boundary_shp_base(), load_saved_boundary(), Save boundary to a type-specific shapefile base so place/county do not overwrite, Load a previously saved boundary, preferring the exact typed name., _sanitize_boundary_token(), save_boundary_gdf()
-
-### Community 57 - "Community 57"
-Cohesion: 0.50
-Nodes (4): _add_boundary_geometry_traces(), _dashed_line_coords(), _iter_boundary_polygons(), Convert a polyline into dash segments for Scattermap, which does not support lin
 
 ### Community 58 - "Community 58"
 Cohesion: 0.50
@@ -386,7 +382,7 @@ Nodes (14): 1. Create Google Cloud Project, 2. Enable Google Drive API, 3. Creat
 
 ### Community 68 - "Community 68"
 Cohesion: 0.17
-Nodes (15): fetch_place_boundary_local(), fetch_tiger_city_shapefile(), fetch_tiger_county_subdivision_shapefile(), fetch_tiger_state_shapefile(), lookup_zip_code(), _match_local_boundary_rows(), normalize_jurisdiction_name(), Extract a zip while blocking path traversal (zip slip). (+7 more)
+Nodes (16): fetch_county_boundary_local(), fetch_place_boundary_local(), fetch_tiger_city_shapefile(), fetch_tiger_county_subdivision_shapefile(), fetch_tiger_state_shapefile(), lookup_zip_code(), _match_local_boundary_rows(), normalize_jurisdiction_name() (+8 more)
 
 ### Community 69 - "Community 69"
 Cohesion: 0.13
@@ -403,10 +399,6 @@ Nodes (9): 📚 Documentation, 📞 Help, 💡 Key Features, Load Times, ⏱️ 
 ### Community 72 - "Community 72"
 Cohesion: 0.25
 Nodes (7): Core App, Current UX, Files To Inspect First, Geospatial Data Safety, Project Skills, Streamlit Monolith Surgery, Validation
-
-### Community 73 - "Community 73"
-Cohesion: 0.40
-Nodes (5): get_base64_of_bin_file(), get_transparent_product_base64(), Image processing utilities for BRINC app., Encode a binary file to base64 string., Return product image as transparent PNG by removing near-black background.
 
 ### Community 74 - "Community 74"
 Cohesion: 0.40
@@ -439,22 +431,22 @@ Nodes (3): Automated refresh (optional), 🔄 Keeping Data Fresh, Monthly refres
 ## Knowledge Gaps
 - **200 isolated node(s):** `python`, `ruff`, `git`, `Path`, `LogRecord` (+195 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **6 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **8 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `main()` connect `Community 8` to `Community 0`, `Community 2`, `Community 6`, `Community 7`, `Community 9`, `Community 10`, `Community 43`, `Community 44`, `Community 73`, `Community 41`, `Community 49`, `Community 52`, `Community 20`, `Community 25`, `Community 57`, `Community 30`?**
-  _High betweenness centrality (0.054) - this node is a cross-community bridge._
-- **Why does `Regulatory Layers — Quick Start Guide` connect `Community 71` to `Community 75`, `Community 76`, `Community 77`, `Community 78`, `Community 79`, `Community 81`?**
+- **Why does `_render_public_report_route()` connect `Community 8` to `Community 9`, `Community 15`, `Community 7`?**
+  _High betweenness centrality (0.056) - this node is a cross-community bridge._
+- **Why does `_public_report_metadata_path()` connect `Community 15` to `Community 8`?**
+  _High betweenness centrality (0.055) - this node is a cross-community bridge._
+- **Why does `main()` connect `Community 7` to `Community 0`, `Community 2`, `Community 6`, `Community 8`, `Community 9`, `Community 41`, `Community 43`, `Community 44`, `Community 52`, `Community 25`, `Community 30`?**
   _High betweenness centrality (0.043) - this node is a cross-community bridge._
-- **Why does `Data Processing Library Integration Guide` connect `Community 31` to `Community 1`?**
-  _High betweenness centrality (0.041) - this node is a cross-community bridge._
 - **Are the 9 inferred relationships involving `main()` (e.g. with `aggressive_parse_calls()` and `_get_annualized_calls()`) actually correct?**
   _`main()` has 9 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `python`, `ruff`, `git` to the rest of the system?**
-  _516 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _507 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Community 0` be split into smaller, more focused modules?**
   _Cohesion score 0.07055630936227951 - nodes in this community are weakly interconnected._
 - **Should `Community 1` be split into smaller, more focused modules?**
-  _Cohesion score 0.061581920903954805 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.0647307924984876 - nodes in this community are weakly interconnected._

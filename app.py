@@ -41,6 +41,8 @@ from PIL import Image
 APP_DIR = Path(__file__).resolve().parent
 MODULES_DIR = APP_DIR / "modules"
 
+from modules.crash_logging import configure_crash_logging, log_crash
+
 
 def _load_local_module(module_name: str):
     """Load a local modules.* file defensively for Streamlit/Python import edge cases."""
@@ -145,6 +147,10 @@ __build_datetime__ = _versioning_mod.__build_datetime__
 __build_timestamp__ = _versioning_mod.__build_timestamp__
 __build_line_count__ = _versioning_mod.__build_line_count__
 _render_version_badge = _versioning_mod._render_version_badge
+configure_crash_logging(
+    source_app=APP_DIR.name,
+    release=f"{__version__}-{__build_revision__}",
+)
 _public_reports_mod = _load_local_module("public_reports")
 _build_public_report_url = _public_reports_mod._build_public_report_url
 _get_document_jurisdiction_name = _public_reports_mod._get_document_jurisdiction_name
@@ -170,6 +176,13 @@ try:
     )
 except Exception as _notifications_import_error:
     NOTIFICATIONS_AVAILABLE = False
+    log_crash(
+        "notifications import",
+        _notifications_import_error,
+        traceback.format_exc(),
+        details={"source_app": APP_DIR.name},
+        source_app=APP_DIR.name,
+    )
 
     def _notify_email(*args, **kwargs):
         return None
@@ -2300,9 +2313,9 @@ def _match_local_boundary_rows(gdf, state_fips, search_name):
 @st.cache_data
 def fetch_place_boundary_local(state_abbr, place_name_input):
     """Look up a city/town/CDP boundary from local parquet caches.
-    Connecticut towns fall back to county-subdivision data when needed."""
+    Connecticut and Rhode Island towns fall back to county-subdivision data when needed."""
     local_files = ["places_lite.parquet"]
-    if str(state_abbr or '').strip().upper() == "CT":
+    if str(state_abbr or '').strip().upper() in {"CT", "RI"}:
         local_files.append("county_subdivisions_lite.parquet")
 
     state_fips = STATE_FIPS.get(state_abbr)
@@ -2318,6 +2331,11 @@ def fetch_place_boundary_local(state_abbr, place_name_input):
             match = _match_local_boundary_rows(gdf, state_fips, search_name)
             if match is not None and not match.empty:
                 return True, match
+
+        if str(state_abbr or '').strip().upper() in {"CT", "RI"}:
+            tiger_success, tiger_gdf = fetch_tiger_county_subdivision_shapefile(state_fips, search_name, SHAPEFILE_DIR)
+            if tiger_success and tiger_gdf is not None and not tiger_gdf.empty:
+                return True, tiger_gdf
 
     except Exception:
         return False, None
@@ -2704,6 +2722,56 @@ def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
         return True, city_gdf
     except Exception as e:
         print(f"[BRINC] fetch_tiger_city_shapefile failed for {city_name}: {e}")
+        return False, None
+
+@st.cache_data
+def fetch_tiger_county_subdivision_shapefile(state_fips, subdivision_name, output_dir):
+    # Rhode Island and Connecticut towns often live in county-subdivision TIGER files.
+    temp_dir = os.path.join(output_dir, f"temp_tiger_{state_fips}_cousub")
+    cached_shp = os.path.join(temp_dir, f"tl_2023_{state_fips}_cousub.shp")
+    gdf = None
+
+    if os.path.exists(cached_shp):
+        try:
+            gdf = gpd.read_file(cached_shp)
+        except Exception:
+            gdf = None
+
+    if gdf is None:
+        for year in ["2023", "2022"]:
+            url = f"https://www2.census.gov/geo/tiger/TIGER{year}/COUSUB/tl_{year}_{state_fips}_cousub.zip"
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "BRINC_COS_Optimizer/1.0"})
+                with urllib.request.urlopen(req, timeout=45) as resp:
+                    zip_data = resp.read()
+                zip_file = zipfile.ZipFile(io.BytesIO(zip_data))
+                os.makedirs(temp_dir, exist_ok=True)
+                zip_file.extractall(temp_dir)
+                shp_files = glob.glob(os.path.join(temp_dir, "*.shp"))
+                if shp_files:
+                    gdf = gpd.read_file(shp_files[0])
+                    break
+            except Exception:
+                continue
+
+    if gdf is None:
+        return False, None
+
+    try:
+        search_name = normalize_jurisdiction_name(subdivision_name)
+        match = _match_local_boundary_rows(gdf, state_fips, search_name)
+        if match is None or match.empty:
+            return False, None
+
+        county_sub_gdf = match.copy()
+        if county_sub_gdf.crs is None:
+            county_sub_gdf = county_sub_gdf.set_crs(epsg=4269)
+        county_sub_gdf = county_sub_gdf.to_crs(epsg=4326)
+        save_path = os.path.join(output_dir, f"{subdivision_name.replace(' ', '_')}_{state_fips}_cousub.shp")
+        county_sub_gdf.to_file(save_path)
+        return True, county_sub_gdf
+    except Exception as e:
+        print(f"[BRINC] fetch_tiger_county_subdivision_shapefile failed for {subdivision_name}: {e}")
         return False, None
 
 def add_cell_towers_layer_to_plotly(fig, state_abbr, minx, miny, maxx, maxy):
@@ -3756,6 +3824,11 @@ st.set_page_config(
     initial_sidebar_state="expanded",
     page_title="BRINC Drone-as-First-Responder",
     page_icon="https://brincdrones.com/favicon.ico"
+)
+configure_crash_logging(
+    source_app=APP_DIR.name,
+    release=f"{__version__}-{__build_revision__}",
+    secrets=st.secrets,
 )
 
 # ============================================================
@@ -5520,20 +5593,28 @@ def main():
                     try:
                         _city, _state = _get_crash_city_state()
                         _files = list(st.session_state.get('_last_uploaded_files', []))
+                        _crash_details = {
+                            'source_app': Path(__file__).resolve().parent.name,
+                            'session_id': st.session_state.get('session_id', ''),
+                            'user_email': _get_crash_user_email(),
+                            'city': _city,
+                            'state': _state,
+                            'file_count': len(_files),
+                            'upload_signature': current_upload_signature if 'current_upload_signature' in locals() else '',
+                            'upload_files': _files,
+                        }
+                        log_crash(
+                            step_name,
+                            exc,
+                            tb_text,
+                            details=_crash_details,
+                            source_app=APP_DIR.name,
+                        )
                         crash_report_path = _write_crash_report(
                             step_name,
                             str(exc),
                             tb_text,
-                            details={
-                                'source_app': Path(__file__).resolve().parent.name,
-                                'session_id': st.session_state.get('session_id', ''),
-                                'user_email': _get_crash_user_email(),
-                                'city': _city,
-                                'state': _state,
-                                'file_count': len(_files),
-                                'upload_signature': current_upload_signature if 'current_upload_signature' in locals() else '',
-                                'upload_files': _files,
-                            },
+                            details=_crash_details,
                         )
                         if crash_report_path:
                             st.session_state['_last_crash_report_path'] = str(crash_report_path)
@@ -5542,16 +5623,7 @@ def main():
                             step_name,
                             str(exc),
                             tb_text,
-                            details={
-                                'source_app': Path(__file__).resolve().parent.name,
-                                'session_id': st.session_state.get('session_id', ''),
-                                'user_email': _get_crash_user_email(),
-                                'city': _city,
-                                'state': _state,
-                                'file_count': len(_files),
-                                'upload_signature': current_upload_signature if 'current_upload_signature' in locals() else '',
-                                'upload_files': _files,
-                            },
+                            details=_crash_details,
                         )
                     except Exception as _crash_email_exc:
                         _push_upload_log(f"⚠ Crash email failed: {_crash_email_exc}")
@@ -7263,6 +7335,13 @@ body{{background:transparent;overflow:hidden}}
                     for f in (st.session_state.get('sim_optional_uploader') or st.session_state.get('uploaded_files') or [])
                 ],
             }
+            log_crash(
+                _opt_step,
+                _opt_exc,
+                _opt_tb,
+                details=_opt_details,
+                source_app=APP_DIR.name,
+            )
             try:
                 _opt_report_path = _write_crash_report(
                     _opt_step,
@@ -12747,52 +12826,44 @@ if __name__ == "__main__":
     except Exception as _app_crash_exc:
         _app_crash_tb = traceback.format_exc()
         _app_crash_report_path = None
+        _app_crash_step = st.session_state.get('_upload_crash_step', 'application startup/runtime')
+        _app_crash_details = {
+            'source_app': Path(__file__).resolve().parent.name,
+            'session_id': st.session_state.get('session_id', ''),
+            'user_email': str(
+                st.session_state.get('google_user_email', '')
+                or st.session_state.get('_last_user_email', '')
+                or getattr(st.user, 'email', '')
+                or ''
+            ).strip(),
+            'city': str(st.session_state.get('active_city', '') or '').strip(),
+            'state': str(st.session_state.get('active_state', '') or '').strip(),
+            'file_count': len(st.session_state.get('_last_uploaded_files', [])),
+            'upload_signature': st.session_state.get('census_source_signature', '') or _app_crash_step,
+            'upload_files': [
+                getattr(f, 'name', '')
+                for f in (st.session_state.get('sim_optional_uploader') or st.session_state.get('uploaded_files') or [])
+            ],
+        }
+        log_crash(
+            _app_crash_step,
+            _app_crash_exc,
+            _app_crash_tb,
+            details=_app_crash_details,
+            source_app=APP_DIR.name,
+        )
         try:
             _app_crash_report_path = _write_crash_report(
-                st.session_state.get('_upload_crash_step', 'application startup/runtime'),
+                _app_crash_step,
                 str(_app_crash_exc),
                 _app_crash_tb,
-                details={
-                    'source_app': Path(__file__).resolve().parent.name,
-                    'session_id': st.session_state.get('session_id', ''),
-                    'user_email': str(
-                        st.session_state.get('google_user_email', '')
-                        or st.session_state.get('_last_user_email', '')
-                        or getattr(st.user, 'email', '')
-                        or ''
-                    ).strip(),
-                    'city': str(st.session_state.get('active_city', '') or '').strip(),
-                    'state': str(st.session_state.get('active_state', '') or '').strip(),
-                    'file_count': len(st.session_state.get('_last_uploaded_files', [])),
-                    'upload_signature': st.session_state.get('census_source_signature', '') or st.session_state.get('_upload_crash_step', ''),
-                    'upload_files': [
-                        getattr(f, 'name', '')
-                        for f in (st.session_state.get('sim_optional_uploader') or st.session_state.get('uploaded_files') or [])
-                    ],
-                },
+                details=_app_crash_details,
             )
             _notify_crash_email(
-                st.session_state.get('_upload_crash_step', 'application startup/runtime'),
+                _app_crash_step,
                 str(_app_crash_exc),
                 _app_crash_tb,
-                details={
-                    'source_app': Path(__file__).resolve().parent.name,
-                    'session_id': st.session_state.get('session_id', ''),
-                    'user_email': str(
-                        st.session_state.get('google_user_email', '')
-                        or st.session_state.get('_last_user_email', '')
-                        or getattr(st.user, 'email', '')
-                        or ''
-                    ).strip(),
-                    'city': str(st.session_state.get('active_city', '') or '').strip(),
-                    'state': str(st.session_state.get('active_state', '') or '').strip(),
-                    'file_count': len(st.session_state.get('_last_uploaded_files', [])),
-                    'upload_signature': st.session_state.get('census_source_signature', '') or st.session_state.get('_upload_crash_step', ''),
-                    'upload_files': [
-                        getattr(f, 'name', '')
-                        for f in (st.session_state.get('sim_optional_uploader') or st.session_state.get('uploaded_files') or [])
-                    ],
-                },
+                details=_app_crash_details,
             )
         except Exception:
             pass

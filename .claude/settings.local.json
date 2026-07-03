@@ -56,5 +56,10 @@
       "Bash(sed -n '759,1102p' app.py)",
       "Bash(bash \"C:/Users/4070/.claude/statusline-command.sh\")"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "pytest",
+    "ruff",
+    "git"
+  ]
 }

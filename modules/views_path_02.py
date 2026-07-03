@@ -52,6 +52,7 @@ from modules.census_batch import (
 )
 from modules.geocoding import geocode_intersection_fallback_rows
 from modules.notifications import _write_crash_report, _notify_crash_email
+from modules.crash_logging import log_crash
 from modules.image_utils import get_themed_logo_base64, get_transparent_product_base64
 
 
@@ -447,20 +448,28 @@ def render():
             try:
                 _city, _state = _get_crash_city_state()
                 _files = list(st.session_state.get('_last_uploaded_files', []))
+                _crash_details = {
+                    'source_app': Path(__file__).resolve().parent.parent.name,
+                    'session_id': st.session_state.get('session_id', ''),
+                    'user_email': _get_crash_user_email(),
+                    'city': _city,
+                    'state': _state,
+                    'file_count': len(_files),
+                    'upload_signature': current_upload_signature if 'current_upload_signature' in locals() else '',
+                    'upload_files': _files,
+                }
+                log_crash(
+                    step_name,
+                    exc,
+                    tb_text,
+                    details=_crash_details,
+                    source_app=Path(__file__).resolve().parent.parent.name,
+                )
                 crash_report_path = _write_crash_report(
                     step_name,
                     str(exc),
                     tb_text,
-                    details={
-                        'source_app': Path(__file__).resolve().parent.parent.name,
-                        'session_id': st.session_state.get('session_id', ''),
-                        'user_email': _get_crash_user_email(),
-                        'city': _city,
-                        'state': _state,
-                        'file_count': len(_files),
-                        'upload_signature': current_upload_signature if 'current_upload_signature' in locals() else '',
-                        'upload_files': _files,
-                    },
+                    details=_crash_details,
                 )
                 if crash_report_path:
                     st.session_state['_last_crash_report_path'] = str(crash_report_path)
@@ -469,16 +478,7 @@ def render():
                     step_name,
                     str(exc),
                     tb_text,
-                    details={
-                        'source_app': Path(__file__).resolve().parent.parent.name,
-                        'session_id': st.session_state.get('session_id', ''),
-                        'user_email': _get_crash_user_email(),
-                        'city': _city,
-                        'state': _state,
-                        'file_count': len(_files),
-                        'upload_signature': current_upload_signature if 'current_upload_signature' in locals() else '',
-                        'upload_files': _files,
-                    },
+                    details=_crash_details,
                 )
             except Exception as _crash_email_exc:
                 _push_upload_log(f"⚠ Crash email failed: {_crash_email_exc}")

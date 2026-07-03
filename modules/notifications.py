@@ -4,10 +4,12 @@ Email and Google Sheets notification system for BRINC app.
 
 import datetime
 import json
+import logging
 import smtplib
 import html
 import re
 import threading
+import traceback
 from pathlib import Path
 import streamlit as st
 from email.mime.text import MIMEText
@@ -21,6 +23,10 @@ from modules.versioning import (
     __build_datetime__,
     __build_line_count__,
 )
+from modules.crash_logging import log_crash
+
+
+logger = logging.getLogger(__name__)
 
 
 EXPORT_HEADERS = [
@@ -194,7 +200,7 @@ def _log_crash_to_sheets(
         ])
         return True
     except Exception as exc:
-        print(f"[BRINC] Crash Sheets log failed: {type(exc).__name__}: {exc}")
+        logger.exception("[BRINC] Crash Sheets log failed: %s: %s", type(exc).__name__, exc)
         return False
 
 
@@ -350,8 +356,14 @@ def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=8) as server:
             server.login(gmail_address, app_password)
             server.sendmail(gmail_address, recipients, msg.as_string())
-    except:
-        pass
+    except Exception as exc:
+        logger.exception("[BRINC] Notification email failed.")
+        log_crash(
+            "notification email",
+            exc,
+            traceback.format_exc(),
+            details={"event_type": file_type, "city": city, "state": state},
+        )
 
 
 def _notify_crash_email(step, error_message, traceback_text, details=None):
@@ -364,7 +376,7 @@ def _notify_crash_email(step, error_message, traceback_text, details=None):
         recipients = _split_recipients([notify_address, sms_address])
         if not gmail_address:
             reason = "missing GMAIL_ADDRESS secret"
-            print(f"[BRINC] Crash email skipped: {reason}.")
+            logger.warning("[BRINC] Crash email skipped: %s.", reason)
             _log_crash_to_sheets(
                 step, error_message, traceback_text, details,
                 event_type="CRASH_EMAIL", email_status="SKIPPED", email_detail=reason,
@@ -372,7 +384,7 @@ def _notify_crash_email(step, error_message, traceback_text, details=None):
             return
         if not app_password:
             reason = "missing GMAIL_APP_PASSWORD secret"
-            print(f"[BRINC] Crash email skipped: {reason}.")
+            logger.warning("[BRINC] Crash email skipped: %s.", reason)
             _log_crash_to_sheets(
                 step, error_message, traceback_text, details,
                 event_type="CRASH_EMAIL", email_status="SKIPPED", email_detail=reason,
@@ -380,7 +392,7 @@ def _notify_crash_email(step, error_message, traceback_text, details=None):
             return
         if not recipients:
             reason = "no NOTIFY_EMAIL or NOTIFY_SMS_EMAIL recipients configured"
-            print(f"[BRINC] Crash email skipped: {reason}.")
+            logger.warning("[BRINC] Crash email skipped: %s.", reason)
             _log_crash_to_sheets(
                 step, error_message, traceback_text, details,
                 event_type="CRASH_EMAIL", email_status="SKIPPED", email_detail=reason,
@@ -453,12 +465,17 @@ def _notify_crash_email(step, error_message, traceback_text, details=None):
         )
     except Exception as exc:
         detail = f"{type(exc).__name__}: {exc}"
-        print(f"[BRINC] Crash email failed: {detail}")
+        logger.exception("[BRINC] Crash email failed: %s", detail)
+        log_crash(
+            "crash email notification",
+            exc,
+            traceback.format_exc(),
+            details=details or {},
+        )
         _log_crash_to_sheets(
             step, error_message, traceback_text, details,
             event_type="CRASH_EMAIL", email_status="FAILED", email_detail=detail,
         )
-        pass
 
 
 def _notify_crash_email_html_only_legacy(step, error_message, traceback_text, details=None):
@@ -520,8 +537,14 @@ def _notify_crash_email_html_only_legacy(step, error_message, traceback_text, de
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=8) as server:
             server.login(gmail_address, app_password)
             server.sendmail(gmail_address, recipients, msg.as_string())
-    except:
-        pass
+    except Exception as exc:
+        logger.exception("[BRINC] Legacy crash email failed.")
+        log_crash(
+            "legacy crash email notification",
+            exc,
+            traceback.format_exc(),
+            details=details or {},
+        )
 
 
 def _ensure_sheet_headers(sheet):
@@ -714,7 +737,14 @@ def _write_crash_report(step, error_message, traceback_text, details=None):
             crash_report_path=str(report_path),
         )
         return str(report_path)
-    except Exception:
+    except Exception as exc:
+        logger.exception("[BRINC] Crash report write failed.")
+        log_crash(
+            "write crash report",
+            exc,
+            traceback.format_exc(),
+            details=details or {},
+        )
         return ""
 
 

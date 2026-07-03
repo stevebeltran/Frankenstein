@@ -1,5 +1,8 @@
+# Never track any real secrets file, including ad-hoc backup copies.
 .streamlit/secrets.toml
 .streamlit/secrets.toml.local
+.streamlit/*secret*.toml
+!.streamlit/secrets.toml.template
 .venv/
 *.pyc
 __pycache__/

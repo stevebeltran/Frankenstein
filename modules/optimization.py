@@ -74,7 +74,8 @@ def _project_lonlat_dataframe(df: pd.DataFrame, epsg_code) -> gpd.GeoDataFrame:
 
     work['lat'] = pd.to_numeric(work['lat'], errors='coerce')
     work['lon'] = pd.to_numeric(work['lon'], errors='coerce')
-    work = work.replace([np.inf, -np.inf], np.nan).dropna(subset=['lat', 'lon']).reset_index(drop=True)
+    finite_mask = np.isfinite(work['lat'].to_numpy(dtype=float)) & np.isfinite(work['lon'].to_numpy(dtype=float))
+    work = work.loc[finite_mask].reset_index(drop=True)
     if work.empty:
         return gpd.GeoDataFrame(work, geometry=[], crs="EPSG:4326")
 

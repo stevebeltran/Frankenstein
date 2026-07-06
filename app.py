@@ -5441,7 +5441,7 @@ def main():
                 _upload_overlay_html = """<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
 <script>
 (function(){{
-  var doc = parent.document;
+  var doc = document;
   var old = doc.getElementById('brinc-flo');
   if(old && old.parentNode) old.parentNode.removeChild(old);
   var oldCss = doc.getElementById('brinc-flo-css');
@@ -5500,8 +5500,8 @@ def main():
   var statusEl = wrap.querySelector('#fl-stl');
   var msgs = ['INGESTING INCIDENT DATA','CHECKING FOR LAT/LON','DETECTING COLUMN TYPES','PREPARING CENSUS BATCH IF NEEDED','RESOLVING JURISDICTION','BUILDING STATION GRID','PREPARING ANALYSIS'];
   var mi = 0;
-  if(parent._brincFloMsgs) parent.clearInterval(parent._brincFloMsgs);
-  parent._brincFloMsgs = parent.setInterval(function(){{
+  if(window._brincFloMsgs) window.clearInterval(window._brincFloMsgs);
+  window._brincFloMsgs = window.setInterval(function(){{
     mi = (mi + 1) % msgs.length;
     if(statusEl) statusEl.innerHTML = msgs[mi] + '<span class="fl-dots"></span>';
   }}, 2400);
@@ -5515,27 +5515,27 @@ def main():
                     .replace("{{", "{")
                     .replace("}}", "}")
                 )
-                components.html(_upload_overlay_html, height=0, scrolling=False)
+                st.html(_upload_overlay_html, unsafe_allow_javascript=True)
 
                 def _clear_upload_overlay():
-                    components.html("""<!DOCTYPE html><html><head></head><body><script>
+                    st.html("""<!DOCTYPE html><html><head></head><body><script>
 (function(){
-  var doc = parent.document;
-  if(parent._brincFloWd){ parent.clearInterval(parent._brincFloWd); parent._brincFloWd = null; }
-  if(parent._brincFloMsgs){ parent.clearInterval(parent._brincFloMsgs); parent._brincFloMsgs = null; }
+  var doc = document;
+  if(window._brincFloWd){ window.clearInterval(window._brincFloWd); window._brincFloWd = null; }
+  if(window._brincFloMsgs){ window.clearInterval(window._brincFloMsgs); window._brincFloMsgs = null; }
   var el = doc.getElementById('brinc-flo');
   if(el){
     el.style.transition = 'opacity 0.25s ease';
     el.style.opacity = '0';
   }
-  parent.setTimeout(function(){
+  window.setTimeout(function(){
     var e = doc.getElementById('brinc-flo');
     if(e && e.parentNode) e.parentNode.removeChild(e);
     var s = doc.getElementById('brinc-flo-css');
     if(s && s.parentNode) s.parentNode.removeChild(s);
   }, 280);
 })();
-</script></body></html>""", height=0, scrolling=False)
+</script></body></html>""", unsafe_allow_javascript=True)
 
                 def _set_upload_overlay_status(title="", status="", copy="", progress=None, logs=None, error=False):
                     _title_js = json.dumps(str(title or ""))
@@ -5546,7 +5546,7 @@ def main():
                     _error_js = 'true' if error else 'false'
                     _upload_overlay_status_html = """<!DOCTYPE html><html><head></head><body><script>
 (function(){{
-  var doc = parent.document;
+  var doc = document;
   var el = doc.getElementById('brinc-flo');
   if(!el) return;
   var titleEl = el.querySelector('.fl-city');
@@ -5565,7 +5565,7 @@ def main():
     logEl.innerHTML = _lines && _lines.length ? _lines.join('<br>') : 'Preparing upload details…';
     if({_error_js}) logEl.classList.add('error'); else logEl.classList.remove('error');
   }}
-  if(parent._brincFloMsgs){{ parent.clearInterval(parent._brincFloMsgs); parent._brincFloMsgs = null; }}
+  if(window._brincFloMsgs){{ window.clearInterval(window._brincFloMsgs); window._brincFloMsgs = null; }}
 }})();
 </script></body></html>"""
                     _upload_overlay_status_html = (
@@ -5579,7 +5579,7 @@ def main():
                         .replace("{{", "{")
                         .replace("}}", "}")
                     )
-                    components.html(_upload_overlay_status_html, height=0, scrolling=False)
+                    st.html(_upload_overlay_status_html, unsafe_allow_javascript=True)
 
                 _upload_logs = []
 

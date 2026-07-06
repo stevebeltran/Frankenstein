@@ -647,7 +647,21 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
             p_norm = str(pattern).strip().lower()
             p_normalized = p_norm.replace('-', ' ').replace('_', ' ')
             p_compact = re.sub(r'[^a-z0-9]+', '', p_norm)
-            if p_norm in norm or p_normalized in normalized or (p_compact and p_compact in compact):
+            # Keep loose matching for human-readable variants, but avoid
+            # compact substring matches like "ylocation" inside
+            # "primarylocationcommonname", which misclassify non-coordinate
+            # columns as lat/lon.
+            if (
+                p_norm in norm
+                or p_normalized in normalized
+                or (
+                    p_compact and (
+                        compact == p_compact
+                        or compact.startswith(p_compact)
+                        or compact.endswith(p_compact)
+                    )
+                )
+            ):
                 return True
         return False
 

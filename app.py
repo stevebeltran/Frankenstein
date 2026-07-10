@@ -41,7 +41,14 @@ from PIL import Image
 APP_DIR = Path(__file__).resolve().parent
 MODULES_DIR = APP_DIR / "modules"
 
-from modules.crash_logging import configure_crash_logging, log_crash
+from modules.crash_logging import (
+    configure_crash_logging,
+    log_crash,
+    sentry_breadcrumb,
+    sentry_metric,
+    sentry_set_user_context,
+    sentry_span,
+)
 
 
 def _load_local_module(module_name: str):
@@ -4039,6 +4046,11 @@ try:
 except Exception:
     pass
 init_session_state(st.session_state, _slugify, _build_public_report_url)
+sentry_set_user_context(
+    session_id=str(st.session_state.get("session_id", "")),
+    email=str(st.session_state.get("google_user_email", "") or getattr(st.user, "email", "") or ""),
+    user_id=str(st.session_state.get("brinc_user", "")),
+)
 
 # ============================================================
 # TRANSIENT BUILD NOTICE
@@ -5368,7 +5380,32 @@ def main():
                         else:
                             st.session_state['stations_user_uploaded'] = False
                             with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools; this can take 10-20 seconds…"):
-                                df_s, osm_note = generate_stations_from_calls(df_c)
+                                sentry_breadcrumb(
+                                    "Station generation started",
+                                    category="stations",
+                                    call_count=len(df_c) if df_c is not None else 0,
+                                    source="census_restored",
+                                )
+                                with sentry_span(
+                                    "stations.generate",
+                                    "Generate station candidates from Census-restored calls",
+                                    call_count=len(df_c) if df_c is not None else 0,
+                                ):
+                                    df_s, osm_note = generate_stations_from_calls(df_c)
+                                sentry_breadcrumb(
+                                    "Station generation finished",
+                                    category="stations",
+                                    station_count=len(df_s) if df_s is not None else 0,
+                                    used_fallback=bool(df_s is None or df_s.empty),
+                                    source="census_restored",
+                                )
+                                sentry_metric(
+                                    "distribution",
+                                    "stations.generated.count",
+                                    len(df_s) if df_s is not None else 0,
+                                    source="census_restored",
+                                    used_fallback=bool(df_s is None or df_s.empty),
+                                )
                             if df_s is None or df_s.empty:
                                 df_s = _make_random_stations(df_c, n=40)
                                 osm_note = "⚠️ Could not reach any map source — using estimated station positions from call data."
@@ -5723,7 +5760,32 @@ def main():
                         )
                         with st.spinner("🔍 Detecting column types in CAD export…"):
                             _mark_upload_step("parsing CAD upload")
-                            df_c = aggressive_parse_calls(call_files)
+                            sentry_breadcrumb(
+                                "CAD parse started",
+                                category="cad",
+                                file_count=len(call_files or []),
+                                require_valid_coordinates=True,
+                            )
+                            with sentry_span(
+                                "cad.parse",
+                                "Parse uploaded CAD files",
+                                file_count=len(call_files or []),
+                                require_valid_coordinates=True,
+                            ):
+                                df_c = aggressive_parse_calls(call_files)
+                            sentry_breadcrumb(
+                                "CAD parse finished",
+                                category="cad",
+                                output_rows=len(df_c) if df_c is not None else 0,
+                                has_coordinates=bool(df_c is not None and not df_c.empty),
+                            )
+                            sentry_metric(
+                                "distribution",
+                                "cad.parse.output_rows",
+                                len(df_c) if df_c is not None else 0,
+                                workflow="cad_upload",
+                                require_valid_coordinates=True,
+                            )
                         for _pq_item in st.session_state.get('parse_quality', []):
                             _pq_in = _pq_item.get('input_rows', 0)
                             _pq_out = _pq_item.get('output_rows', 0)
@@ -5765,7 +5827,31 @@ def main():
                                     progress=24,
                                     logs=_upload_logs,
                                 )
-                                df_c_partial = aggressive_parse_calls(call_files, require_valid_coordinates=False)
+                                sentry_breadcrumb(
+                                    "CAD Census staging parse started",
+                                    category="cad",
+                                    file_count=len(call_files or []),
+                                    require_valid_coordinates=False,
+                                )
+                                with sentry_span(
+                                    "cad.parse",
+                                    "Parse uploaded CAD files for Census staging",
+                                    file_count=len(call_files or []),
+                                    require_valid_coordinates=False,
+                                ):
+                                    df_c_partial = aggressive_parse_calls(call_files, require_valid_coordinates=False)
+                                sentry_breadcrumb(
+                                    "CAD Census staging parse finished",
+                                    category="cad",
+                                    output_rows=len(df_c_partial) if df_c_partial is not None else 0,
+                                )
+                                sentry_metric(
+                                    "distribution",
+                                    "cad.parse.output_rows",
+                                    len(df_c_partial) if df_c_partial is not None else 0,
+                                    workflow="census_staging",
+                                    require_valid_coordinates=False,
+                                )
                                 _push_upload_log("Extracting street, city, state, and ZIP fields for Census formatting.")
                                 _set_upload_overlay_status(
                                     title="CENSUS REQUIRED",
@@ -6172,7 +6258,30 @@ def main():
                             )
                             st.session_state['stations_user_uploaded'] = False
                             with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools; this can take 10-20 seconds…"):
-                                df_s, osm_note = generate_stations_from_calls(df_c)
+                                sentry_breadcrumb(
+                                    "Station generation started",
+                                    category="stations",
+                                    call_count=len(df_c) if df_c is not None else 0,
+                                )
+                                with sentry_span(
+                                    "stations.generate",
+                                    "Generate station candidates from calls",
+                                    call_count=len(df_c) if df_c is not None else 0,
+                                ):
+                                    df_s, osm_note = generate_stations_from_calls(df_c)
+                                sentry_breadcrumb(
+                                    "Station generation finished",
+                                    category="stations",
+                                    station_count=len(df_s) if df_s is not None else 0,
+                                    used_fallback=bool(df_s is None or df_s.empty),
+                                )
+                                sentry_metric(
+                                    "distribution",
+                                    "stations.generated.count",
+                                    len(df_s) if df_s is not None else 0,
+                                    source="cad_upload",
+                                    used_fallback=bool(df_s is None or df_s.empty),
+                                )
                             if df_s is None or df_s.empty:
                                 # Final safety net: scatter stations across call bounding box
                                 df_s = _make_random_stations(df_c, n=40)
@@ -7322,32 +7431,72 @@ body{{background:transparent;overflow:hidden}}
         _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
         opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{guard_strategy}_{resp_strategy}_{deployment_mode}_{incremental_build}_{allow_redundancy}_{complement_mode}_{shared_mode}_{bounds_hash}_{_station_signature}_{_pins_key}"
         try:
-            _opt_result = optimize_fleet_selection(
-                st,
-                st.session_state,
-                optimization,
-                station_metadata,
-                resp_matrix,
-                guard_matrix,
-                dist_matrix_r,
-                dist_matrix_g,
+            sentry_breadcrumb(
+                "Optimizer started",
+                category="optimizer",
+                station_count=len(station_metadata) if station_metadata is not None else 0,
+                call_count=total_calls,
+                responder_count=k_responder,
+                guardian_count=k_guardian,
+            )
+            with sentry_span(
+                "optimizer.solve",
+                "Optimize fleet selection",
+                station_count=len(station_metadata) if station_metadata is not None else 0,
+                call_count=total_calls,
+                responder_count=k_responder,
+                guardian_count=k_guardian,
+                allow_redundancy=allow_redundancy,
+                complement_mode=complement_mode,
+                shared_mode=shared_mode,
+                incremental_build=incremental_build,
+            ):
+                _opt_result = optimize_fleet_selection(
+                    st,
+                    st.session_state,
+                    optimization,
+                    station_metadata,
+                    resp_matrix,
+                    guard_matrix,
+                    dist_matrix_r,
+                    dist_matrix_g,
+                    total_calls,
+                    calls_per_day,
+                    dfr_dispatch_rate,
+                    CONFIG,
+                    k_responder,
+                    k_guardian,
+                    guard_radius_mi,
+                    allow_redundancy,
+                    complement_mode,
+                    shared_mode,
+                    incremental_build,
+                    guard_strategy,
+                    resp_strategy,
+                    locked_g_pins,
+                    locked_r_pins,
+                    n,
+                    opt_cache_key,
+                )
+            sentry_breadcrumb(
+                "Optimizer finished",
+                category="optimizer",
+                responder_count=k_responder,
+                guardian_count=k_guardian,
+            )
+            sentry_metric(
+                "distribution",
+                "optimizer.input.calls",
                 total_calls,
-                calls_per_day,
-                dfr_dispatch_rate,
-                CONFIG,
-                k_responder,
-                k_guardian,
-                guard_radius_mi,
-                allow_redundancy,
-                complement_mode,
-                shared_mode,
-                incremental_build,
-                guard_strategy,
-                resp_strategy,
-                locked_g_pins,
-                locked_r_pins,
-                n,
-                opt_cache_key,
+                responder_count=k_responder,
+                guardian_count=k_guardian,
+            )
+            sentry_metric(
+                "distribution",
+                "optimizer.input.stations",
+                len(station_metadata) if station_metadata is not None else 0,
+                responder_count=k_responder,
+                guardian_count=k_guardian,
             )
         except Exception as _opt_exc:
             _opt_tb = traceback.format_exc()
@@ -7547,6 +7696,20 @@ body{{background:transparent;overflow:hidden}}
         if _metric_total_calls > 0:
             calls_covered_perc = (np.logical_or(cov_r, cov_g).sum() / _metric_total_calls) * 100
             st.session_state['calls_covered_perc'] = calls_covered_perc
+            sentry_metric(
+                "gauge",
+                "coverage.calls_percent",
+                float(calls_covered_perc or 0),
+                responder_count=len(active_resp_idx or []),
+                guardian_count=len(active_guard_idx or []),
+            )
+        sentry_metric(
+            "gauge",
+            "coverage.area_percent",
+            float(area_covered_perc or 0),
+            responder_count=len(active_resp_idx or []),
+            guardian_count=len(active_guard_idx or []),
+        )
         if len(active_geos) >= 2:
             inters = [active_geos[i].intersection(active_geos[j])
                       for i in range(len(active_geos))
@@ -12645,6 +12808,13 @@ body{{background:transparent;overflow:hidden}}
         _ts          = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         _version_slug = _safe_export_slug(__version__, "version")
         st.session_state['report_build_seconds'] = round(time.perf_counter() - _report_build_started, 2)
+        sentry_metric(
+            "distribution",
+            "report.build_seconds",
+            float(st.session_state['report_build_seconds']),
+            responder_count=actual_k_responder,
+            guardian_count=actual_k_guardian,
+        )
         _report_notice_slot.caption(
             f"Reports ready in {st.session_state['report_build_seconds']:.1f}s. The download buttons below are active."
         )
@@ -12660,6 +12830,14 @@ body{{background:transparent;overflow:hidden}}
                                               file_name=f"BRINC_Deployment_Plan_{_safe_city}_{_version_slug}_{_ts}.brinc",
                                               mime="application/octet-stream", width="stretch"):
             # ── Track export event ───────────────────────────────────────────────
+            sentry_breadcrumb(
+                "Export downloaded",
+                category="export",
+                export_type="brinc_plan",
+                responder_count=actual_k_responder,
+                guardian_count=actual_k_guardian,
+            )
+            sentry_metric("count", "export.downloaded", 1, export_type="brinc_plan")
             st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['BRINC']
             st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
             _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
@@ -12677,6 +12855,14 @@ body{{background:transparent;overflow:hidden}}
                                                                         mime="text/html",
                                                                         width="stretch"):
                 # ── Track export event ───────────────────────────────────────────
+                sentry_breadcrumb(
+                    "Export downloaded",
+                    category="export",
+                    export_type="html_summary",
+                    responder_count=actual_k_responder,
+                    guardian_count=actual_k_guardian,
+                )
+                sentry_metric("count", "export.downloaded", 1, export_type="html_summary")
                 st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['HTML']
                 st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
                 _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
@@ -12720,6 +12906,14 @@ body{{background:transparent;overflow:hidden}}
                                                 mime="application/vnd.google-earth.kml+xml",
                                                 width="stretch"):
                 # ── Track export event ───────────────────────────────────────────
+                sentry_breadcrumb(
+                    "Export downloaded",
+                    category="export",
+                    export_type="kml",
+                    responder_count=actual_k_responder,
+                    guardian_count=actual_k_guardian,
+                )
+                sentry_metric("count", "export.downloaded", 1, export_type="kml")
                 st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['KML']
                 st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
                 _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),

@@ -7,18 +7,46 @@ external log sink must never create a second application failure.
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import traceback
 import urllib.request
+from contextlib import contextmanager, nullcontext
 from typing import Any
 
 
 _STREAM_HANDLER_CONFIGURED = False
 _SENTRY_CONFIGURED = False
 _BETTER_STACK_CONFIGURED = False
+
+_EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+_PHONE_RE = re.compile(r"(?<!\d)(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}(?!\d)")
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b(api[_-]?key|token|secret|password|passwd|pwd|authorization|credential)"
+    r"\s*[:=]\s*([^\s,;]+)"
+)
+_SENSITIVE_KEY_PARTS = {
+    "address",
+    "api_key",
+    "apikey",
+    "authorization",
+    "cookie",
+    "credential",
+    "email",
+    "gmail_app_password",
+    "password",
+    "passwd",
+    "phone",
+    "pwd",
+    "secret",
+    "street",
+    "token",
+}
+_FILE_KEY_PARTS = {"upload_file", "upload_files", "uploaded_file", "uploaded_files"}
 
 
 def _safe_get_config(name: str, secrets: Any = None, default: str = "") -> str:
@@ -68,11 +96,192 @@ def _sanitize(value: Any, *, depth: int = 0) -> Any:
     return str(value)[:2000]
 
 
+def _redact_string(value: str) -> str:
+    value = _EMAIL_RE.sub("[Filtered email]", str(value))
+    value = _PHONE_RE.sub("[Filtered phone]", value)
+    return _SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=[Filtered secret]", value)
+
+
+def _is_sensitive_key(key: str) -> bool:
+    key = str(key or "").strip().lower()
+    return any(part in key for part in _SENSITIVE_KEY_PARTS)
+
+
+def _is_file_key(key: str) -> bool:
+    key = str(key or "").strip().lower()
+    return any(part in key for part in _FILE_KEY_PARTS)
+
+
+def _scrub_sentry_value(value: Any, *, key: str = "", depth: int = 0) -> Any:
+    if depth > 10:
+        return _redact_string(str(value))[:1000]
+    if key and _is_sensitive_key(key):
+        return "[Filtered]"
+    if key and _is_file_key(key):
+        return "[Filtered file]"
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return _redact_string(value)[:5000]
+    if isinstance(value, dict):
+        clean = {}
+        for item_key, item_value in list(value.items())[:100]:
+            clean_key = str(item_key)[:120]
+            clean[clean_key] = _scrub_sentry_value(item_value, key=clean_key, depth=depth + 1)
+        return clean
+    if isinstance(value, (list, tuple, set)):
+        return [_scrub_sentry_value(item, key=key, depth=depth + 1) for item in list(value)[:100]]
+    return _redact_string(str(value))[:2000]
+
+
+def _scrub_sentry_event(event: dict[str, Any], hint: Any = None) -> dict[str, Any] | None:
+    del hint
+    try:
+        return _scrub_sentry_value(event)
+    except Exception:
+        return event
+
+
+def _scrub_sentry_log(log: dict[str, Any], hint: Any = None) -> dict[str, Any] | None:
+    del hint
+    try:
+        if "body" in log:
+            log["body"] = _scrub_sentry_value(log["body"])
+        if "attributes" in log:
+            log["attributes"] = _scrub_sentry_value(log["attributes"])
+        return log
+    except Exception:
+        return log
+
+
+def sentry_breadcrumb(
+    message: str,
+    *,
+    category: str = "workflow",
+    level: str = "info",
+    **data: Any,
+) -> None:
+    """Add a Sentry breadcrumb with sanitized, non-sensitive workflow metadata."""
+    if not _SENTRY_CONFIGURED:
+        return
+
+    try:
+        import sentry_sdk
+
+        sentry_sdk.add_breadcrumb(
+            category=str(category or "workflow"),
+            message=str(message or ""),
+            level=str(level or "info"),
+            data=_scrub_sentry_value(_sanitize(data or {})),
+        )
+    except Exception:
+        return
+
+
+def sentry_metric(kind: str, name: str, value: float, unit: str | None = None, **attributes: Any) -> None:
+    """Capture a Sentry metric when Sentry is enabled."""
+    if not _SENTRY_CONFIGURED:
+        return
+
+    try:
+        import sentry_sdk
+
+        metric_func = getattr(sentry_sdk.metrics, str(kind or "").lower(), None)
+        if metric_func is None:
+            return
+        metric_func(
+            str(name),
+            float(value),
+            unit=unit,
+            attributes=_scrub_sentry_value(_sanitize(attributes or {})),
+        )
+    except Exception:
+        return
+
+
+def sentry_set_user_context(*, session_id: str = "", email: str = "", user_id: str = "") -> None:
+    """Set a non-PII Sentry user context from session/user identifiers."""
+    if not _SENTRY_CONFIGURED:
+        return
+
+    try:
+        import sentry_sdk
+
+        clean_session = str(session_id or "").strip()[:120]
+        clean_user_id = str(user_id or "").strip()[:120]
+        clean_email = str(email or "").strip().lower()
+        hashed_email = hashlib.sha256(clean_email.encode("utf-8")).hexdigest() if clean_email else ""
+        sentry_user = {
+            key: value
+            for key, value in {
+                "id": clean_user_id or hashed_email or clean_session,
+                "email_hash": hashed_email,
+                "session_id": clean_session,
+            }.items()
+            if value
+        }
+        if sentry_user:
+            sentry_sdk.set_user(sentry_user)
+    except Exception:
+        return
+
+
+def sentry_cron_checkin(
+    monitor_slug: str,
+    status: str,
+    *,
+    check_in_id: str = "",
+    duration: float | None = None,
+) -> str:
+    """Send a Sentry cron check-in when a monitor slug is configured."""
+    if not _SENTRY_CONFIGURED or not str(monitor_slug or "").strip():
+        return ""
+
+    try:
+        from sentry_sdk.crons import capture_checkin
+
+        return capture_checkin(
+            monitor_slug=str(monitor_slug).strip(),
+            check_in_id=str(check_in_id or "") or None,
+            status=str(status or ""),
+            duration=duration,
+        )
+    except Exception:
+        return ""
+
+
 def _normalize_better_stack_host(host: str) -> str:
     host = str(host or "").strip().rstrip("/")
     if host and not host.startswith(("http://", "https://")):
         host = f"https://{host}"
     return host
+
+
+@contextmanager
+def sentry_span(op: str, description: str = "", **data: Any):
+    """Create a Sentry performance transaction when Sentry is enabled."""
+    if not _SENTRY_CONFIGURED:
+        yield
+        return
+
+    try:
+        import sentry_sdk
+
+        span_context = sentry_sdk.start_transaction(
+            op=str(op or "task"),
+            name=str(description or op or "task"),
+        )
+    except Exception:
+        span_context = nullcontext()
+
+    with span_context as span:
+        if span is not None:
+            for key, value in _sanitize(data or {}).items():
+                try:
+                    span.set_data(str(key), value)
+                except Exception:
+                    pass
+        yield span
 
 
 class BetterStackHandler(logging.Handler):
@@ -149,28 +358,56 @@ def configure_crash_logging(
             import sentry_sdk
             from sentry_sdk.integrations.logging import LoggingIntegration
 
-            sentry_sdk.init(
-                dsn=dsn,
-                environment=_safe_get_config("SENTRY_ENVIRONMENT", secrets, "production"),
-                release=release or _safe_get_config("SENTRY_RELEASE", secrets, ""),
-                traces_sample_rate=_as_float(
+            profiles_sample_rate = _as_float(
+                _safe_get_config("SENTRY_PROFILES_SAMPLE_RATE", secrets, ""),
+                0.0,
+            )
+            profile_session_sample_rate = _as_float(
+                _safe_get_config("SENTRY_PROFILE_SESSION_SAMPLE_RATE", secrets, ""),
+                0.0,
+            )
+            sentry_options = {
+                "dsn": dsn,
+                "environment": _safe_get_config("SENTRY_ENVIRONMENT", secrets, "production"),
+                "release": release or _safe_get_config("SENTRY_RELEASE", secrets, ""),
+                "traces_sample_rate": _as_float(
                     _safe_get_config("SENTRY_TRACES_SAMPLE_RATE", secrets, "0"),
                     0.0,
                 ),
-                send_default_pii=_as_bool(
+                "send_default_pii": _as_bool(
                     _safe_get_config("SENTRY_SEND_DEFAULT_PII", secrets, "false"),
                     False,
                 ),
-                enable_logs=_as_bool(
+                "enable_logs": _as_bool(
                     _safe_get_config("SENTRY_ENABLE_LOGS", secrets, "false"),
                     False,
                 ),
-                integrations=[
+                "before_send": _scrub_sentry_event,
+                "before_send_log": _scrub_sentry_log,
+                "integrations": [
                     LoggingIntegration(
                         level=logging.INFO,
                         event_level=logging.ERROR,
                     )
                 ],
+            }
+            if profiles_sample_rate > 0.0:
+                sentry_options["profiles_sample_rate"] = profiles_sample_rate
+                sentry_options["profile_lifecycle"] = _safe_get_config(
+                    "SENTRY_PROFILE_LIFECYCLE",
+                    secrets,
+                    "trace",
+                )
+            if profile_session_sample_rate > 0.0:
+                sentry_options["profile_session_sample_rate"] = profile_session_sample_rate
+                sentry_options["profile_lifecycle"] = _safe_get_config(
+                    "SENTRY_PROFILE_LIFECYCLE",
+                    secrets,
+                    "trace",
+                )
+
+            sentry_sdk.init(
+                **sentry_options,
             )
             _SENTRY_CONFIGURED = True
             logger.info("Sentry crash logging enabled.", extra={"source_app": source_app})

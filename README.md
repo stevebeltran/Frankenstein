@@ -66,12 +66,21 @@ Keys referenced in the code include:
 - `gcp_service_account`
 - `SENTRY_DSN` for optional Sentry crash/error tracking
 - `SENTRY_ENVIRONMENT` such as `production` or `local`
+- `SENTRY_TRACES_SAMPLE_RATE` from `0` to `1` to enable Sentry performance transactions
+- `SENTRY_PROFILES_SAMPLE_RATE` from `0` to `1` to sample transaction-linked CPU profiles; requires tracing
+- `SENTRY_PROFILE_SESSION_SAMPLE_RATE` from `0` to `1` to enable continuous profiling sessions
+- `SENTRY_PROFILE_LIFECYCLE` such as `trace`; defaults to `trace` when profiling is enabled
 - `SENTRY_ENABLE_LOGS` set to `true` only if you want Sentry log ingestion in addition to error events
+- `SENTRY_RELEASE` should be set to the deployed Git SHA or CI build id when available
+- `SENTRY_CRON_DOWNLOAD_REGULATORY_LAYERS` with the Sentry monitor slug for `download_regulatory_layers.py`
+- `SENTRY_CRON_COMPRESS_CELL_COVERAGE` with the Sentry monitor slug for `compress_cell_coverage.py`
 - `BETTER_STACK_SOURCE_TOKEN` and `BETTER_STACK_INGESTING_HOST` for optional redundant external crash logs
 
 These integrations are optional for basic local exploration, but features such as login, notification emails, and Sheets logging depend on them.
 
 Crash logging is layered. Unhandled app crashes are printed to Streamlit logs, written through the local crash report path, logged to the Crash Reports worksheet when Google Sheets is configured, sent to Sentry when `SENTRY_DSN` is configured, and sent to Better Stack when the Better Stack secrets are configured. Crash alert email is attempted after those log paths, so email failure should not erase the crash evidence.
+
+Sentry also receives optional non-PII workflow telemetry when enabled: performance transactions, CPU profiling, breadcrumbs, custom metrics, hashed user/session context, and cron check-ins for maintenance scripts. Recommended Sentry dashboards should group by `crash_step`, release, environment, workflow metric names, and export type.
 
 ### 4. Cache regulatory layers
 

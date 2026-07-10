@@ -44,6 +44,8 @@ from shapely.geometry import Point, Polygon, box, shape
 import requests
 from tqdm import tqdm
 
+from modules.crash_logging import configure_crash_logging, sentry_cron_checkin, sentry_metric
+
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
 
 OUTPUT_DIR = Path("regulatory_layers")
@@ -583,5 +585,29 @@ def main():
     print("App will work fine with mock data!")
     print()
 
+def _run_main_with_sentry_cron():
+    configure_crash_logging(source_app=Path(__file__).stem)
+    monitor_slug = os.environ.get("SENTRY_CRON_DOWNLOAD_REGULATORY_LAYERS", "").strip()
+    started_at = time.perf_counter()
+    check_in_id = sentry_cron_checkin(monitor_slug, "in_progress")
+    try:
+        main()
+    except SystemExit as exc:
+        duration = time.perf_counter() - started_at
+        status = "ok" if exc.code in (None, 0) else "error"
+        sentry_metric("distribution", "maintenance.duration_seconds", duration, job="download_regulatory_layers")
+        sentry_cron_checkin(monitor_slug, status, check_in_id=check_in_id, duration=duration)
+        raise
+    except BaseException:
+        duration = time.perf_counter() - started_at
+        sentry_metric("distribution", "maintenance.duration_seconds", duration, job="download_regulatory_layers")
+        sentry_cron_checkin(monitor_slug, "error", check_in_id=check_in_id, duration=duration)
+        raise
+    else:
+        duration = time.perf_counter() - started_at
+        sentry_metric("distribution", "maintenance.duration_seconds", duration, job="download_regulatory_layers")
+        sentry_cron_checkin(monitor_slug, "ok", check_in_id=check_in_id, duration=duration)
+
+
 if __name__ == "__main__":
-    main()
+    _run_main_with_sentry_cron()

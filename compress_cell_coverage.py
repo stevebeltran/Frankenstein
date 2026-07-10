@@ -6,12 +6,15 @@ Recompress cell_coverage/*.parquet files:
 """
 import os
 import sys
+import time
 from pathlib import Path
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from shapely.wkb import loads as wkb_loads, dumps as wkb_dumps
+
+from modules.crash_logging import configure_crash_logging, sentry_cron_checkin, sentry_metric
 
 
 TOLERANCE = 0.001   # degrees (~100m); invisible on any web map zoom level
@@ -69,5 +72,29 @@ def main():
     print(f"\nTotal: {total_before/1e6:.1f} MB -> {total_after/1e6:.1f} MB  ({pct_total:.0f}% reduction)")
 
 
+def _run_main_with_sentry_cron():
+    configure_crash_logging(source_app=Path(__file__).stem)
+    monitor_slug = os.environ.get("SENTRY_CRON_COMPRESS_CELL_COVERAGE", "").strip()
+    started_at = time.perf_counter()
+    check_in_id = sentry_cron_checkin(monitor_slug, "in_progress")
+    try:
+        main()
+    except SystemExit as exc:
+        duration = time.perf_counter() - started_at
+        status = "ok" if exc.code in (None, 0) else "error"
+        sentry_metric("distribution", "maintenance.duration_seconds", duration, job="compress_cell_coverage")
+        sentry_cron_checkin(monitor_slug, status, check_in_id=check_in_id, duration=duration)
+        raise
+    except BaseException:
+        duration = time.perf_counter() - started_at
+        sentry_metric("distribution", "maintenance.duration_seconds", duration, job="compress_cell_coverage")
+        sentry_cron_checkin(monitor_slug, "error", check_in_id=check_in_id, duration=duration)
+        raise
+    else:
+        duration = time.perf_counter() - started_at
+        sentry_metric("distribution", "maintenance.duration_seconds", duration, job="compress_cell_coverage")
+        sentry_cron_checkin(monitor_slug, "ok", check_in_id=check_in_id, duration=duration)
+
+
 if __name__ == "__main__":
-    main()
+    _run_main_with_sentry_cron()

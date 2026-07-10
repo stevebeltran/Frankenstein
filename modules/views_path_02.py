@@ -52,7 +52,7 @@ from modules.census_batch import (
 )
 from modules.geocoding import geocode_intersection_fallback_rows
 from modules.notifications import _write_crash_report, _notify_crash_email
-from modules.crash_logging import log_crash
+from modules.crash_logging import log_crash, sentry_breadcrumb, sentry_metric, sentry_span
 from modules.image_utils import get_themed_logo_base64, get_transparent_product_base64
 
 
@@ -198,7 +198,32 @@ def render():
                 else:
                     st.session_state['stations_user_uploaded'] = False
                     with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools; this can take 10-20 seconds…"):
-                        df_s, osm_note = generate_stations_from_calls(df_c)
+                        sentry_breadcrumb(
+                            "Station generation started",
+                            category="stations",
+                            call_count=len(df_c) if df_c is not None else 0,
+                            source="census_restored",
+                        )
+                        with sentry_span(
+                            "stations.generate",
+                            "Generate station candidates from calls",
+                            call_count=len(df_c) if df_c is not None else 0,
+                        ):
+                            df_s, osm_note = generate_stations_from_calls(df_c)
+                        sentry_breadcrumb(
+                            "Station generation finished",
+                            category="stations",
+                            station_count=len(df_s) if df_s is not None else 0,
+                            used_fallback=bool(df_s is None or df_s.empty),
+                            source="census_restored",
+                        )
+                        sentry_metric(
+                            "distribution",
+                            "stations.generated.count",
+                            len(df_s) if df_s is not None else 0,
+                            source="census_restored",
+                            used_fallback=bool(df_s is None or df_s.empty),
+                        )
                     if df_s is None or df_s.empty:
                         df_s = _make_random_stations(df_c, n=40)
                         osm_note = "⚠️ Could not reach any map source — using estimated station positions from call data."
@@ -542,7 +567,32 @@ def render():
                 )
                 with st.spinner("🔍 Detecting column types in CAD export…"):
                     _mark_upload_step("parsing CAD upload")
-                    df_c = aggressive_parse_calls(call_files)
+                    sentry_breadcrumb(
+                        "CAD parse started",
+                        category="cad",
+                        file_count=len(call_files or []),
+                        require_valid_coordinates=True,
+                    )
+                    with sentry_span(
+                        "cad.parse",
+                        "Parse uploaded CAD files",
+                        file_count=len(call_files or []),
+                        require_valid_coordinates=True,
+                    ):
+                        df_c = aggressive_parse_calls(call_files)
+                    sentry_breadcrumb(
+                        "CAD parse finished",
+                        category="cad",
+                        output_rows=len(df_c) if df_c is not None else 0,
+                        has_coordinates=bool(df_c is not None and not df_c.empty),
+                    )
+                    sentry_metric(
+                        "distribution",
+                        "cad.parse.output_rows",
+                        len(df_c) if df_c is not None else 0,
+                        workflow="cad_upload",
+                        require_valid_coordinates=True,
+                    )
                 for _pq_item in st.session_state.get('parse_quality', []):
                     _pq_in = _pq_item.get('input_rows', 0)
                     _pq_out = _pq_item.get('output_rows', 0)
@@ -571,7 +621,31 @@ def render():
                             progress=24,
                             logs=_upload_logs,
                         )
-                        df_c_partial = aggressive_parse_calls(call_files, require_valid_coordinates=False)
+                        sentry_breadcrumb(
+                            "CAD Census staging parse started",
+                            category="cad",
+                            file_count=len(call_files or []),
+                            require_valid_coordinates=False,
+                        )
+                        with sentry_span(
+                            "cad.parse",
+                            "Parse uploaded CAD files for Census staging",
+                            file_count=len(call_files or []),
+                            require_valid_coordinates=False,
+                        ):
+                            df_c_partial = aggressive_parse_calls(call_files, require_valid_coordinates=False)
+                        sentry_breadcrumb(
+                            "CAD Census staging parse finished",
+                            category="cad",
+                            output_rows=len(df_c_partial) if df_c_partial is not None else 0,
+                        )
+                        sentry_metric(
+                            "distribution",
+                            "cad.parse.output_rows",
+                            len(df_c_partial) if df_c_partial is not None else 0,
+                            workflow="census_staging",
+                            require_valid_coordinates=False,
+                        )
                         _push_upload_log("Extracting street, city, state, and ZIP fields for Census formatting.")
                         _set_upload_overlay_status(
                             title="CENSUS REQUIRED",
@@ -1013,7 +1087,30 @@ def render():
                     )
                     st.session_state['stations_user_uploaded'] = False
                     with st.spinner("🌐 No stations file detected — querying OpenStreetMap for police, fire & schools; this can take 10-20 seconds…"):
-                        df_s, osm_note = generate_stations_from_calls(df_c)
+                        sentry_breadcrumb(
+                            "Station generation started",
+                            category="stations",
+                            call_count=len(df_c) if df_c is not None else 0,
+                        )
+                        with sentry_span(
+                            "stations.generate",
+                            "Generate station candidates from calls",
+                            call_count=len(df_c) if df_c is not None else 0,
+                        ):
+                            df_s, osm_note = generate_stations_from_calls(df_c)
+                        sentry_breadcrumb(
+                            "Station generation finished",
+                            category="stations",
+                            station_count=len(df_s) if df_s is not None else 0,
+                            used_fallback=bool(df_s is None or df_s.empty),
+                        )
+                        sentry_metric(
+                            "distribution",
+                            "stations.generated.count",
+                            len(df_s) if df_s is not None else 0,
+                            source="cad_upload",
+                            used_fallback=bool(df_s is None or df_s.empty),
+                        )
                     if df_s is None or df_s.empty:
                         df_s = _make_random_stations(df_c, n=40)
                         osm_note = "⚠️ Could not reach any map source — using estimated station positions from call data."

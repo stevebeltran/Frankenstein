@@ -2096,6 +2096,22 @@ def station_suggestion_display_metrics(suggestion, mode):
     }
 
 
+def deployed_station_indices(active_drones):
+    """Return station indices already rendered as deployed drones."""
+    deployed = set()
+    for drone in active_drones or []:
+        if not isinstance(drone, dict):
+            continue
+        idx = drone.get('idx')
+        if idx is None:
+            continue
+        try:
+            deployed.add(int(idx))
+        except (TypeError, ValueError):
+            continue
+    return deployed
+
+
 def _ranked_suggestion_modes(suggestions, k_guardian=0, k_responder=0, forced_modes=None):
     """Assign visible suggestions from the slider counts in rank order."""
     forced_modes = dict(forced_modes or {})
@@ -2391,6 +2407,7 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
     if show_markers != session_state.get('show_suggestion_markers', True):
         session_state['show_suggestion_markers'] = show_markers
         changed = True
+        st.rerun()
 
     session_state['suggestion_modes'] = modes
     session_state['suggestion_toggles'] = {idx: (mode != 'Off') for idx, mode in modes.items()}
@@ -2555,6 +2572,7 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
     if show_markers != session_state.get('show_suggestion_markers', True):
         session_state['show_suggestion_markers'] = show_markers
         changed = True
+        st.rerun()
 
     session_state['suggestion_modes'] = modes
     session_state['suggestion_toggles'] = {idx: (mode != 'Off') for idx, mode in modes.items()}

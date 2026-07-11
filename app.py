@@ -269,6 +269,7 @@ prepare_runtime_context = _dashboard_helpers_mod.prepare_runtime_context
 optimize_fleet_selection = _dashboard_helpers_mod.optimize_fleet_selection
 compute_station_suggestions = _dashboard_helpers_mod.compute_station_suggestions
 station_suggestion_display_metrics = _dashboard_helpers_mod.station_suggestion_display_metrics
+deployed_station_indices = _dashboard_helpers_mod.deployed_station_indices
 sync_station_suggestion_modes = _dashboard_helpers_mod.sync_station_suggestion_modes
 render_station_suggestions_grid = _dashboard_helpers_mod.render_station_suggestions_grid
 _onboarding_mod = _load_local_module("onboarding")
@@ -8748,10 +8749,14 @@ body{{background:transparent;overflow:hidden}}
             if _suggestions and show_station_suggestions and st.session_state.get('show_suggestion_markers', True):
                 _stg_map = st.session_state.get('suggestion_toggles', {})
                 _stg_modes = st.session_state.get('suggestion_modes', {})
+                _active_suggestion_indices = deployed_station_indices(active_drones)
                 _sug_on_lat, _sug_on_lon, _sug_on_text = [], [], []
                 _sug_off_lat, _sug_off_lon, _sug_off_text = [], [], []
                 for _s in _suggestions:
-                    _mode = _stg_modes.get(_s['station_idx'], _s.get('role', 'Off'))
+                    _s_idx = int(_s['station_idx'])
+                    if _s_idx in _active_suggestion_indices:
+                        continue
+                    _mode = _stg_modes.get(_s_idx, _s.get('role', 'Off'))
                     _display_metrics = station_suggestion_display_metrics(_s, _mode)
                     _tip = (
                         f"<b>#{_s['rank']} {_s['name']}</b><br>"
@@ -8759,7 +8764,7 @@ body{{background:transparent;overflow:hidden}}
                         f"📞 {_display_metrics['call_count']:,} calls · "
                         f"{_display_metrics['call_pct']}% of city calls · 🗺️ {_display_metrics['land_pct']}% land"
                     )
-                    if _stg_map.get(_s['station_idx']):
+                    if _stg_map.get(_s_idx):
                         _sug_on_lat.append(_s['lat'])
                         _sug_on_lon.append(_s['lon'])
                         _sug_on_text.append(_tip)

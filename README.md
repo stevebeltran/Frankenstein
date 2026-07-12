@@ -64,9 +64,10 @@ Keys referenced in the code include:
 - `NOTIFY_SMS_EMAIL` for an optional extra recipient such as `8152437777@mms.uscc.net`
 - `GOOGLE_SHEET_ID`
 - `gcp_service_account`
-- `SENTRY_DSN` for optional Sentry crash/error tracking
+- `SENTRY_DSN` to override the built-in Sentry project DSN for crash/error tracking
 - `SENTRY_ENVIRONMENT` such as `production` or `local`
-- `SENTRY_TRACES_SAMPLE_RATE` from `0` to `1` to enable Sentry performance transactions
+- `SENTRY_TRACES_SAMPLE_RATE` from `0` to `1` to control Sentry performance transactions; defaults to `1.0`
+- `SENTRY_SEND_DEFAULT_PII` set to `false` to stop sending default PII, including MCP inputs/responses; defaults to `true`
 - `SENTRY_PROFILES_SAMPLE_RATE` from `0` to `1` to sample transaction-linked CPU profiles; requires tracing
 - `SENTRY_PROFILE_SESSION_SAMPLE_RATE` from `0` to `1` to enable continuous profiling sessions
 - `SENTRY_PROFILE_LIFECYCLE` such as `trace`; defaults to `trace` when profiling is enabled
@@ -80,7 +81,7 @@ These integrations are optional for basic local exploration, but features such a
 
 Crash logging is layered. Unhandled app crashes are printed to Streamlit logs, written through the local crash report path, logged to the Crash Reports worksheet when Google Sheets is configured, sent to Sentry when `SENTRY_DSN` is configured, and sent to Better Stack when the Better Stack secrets are configured. Crash alert email is attempted after those log paths, so email failure should not erase the crash evidence.
 
-Sentry also receives optional non-PII workflow telemetry when enabled: performance transactions, CPU profiling, breadcrumbs, custom metrics, hashed user/session context, and cron check-ins for maintenance scripts. Recommended Sentry dashboards should group by `crash_step`, release, environment, workflow metric names, and export type.
+Sentry also receives workflow telemetry when enabled: performance transactions, MCP server monitoring, CPU profiling, breadcrumbs, custom metrics, hashed user/session context, and cron check-ins for maintenance scripts. Recommended Sentry dashboards should group by `crash_step`, release, environment, workflow metric names, and export type.
 
 ### 4. Cache regulatory layers
 

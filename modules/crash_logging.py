@@ -22,6 +22,7 @@ from typing import Any
 _STREAM_HANDLER_CONFIGURED = False
 _SENTRY_CONFIGURED = False
 _BETTER_STACK_CONFIGURED = False
+_DEFAULT_SENTRY_DSN = "https://8770fa479f91862ab0af5ab615f0c933@o4511610392346624.ingest.us.sentry.io/4511610397065216"
 
 _EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _PHONE_RE = re.compile(r"(?<!\d)(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}(?!\d)")
@@ -352,7 +353,7 @@ def configure_crash_logging(
             root.addHandler(stream_handler)
         _STREAM_HANDLER_CONFIGURED = True
 
-    dsn = _safe_get_config("SENTRY_DSN", secrets)
+    dsn = _safe_get_config("SENTRY_DSN", secrets, _DEFAULT_SENTRY_DSN)
     if dsn and not _SENTRY_CONFIGURED:
         try:
             import sentry_sdk
@@ -366,16 +367,29 @@ def configure_crash_logging(
                 _safe_get_config("SENTRY_PROFILE_SESSION_SAMPLE_RATE", secrets, ""),
                 0.0,
             )
+            integrations = [
+                LoggingIntegration(
+                    level=logging.INFO,
+                    event_level=logging.ERROR,
+                )
+            ]
+            try:
+                from sentry_sdk.integrations.mcp import MCPIntegration
+
+                integrations.append(MCPIntegration())
+            except Exception as mcp_exc:
+                logger.warning("Sentry MCP integration could not be enabled: %s", mcp_exc)
+
             sentry_options = {
                 "dsn": dsn,
                 "environment": _safe_get_config("SENTRY_ENVIRONMENT", secrets, "production"),
                 "release": release or _safe_get_config("SENTRY_RELEASE", secrets, ""),
                 "traces_sample_rate": _as_float(
-                    _safe_get_config("SENTRY_TRACES_SAMPLE_RATE", secrets, "0"),
+                    _safe_get_config("SENTRY_TRACES_SAMPLE_RATE", secrets, "1.0"),
                     0.0,
                 ),
                 "send_default_pii": _as_bool(
-                    _safe_get_config("SENTRY_SEND_DEFAULT_PII", secrets, "false"),
+                    _safe_get_config("SENTRY_SEND_DEFAULT_PII", secrets, "true"),
                     False,
                 ),
                 "enable_logs": _as_bool(
@@ -384,12 +398,7 @@ def configure_crash_logging(
                 ),
                 "before_send": _scrub_sentry_event,
                 "before_send_log": _scrub_sentry_log,
-                "integrations": [
-                    LoggingIntegration(
-                        level=logging.INFO,
-                        event_level=logging.ERROR,
-                    )
-                ],
+                "integrations": integrations,
             }
             if profiles_sample_rate > 0.0:
                 sentry_options["profiles_sample_rate"] = profiles_sample_rate

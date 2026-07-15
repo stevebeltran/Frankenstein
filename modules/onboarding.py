@@ -466,6 +466,19 @@ def _station_label_from_address(address_value, fallback_label):
     return text or fallback_label
 
 
+def _looks_like_station_address_text(value):
+    text = str(value or '').strip().lower()
+    if not text or not re.search(r'\d', text):
+        return False
+    street_tokens = (
+        ' st', ' street', ' rd', ' road', ' ave', ' avenue', ' blvd', ' boulevard',
+        ' dr', ' drive', ' ln', ' lane', ' ct', ' court', ' pkwy', ' parkway',
+        ' hwy', ' highway', ' ter', ' terrace', ' cir', ' circle', ' way', ' pl',
+        ' place', ' n ', ' s ', ' e ', ' w ',
+    )
+    return ',' in text or any(token in text for token in street_tokens)
+
+
 def _normalize_station_state_abbr(state_value, us_states_abbr=None):
     text = str(state_value or '').strip()
     if not text:
@@ -488,6 +501,7 @@ def infer_simulation_targets_from_station_file(
     station_df = _read_station_upload(sim_uploader)
     station_df = _normalize_station_columns(station_df)
     station_df, _single_col_note = _extract_single_column_station_addresses(station_df)
+    station_df, lat_col, lon_col = _extract_station_lat_lon(station_df)
 
     city_col = next(
         (c for c in station_df.columns if c in ['city', 'town', 'village', 'municipality']),
@@ -495,11 +509,12 @@ def infer_simulation_targets_from_station_file(
     )
     state_col = next((c for c in station_df.columns if c in ['state', 'state_abbr', 'st']), None)
     addr_col = next((c for c in station_df.columns if any(a in c for a in ['address', 'street', 'location'])), None)
+    name_col = next((c for c in station_df.columns if any(n in c for n in ['name', 'station', 'facility', 'dept'])), None)
     fallback_state = _normalize_station_state_abbr(default_state, us_states_abbr)
 
     inferred_targets = []
     seen = set()
-    geocode_used = False
+    location_lookup_used = False
 
     for _, row in station_df.iterrows():
         city_name = str(row[city_col]).strip() if city_col and pd.notna(row[city_col]) else ''
@@ -508,11 +523,26 @@ def infer_simulation_targets_from_station_file(
             if state_col and pd.notna(row[state_col]) else ''
         )
         address_value = str(row[addr_col]).strip() if addr_col and pd.notna(row[addr_col]) else ''
+        if not address_value and name_col and pd.notna(row[name_col]):
+            name_value = str(row[name_col]).strip()
+            if _looks_like_station_address_text(name_value):
+                address_value = name_value
+
+        lat_value = pd.to_numeric(row.get('lat'), errors='coerce') if lat_col else np.nan
+        lon_value = pd.to_numeric(row.get('lon'), errors='coerce') if lon_col else np.nan
+
+        if (not city_name or not state_name) and pd.notna(lat_value) and pd.notna(lon_value):
+            state_full, reverse_city = reverse_geocode_state(float(lat_value), float(lon_value))
+            if reverse_city and not city_name:
+                city_name = str(reverse_city).strip()
+            if state_full and not state_name:
+                state_name = _normalize_station_state_abbr(state_full, us_states_abbr)
+            location_lookup_used = True
 
         if (not city_name or not state_name) and address_value:
             lat, lon = forward_geocode(address_value, city_name, state_name)
             if lat is not None and lon is not None:
-                geocode_used = True
+                location_lookup_used = True
                 state_full, reverse_city = reverse_geocode_state(lat, lon)
                 if reverse_city and not city_name:
                     city_name = str(reverse_city).strip()
@@ -533,7 +563,7 @@ def infer_simulation_targets_from_station_file(
         inferred_targets.append({'city': city_name.strip(), 'state': state_name})
 
     notice = ''
-    if inferred_targets and geocode_used:
+    if inferred_targets and location_lookup_used:
         notice = 'Derived jurisdiction targets from the uploaded stations file.'
     return inferred_targets, notice
 
@@ -1053,6 +1083,8 @@ def resolve_demo_stations(
             )
             notices.extend([f"Could not geocode: {addr_str}" for addr_str in ungeocoded_addresses])
             if custom_station_df is not None and not custom_station_df.empty:
+                row_label = 'row' if len(custom_station_df) == 1 else 'rows'
+                notices.append(f"Loaded {len(custom_station_df):,} station {row_label} from uploaded stations file.")
                 return custom_station_df, True, notices, warnings
             warnings.append(
                 "Uploaded stations file did not yield any usable station rows. "
@@ -1089,6 +1121,33 @@ def resolve_demo_stations(
     })
     return fallback_df, False, notices, warnings
 
+
+def _format_boundary_suggestion_prompt(suggestions):
+    if not suggestions:
+        return ''
+
+    place_names = []
+    county_names = []
+    for suggestion in suggestions:
+        display_name = str(suggestion.get('display_name') or '').strip()
+        if not display_name:
+            continue
+        kind = str(suggestion.get('kind') or '').strip().lower()
+        if kind == 'county':
+            if display_name not in county_names:
+                county_names.append(display_name)
+        else:
+            if display_name not in place_names:
+                place_names.append(display_name)
+
+    parts = []
+    if place_names:
+        parts.append(f"Did you mean {' or '.join(place_names[:2])}?")
+    if county_names:
+        parts.append(f"County option: {' or '.join(county_names[:1])}.")
+    return ' ' + ' '.join(parts) if parts else ''
+
+
 def build_demo_boundaries(
     session_state,
     active_targets,
@@ -1101,6 +1160,7 @@ def build_demo_boundaries(
     save_boundary_gdf,
     fetch_census_population,
     fetch_census_state_population,
+    suggest_boundary_matches=None,
 ):
     all_gdfs = []
     boundary_records = []
@@ -1181,7 +1241,25 @@ def build_demo_boundaries(
                 'geometry': temp_gdf.geometry.union_all(),
             })
         else:
-            warnings.append(f"⚠️ Could not find a boundary for {city_name or state_name}, {state_name}. Try another city or state.")
+            suggestion_prompt = ''
+            if city_name:
+                suggest_fn = suggest_boundary_matches
+                if suggest_fn is None:
+                    try:
+                        from modules.boundaries import suggest_boundary_matches as suggest_fn
+                    except Exception:
+                        suggest_fn = None
+                if suggest_fn is not None:
+                    try:
+                        suggestion_prompt = _format_boundary_suggestion_prompt(
+                            suggest_fn(state_name, city_name)
+                        )
+                    except Exception:
+                        suggestion_prompt = ''
+            warnings.append(
+                f"⚠️ Could not find a boundary for {city_name or state_name}, {state_name}."
+                f"{suggestion_prompt or ' Try another city or state.'}"
+            )
             if session_state.get('_last_demo_city') == city_name:
                 candidates = [city for city in demo_cities if city[0] != city_name]
                 rerun_demo_target = random.choice(candidates)

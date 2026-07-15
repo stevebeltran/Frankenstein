@@ -1,6 +1,7 @@
 """Boundary and jurisdiction lookups using local parquets and Census TIGER shapefiles."""
 import streamlit as st
 import geopandas as gpd
+import pandas as pd
 import os
 import re
 import json
@@ -9,6 +10,7 @@ import urllib.parse
 import io
 import zipfile
 import glob
+from difflib import SequenceMatcher
 from shapely.geometry import Point
 from modules.config import STATE_FIPS, KNOWN_POPULATIONS
 from modules.geocoding import forward_geocode
@@ -49,8 +51,7 @@ def lookup_zip_code(zip_code: str):
     except Exception:
         return None, None, None
 
-@st.cache_data
-def normalize_jurisdiction_name(name):
+def _normalize_jurisdiction_name_plain(name):
     if not name:
         return ""
     name = str(name).lower().strip()
@@ -62,6 +63,141 @@ def normalize_jurisdiction_name(name):
             break
     name = re.sub(r'\s+', ' ', name).strip()
     return name
+
+
+@st.cache_data
+def normalize_jurisdiction_name(name):
+    return _normalize_jurisdiction_name_plain(name)
+
+
+def _boundary_name_score(query_norm, candidate_norm):
+    if not query_norm or not candidate_norm:
+        return 0.0
+    score = SequenceMatcher(None, query_norm, candidate_norm).ratio()
+    if candidate_norm.startswith(query_norm) or query_norm.startswith(candidate_norm):
+        score += 0.12
+    return min(score, 1.0)
+
+
+def _best_boundary_name_matches(rows, query_norm, *, name_col='NAME', label_col=None, limit=2):
+    scored = []
+    seen = set()
+    for idx, row in rows.iterrows():
+        raw_name = str(row.get(name_col, '') or '').strip()
+        if not raw_name:
+            continue
+        raw_label = str(row.get(label_col, '') or '').strip() if label_col else raw_name
+        norm_names = {
+            _normalize_jurisdiction_name_plain(raw_name),
+            _normalize_jurisdiction_name_plain(raw_label),
+        }
+        score = max(_boundary_name_score(query_norm, norm) for norm in norm_names if norm)
+        threshold = 0.74 if len(query_norm) >= 5 else 0.84
+        if score < threshold:
+            continue
+        dedupe_key = _normalize_jurisdiction_name_plain(raw_name)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        scored.append((score, raw_name, raw_label, idx))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return scored[:limit]
+
+
+def _county_for_place_row(place_row, state_counties):
+    try:
+        point = place_row.geometry.representative_point()
+        containing = state_counties[state_counties.geometry.contains(point)]
+        if containing.empty:
+            counties = state_counties.copy()
+            counties['_dist'] = counties.geometry.distance(point)
+            containing = counties.nsmallest(1, '_dist')
+        if containing.empty:
+            return ''
+        county_name = str(containing.iloc[0].get('NAME', '') or '').strip()
+        return county_name
+    except Exception:
+        return ''
+
+
+def suggest_boundary_matches(state_abbr, query, max_places=2, max_counties=1):
+    """Suggest close city/place and county names from local boundary parquets."""
+    state_abbr = str(state_abbr or '').strip().upper()
+    state_fips = STATE_FIPS.get(state_abbr)
+    query_norm = _normalize_jurisdiction_name_plain(query)
+    if not state_fips or not query_norm:
+        return []
+
+    suggestions = []
+    try:
+        place_frames = []
+        for local_file in ("places_lite.parquet", "county_subdivisions_lite.parquet"):
+            if not os.path.exists(local_file):
+                continue
+            place_gdf = gpd.read_parquet(local_file)
+            state_places = place_gdf[place_gdf["STATEFP"].astype(str) == str(state_fips)].copy()
+            if not state_places.empty:
+                place_frames.append(state_places)
+        places = gpd.GeoDataFrame(pd.concat(place_frames, ignore_index=True), crs=place_frames[0].crs) if place_frames else gpd.GeoDataFrame()
+    except Exception:
+        places = gpd.GeoDataFrame()
+
+    top_place_rows = []
+    if not places.empty:
+        for score, raw_name, raw_label, row_idx in _best_boundary_name_matches(
+            places,
+            query_norm,
+            label_col='NAMELSAD' if 'NAMELSAD' in places.columns else None,
+            limit=max_places,
+        ):
+            suggestions.append({
+                'kind': 'place',
+                'name': raw_name,
+                'label': raw_label,
+                'state': state_abbr,
+                'display_name': f"{raw_name}, {state_abbr}",
+                'score': round(float(score), 4),
+            })
+            top_place_rows.append(places.loc[row_idx])
+
+    try:
+        counties = gpd.read_parquet("counties_lite.parquet") if os.path.exists("counties_lite.parquet") else gpd.GeoDataFrame()
+        state_counties = counties[counties["STATEFP"].astype(str) == str(state_fips)].copy() if not counties.empty else gpd.GeoDataFrame()
+    except Exception:
+        state_counties = gpd.GeoDataFrame()
+
+    county_names = []
+    if not state_counties.empty:
+        for place_row in top_place_rows[:1]:
+            county_name = _county_for_place_row(place_row, state_counties)
+            if county_name:
+                county_names.append(county_name)
+
+        for score, county_name, _raw_label, _row_idx in _best_boundary_name_matches(
+            state_counties,
+            query_norm,
+            limit=max_counties,
+        ):
+            county_names.append(county_name)
+
+    seen_counties = set()
+    for county_name in county_names:
+        county_key = _normalize_jurisdiction_name_plain(county_name)
+        if not county_key or county_key in seen_counties:
+            continue
+        seen_counties.add(county_key)
+        suggestions.append({
+            'kind': 'county',
+            'name': f"{county_name} County",
+            'label': f"{county_name} County",
+            'state': state_abbr,
+            'display_name': f"{county_name} County, {state_abbr}",
+        })
+        if len(seen_counties) >= max_counties:
+            break
+
+    return suggestions
+
 
 def lookup_county_for_city(city_name, state_abbr):
     """Use Nominatim reverse-geocode to find the county name for a city that

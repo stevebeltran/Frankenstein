@@ -755,7 +755,23 @@ def prepare_station_candidates(
             # Uploaded files are user-authored deployment inputs, so we do not
             # silently drop rows just because one point falls outside the active
             # boundary polygon.
-            pass
+            try:
+                inside_mask = station_gdf_utm.within(city_m)
+                inside_count = int(inside_mask.sum())
+                station_total = int(len(station_gdf_utm))
+                if station_total and inside_count == 0:
+                    st.warning(
+                        'Uploaded stations file loaded, but none of its station coordinates '
+                        'fall inside the selected jurisdiction boundary. Check the selected '
+                        'city/state and the station file coordinates.'
+                    )
+                elif 0 < inside_count < station_total:
+                    st.info(
+                        f'Uploaded stations file loaded; {inside_count:,} of {station_total:,} '
+                        'station coordinates fall inside the selected jurisdiction boundary.'
+                    )
+            except Exception:
+                pass
         else:
             mask = station_gdf_utm.within(city_m)
             df_inside = df_stations_all[mask].reset_index(drop=True)

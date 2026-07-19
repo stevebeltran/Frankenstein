@@ -2,6 +2,7 @@ import pandas as pd
 
 from modules.dashboard_helpers import (
     _suggestion_widget_key,
+    apply_manual_suggestion_deployments,
     deployed_station_indices,
     sync_station_suggestion_modes,
 )
@@ -43,7 +44,7 @@ def test_slider_assigns_ranked_station_suggestions():
     assert modes[2] == "Responder"
 
 
-def test_card_toggle_to_responder_queues_slider_count():
+def test_card_toggle_to_responder_records_manual_mode_without_slider_count():
     suggestions = _suggestions()
     session_state = {
         "_station_suggestion_rank_by": "call",
@@ -59,11 +60,12 @@ def test_card_toggle_to_responder_queues_slider_count():
     )
 
     assert modes[2] == "Responder"
-    assert session_state["_pending_k_resp"] == 2
-    assert session_state["_pending_k_guard"] == 1
+    assert "_pending_k_resp" not in session_state
+    assert "_pending_k_guard" not in session_state
+    assert session_state["_suggestion_manual_modes"] == {2: "Responder"}
 
 
-def test_card_toggle_to_off_queues_slider_count():
+def test_card_toggle_to_off_records_manual_mode_without_slider_count():
     suggestions = _suggestions()
     session_state = {
         "_station_suggestion_rank_by": "call",
@@ -79,11 +81,12 @@ def test_card_toggle_to_off_queues_slider_count():
     )
 
     assert modes[2] == "Off"
-    assert session_state["_pending_k_resp"] == 1
-    assert session_state["_pending_k_guard"] == 1
+    assert "_pending_k_resp" not in session_state
+    assert "_pending_k_guard" not in session_state
+    assert session_state["_suggestion_manual_modes"] == {2: "Off"}
 
 
-def test_card_role_change_queues_both_slider_counts():
+def test_card_role_change_records_manual_mode_without_slider_count():
     suggestions = _suggestions()
     session_state = {
         "_station_suggestion_rank_by": "call",
@@ -99,8 +102,9 @@ def test_card_role_change_queues_both_slider_counts():
     )
 
     assert modes[0] == "Responder"
-    assert session_state["_pending_k_resp"] == 2
-    assert session_state["_pending_k_guard"] == 0
+    assert "_pending_k_resp" not in session_state
+    assert "_pending_k_guard" not in session_state
+    assert session_state["_suggestion_manual_modes"] == {0: "Responder"}
 
 
 def test_slider_change_rebuilds_manual_card_modes():
@@ -163,3 +167,17 @@ def test_deployed_station_indices_normalizes_active_drone_indices():
             object(),
         ]
     ) == {2, 4}
+
+
+def test_manual_suggestion_deployments_override_optimizer_indices():
+    station_metadata = [{"name": f"Station {i}"} for i in range(5)]
+
+    resp_idx, guard_idx = apply_manual_suggestion_deployments(
+        station_metadata,
+        active_resp_idx=[1, 2],
+        active_guard_idx=[0],
+        manual_modes={0: "Responder", 2: "Off", 3: "Guardian"},
+    )
+
+    assert resp_idx == [1, 0]
+    assert guard_idx == [3]

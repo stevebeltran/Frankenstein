@@ -6,6 +6,7 @@ from modules.onboarding import (
     infer_simulation_targets_from_station_file,
     load_simulation_custom_stations,
     resolve_demo_stations,
+    restore_brinc_session,
 )
 
 
@@ -81,3 +82,18 @@ def test_resolve_demo_stations_reports_uploaded_station_count():
     assert warnings == []
     assert notices == ["Loaded 1 station row from uploaded stations file."]
     assert len(stations_df) == 1
+
+
+def test_restore_brinc_session_missing_responder_count_defaults_to_zero():
+    session_state = {}
+
+    restore_brinc_session(
+        session_state,
+        {
+            "city": "Test City",
+            "state": "TX",
+            "calls_data": [{"lat": 1.0, "lon": 2.0}],
+        },
+    )
+
+    assert session_state["k_resp"] == 0

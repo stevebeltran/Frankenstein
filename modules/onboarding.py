@@ -56,7 +56,7 @@ def load_brinc_save_data(brinc_file):
 def restore_brinc_session(session_state, save_data):
     session_state['active_city'] = str(save_data.get('city', 'Unknown')).title()
     session_state['active_state'] = save_data.get('state', 'US')
-    session_state['k_resp'] = save_data.get('k_resp', 2)
+    session_state['k_resp'] = save_data.get('k_resp', 0)
     session_state['k_guard'] = save_data.get('k_guard', 0)
     session_state['r_resp'] = save_data.get('r_resp', 2.0)
     session_state['r_guard'] = save_data.get('r_guard', 8.0)

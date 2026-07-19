@@ -277,6 +277,7 @@ station_suggestion_display_metrics = _dashboard_helpers_mod.station_suggestion_d
 deployed_station_indices = _dashboard_helpers_mod.deployed_station_indices
 sync_station_suggestion_modes = _dashboard_helpers_mod.sync_station_suggestion_modes
 render_station_suggestions_grid = _dashboard_helpers_mod.render_station_suggestions_grid
+apply_manual_suggestion_deployments = _dashboard_helpers_mod.apply_manual_suggestion_deployments
 _onboarding_mod = _load_local_module("onboarding")
 from modules.highway_corridor import (
     STATE_PRIMARY_INTERSTATES,
@@ -7425,18 +7426,8 @@ body{{background:transparent;overflow:hidden}}
                 k_guardian=k_guardian,
                 k_responder=k_responder,
             )
-            if st.session_state.pop('_suggestion_card_change_pending', False):
-                st.rerun()
             st.session_state['_suggestion_selected_resp_count'] = sum(1 for mode in _current_modes.values() if mode == 'Responder')
             st.session_state['_suggestion_selected_guard_count'] = sum(1 for mode in _current_modes.values() if mode == 'Guardian')
-            locked_g_pins = list(dict.fromkeys(locked_g_pins + [
-                s['station_idx'] for s in _suggestions
-                if _current_modes.get(s['station_idx']) == 'Guardian'
-            ]))
-            locked_r_pins = list(dict.fromkeys(locked_r_pins + [
-                s['station_idx'] for s in _suggestions
-                if _current_modes.get(s['station_idx']) == 'Responder'
-            ]))
 
         # ── OPTIMIZATION ──────────────────────────────────────────────────
         _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
@@ -7566,6 +7557,17 @@ body{{background:transparent;overflow:hidden}}
         chrono_g = _opt_result['chrono_g']
         best_combo = _opt_result['best_combo']
         guard_claims_by_idx = _opt_result.get('guard_claims_by_idx', {}) or {}
+        _manual_suggestion_modes = dict(st.session_state.get('_suggestion_manual_modes', {}) or {})
+        if _manual_suggestion_modes:
+            active_resp_idx, active_guard_idx = apply_manual_suggestion_deployments(
+                station_metadata,
+                active_resp_idx,
+                active_guard_idx,
+                _manual_suggestion_modes,
+            )
+            active_resp_names = [station_metadata[i]['name'] for i in active_resp_idx]
+            active_guard_names = [station_metadata[i]['name'] for i in active_guard_idx]
+            best_combo = (tuple(active_resp_idx), tuple(active_guard_idx))
 
 
         # ── METRICS ───────────────────────────────────────────────────────
@@ -11136,7 +11138,7 @@ body{{background:transparent;overflow:hidden}}
                     "or guarantee of any product, service, or financial outcome."
                 ),
                 # Fleet counts and ranges
-                "k_resp": k_responder, "k_guard": k_guardian,
+                "k_resp": actual_k_responder, "k_guard": actual_k_guardian,
                 "r_resp": resp_radius_mi, "r_guard": guard_radius_mi,
                 # Rates
                 "dfr_rate": int(dfr_dispatch_rate*100), "deflect_rate": int(deflection_rate*100),
@@ -11149,8 +11151,8 @@ body{{background:transparent;overflow:hidden}}
                 # Boundary selection
                 "use_county_boundary": st.session_state.get('use_county_boundary', False),
                 # Locked stations (must restore before auto-minimums runs)
-                "pinned_guard_names": list(pinned_guard_names),
-                "pinned_resp_names":  list(pinned_resp_names),
+                "pinned_guard_names": list(active_guard_names),
+                "pinned_resp_names":  list(active_resp_names),
                 # Custom / pin-dropped stations (bypass OSM on reimport)
                 "custom_stations": html_reports._safe_df_to_records(st.session_state.get('custom_stations')),
                 # Whether fleet was manually built via pin-drop
@@ -13074,13 +13076,11 @@ body{{background:transparent;overflow:hidden}}
                 guardian_count=actual_k_guardian,
             )
             sentry_metric("count", "export.downloaded", 1, export_type="brinc_plan")
-            st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['BRINC']
-            st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
             _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                          "BRINC", k_responder, k_guardian, calls_covered_perc,
+                          "BRINC", actual_k_responder, actual_k_guardian, calls_covered_perc,
                           prop_name, prop_email, details=export_details)
             _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                           "BRINC", k_responder, k_guardian, calls_covered_perc,
+                           "BRINC", actual_k_responder, actual_k_guardian, calls_covered_perc,
                            prop_name, prop_email, details=export_details)
         # 2. Executive Summary / proposal HTML export
         _export_html_ready = isinstance(export_html, str) and export_html.lstrip().lower().startswith("<!doctype html")

@@ -2268,22 +2268,21 @@ def sync_station_suggestion_modes(session_state, suggestions, k_guardian=None, k
         normalized_existing[idx] = mode if mode in valid_modes else 'Off'
 
     widget_changed = False
+    changed_widget_modes = {}
     for s in suggestions:
         idx = s['station_idx']
         widget_mode = session_state.get(_suggestion_widget_key(session_state, idx))
         if widget_mode in valid_modes and widget_mode != normalized_existing.get(idx, 'Off'):
             normalized_existing[idx] = widget_mode
             widget_changed = True
+            changed_widget_modes[int(idx)] = widget_mode
 
     if widget_changed:
         synced_modes = normalized_existing
-        next_resp = sum(1 for mode in synced_modes.values() if mode == 'Responder')
-        next_guard = sum(1 for mode in synced_modes.values() if mode == 'Guardian')
-        session_state['_pending_k_resp'] = next_resp
-        session_state['_pending_k_guard'] = next_guard
-        session_state['_suggestion_card_change_pending'] = True
         session_state['_suggestion_sync_source'] = 'cards'
-        session_state['_suggestion_manual_modes'] = dict(synced_modes)
+        manual_modes = dict(session_state.get('_suggestion_manual_modes', {}) or {})
+        manual_modes.update(changed_widget_modes)
+        session_state['_suggestion_manual_modes'] = manual_modes
         session_state['suggestion_modes'] = synced_modes
         session_state['suggestion_toggles'] = {idx: (mode != 'Off') for idx, mode in synced_modes.items()}
         return synced_modes
@@ -2324,21 +2323,45 @@ def sync_station_suggestion_modes(session_state, suggestions, k_guardian=None, k
 
 
 def _queue_suggestion_mode_delta(session_state, idx, current_resp, current_guard, old_mode, new_mode):
-    """Queue fleet count changes for a manual suggestion-card role change."""
+    """Record a manual suggestion-card role change without changing fleet counts."""
     if old_mode == new_mode:
         return False
 
-    # Queue the exact current totals from the updated suggestion map so the
-    # sliders follow the cards without accumulating stale deltas across reruns.
-    modes = session_state.get('suggestion_modes', {}) or {}
-    next_resp = sum(1 for mode in modes.values() if mode == 'Responder')
-    next_guard = sum(1 for mode in modes.values() if mode == 'Guardian')
-    session_state['_pending_k_resp'] = next_resp
-    session_state['_pending_k_guard'] = next_guard
     manual_modes = dict(session_state.get('_suggestion_manual_modes', {}) or {})
     manual_modes[int(idx)] = new_mode
     session_state['_suggestion_manual_modes'] = manual_modes
     return True
+
+
+def apply_manual_suggestion_deployments(
+    station_metadata,
+    active_resp_idx,
+    active_guard_idx,
+    manual_modes,
+):
+    """Apply suggestion-card overrides directly to active deployment indices."""
+    station_count = len(station_metadata or [])
+    resp_idx = list(active_resp_idx or [])
+    guard_idx = list(active_guard_idx or [])
+    valid_modes = {'Guardian', 'Responder', 'Off'}
+
+    for raw_idx, raw_mode in (manual_modes or {}).items():
+        try:
+            idx = int(raw_idx)
+        except Exception:
+            continue
+        if idx < 0 or idx >= station_count:
+            continue
+
+        mode = raw_mode if raw_mode in valid_modes else 'Off'
+        resp_idx = [existing for existing in resp_idx if int(existing) != idx]
+        guard_idx = [existing for existing in guard_idx if int(existing) != idx]
+        if mode == 'Guardian':
+            guard_idx.append(idx)
+        elif mode == 'Responder':
+            resp_idx.append(idx)
+
+    return list(dict.fromkeys(resp_idx)), list(dict.fromkeys(guard_idx))
 
 
 def render_station_suggestions(st, session_state, suggestions, text_main, text_muted,

@@ -4,6 +4,7 @@ from modules.dashboard_helpers import (
     _suggestion_widget_key,
     apply_manual_suggestion_deployments,
     deployed_station_indices,
+    reconcile_suggestion_modes_from_deployments,
     sync_station_suggestion_modes,
 )
 
@@ -240,3 +241,23 @@ def test_lower_rank_widget_key_updates_exact_station_not_next_card():
     assert modes[26] == "Responder"
     assert modes[27] == "Off"
     assert session_state["_suggestion_manual_modes"] == {26: "Responder"}
+
+
+def test_reconcile_suggestion_modes_reflects_final_optimizer_deployments():
+    session_state = {
+        "suggestion_modes": {0: "Guardian", 1: "Guardian", 2: "Off", 3: "Off"},
+        "suggestion_toggles": {0: True, 1: True, 2: False, 3: False},
+    }
+
+    modes = reconcile_suggestion_modes_from_deployments(
+        session_state,
+        _suggestions(4),
+        active_resp_idx=[3],
+        active_guard_idx=[1, 2],
+    )
+
+    assert modes == {0: "Off", 1: "Guardian", 2: "Guardian", 3: "Responder"}
+    assert session_state["suggestion_toggles"] == {0: False, 1: True, 2: True, 3: True}
+    assert session_state["_suggestion_selected_resp_count"] == 1
+    assert session_state["_suggestion_selected_guard_count"] == 2
+    assert session_state["_suggestion_widget_version"] == 1

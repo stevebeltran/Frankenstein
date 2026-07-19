@@ -2449,6 +2449,52 @@ def apply_manual_suggestion_deployments(
     return resp_idx, guard_idx
 
 
+def reconcile_suggestion_modes_from_deployments(
+    session_state,
+    suggestions,
+    active_resp_idx,
+    active_guard_idx,
+):
+    """Mirror final deployed station indices back into visible suggestion cards."""
+    if not suggestions:
+        return {}
+
+    resp_set = set()
+    guard_set = set()
+    for idx in active_resp_idx or []:
+        try:
+            resp_set.add(int(idx))
+        except Exception:
+            continue
+    for idx in active_guard_idx or []:
+        try:
+            guard_set.add(int(idx))
+        except Exception:
+            continue
+
+    modes = {}
+    for suggestion in suggestions:
+        try:
+            idx = int(suggestion.get('station_idx'))
+        except Exception:
+            continue
+        if idx in guard_set:
+            modes[idx] = 'Guardian'
+        elif idx in resp_set:
+            modes[idx] = 'Responder'
+        else:
+            modes[idx] = 'Off'
+
+    previous_modes = dict(session_state.get('suggestion_modes', {}) or {})
+    if previous_modes != modes:
+        session_state['_suggestion_widget_version'] = _suggestion_widget_version(session_state) + 1
+    session_state['suggestion_modes'] = modes
+    session_state['suggestion_toggles'] = {idx: (mode != 'Off') for idx, mode in modes.items()}
+    session_state['_suggestion_selected_resp_count'] = sum(1 for mode in modes.values() if mode == 'Responder')
+    session_state['_suggestion_selected_guard_count'] = sum(1 for mode in modes.values() if mode == 'Guardian')
+    return modes
+
+
 def render_station_suggestions(st, session_state, suggestions, text_main, text_muted,
                                card_bg, card_border, accent_color, source_label='public data',
                                k_guardian=None, k_responder=None):

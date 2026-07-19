@@ -278,6 +278,7 @@ deployed_station_indices = _dashboard_helpers_mod.deployed_station_indices
 sync_station_suggestion_modes = _dashboard_helpers_mod.sync_station_suggestion_modes
 render_station_suggestions_grid = _dashboard_helpers_mod.render_station_suggestions_grid
 apply_manual_suggestion_deployments = _dashboard_helpers_mod.apply_manual_suggestion_deployments
+reconcile_suggestion_modes_from_deployments = _dashboard_helpers_mod.reconcile_suggestion_modes_from_deployments
 _onboarding_mod = _load_local_module("onboarding")
 from modules.highway_corridor import (
     STATE_PRIMARY_INTERSTATES,
@@ -7570,6 +7571,13 @@ body{{background:transparent;overflow:hidden}}
             active_resp_names = [station_metadata[i]['name'] for i in active_resp_idx]
             active_guard_names = [station_metadata[i]['name'] for i in active_guard_idx]
             best_combo = (tuple(active_resp_idx), tuple(active_guard_idx))
+        if _suggestions:
+            _current_modes = reconcile_suggestion_modes_from_deployments(
+                st.session_state,
+                _suggestions,
+                active_resp_idx,
+                active_guard_idx,
+            )
 
 
         # ── METRICS ───────────────────────────────────────────────────────

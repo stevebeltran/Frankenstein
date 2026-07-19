@@ -502,7 +502,7 @@ def render_crash_simulator(
             key="crash_altitude"
         )
     with col5:
-        if st.button("🎬 SIMULATE CRASH", use_container_width=True):
+        if st.button("🎬 SIMULATE CRASH", width="stretch"):
             st.session_state['crash_sim_run'] = True
 
     # ─ Run simulation if requested ─

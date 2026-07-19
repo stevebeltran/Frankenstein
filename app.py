@@ -9119,7 +9119,7 @@ body{{background:transparent;overflow:hidden}}
                     lambda value: f"{value:.1f}" if pd.notna(value) else 'N/A'
                 )
                 _arrival_left.markdown('**By District**')
-                _arrival_left.dataframe(_district_display, hide_index=True, use_container_width=True)
+                _arrival_left.dataframe(_district_display, hide_index=True, width="stretch")
 
             _station_arrival = _arrival_summary.get('station_summary', pd.DataFrame())
             if isinstance(_station_arrival, pd.DataFrame) and not _station_arrival.empty:
@@ -9133,7 +9133,7 @@ body{{background:transparent;overflow:hidden}}
                     lambda value: f"{value:.1f}" if pd.notna(value) else 'N/A'
                 )
                 _arrival_right.markdown('**By Deployed Station**')
-                _arrival_right.dataframe(_station_display, hide_index=True, use_container_width=True)
+                _arrival_right.dataframe(_station_display, hide_index=True, width="stretch")
 
             _beat_arrival = _arrival_summary.get('beat_summary', pd.DataFrame())
             if isinstance(_beat_arrival, pd.DataFrame) and not _beat_arrival.empty:
@@ -9149,7 +9149,7 @@ body{{background:transparent;overflow:hidden}}
                     lambda value: f"{value:.1f}" if pd.notna(value) else 'N/A'
                 )
                 with st.expander('Beat-level arrival detail', expanded=False):
-                    st.dataframe(_beat_display, hide_index=True, use_container_width=True)
+                    st.dataframe(_beat_display, hide_index=True, width="stretch")
 
             _day_arrival = _arrival_summary.get('day_summary', pd.DataFrame())
             if isinstance(_day_arrival, pd.DataFrame) and not _day_arrival.empty:
@@ -9178,7 +9178,7 @@ body{{background:transparent;overflow:hidden}}
                     xaxis=dict(showgrid=False),
                     yaxis=dict(title='Drone First %', range=[0, 100], gridcolor='rgba(255,255,255,0.08)'),
                 )
-                st.plotly_chart(_day_fig, use_container_width=True, config={'displayModeBar': False})
+                st.plotly_chart(_day_fig, width="stretch", config={'displayModeBar': False})
 
         # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────
         st.markdown("---")
@@ -9738,7 +9738,7 @@ body{{background:transparent;overflow:hidden}}
                         xaxis=dict(title=None, showgrid=False, zeroline=False),
                         yaxis=dict(title='Minutes', gridcolor='rgba(255,255,255,0.08)', zeroline=False),
                     )
-                    st.plotly_chart(_priority_fig, use_container_width=True, config={'displayModeBar': False})
+                    st.plotly_chart(_priority_fig, width="stretch", config={'displayModeBar': False})
 
                 _detail_cols = st.columns(2, gap="medium")
                 _district_summary = _historical_response_summary.get('district_summary')
@@ -9748,7 +9748,7 @@ body{{background:transparent;overflow:hidden}}
                     _district_display['Average'] = _district_display['AverageMin'].map(lambda v: _format_minutes_label(v, include_seconds=True))
                     _district_display = _district_display[['Label', 'Calls', 'Median', 'Average']].rename(columns={'Label': 'District'})
                     _detail_cols[0].markdown(f"<div style='font-size:0.78rem; font-weight:700; color:{text_main}; margin:4px 0 8px;'>Response Time by District</div>", unsafe_allow_html=True)
-                    _detail_cols[0].dataframe(_district_display, hide_index=True, use_container_width=True)
+                    _detail_cols[0].dataframe(_district_display, hide_index=True, width="stretch")
 
                 _call_type_summary = _historical_response_summary.get('call_type_summary')
                 if isinstance(_call_type_summary, pd.DataFrame) and not _call_type_summary.empty:
@@ -9757,7 +9757,7 @@ body{{background:transparent;overflow:hidden}}
                     _call_type_display['Average'] = _call_type_display['AverageMin'].map(lambda v: _format_minutes_label(v, include_seconds=True))
                     _call_type_display = _call_type_display[['Label', 'Calls', 'Median', 'Average']].rename(columns={'Label': 'Call Type'})
                     _detail_cols[1].markdown(f"<div style='font-size:0.78rem; font-weight:700; color:{text_main}; margin:4px 0 8px;'>Most Common Call Types</div>", unsafe_allow_html=True)
-                    _detail_cols[1].dataframe(_call_type_display, hide_index=True, use_container_width=True)
+                    _detail_cols[1].dataframe(_call_type_display, hide_index=True, width="stretch")
 
                 _foot_parts = [
                     f"{_historical_response_summary['calls_analyzed']:,} completed calls included",

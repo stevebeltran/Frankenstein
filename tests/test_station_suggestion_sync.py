@@ -44,7 +44,7 @@ def test_slider_assigns_ranked_station_suggestions():
     assert modes[2] == "Responder"
 
 
-def test_card_toggle_to_responder_records_manual_mode_without_slider_count():
+def test_card_toggle_to_responder_records_manual_mode_and_increments_slider_count():
     suggestions = _suggestions()
     session_state = {
         "_station_suggestion_rank_by": "call",
@@ -60,12 +60,33 @@ def test_card_toggle_to_responder_records_manual_mode_without_slider_count():
     )
 
     assert modes[2] == "Responder"
-    assert "_pending_k_resp" not in session_state
+    assert session_state["_pending_k_resp"] == 2
     assert "_pending_k_guard" not in session_state
     assert session_state["_suggestion_manual_modes"] == {2: "Responder"}
 
 
-def test_card_toggle_to_off_records_manual_mode_without_slider_count():
+def test_card_toggle_to_guardian_records_manual_mode_and_increments_slider_count():
+    suggestions = _suggestions()
+    session_state = {
+        "_station_suggestion_rank_by": "call",
+        "suggestion_modes": {0: "Guardian", 1: "Responder", 2: "Off", 3: "Off", 4: "Off"},
+    }
+    session_state[_suggestion_widget_key(session_state, 2)] = "Guardian"
+
+    modes = sync_station_suggestion_modes(
+        session_state,
+        suggestions,
+        k_guardian=1,
+        k_responder=1,
+    )
+
+    assert modes[2] == "Guardian"
+    assert "_pending_k_resp" not in session_state
+    assert session_state["_pending_k_guard"] == 2
+    assert session_state["_suggestion_manual_modes"] == {2: "Guardian"}
+
+
+def test_card_toggle_to_off_records_manual_mode_and_decrements_slider_count():
     suggestions = _suggestions()
     session_state = {
         "_station_suggestion_rank_by": "call",
@@ -81,12 +102,12 @@ def test_card_toggle_to_off_records_manual_mode_without_slider_count():
     )
 
     assert modes[2] == "Off"
-    assert "_pending_k_resp" not in session_state
+    assert session_state["_pending_k_resp"] == 1
     assert "_pending_k_guard" not in session_state
     assert session_state["_suggestion_manual_modes"] == {2: "Off"}
 
 
-def test_card_role_change_records_manual_mode_without_slider_count():
+def test_card_role_change_records_manual_mode_and_updates_slider_counts():
     suggestions = _suggestions()
     session_state = {
         "_station_suggestion_rank_by": "call",
@@ -102,8 +123,8 @@ def test_card_role_change_records_manual_mode_without_slider_count():
     )
 
     assert modes[0] == "Responder"
-    assert "_pending_k_resp" not in session_state
-    assert "_pending_k_guard" not in session_state
+    assert session_state["_pending_k_resp"] == 2
+    assert session_state["_pending_k_guard"] == 0
     assert session_state["_suggestion_manual_modes"] == {0: "Responder"}
 
 

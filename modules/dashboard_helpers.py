@@ -2272,10 +2272,19 @@ def sync_station_suggestion_modes(session_state, suggestions, k_guardian=None, k
     for s in suggestions:
         idx = s['station_idx']
         widget_mode = session_state.get(_suggestion_widget_key(session_state, idx))
-        if widget_mode in valid_modes and widget_mode != normalized_existing.get(idx, 'Off'):
+        old_mode = normalized_existing.get(idx, 'Off')
+        if widget_mode in valid_modes and widget_mode != old_mode:
             normalized_existing[idx] = widget_mode
             widget_changed = True
             changed_widget_modes[int(idx)] = widget_mode
+            _queue_suggestion_mode_delta(
+                session_state,
+                idx,
+                k_responder,
+                k_guardian,
+                old_mode,
+                widget_mode,
+            )
 
     if widget_changed:
         synced_modes = normalized_existing
@@ -2323,13 +2332,25 @@ def sync_station_suggestion_modes(session_state, suggestions, k_guardian=None, k
 
 
 def _queue_suggestion_mode_delta(session_state, idx, current_resp, current_guard, old_mode, new_mode):
-    """Record a manual suggestion-card role change without changing fleet counts."""
+    """Record a manual suggestion-card role change and queue matching fleet counts."""
     if old_mode == new_mode:
         return False
 
     manual_modes = dict(session_state.get('_suggestion_manual_modes', {}) or {})
     manual_modes[int(idx)] = new_mode
     session_state['_suggestion_manual_modes'] = manual_modes
+
+    def _mode_delta(role):
+        return (1 if new_mode == role else 0) - (1 if old_mode == role else 0)
+
+    resp_delta = _mode_delta('Responder')
+    guard_delta = _mode_delta('Guardian')
+    if resp_delta:
+        base_resp = int(current_resp or 0)
+        session_state['_pending_k_resp'] = max(0, base_resp + resp_delta)
+    if guard_delta:
+        base_guard = int(current_guard or 0)
+        session_state['_pending_k_guard'] = max(0, base_guard + guard_delta)
     return True
 
 

@@ -917,6 +917,12 @@ def resolve_uploaded_boundaries(
     session_state['active_city'] = chosen_name
     if chosen_state:
         session_state['active_state'] = chosen_state
+    if chosen_name and (chosen_state or file_state or session_state.get('active_state')):
+        session_state['target_cities'] = [{
+            'city': chosen_name,
+            'state': chosen_state or file_state or str(session_state.get('active_state', '') or '').strip().upper(),
+        }]
+        session_state['saved_jurisdiction_names'] = [chosen_name]
     set_stage(85, "Saving the resolved boundary for faster reuse next time…")
     saved_path = save_boundary_gdf(
         chosen_gdf,

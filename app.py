@@ -248,6 +248,11 @@ from modules.geospatial import (
     _count_points_within_boundary, find_jurisdictions_by_coordinates
 )
 from modules import faa_rf, optimization, html_reports
+from modules.arrival_advantage import (
+    build_arrival_summary,
+    compute_arrival_advantage,
+    find_column as find_arrival_column,
+)
 _transient_notice_mod = _load_local_module("transient_notice")
 render_transient_build_notice = _transient_notice_mod.render_transient_build_notice
 _session_state_mod = _load_local_module("session_state")
@@ -7196,7 +7201,7 @@ body{{background:transparent;overflow:hidden}}
             df_calls_full,
         )
 
-        _display_opts = render_display_options(st)
+        _display_opts = render_display_options(st, df_calls_full)
         show_satellite = _display_opts['show_satellite']
         show_boundaries = _display_opts['show_boundaries']
         show_faa = _display_opts['show_faa']
@@ -7206,6 +7211,11 @@ body{{background:transparent;overflow:hidden}}
         show_cell_towers = _display_opts['show_cell_towers']
         show_heatmap = _display_opts['show_heatmap']
         show_dots = _display_opts['show_dots']
+        show_arrival_advantage = _display_opts['show_arrival_advantage']
+        arrival_baseline = _display_opts['arrival_baseline']
+        arrival_districts = _display_opts['arrival_districts']
+        arrival_beats = _display_opts['arrival_beats']
+        arrival_show_missing = _display_opts['arrival_show_missing']
         show_station_suggestions = _display_opts['show_station_suggestions']
         show_rapid_response_ring = _display_opts['show_rapid_response_ring']
         simulate_traffic = _display_opts['simulate_traffic']
@@ -7617,6 +7627,7 @@ body{{background:transparent;overflow:hidden}}
         _station_city_masks = {}
         _metric_cov_r = cov_r.copy()
         _metric_cov_g = cov_g.copy()
+        _metric_calls_in_city = None
 
         _metric_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
         if _metric_df is not None and len(_metric_df) > 0:
@@ -7872,6 +7883,7 @@ body{{background:transparent;overflow:hidden}}
                 'faa_ceiling': faa_rf.get_station_faa_ceiling(d_lat, d_lon, faa_geojson),
                 'nearest_airport': faa_rf.get_nearest_airfield(d_lat, d_lon, airfields)
             }
+            d['arrival_station_key'] = f"{d_type}:{idx}"
 
             if total_calls > 0 and cumulative_mask is not None:
                 # ── DEDUPLICATION: track unique calls added for combined KPI totals ──
@@ -8125,6 +8137,62 @@ body{{background:transparent;overflow:hidden}}
                           'zone_flights_annual':0})
             active_drones.append(d)
             step += 1
+
+        # Historical deputy arrival vs. fastest deployed drone. The comparison
+        # uses the same deployed station coordinates, radii, and speeds as the
+        # coverage model above; only calls with a recorded first arrival enter
+        # the timing percentages.
+        _arrival_analysis_df = pd.DataFrame()
+        _arrival_map_df = pd.DataFrame()
+        _arrival_summary = {}
+        _arrival_source = _metric_calls_in_city.copy() if _metric_calls_in_city is not None else pd.DataFrame()
+
+        def _filter_arrival_scope(_source):
+            if _source is None or _source.empty:
+                return _source
+            _filtered = _source.copy()
+            _district_col = find_arrival_column(_filtered, 'District')
+            _beat_col = find_arrival_column(_filtered, 'Beat')
+            if arrival_districts and _district_col is not None:
+                _filtered = _filtered[_filtered[_district_col].fillna('').astype(str).isin(arrival_districts)]
+            if arrival_beats and _beat_col is not None:
+                _filtered = _filtered[_filtered[_beat_col].fillna('').astype(str).isin(arrival_beats)]
+            return _filtered
+
+        if active_drones and not _arrival_source.empty:
+            _arrival_source = _filter_arrival_scope(_arrival_source)
+            _arrival_analysis_df = compute_arrival_advantage(
+                _arrival_source,
+                active_drones,
+                baseline=arrival_baseline,
+            )
+            _arrival_summary = build_arrival_summary(_arrival_analysis_df)
+
+            _station_arrival_summary = _arrival_summary.get('station_summary', pd.DataFrame())
+            if isinstance(_station_arrival_summary, pd.DataFrame) and not _station_arrival_summary.empty:
+                _station_arrival_lookup = {
+                    str(row['arrival_station_key']): row
+                    for _, row in _station_arrival_summary.iterrows()
+                }
+                for _drone in active_drones:
+                    _station_row = _station_arrival_lookup.get(str(_drone.get('arrival_station_key', '')))
+                    if _station_row is None:
+                        continue
+                    _drone['deputy_comparison_calls'] = int(_station_row.get('Compared', 0) or 0)
+                    _drone['drone_first_pct'] = float(_station_row.get('Drone First %', 0) or 0)
+                    _drone['median_eyes_on_min'] = float(_station_row.get('Median Eyes-On Min', 0) or 0)
+
+            if show_arrival_advantage and display_calls is not None and not display_calls.empty:
+                _arrival_map_source = _filter_arrival_scope(display_calls)
+                _arrival_map_df = compute_arrival_advantage(
+                    _arrival_map_source,
+                    active_drones,
+                    baseline=arrival_baseline,
+                )
+                if not arrival_show_missing:
+                    _arrival_map_df = _arrival_map_df[
+                        _arrival_map_df['arrival_category'] != 'Missing arrival'
+                    ]
 
         unit_card_drones = sorted(
             active_drones,
@@ -8577,12 +8645,57 @@ body{{background:transparent;overflow:hidden}}
                         legendgroup=_label,
                     )
 
-            if show_heatmap and not display_calls.empty:
+            if show_heatmap and not show_arrival_advantage and not display_calls.empty:
                 fig.add_trace(go.Densitymap(lat=display_calls.geometry.y, lon=display_calls.geometry.x,
                     z=np.ones(len(display_calls)), radius=12, colorscale='Inferno', opacity=0.6,
                     showscale=False, name="Heatmap", hoverinfo='skip'))
 
-            if show_dots and not display_calls.empty:
+            if show_arrival_advantage and not _arrival_map_df.empty:
+                _arrival_colors = {
+                    'Drone first': '#2ECC71',
+                    'Close': '#F0B429',
+                    'Deputy first': '#FF4D5A',
+                    'Outside coverage': '#78849A',
+                    'Missing arrival': '#A0A7B4',
+                }
+                _arrival_district_col = find_arrival_column(_arrival_map_df, 'District')
+                _arrival_beat_col = find_arrival_column(_arrival_map_df, 'Beat')
+
+                def _arrival_hover_text(_row):
+                    _district = str(_row.get(_arrival_district_col, '') or '') if _arrival_district_col else ''
+                    _beat = str(_row.get(_arrival_beat_col, '') or '') if _arrival_beat_col else ''
+                    _deputy = _row.get('arrival_deputy_response_min')
+                    _drone = _row.get('arrival_drone_response_min')
+                    _advantage = _row.get('arrival_advantage_min')
+                    _station = str(_row.get('arrival_station', '') or '')
+                    _deputy_text = f"{float(_deputy):.1f} min" if pd.notna(_deputy) else 'Missing'
+                    _drone_text = f"{float(_drone):.1f} min" if pd.notna(_drone) else 'Outside coverage'
+                    _advantage_text = f"{float(_advantage):+.1f} min" if pd.notna(_advantage) else 'N/A'
+                    return (
+                        f"<b>{html.escape(str(_row.get('arrival_category', 'Arrival comparison')))}</b>"
+                        f"<br>District {_district or 'N/A'} · Beat {_beat or 'N/A'}"
+                        f"<br>Deputy response: {_deputy_text}"
+                        f"<br>Drone response: {_drone_text}"
+                        f"<br>Drone advantage: {_advantage_text}"
+                        f"<br>Station: {html.escape(_station) if _station else 'N/A'}"
+                        f"<br>Baseline: {html.escape(str(arrival_baseline))}"
+                    )
+
+                for _category in ['Drone first', 'Close', 'Deputy first', 'Outside coverage', 'Missing arrival']:
+                    _category_calls = _arrival_map_df[_arrival_map_df['arrival_category'] == _category]
+                    if _category_calls.empty:
+                        continue
+                    _hover_text = [_arrival_hover_text(_row) for _, _row in _category_calls.iterrows()]
+                    fig.add_trace(go.Scattermap(
+                        lat=_category_calls.geometry.y,
+                        lon=_category_calls.geometry.x,
+                        mode='markers',
+                        marker=dict(size=8, color=_arrival_colors[_category], opacity=0.78),
+                        name=_category,
+                        text=_hover_text,
+                        hovertemplate='%{text}<extra></extra>',
+                    ))
+            elif show_dots and not display_calls.empty:
                 point_size = 2 if len(display_calls) > 150000 else 3 if len(display_calls) > 50000 else 4 if len(display_calls) > 20000 else 5
                 point_opacity = 0.06 if len(display_calls) > 150000 else 0.10 if len(display_calls) > 50000 else 0.18 if len(display_calls) > 20000 else 0.28 if len(display_calls) > 10000 else 0.4
                 # Split by agency so fire calls render red and police calls use the theme colour
@@ -8946,6 +9059,124 @@ body{{background:transparent;overflow:hidden}}
                 k_responder=k_responder,
                 suggestion_color_map=_suggestion_color_map,
             )
+
+        # ── ARRIVAL ADVANTAGE ────────────────────────────────────────────────────
+        if _arrival_summary and int(_arrival_summary.get('calls_with_arrival', 0) or 0) > 0:
+            st.markdown('---')
+            st.markdown(
+                f"<h4 style='margin-top:2px;border-bottom:1px solid {card_border};padding-bottom:8px;color:{text_main};'>"
+                f"Arrival Advantage <span class='tip' data-tip='Actual first-deputy arrival timestamps compared with modeled travel from the fastest in-range deployed drone. Positive advantage means the drone arrives first.'>?</span>"
+                f"</h4>",
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                f"Ground baseline: {arrival_baseline}. Drone travel uses the deployed station coordinates, configured coverage radius, and aircraft speed."
+            )
+            _arrival_kpi_cols = st.columns(4, gap='small')
+            _arrival_kpi_cols[0].metric(
+                'Drone Arrives First',
+                f"{float(_arrival_summary.get('drone_wins_pct', 0) or 0):.1f}%",
+                help='Share of calls with both a deputy arrival timestamp and an in-range deployed drone where the drone travel time is shorter.',
+            )
+            _arrival_kpi_cols[1].metric(
+                'Median Eyes-On',
+                f"{float(_arrival_summary.get('median_eyes_on_min', 0) or 0):.1f} min",
+                help='Median positive arrival advantage among calls where the drone arrives first.',
+            )
+            _arrival_kpi_cols[2].metric(
+                'Calls Compared',
+                f"{int(_arrival_summary.get('calls_analyzed', 0) or 0):,}",
+                help='Calls with a recorded deputy arrival that also fall inside an active drone coverage radius.',
+            )
+            _arrival_kpi_cols[3].metric(
+                'Arrival Data',
+                f"{float(_arrival_summary.get('arrival_completeness_pct', 0) or 0):.1f}%",
+                help='Share of calls in the current district/beat scope with a usable first-arrival timestamp.',
+            )
+            _arrival_available = int(_arrival_summary.get('calls_with_arrival', 0) or 0)
+            _arrival_total = int(_arrival_summary.get('total_calls', 0) or 0)
+            if float(_arrival_summary.get('arrival_completeness_pct', 0) or 0) < 50:
+                st.warning(
+                    f"Arrival-time coverage is limited: {_arrival_available:,} of {_arrival_total:,} calls "
+                    f"({float(_arrival_summary.get('arrival_completeness_pct', 0) or 0):.1f}%). "
+                    "Timing results describe the recorded sample and may not represent calls with missing arrivals."
+                )
+
+            _arrival_left, _arrival_right = st.columns(2, gap='medium')
+            _district_arrival = _arrival_summary.get('district_summary', pd.DataFrame())
+            if isinstance(_district_arrival, pd.DataFrame) and not _district_arrival.empty:
+                _district_source_col = find_arrival_column(_district_arrival, 'District')
+                _district_display = _district_arrival.rename(columns={_district_source_col: 'District'}).copy()
+                _district_display = _district_display[
+                    ['District', 'Calls', 'Arrival Data', 'Compared', 'Drone First %', 'Median Eyes-On Min']
+                ].sort_values('District')
+                _district_display['Drone First %'] = _district_display['Drone First %'].map(
+                    lambda value: f"{value:.1f}%" if pd.notna(value) else 'N/A'
+                )
+                _district_display['Median Eyes-On Min'] = _district_display['Median Eyes-On Min'].map(
+                    lambda value: f"{value:.1f}" if pd.notna(value) else 'N/A'
+                )
+                _arrival_left.markdown('**By District**')
+                _arrival_left.dataframe(_district_display, hide_index=True, use_container_width=True)
+
+            _station_arrival = _arrival_summary.get('station_summary', pd.DataFrame())
+            if isinstance(_station_arrival, pd.DataFrame) and not _station_arrival.empty:
+                _station_display = _station_arrival[
+                    ['arrival_station', 'Compared', 'Drone First %', 'Median Eyes-On Min']
+                ].rename(columns={'arrival_station': 'Station'}).copy()
+                _station_display['Drone First %'] = _station_display['Drone First %'].map(
+                    lambda value: f"{value:.1f}%" if pd.notna(value) else 'N/A'
+                )
+                _station_display['Median Eyes-On Min'] = _station_display['Median Eyes-On Min'].map(
+                    lambda value: f"{value:.1f}" if pd.notna(value) else 'N/A'
+                )
+                _arrival_right.markdown('**By Deployed Station**')
+                _arrival_right.dataframe(_station_display, hide_index=True, use_container_width=True)
+
+            _beat_arrival = _arrival_summary.get('beat_summary', pd.DataFrame())
+            if isinstance(_beat_arrival, pd.DataFrame) and not _beat_arrival.empty:
+                _beat_source_col = find_arrival_column(_beat_arrival, 'Beat')
+                _beat_display = _beat_arrival.rename(columns={_beat_source_col: 'Beat'}).copy()
+                _beat_display = _beat_display[
+                    ['Beat', 'Calls', 'Arrival Data', 'Compared', 'Drone First %', 'Median Eyes-On Min']
+                ].sort_values('Beat')
+                _beat_display['Drone First %'] = _beat_display['Drone First %'].map(
+                    lambda value: f"{value:.1f}%" if pd.notna(value) else 'N/A'
+                )
+                _beat_display['Median Eyes-On Min'] = _beat_display['Median Eyes-On Min'].map(
+                    lambda value: f"{value:.1f}" if pd.notna(value) else 'N/A'
+                )
+                with st.expander('Beat-level arrival detail', expanded=False):
+                    st.dataframe(_beat_display, hide_index=True, use_container_width=True)
+
+            _day_arrival = _arrival_summary.get('day_summary', pd.DataFrame())
+            if isinstance(_day_arrival, pd.DataFrame) and not _day_arrival.empty:
+                _day_source_col = find_arrival_column(_day_arrival, 'Day of Week')
+                _day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                _day_plot = _day_arrival.rename(columns={_day_source_col: 'Day'}).copy()
+                _day_plot['Day'] = pd.Categorical(_day_plot['Day'], categories=_day_order, ordered=True)
+                _day_plot = _day_plot.sort_values('Day')
+                _day_fig = go.Figure(go.Bar(
+                    x=_day_plot['Day'].astype(str),
+                    y=_day_plot['Drone First %'],
+                    marker_color=accent_color,
+                    customdata=np.stack([
+                        _day_plot['Compared'].to_numpy(),
+                        _day_plot['Median Eyes-On Min'].fillna(0).to_numpy(),
+                    ], axis=-1),
+                    hovertemplate='%{x}<br>Drone first: %{y:.1f}%<br>Compared: %{customdata[0]:.0f}<br>Median eyes-on: %{customdata[1]:.1f} min<extra></extra>',
+                ))
+                _day_fig.update_layout(
+                    title='Drone-First Rate by Day of Week',
+                    height=280,
+                    margin=dict(l=20, r=10, t=45, b=20),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color=text_main),
+                    xaxis=dict(showgrid=False),
+                    yaxis=dict(title='Drone First %', range=[0, 100], gridcolor='rgba(255,255,255,0.08)'),
+                )
+                st.plotly_chart(_day_fig, use_container_width=True, config={'displayModeBar': False})
 
         # ── UNIT ECONOMICS CARDS (directly below map, no toggle) ─────────────────
         st.markdown("---")

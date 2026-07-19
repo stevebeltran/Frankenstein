@@ -106,15 +106,22 @@ def _count_points_within_boundary(df_calls, boundary_geom_4326):
         return 0
 
 
-def find_jurisdictions_by_coordinates(df_calls, min_call_share=0.10, min_call_count=3):
+def find_jurisdictions_by_coordinates(
+    df_calls,
+    min_call_share=0.10,
+    min_call_count=3,
+    dominant_county_share=0.80,
+):
     """
     Purely coordinate-driven jurisdiction lookup.
 
-    Spatially joins call points against places_lite.parquet (and
-    counties_lite.parquet as fallback) to find every jurisdiction that
+    Spatially joins call points against places_lite.parquet and
+    counties_lite.parquet to find every jurisdiction that
     contains at least `min_call_share` of the uploaded calls OR at least
     `min_call_count` absolute calls. The default share threshold is 10% so
     small spillover clusters do not distort multi-jurisdiction station lookup.
+    Countywide uploads are promoted to the county when one county contains at
+    least `dominant_county_share` of calls and no place reaches that share.
     Returns a GeoDataFrame with columns [DISPLAY_NAME, data_count, geometry]
     sorted descending by data_count, or None if nothing is found.
     """
@@ -170,9 +177,10 @@ def find_jurisdictions_by_coordinates(df_calls, min_call_share=0.10, min_call_co
                 if hit_counts.empty:
                     continue
 
-                total = hit_counts.sum()
+                sample_total = max(int(len(pts_gdf)), 1)
                 for jname, cnt in hit_counts.items():
-                    if cnt / total <= min_call_share:
+                    call_share = float(cnt) / sample_total
+                    if call_share < min_call_share and int(cnt) < int(min_call_count):
                         continue
                     row = poly_gdf[poly_gdf[name_col] == jname].copy()
                     if row.empty:
@@ -186,15 +194,12 @@ def find_jurisdictions_by_coordinates(df_calls, min_call_share=0.10, min_call_co
                             'DISPLAY_NAME': display,
                             'boundary_kind': kind,
                             'data_count': int(cnt),
+                            'call_share': call_share,
                             'geometry': row.geometry.iloc[0],
                         })
             except Exception as _e:
                 _debug_msgs.append(f"{parquet_file} ERROR: {_e}\n{_tb.format_exc()[-300:]}")
                 continue
-
-            if results and parquet_file.startswith('places'):
-                break
-
         _debug_msgs.append(f"total results: {len(results)}, names: {[r['DISPLAY_NAME'] for r in results]}")
         st.session_state['_jur_debug'] = _debug_msgs
 
@@ -202,7 +207,24 @@ def find_jurisdictions_by_coordinates(df_calls, min_call_share=0.10, min_call_co
             return None
 
         out = gpd.GeoDataFrame(results, crs='EPSG:4326')
-        out = out.sort_values('data_count', ascending=False).reset_index(drop=True)
+        def _max_share(rows):
+            share = rows['call_share'].max() if not rows.empty else 0
+            return float(share) if pd.notna(share) else 0.0
+
+        place_share = _max_share(out[out['boundary_kind'] == 'place'])
+        county_rows = out[out['boundary_kind'] == 'county'].copy()
+        county_share = _max_share(county_rows)
+        if county_share >= float(dominant_county_share) and place_share < float(dominant_county_share):
+            out = county_rows.sort_values('data_count', ascending=False).head(1).reset_index(drop=True)
+            _debug_msgs.append(f"dominant county selected: {out.iloc[0]['DISPLAY_NAME']} ({county_share:.1%})")
+        else:
+            out['_kind_rank'] = out['boundary_kind'].map({'place': 0, 'county': 1}).fillna(2)
+            out = (
+                out.sort_values(['_kind_rank', 'data_count'], ascending=[True, False])
+                .drop(columns=['_kind_rank'])
+                .reset_index(drop=True)
+            )
+        st.session_state['_jur_debug'] = _debug_msgs
         return out
 
     except Exception as _e:

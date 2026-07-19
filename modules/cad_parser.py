@@ -18,6 +18,7 @@ from pathlib import Path
 import pyproj
 from modules.config import STATE_FIPS, US_STATES_ABBR, KNOWN_POPULATIONS
 from modules.numbers_adapter import load_numbers_dataframe
+from modules.arrival_advantage import normalize_arrival_fields
 
 
 def _normalize_jacksonville_cfs_report(raw_bytes, filename=""):
@@ -1429,7 +1430,12 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                 continue
 
             res = pd.DataFrame()
-            for _raw_keep_col in ['timedispatched', 'timearrived', 'finalcallcode', 'origcallcode', 'displayaddrs', 'district', 'neighborhood']:
+            for _raw_keep_col in [
+                'timedispatched', 'timearrived', 'finalcallcode', 'origcallcode',
+                'displayaddrs', 'district', 'neighborhood',
+                'beat', 'cfs date', 'cfs time', 'day of week', 'call type',
+                'first assigned time', 'first enroute time', 'first arrived time',
+            ]:
                 if _raw_keep_col in raw_df.columns:
                     res[_raw_keep_col] = raw_df[_raw_keep_col]
             exact_coord_names = {
@@ -1895,7 +1901,7 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
     #   2) the stations map can render a much denser full-history call cloud
     #   3) export/reporting math stays tied to the source file, not a k-means
     #      surrogate created during parsing
-    return combined
+    return normalize_arrival_fields(combined)
 
 def _get_annualized_calls(raw_count: int) -> int:
     """Return raw_count scaled to a full year using the uploaded file's date span.

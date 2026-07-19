@@ -2320,6 +2320,16 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             travel_compare_text = "Arrival time"
             travel_detail_text = f"Guardian {guardian_time:.1f} min vs Responder {responder_time:.1f} min"
             travel_color = "#00D2FF"
+        deputy_comparison_calls = int(d.get("deputy_comparison_calls", 0) or 0)
+        if deputy_comparison_calls > 0:
+            drone_first_pct = float(d.get("drone_first_pct", 0) or 0)
+            median_eyes_on_min = float(d.get("median_eyes_on_min", 0) or 0)
+            travel_compare_text = f"Drone first {drone_first_pct:.0f}%"
+            travel_detail_text = f"{median_eyes_on_min:.1f} min median eyes-on · n={deputy_comparison_calls:,}"
+            travel_color = "#2ecc71" if drone_first_pct >= 50 else "#F0B429"
+            arrival_tooltip = "Historical first-deputy arrival compared with this station's modeled drone travel time for calls attributed to this deployed unit."
+        else:
+            arrival_tooltip = "Average station-to-call travel time compared between Guardian and Responder at the same station. The faster unit arrives first."
 
 
 
@@ -2545,7 +2555,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
             patrol_time_line += (
                 f'<div style="margin-top:4px;padding-top:4px;border-top:1px dashed rgba(255,255,255,0.08);">'
                 f'<div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;text-align:right;">Arrival advantage'
-                f'<span class="tip" data-tip="Average station-to-call travel time compared between Guardian and Responder at the same station. The faster unit arrives first.">?</span></div>'
+                f'<span class="tip" data-tip="{arrival_tooltip}">?</span></div>'
                 f'<div style="font-size:0.78rem;font-weight:800;color:{travel_color};text-align:right;line-height:1.1;">{travel_compare_text}</div>'
                 f'<div style="font-size:0.58rem;color:{text_muted};text-align:right;margin-top:1px;">{travel_detail_text}</div>'
                 f'</div>'
@@ -2641,7 +2651,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
             f'      <div style="flex:1;background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:6px;padding:8px 10px;text-align:center;">'
 
-            f'        <div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:3px;">Arrival advantage<span class="tip" data-tip="Average station-to-call travel time compared between Guardian and Responder at the same station. The faster unit arrives first.">?</span></div>'
+            f'        <div style="font-size:0.58rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;margin-bottom:3px;">Arrival advantage<span class="tip" data-tip="{arrival_tooltip}">?</span></div>'
 
             f'        <div style="font-size:0.82rem;font-weight:900;color:{travel_color};line-height:1.1;margin-top:2px;">{travel_compare_text}</div>'
 
@@ -2773,7 +2783,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
             f'      <div style="flex:1; background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:6px; padding:8px 10px; text-align:center;">'
 
-            f'        <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Arrival advantage<span class="tip" data-tip="Average station-to-call travel time compared between Guardian and Responder at the same station. The faster unit arrives first.">?</span></div>'
+            f'        <div style="font-size:0.68rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Arrival advantage<span class="tip" data-tip="{arrival_tooltip}">?</span></div>'
 
             f'        <div style="font-size:0.82rem; font-weight:900; color:{travel_color}; line-height:1.1;">{travel_compare_text}</div>'
 
@@ -2922,7 +2932,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
   </div>
   <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-bottom:6px;padding:6px 8px;background:rgba(255,255,255,0.03);border:1px solid {card_border};border-radius:5px;">
     <div>
-      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Arrival advantage<span class="tip" data-tip="Average station-to-call travel time compared between Guardian and Responder at the same station. The faster unit arrives first.">?</span></div>
+      <div style="font-size:0.57rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.3px;">Arrival advantage<span class="tip" data-tip="{arrival_tooltip}">?</span></div>
       <div style="font-size:0.88rem;font-weight:800;color:{travel_color};">{travel_compare_text}</div>
     </div>
     <div style="text-align:right;">

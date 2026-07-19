@@ -13,6 +13,7 @@ from shapely.geometry import box
 from shapely.ops import unary_union
 
 from modules.config import calculate_max_flights_per_day, US_STATES_ABBR, text_muted
+from modules.arrival_advantage import available_baselines, find_column
 from modules.versioning import __version__ as _app_version
 
 
@@ -402,7 +403,7 @@ def render_data_filters(st, df_stations_all, df_calls, df_calls_full):
     return df_stations_all, df_calls, df_calls_full
 
 
-def render_display_options(st):
+def render_display_options(st, df_calls_full=None):
     disp_expander = st.sidebar.expander('👁️ Display Options', expanded=False)
     
     def section_header(label):
@@ -479,6 +480,58 @@ def render_display_options(st):
             key='show_dots_b',
             help='Show individual 911 call locations as dots on the map.',
         )
+        _arrival_baselines = available_baselines(df_calls_full)
+        show_arrival_advantage = st.toggle(
+            'Deputy vs. Drone Arrival',
+            value=False,
+            key='show_arrival_advantage_b',
+            help=(
+                'Color calls by whether the fastest deployed drone or the first deputy arrives first. '
+                'Requires historical first-arrival timestamps.'
+            ),
+        )
+        if not _arrival_baselines:
+            st.caption('Deputy vs. Drone Arrival requires CAD rows with first-arrival timestamps.')
+        arrival_baseline = _arrival_baselines[0] if _arrival_baselines else 'CFS Time'
+        arrival_districts = []
+        arrival_beats = []
+        arrival_show_missing = False
+        if show_arrival_advantage and _arrival_baselines:
+            arrival_baseline = st.selectbox(
+                'Ground Response Baseline',
+                _arrival_baselines,
+                index=0,
+                key='arrival_baseline_b',
+                help='CFS Time measures customer-perceived response. Assigned and Enroute isolate later operational stages.',
+            )
+            district_col = find_column(df_calls_full, 'District')
+            beat_col = find_column(df_calls_full, 'Beat')
+            if district_col is not None:
+                district_options = sorted(
+                    value for value in df_calls_full[district_col].fillna('').astype(str).str.strip().unique()
+                    if value in {'1', '2', '3', '4'}
+                )
+                arrival_districts = st.multiselect(
+                    'Districts', district_options, key='arrival_districts_b',
+                    help='Leave blank to include every district.',
+                )
+            if beat_col is not None:
+                beat_source = df_calls_full
+                if arrival_districts and district_col is not None:
+                    beat_source = beat_source[beat_source[district_col].astype(str).isin(arrival_districts)]
+                beat_options = sorted(
+                    value for value in beat_source[beat_col].fillna('').astype(str).str.strip().unique() if value
+                )
+                arrival_beats = st.multiselect(
+                    'Beats', beat_options, key='arrival_beats_b',
+                    help='Leave blank to include every beat in the selected districts.',
+                )
+            arrival_show_missing = st.checkbox(
+                'Show calls missing arrival time',
+                value=False,
+                key='arrival_show_missing_b',
+                help='Missing records are shown in gray and are excluded from timing percentages.',
+            )
 
         section_header('🛠️ Deployment Tools')
         if 'show_station_suggestions_ui' not in st.session_state:
@@ -535,6 +588,11 @@ def render_display_options(st):
         'show_cell_towers': show_cell_towers,
         'show_heatmap': show_heatmap,
         'show_dots': show_dots,
+        'show_arrival_advantage': show_arrival_advantage,
+        'arrival_baseline': arrival_baseline,
+        'arrival_districts': arrival_districts,
+        'arrival_beats': arrival_beats,
+        'arrival_show_missing': arrival_show_missing,
         'show_station_suggestions': show_station_suggestions,
         'show_rapid_response_ring': show_rapid_response_ring,
         'simulate_traffic': simulate_traffic,
@@ -2517,15 +2575,22 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                 idx = s['station_idx']
                 mode = modes.get(idx, 'Off')
                 display_metrics = station_suggestion_display_metrics(s, mode)
-                mode_color = '#FFD700' if mode == 'Guardian' else '#00D2FF' if mode == 'Responder' else '#9aa0b4'
                 mode_abbr = 'G' if mode == 'Guardian' else 'R' if mode == 'Responder' else 'O'
-                role_key = 'GUARDIAN' if mode == 'Guardian' else 'RESPONDER' if mode == 'Responder' else 'OFF'
-                ring_color = suggestion_color_map.get((int(idx), role_key)) or suggestion_color_map.get(str(idx))
-                bg = card_bg if mode != 'Off' else 'rgba(30,30,40,0.4)'
-                opacity = '1.0' if mode != 'Off' else '0.55'
+                mode_key = str(mode or '').upper()
+                is_active_mode = mode in {'Guardian', 'Responder'}
+                ring_color = (
+                    suggestion_color_map.get((int(idx), mode_key))
+                    or suggestion_color_map.get((str(idx), mode_key))
+                    or suggestion_color_map.get(f"{idx}_{mode_key}")
+                    or ('#FFD700' if mode == 'Guardian' else '#00D2FF' if mode == 'Responder' else card_border)
+                )
+                bg = card_bg if is_active_mode else 'rgba(30,30,40,0.4)'
+                opacity = '1.0' if is_active_mode else '0.55'
                 border_col = card_border
-                indicator_color = ring_color if mode != 'Off' and ring_color else card_border
-                badge_color = ring_color if mode != 'Off' and ring_color else mode_color
+                indicator_color = ring_color if is_active_mode else 'transparent'
+                badge_bg = ring_color if is_active_mode else 'transparent'
+                badge_fg = '#000' if is_active_mode else text_muted
+                badge_border = 'transparent' if is_active_mode else card_border
                 widget_key = _suggestion_widget_key(session_state, idx)
                 station_name = str(s.get('name', '') or 'Unnamed Station')
                 station_address = str(s.get('address', '') or '').strip()
@@ -2545,8 +2610,8 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                     f"min-height:72px; font-size:0.7rem; line-height:1.3;'>"
                     f"<div style='display:flex; justify-content:space-between; align-items:center;'>"
                     f"<span style='font-weight:700; color:{text_main};'>#{s['rank']}</span>"
-                    f"<span style='background:{badge_color}; color:#000; font-size:0.55rem; "
-                    f"font-weight:800; padding:1px 5px; border-radius:3px;'>{mode_abbr}</span></div>"
+                    f"<span style='background:{badge_bg}; color:{badge_fg}; border:1px solid {badge_border}; "
+                    f"font-size:0.55rem; font-weight:800; padding:1px 5px; border-radius:3px;'>{mode_abbr}</span></div>"
                     f"<div style='display:flex; align-items:center; gap:6px; margin:4px 0 2px;'>"
                     f"<span style='width:10px; height:10px; border-radius:2px; background:{indicator_color}; "
                     f"border:1px solid rgba(255,255,255,0.2); flex:0 0 auto;'></span>"

@@ -279,6 +279,8 @@ sync_station_suggestion_modes = _dashboard_helpers_mod.sync_station_suggestion_m
 render_station_suggestions_grid = _dashboard_helpers_mod.render_station_suggestions_grid
 apply_manual_suggestion_deployments = _dashboard_helpers_mod.apply_manual_suggestion_deployments
 reconcile_suggestion_modes_from_deployments = _dashboard_helpers_mod.reconcile_suggestion_modes_from_deployments
+apply_suggestion_widget_overrides = _dashboard_helpers_mod.apply_suggestion_widget_overrides
+reconcile_unique_deployment_indices = _dashboard_helpers_mod.reconcile_unique_deployment_indices
 _onboarding_mod = _load_local_module("onboarding")
 from modules.highway_corridor import (
     STATE_PRIMARY_INTERSTATES,
@@ -7427,8 +7429,20 @@ body{{background:transparent;overflow:hidden}}
                 k_guardian=k_guardian,
                 k_responder=k_responder,
             )
-            st.session_state['_suggestion_selected_resp_count'] = sum(1 for mode in _current_modes.values() if mode == 'Responder')
-            st.session_state['_suggestion_selected_guard_count'] = sum(1 for mode in _current_modes.values() if mode == 'Guardian')
+            _current_modes = apply_suggestion_widget_overrides(
+                st.session_state,
+                _suggestions,
+                _current_modes,
+            )
+            _suggestion_resp_count = sum(1 for mode in _current_modes.values() if mode == 'Responder')
+            _suggestion_guard_count = sum(1 for mode in _current_modes.values() if mode == 'Guardian')
+            st.session_state['_suggestion_selected_resp_count'] = _suggestion_resp_count
+            st.session_state['_suggestion_selected_guard_count'] = _suggestion_guard_count
+            if st.session_state.get('_suggestion_sync_source') == 'cards':
+                k_responder = _suggestion_resp_count
+                k_guardian = _suggestion_guard_count
+                st.session_state['_fleet_k_resp'] = int(k_responder)
+                st.session_state['_fleet_k_guard'] = int(k_guardian)
 
         # ── OPTIMIZATION ──────────────────────────────────────────────────
         _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"
@@ -7568,9 +7582,18 @@ body{{background:transparent;overflow:hidden}}
                 target_resp_count=k_responder,
                 target_guard_count=k_guardian,
             )
-            active_resp_names = [station_metadata[i]['name'] for i in active_resp_idx]
-            active_guard_names = [station_metadata[i]['name'] for i in active_guard_idx]
-            best_combo = (tuple(active_resp_idx), tuple(active_guard_idx))
+        active_resp_idx, active_guard_idx = reconcile_unique_deployment_indices(
+            station_metadata,
+            active_resp_idx,
+            active_guard_idx,
+            suggestions=_suggestions,
+            target_resp_count=k_responder,
+            target_guard_count=k_guardian,
+            preferred_modes=_manual_suggestion_modes,
+        )
+        active_resp_names = [station_metadata[i]['name'] for i in active_resp_idx]
+        active_guard_names = [station_metadata[i]['name'] for i in active_guard_idx]
+        best_combo = (tuple(active_resp_idx), tuple(active_guard_idx))
         if _suggestions:
             _current_modes = reconcile_suggestion_modes_from_deployments(
                 st.session_state,

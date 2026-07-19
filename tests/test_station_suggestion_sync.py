@@ -2,9 +2,11 @@ import pandas as pd
 
 from modules.dashboard_helpers import (
     _suggestion_widget_key,
+    apply_suggestion_widget_overrides,
     apply_manual_suggestion_deployments,
     deployed_station_indices,
     reconcile_suggestion_modes_from_deployments,
+    reconcile_unique_deployment_indices,
     sync_station_suggestion_modes,
 )
 
@@ -62,7 +64,7 @@ def test_card_toggle_to_responder_records_manual_mode_and_increments_slider_coun
 
     assert modes[2] == "Responder"
     assert session_state["_pending_k_resp"] == 2
-    assert "_pending_k_guard" not in session_state
+    assert session_state["_pending_k_guard"] == 1
     assert session_state["_suggestion_manual_modes"] == {2: "Responder"}
 
 
@@ -82,7 +84,7 @@ def test_card_toggle_to_guardian_records_manual_mode_and_increments_slider_count
     )
 
     assert modes[2] == "Guardian"
-    assert "_pending_k_resp" not in session_state
+    assert session_state["_pending_k_resp"] == 1
     assert session_state["_pending_k_guard"] == 2
     assert session_state["_suggestion_manual_modes"] == {2: "Guardian"}
 
@@ -104,7 +106,7 @@ def test_card_toggle_to_off_records_manual_mode_and_decrements_slider_count():
 
     assert modes[2] == "Off"
     assert session_state["_pending_k_resp"] == 1
-    assert "_pending_k_guard" not in session_state
+    assert session_state["_pending_k_guard"] == 1
     assert session_state["_suggestion_manual_modes"] == {2: "Off"}
 
 
@@ -127,6 +129,44 @@ def test_card_role_change_records_manual_mode_and_updates_slider_counts():
     assert session_state["_pending_k_resp"] == 2
     assert session_state["_pending_k_guard"] == 0
     assert session_state["_suggestion_manual_modes"] == {0: "Responder"}
+
+
+def test_card_role_switch_uses_exact_card_counts_not_delta_guess():
+    suggestions = _suggestions()
+    session_state = {
+        "_station_suggestion_rank_by": "call",
+        "suggestion_modes": {0: "Guardian", 1: "Responder", 2: "Responder", 3: "Off", 4: "Off"},
+    }
+    session_state[_suggestion_widget_key(session_state, 2, suggestions[2])] = "Guardian"
+
+    modes = sync_station_suggestion_modes(
+        session_state,
+        suggestions,
+        k_guardian=1,
+        k_responder=2,
+    )
+
+    assert modes[2] == "Guardian"
+    assert session_state["_pending_k_resp"] == 1
+    assert session_state["_pending_k_guard"] == 2
+    assert session_state["_suggestion_manual_modes"] == {2: "Guardian"}
+
+
+def test_apply_suggestion_widget_overrides_updates_counts_before_optimizer():
+    suggestions = _suggestions(10)
+    modes = {0: "Responder", 7: "Responder", 8: "Responder", 9: "Guardian"}
+    session_state = {
+        "_suggestion_widget_version": 0,
+        "suggestion_modes": dict(modes),
+    }
+    session_state[_suggestion_widget_key(session_state, 8, suggestions[8])] = "Guardian"
+
+    updated = apply_suggestion_widget_overrides(session_state, suggestions, modes)
+
+    assert updated[8] == "Guardian"
+    assert session_state["_pending_k_resp"] == 2
+    assert session_state["_pending_k_guard"] == 2
+    assert session_state["_suggestion_sync_source"] == "cards"
 
 
 def test_slider_change_rebuilds_manual_card_modes():
@@ -260,4 +300,45 @@ def test_reconcile_suggestion_modes_reflects_final_optimizer_deployments():
     assert session_state["suggestion_toggles"] == {0: False, 1: True, 2: True, 3: True}
     assert session_state["_suggestion_selected_resp_count"] == 1
     assert session_state["_suggestion_selected_guard_count"] == 2
-    assert session_state["_suggestion_widget_version"] == 1
+    assert session_state[_suggestion_widget_key(session_state, 0, _suggestions(4)[0])] == "Off"
+    assert session_state[_suggestion_widget_key(session_state, 1, _suggestions(4)[1])] == "Guardian"
+    assert session_state[_suggestion_widget_key(session_state, 2, _suggestions(4)[2])] == "Guardian"
+    assert session_state[_suggestion_widget_key(session_state, 3, _suggestions(4)[3])] == "Responder"
+
+
+def test_reconcile_unique_deployment_indices_fills_duplicate_role_station():
+    station_metadata = [{"name": f"Station {i}"} for i in range(5)]
+    suggestions = _suggestions(5)
+
+    resp_idx, guard_idx = reconcile_unique_deployment_indices(
+        station_metadata,
+        active_resp_idx=[1, 2],
+        active_guard_idx=[1],
+        suggestions=suggestions,
+        target_resp_count=2,
+        target_guard_count=1,
+    )
+
+    assert len(resp_idx) == 2
+    assert len(guard_idx) == 1
+    assert not (set(resp_idx) & set(guard_idx))
+    assert 1 in guard_idx
+
+
+def test_reconcile_unique_deployment_indices_respects_manual_role_preference():
+    station_metadata = [{"name": f"Station {i}"} for i in range(5)]
+
+    resp_idx, guard_idx = reconcile_unique_deployment_indices(
+        station_metadata,
+        active_resp_idx=[1],
+        active_guard_idx=[1, 2],
+        suggestions=_suggestions(5),
+        target_resp_count=1,
+        target_guard_count=2,
+        preferred_modes={1: "Responder"},
+    )
+
+    assert 1 in resp_idx
+    assert 1 not in guard_idx
+    assert len(resp_idx) == 1
+    assert len(guard_idx) == 2

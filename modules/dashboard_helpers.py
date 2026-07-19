@@ -2228,6 +2228,11 @@ def _suggestion_widget_key(session_state, idx, suggestion=None):
     return f"suggest_mode_{_suggestion_widget_version(session_state)}_{identity}"
 
 
+def _suggestion_widget_mode(session_state, idx, suggestion, valid_modes):
+    current_value = session_state.get(_suggestion_widget_key(session_state, idx, suggestion))
+    return current_value if current_value in valid_modes else None
+
+
 def _forced_custom_suggestion_modes(session_state, suggestions):
     forced_modes = {}
     custom_stations = session_state.get('custom_stations', pd.DataFrame())
@@ -2279,20 +2284,12 @@ def sync_station_suggestion_modes(session_state, suggestions, k_guardian=None, k
     changed_widget_modes = {}
     for s in suggestions:
         idx = s['station_idx']
-        widget_mode = session_state.get(_suggestion_widget_key(session_state, idx, s))
+        widget_mode = _suggestion_widget_mode(session_state, idx, s, valid_modes)
         old_mode = normalized_existing.get(idx, 'Off')
         if widget_mode in valid_modes and widget_mode != old_mode:
             normalized_existing[idx] = widget_mode
             widget_changed = True
             changed_widget_modes[int(idx)] = widget_mode
-            _queue_suggestion_mode_delta(
-                session_state,
-                idx,
-                k_responder,
-                k_guardian,
-                old_mode,
-                widget_mode,
-            )
 
     if widget_changed:
         synced_modes = normalized_existing
@@ -2302,6 +2299,8 @@ def sync_station_suggestion_modes(session_state, suggestions, k_guardian=None, k
         session_state['_suggestion_manual_modes'] = manual_modes
         session_state['suggestion_modes'] = synced_modes
         session_state['suggestion_toggles'] = {idx: (mode != 'Off') for idx, mode in synced_modes.items()}
+        session_state['_pending_k_resp'] = sum(1 for mode in synced_modes.values() if mode == 'Responder')
+        session_state['_pending_k_guard'] = sum(1 for mode in synced_modes.values() if mode == 'Guardian')
         return synced_modes
 
     if (k_guardian is not None) or (k_responder is not None):
@@ -2485,14 +2484,150 @@ def reconcile_suggestion_modes_from_deployments(
         else:
             modes[idx] = 'Off'
 
-    previous_modes = dict(session_state.get('suggestion_modes', {}) or {})
-    if previous_modes != modes:
-        session_state['_suggestion_widget_version'] = _suggestion_widget_version(session_state) + 1
     session_state['suggestion_modes'] = modes
     session_state['suggestion_toggles'] = {idx: (mode != 'Off') for idx, mode in modes.items()}
+    for suggestion in suggestions:
+        try:
+            idx = int(suggestion.get('station_idx'))
+        except Exception:
+            continue
+        widget_key = _suggestion_widget_key(session_state, idx, suggestion)
+        if idx in modes:
+            session_state[widget_key] = modes[idx]
     session_state['_suggestion_selected_resp_count'] = sum(1 for mode in modes.values() if mode == 'Responder')
     session_state['_suggestion_selected_guard_count'] = sum(1 for mode in modes.values() if mode == 'Guardian')
     return modes
+
+
+def apply_suggestion_widget_overrides(session_state, suggestions, modes):
+    """Apply live radio widget values to a suggestion mode map before optimization."""
+    valid_modes = {'Guardian', 'Responder', 'Off'}
+    updated = dict(modes or {})
+    changed = {}
+    for suggestion in suggestions or []:
+        try:
+            idx = int(suggestion.get('station_idx'))
+        except Exception:
+            continue
+        widget_mode = session_state.get(_suggestion_widget_key(session_state, idx, suggestion))
+        if widget_mode not in valid_modes:
+            continue
+        old_mode = updated.get(idx, 'Off')
+        if widget_mode == old_mode:
+            continue
+        updated[idx] = widget_mode
+        changed[idx] = widget_mode
+
+    if changed:
+        manual_modes = dict(session_state.get('_suggestion_manual_modes', {}) or {})
+        manual_modes.update(changed)
+        session_state['_suggestion_manual_modes'] = manual_modes
+        session_state['suggestion_modes'] = updated
+        session_state['suggestion_toggles'] = {idx: (mode != 'Off') for idx, mode in updated.items()}
+        session_state['_suggestion_sync_source'] = 'cards'
+        session_state['_pending_k_resp'] = sum(1 for mode in updated.values() if mode == 'Responder')
+        session_state['_pending_k_guard'] = sum(1 for mode in updated.values() if mode == 'Guardian')
+    return updated
+
+
+def reconcile_unique_deployment_indices(
+    station_metadata,
+    active_resp_idx,
+    active_guard_idx,
+    suggestions=None,
+    target_resp_count=None,
+    target_guard_count=None,
+    preferred_modes=None,
+):
+    """Ensure one station index is not deployed as both roles."""
+    station_count = len(station_metadata or [])
+    preferred_modes = {
+        int(idx): mode
+        for idx, mode in (preferred_modes or {}).items()
+        if str(mode) in {'Guardian', 'Responder', 'Off'}
+    }
+
+    def _unique(values):
+        result = []
+        seen = set()
+        for value in values or []:
+            try:
+                idx = int(value)
+            except Exception:
+                continue
+            if idx < 0 or idx >= station_count or idx in seen:
+                continue
+            seen.add(idx)
+            result.append(idx)
+        return result
+
+    resp_idx = _unique(active_resp_idx)
+    guard_idx = _unique(active_guard_idx)
+    resp_set = set(resp_idx)
+    guard_set = set(guard_idx)
+
+    for idx in sorted(resp_set & guard_set):
+        preferred = preferred_modes.get(idx)
+        if preferred == 'Responder':
+            guard_idx = [value for value in guard_idx if value != idx]
+            guard_set.discard(idx)
+        else:
+            resp_idx = [value for value in resp_idx if value != idx]
+            resp_set.discard(idx)
+
+    suggestion_order = []
+    for suggestion in suggestions or []:
+        try:
+            idx = int(suggestion.get('station_idx'))
+        except Exception:
+            continue
+        if 0 <= idx < station_count and idx not in suggestion_order:
+            suggestion_order.append(idx)
+    station_order = suggestion_order + [idx for idx in range(station_count) if idx not in suggestion_order]
+
+    def _target(value, current_len):
+        if value is None:
+            return current_len
+        try:
+            return max(0, min(station_count, int(value or 0)))
+        except Exception:
+            return current_len
+
+    target_resp = _target(target_resp_count, len(resp_idx))
+    target_guard = _target(target_guard_count, len(guard_idx))
+
+    def _trim(values, target, protected):
+        if len(values) <= target:
+            return values
+        keep = [idx for idx in values if idx in protected]
+        rest = [idx for idx in values if idx not in protected]
+        return (keep + rest)[:target]
+
+    protected_resp = {idx for idx, mode in preferred_modes.items() if mode == 'Responder'}
+    protected_guard = {idx for idx, mode in preferred_modes.items() if mode == 'Guardian'}
+    forbidden = {idx for idx, mode in preferred_modes.items() if mode == 'Off'}
+    resp_idx = _trim(resp_idx, target_resp, protected_resp)
+    guard_idx = _trim(guard_idx, target_guard, protected_guard)
+
+    def _fill(values, target, other_values, preferred_role):
+        values = list(values)
+        used = set(values) | set(other_values) | forbidden
+        preferred = [
+            idx for idx, mode in preferred_modes.items()
+            if mode == preferred_role and idx not in used and 0 <= idx < station_count
+        ]
+        for idx in preferred + station_order:
+            if len(values) >= target:
+                break
+            if idx in used:
+                continue
+            values.append(idx)
+            used.add(idx)
+        return values
+
+    guard_idx = _fill(guard_idx, target_guard, resp_idx, 'Guardian')
+    resp_idx = _fill(resp_idx, target_resp, guard_idx, 'Responder')
+    return resp_idx, guard_idx
 
 
 def render_station_suggestions(st, session_state, suggestions, text_main, text_muted,
@@ -2622,7 +2757,8 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
                     session_state['_suggestion_manual_modes'] = manual_modes
                     session_state['suggestion_modes'] = modes
                     session_state['suggestion_toggles'] = {i: (m != 'Off') for i, m in modes.items()}
-                    _queue_suggestion_mode_delta(session_state, idx, k_responder, k_guardian, mode, new_mode)
+                    session_state['_pending_k_resp'] = sum(1 for m in modes.values() if m == 'Responder')
+                    session_state['_pending_k_guard'] = sum(1 for m in modes.values() if m == 'Guardian')
                     changed = True
                     st.rerun()
 
@@ -2639,6 +2775,7 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
 
     session_state['suggestion_modes'] = modes
     session_state['suggestion_toggles'] = {idx: (mode != 'Off') for idx, mode in modes.items()}
+    session_state['_suggestion_last_render_modes'] = dict(modes)
     return changed
 
 def render_station_suggestions_grid(st, session_state, suggestions, text_main, text_muted,
@@ -2795,7 +2932,8 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                     session_state['_suggestion_manual_modes'] = manual_modes
                     session_state['suggestion_modes'] = modes
                     session_state['suggestion_toggles'] = {i: (m != 'Off') for i, m in modes.items()}
-                    _queue_suggestion_mode_delta(session_state, idx, k_responder, k_guardian, mode, new_mode)
+                    session_state['_pending_k_resp'] = sum(1 for m in modes.values() if m == 'Responder')
+                    session_state['_pending_k_guard'] = sum(1 for m in modes.values() if m == 'Guardian')
                     changed = True
                     st.rerun()
 
@@ -2811,4 +2949,5 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
 
     session_state['suggestion_modes'] = modes
     session_state['suggestion_toggles'] = {idx: (mode != 'Off') for idx, mode in modes.items()}
+    session_state['_suggestion_last_render_modes'] = dict(modes)
     return changed

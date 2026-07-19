@@ -2216,8 +2216,16 @@ def _suggestion_widget_version(session_state):
         return 0
 
 
-def _suggestion_widget_key(session_state, idx):
-    return f"suggest_mode_{_suggestion_widget_version(session_state)}_{idx}"
+def _suggestion_widget_identity(suggestion):
+    station_idx = int(suggestion.get('station_idx', 0))
+    rank = int(suggestion.get('rank', 0) or 0)
+    name = re.sub(r'[^a-zA-Z0-9]+', '_', str(suggestion.get('name', '') or '').strip()).strip('_')[:40]
+    return f"{station_idx}_{rank}_{name}"
+
+
+def _suggestion_widget_key(session_state, idx, suggestion=None):
+    identity = _suggestion_widget_identity(suggestion) if suggestion is not None else str(idx)
+    return f"suggest_mode_{_suggestion_widget_version(session_state)}_{identity}"
 
 
 def _forced_custom_suggestion_modes(session_state, suggestions):
@@ -2271,7 +2279,7 @@ def sync_station_suggestion_modes(session_state, suggestions, k_guardian=None, k
     changed_widget_modes = {}
     for s in suggestions:
         idx = s['station_idx']
-        widget_mode = session_state.get(_suggestion_widget_key(session_state, idx))
+        widget_mode = session_state.get(_suggestion_widget_key(session_state, idx, s))
         old_mode = normalized_existing.get(idx, 'Off')
         if widget_mode in valid_modes and widget_mode != old_mode:
             normalized_existing[idx] = widget_mode
@@ -2359,12 +2367,17 @@ def apply_manual_suggestion_deployments(
     active_resp_idx,
     active_guard_idx,
     manual_modes,
+    target_resp_count=None,
+    target_guard_count=None,
 ):
-    """Apply suggestion-card overrides directly to active deployment indices."""
+    """Apply suggestion-card overrides while preserving requested fleet counts."""
     station_count = len(station_metadata or [])
     resp_idx = list(active_resp_idx or [])
     guard_idx = list(active_guard_idx or [])
     valid_modes = {'Guardian', 'Responder', 'Off'}
+    forced_resp = []
+    forced_guard = []
+    manual_by_idx = {}
 
     for raw_idx, raw_mode in (manual_modes or {}).items():
         try:
@@ -2375,14 +2388,65 @@ def apply_manual_suggestion_deployments(
             continue
 
         mode = raw_mode if raw_mode in valid_modes else 'Off'
+        manual_by_idx[idx] = mode
         resp_idx = [existing for existing in resp_idx if int(existing) != idx]
         guard_idx = [existing for existing in guard_idx if int(existing) != idx]
         if mode == 'Guardian':
-            guard_idx.append(idx)
+            forced_guard.append(idx)
         elif mode == 'Responder':
-            resp_idx.append(idx)
+            forced_resp.append(idx)
 
-    return list(dict.fromkeys(resp_idx)), list(dict.fromkeys(guard_idx))
+    def _unique_ints(values):
+        unique = []
+        seen = set()
+        for value in values:
+            try:
+                idx = int(value)
+            except Exception:
+                continue
+            if idx in seen or idx < 0 or idx >= station_count:
+                continue
+            seen.add(idx)
+            unique.append(idx)
+        return unique
+
+    forced_resp = _unique_ints(forced_resp)
+    forced_guard = _unique_ints(forced_guard)
+    should_reconcile_counts = target_resp_count is not None or target_guard_count is not None
+    if should_reconcile_counts:
+        resp_idx = _unique_ints(forced_resp + resp_idx)
+        guard_idx = _unique_ints(forced_guard + guard_idx)
+    else:
+        resp_idx = _unique_ints(resp_idx + forced_resp)
+        guard_idx = _unique_ints(guard_idx + forced_guard)
+
+    forced_resp_set = set(forced_resp)
+    forced_guard_set = set(forced_guard)
+    resp_idx = [idx for idx in resp_idx if idx not in forced_guard_set and manual_by_idx.get(idx) != 'Off']
+    guard_idx = [idx for idx in guard_idx if idx not in forced_resp_set and manual_by_idx.get(idx) != 'Off']
+
+    def _trim_to_target(values, target_count, forced_set):
+        if target_count is None:
+            return values
+        try:
+            target = max(0, int(target_count or 0))
+        except Exception:
+            return values
+        if len(values) <= target:
+            return values
+        kept = []
+        removable = []
+        for idx in values:
+            if idx in forced_set:
+                kept.append(idx)
+            else:
+                removable.append(idx)
+        available = max(0, target - len(kept))
+        return kept + removable[:available]
+
+    resp_idx = _trim_to_target(resp_idx, target_resp_count, forced_resp_set)
+    guard_idx = _trim_to_target(guard_idx, target_guard_count, forced_guard_set)
+    return resp_idx, guard_idx
 
 
 def render_station_suggestions(st, session_state, suggestions, text_main, text_muted,
@@ -2471,7 +2535,7 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
             opacity = '1.0' if mode != 'Off' else '0.55'
             border_col = card_border
             top_accent = mode_color if mode != 'Off' else card_border
-            widget_key = _suggestion_widget_key(session_state, idx)
+            widget_key = _suggestion_widget_key(session_state, idx, s)
 
             # Use address if available, otherwise fall back to name
             display_text = s.get('address', '') or s['name']
@@ -2635,7 +2699,7 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                 badge_bg = ring_color if is_active_mode else 'transparent'
                 badge_fg = '#000' if is_active_mode else text_muted
                 badge_border = 'transparent' if is_active_mode else card_border
-                widget_key = _suggestion_widget_key(session_state, idx)
+                widget_key = _suggestion_widget_key(session_state, idx, s)
                 station_name = str(s.get('name', '') or 'Unnamed Station')
                 station_address = str(s.get('address', '') or '').strip()
                 address_html = (

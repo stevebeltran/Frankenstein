@@ -7564,6 +7564,8 @@ body{{background:transparent;overflow:hidden}}
                 active_resp_idx,
                 active_guard_idx,
                 _manual_suggestion_modes,
+                target_resp_count=k_responder,
+                target_guard_count=k_guardian,
             )
             active_resp_names = [station_metadata[i]['name'] for i in active_resp_idx]
             active_guard_names = [station_metadata[i]['name'] for i in active_guard_idx]

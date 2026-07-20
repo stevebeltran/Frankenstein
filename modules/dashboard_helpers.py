@@ -2143,8 +2143,9 @@ def compute_station_suggestions(
 
     suggestions = [scored[idx] for idx in chosen]
 
+    _sort_key = 'land_pct_guardian' if rank_by == 'land' else 'call_pct_guardian'
     suggestions.sort(
-        key=lambda s: float(s.get('call_pct_guardian', s.get('call_pct', 0)) or 0),
+        key=lambda s: float(s.get(_sort_key, 0) or 0),
         reverse=True,
     )
 

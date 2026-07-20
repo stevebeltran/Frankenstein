@@ -10125,6 +10125,262 @@ body{{background:transparent;overflow:hidden}}
             )
             components.html(_school_full_html, height=1300, scrolling=False)
 
+        _show_fire_rescue_section = st.toggle(
+            "Show Fire & Rescue Capability",
+            value=True,
+            key="show_fire_rescue_capability_section",
+            help="DFR value case for structure fires, hazmat, interstate MVA scene management, and water/river rescue — plus a breakdown of this jurisdiction's own uploaded call data by category.",
+        )
+        if _show_fire_rescue_section:
+            # ── FIRE & RESCUE CAPABILITY MATRIX ──────────────────────────────────────
+            st.markdown("---")
+            _fr_dfr_amortized = int(fleet_capex / 7) if fleet_capex > 0 else 0
+            _fr_dfr_amort_str = f"${_fr_dfr_amortized:,}/yr" if _fr_dfr_amortized > 0 else "~$11K–22K/yr"
+
+            _fr_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
+            _fr_has_agency = _fr_df is not None and not _fr_df.empty and 'agency' in _fr_df.columns
+            if _fr_has_agency:
+                _fr_agency_counts = _fr_df['agency'].astype(str).str.lower().value_counts()
+                _fr_total = int(_fr_agency_counts.sum())
+            else:
+                _fr_agency_counts = pd.Series(dtype=int)
+                _fr_total = 0
+
+            def _fr_pct(bucket):
+                if _fr_total <= 0:
+                    return None
+                return 100.0 * float(_fr_agency_counts.get(bucket, 0)) / _fr_total
+
+            _fr_fire_pct = _fr_pct('fire')
+            _fr_mva_pct = _fr_pct('mva')
+            _fr_water_pct = _fr_pct('water')
+            _fr_medical_pct = _fr_pct('medical')
+
+            def _fr_row(label, ground_val, dfr_val, alt, cbrd, tmuted, tmain, acc, last=False):
+                bg = "background:rgba(255,255,255,0.02);" if alt else ""
+                brd = "" if last else f"border-bottom:1px solid {cbrd};"
+                return (
+                    f'<tr style="{bg}{brd}">'
+                    f'<td style="padding:8px 12px;color:{tmain};font-weight:600;font-size:0.72rem;">{label}</td>'
+                    f'<td style="padding:8px 12px;text-align:center;color:#f59e0b;font-size:0.71rem;">{ground_val}</td>'
+                    f'<td style="padding:8px 12px;text-align:center;color:{acc};font-size:0.71rem;">{dfr_val}</td>'
+                    f'</tr>'
+                )
+
+            _fr_rows = (
+                _fr_row("Structure Fire Pre-Arrival Intel",
+                        "❌ None until first unit on scene",
+                        "✅ Live HD + thermal size-up before engine arrival",
+                        False, card_border, text_muted, text_main, accent_color) +
+                _fr_row("Flashover Awareness",
+                        "⚠️ Modern synthetic-furnished rooms flash over in 3–5 min (UL FSRI)",
+                        "✅ Aerial thermal read of smoke/fire conditions before entry",
+                        True, card_border, text_muted, text_main, accent_color) +
+                _fr_row("Hazmat / Gas Leak Standoff",
+                        "⚠️ Requires close approach to assess plume/leak",
+                        "✅ Remote visual + thermal assessment from safe standoff",
+                        False, card_border, text_muted, text_main, accent_color) +
+                _fr_row("Interstate MVA Scene Management",
+                        "⚠️ Secondary-crash risk grows +2.8%/min on scene (FHWA)",
+                        "✅ Airborne &lt;90 sec — faster documentation, faster clearance",
+                        True, card_border, text_muted, text_main, accent_color) +
+                _fr_row("River / Water Rescue",
+                        "⚠️ Drowning can occur in 20–60 sec, often silent (CDC)",
+                        "✅ Rapid aerial search, thermal in low-vis water, flotation drop",
+                        False, card_border, text_muted, text_main, accent_color) +
+                _fr_row("Incident Command Picture",
+                        "Radio reports only — delayed situational awareness",
+                        "✅ Live video feed to command post &amp; mobile devices",
+                        True, card_border, text_muted, text_main, accent_color) +
+                _fr_row("Night / Low-Light Operations",
+                        "Handheld spotlights, limited range",
+                        "✅ 640px FLIR thermal, full-scene coverage",
+                        False, card_border, text_muted, text_main, accent_color) +
+                _fr_row("Multi-Unit Coordination",
+                        "Sequential arrival, staggered intel per unit",
+                        "✅ One aerial asset, shared live view for all responding units",
+                        True, card_border, text_muted, text_main, accent_color, last=True)
+            )
+
+            _fr_jurisdiction_block = ""
+            if _fr_total > 0:
+                _fr_jurisdiction_block = f"""
+              <div style="background:rgba(0,210,255,0.05);border:1px solid rgba(0,210,255,0.18);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+                <div style="font-size:0.68rem;font-weight:700;color:{accent_color};text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
+                  This Jurisdiction's Uploaded Call Data — {_fr_total:,} calls categorized
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:0.68rem;color:{text_muted};">
+                  <div>🔴 Fire: <strong style="color:{text_main};">{f'{_fr_fire_pct:.1f}%' if _fr_fire_pct is not None else '—'}</strong></div>
+                  <div>🟠 MVA: <strong style="color:{text_main};">{f'{_fr_mva_pct:.1f}%' if _fr_mva_pct is not None else '—'}</strong></div>
+                  <div>🟣 Water Rescue: <strong style="color:{text_main};">{f'{_fr_water_pct:.2f}%' if _fr_water_pct is not None else '—'}</strong></div>
+                  <div>🟡 Medical: <strong style="color:{text_main};">{f'{_fr_medical_pct:.1f}%' if _fr_medical_pct is not None else '—'}</strong></div>
+                </div>
+              </div>"""
+
+            _fr_html = f"""
+            <style>
+            .fr-tip {{
+              display:inline-flex;align-items:center;justify-content:center;
+              width:13px;height:13px;border-radius:50%;
+              background:rgba(255,255,255,0.12);color:#888;font-size:9px;font-weight:700;
+              cursor:default;margin-left:3px;vertical-align:middle;position:relative;flex-shrink:0;
+            }}
+            .fr-tip:hover::after {{
+              content:attr(data-tip);position:absolute;bottom:130%;left:50%;
+              transform:translateX(-50%);background:#1a1a2e;color:#e0e0e0;
+              font-size:10.5px;font-weight:400;padding:6px 10px;border-radius:5px;
+              white-space:normal;width:260px;line-height:1.5;z-index:9999;
+              border:1px solid #333;box-shadow:0 4px 12px rgba(0,0,0,0.5);
+              pointer-events:none;text-transform:none;letter-spacing:normal;
+            }}
+            </style>
+
+            <div>
+              <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;">
+                <h3 style="color:{text_main};margin:0;">🚒 Fire &amp; Rescue Capability <span class='tip' data-tip='Sources: UL Fire Safety Research Institute (FSRI) synthetic vs. natural furnishings burn studies · NFPA 1710 Standard for Career Fire Department deployment · FHWA Office of Operations secondary-crash research · CDC Drowning Prevention data research · BRINC technical specifications.'>src</span></h3>
+                <span style="font-size:0.7rem;color:{text_muted};">Structure fire · hazmat · interstate MVA · water/river rescue · incident command</span>
+              </div>
+              <div style="font-size:0.78rem;color:{text_muted};margin-bottom:16px;max-width:740px;line-height:1.6;">
+                BRINC DFR gives incident command live HD and thermal video before the first ground unit arrives —
+                shrinking the blind window on structure fires, hazmat leaks, interstate MVAs, and water rescues where
+                every minute materially changes outcomes.
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;">
+
+                <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid #ef4444;border-radius:8px;padding:14px 12px;text-align:center;">
+                  <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
+                    Structure Fire Flashover
+                    <span class="fr-tip" data-tip="Source: UL Fire Safety Research Institute (FSRI). Modern synthetic-furnished rooms reach flashover in as little as 3-5 minutes, vs. 25-30 minutes for legacy natural-material furnishings.">?</span>
+                  </div>
+                  <div style="font-size:1.75rem;font-weight:900;color:#ef4444;font-family:'IBM Plex Mono',monospace;">3–5 min</div>
+                  <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">modern synthetic furnishings (UL FSRI)</div>
+                </div>
+
+                <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid #f59e0b;border-radius:8px;padding:14px 12px;text-align:center;">
+                  <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
+                    Secondary Crash Risk
+                    <span class="fr-tip" data-tip="Source: FHWA Office of Operations, Secondary Crash Research: A Multistate Analysis (2023). Secondary-crash risk increases 2.8% for every minute a roadway incident remains a hazard; ~20% of all highway incidents are secondary crashes.">?</span>
+                  </div>
+                  <div style="font-size:1.75rem;font-weight:900;color:#f59e0b;font-family:'IBM Plex Mono',monospace;">+2.8%/min</div>
+                  <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">risk growth per minute on scene (FHWA)</div>
+                </div>
+
+                <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid #8b5cf6;border-radius:8px;padding:14px 12px;text-align:center;">
+                  <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
+                    Drowning Response Window
+                    <span class="fr-tip" data-tip="Source: CDC Drowning Prevention. Drowning can occur in as little as 20-60 seconds and is frequently silent — no splashing or shouting for help.">?</span>
+                  </div>
+                  <div style="font-size:1.75rem;font-weight:900;color:#8b5cf6;font-family:'IBM Plex Mono',monospace;">20–60s</div>
+                  <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">often silent, no visible distress (CDC)</div>
+                </div>
+
+                <div style="background:{card_bg};border:1px solid {card_border};border-top:3px solid {accent_color};border-radius:8px;padding:14px 12px;text-align:center;">
+                  <div style="font-size:0.61rem;color:{text_muted};text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">
+                    BRINC On-Scene
+                    <span class="fr-tip" data-tip="Source: BRINC technical specifications. BRINC launches in under 20 seconds and is on-scene in under 90 seconds.">?</span>
+                  </div>
+                  <div style="font-size:1.75rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">&lt;90s</div>
+                  <div style="font-size:0.64rem;color:{text_muted};margin-top:2px;">airborne &amp; streaming live video</div>
+                </div>
+
+              </div>
+
+              <div style="background:rgba(239,68,68,0.06);border-left:3px solid #ef4444;border-radius:0 6px 6px 0;padding:12px 16px;margin-bottom:16px;">
+                <div style="font-size:0.7rem;font-weight:700;color:#ef4444;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">
+                  ⚠️ The Pre-Arrival Gap
+                  <span class="fr-tip" data-tip="Sources: NFPA 1710 Standard for the Organization and Deployment of Fire Suppression Operations (2020 ed.) · UL FSRI furnishings burn studies · BRINC technical specifications.">?</span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
+                  <div style="text-align:center;background:rgba(0,0,0,0.25);border-radius:6px;padding:10px 8px;">
+                    <div style="font-size:1.25rem;font-weight:900;color:#ef4444;font-family:'IBM Plex Mono',monospace;">4–8 min</div>
+                    <div style="font-size:0.63rem;color:{text_muted};margin-top:3px;">NFPA 1710 benchmark — first engine /<br>full first-alarm assignment</div>
+                  </div>
+                  <div style="text-align:center;background:rgba(0,0,0,0.25);border-radius:6px;padding:10px 8px;">
+                    <div style="font-size:1.25rem;font-weight:900;color:#f59e0b;font-family:'IBM Plex Mono',monospace;">3–5 min</div>
+                    <div style="font-size:0.63rem;color:{text_muted};margin-top:3px;">Modern-furnishing flashover<br>window (UL FSRI)</div>
+                  </div>
+                  <div style="text-align:center;background:rgba(0,0,0,0.25);border-radius:6px;padding:10px 8px;">
+                    <div style="font-size:1.25rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">&lt;90 sec</div>
+                    <div style="font-size:0.63rem;color:{text_muted};margin-top:3px;">BRINC on-scene with live<br>HD + thermal to command</div>
+                  </div>
+                </div>
+                <div style="font-size:0.69rem;color:{text_muted};font-style:italic;line-height:1.55;">
+                  A DFR unit can be airborne and streaming before the first engine reaches the curb — giving command
+                  a read on smoke conditions, occupants, and hazards while there's still time to act on it.
+                </div>
+              </div>
+
+              {_fr_jurisdiction_block}
+
+              <div style="font-size:0.7rem;font-weight:700;color:{text_main};text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
+                Traditional Ground Response vs. BRINC DFR — Capability Matrix
+              </div>
+              <div style="overflow-x:auto;border-radius:8px;border:1px solid {card_border};">
+                <table style="width:100%;border-collapse:collapse;font-size:0.72rem;">
+                  <thead>
+                    <tr style="background:rgba(0,0,0,0.45);">
+                      <th style="padding:10px 14px;text-align:left;font-size:0.61rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:{text_muted};">Capability</th>
+                      <th style="padding:10px 14px;text-align:center;font-size:0.61rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#f59e0b;">Traditional Ground Response</th>
+                      <th style="padding:10px 14px;text-align:center;font-size:0.61rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:{accent_color};">BRINC DFR</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {_fr_rows}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;margin-bottom:12px;">
+
+                <div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:16px;">
+                  <div style="font-size:0.63rem;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
+                    📋 Traditional Ground-Only Response
+                  </div>
+                  <div style="font-size:1.6rem;font-weight:900;color:#f59e0b;font-family:'IBM Plex Mono',monospace;">4–8 min</div>
+                  <div style="font-size:0.67rem;color:{text_muted};margin-top:3px;">to first intel — NFPA 1710 benchmark, engine/alarm dependent</div>
+                  <div style="margin-top:10px;display:flex;flex-direction:column;gap:3px;font-size:0.65rem;color:{text_muted};">
+                    <div>Pre-arrival scene intel: ❌ none</div>
+                    <div>Night/thermal visibility: ❌ handheld only</div>
+                    <div>Command situational awareness: ⚠️ radio reports only</div>
+                  </div>
+                </div>
+
+                <div style="background:rgba(0,210,255,0.06);border:1px solid rgba(0,210,255,0.2);border-radius:8px;padding:16px;">
+                  <div style="font-size:0.63rem;font-weight:700;color:{accent_color};text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
+                    🚁 BRINC DFR — Fleet Deployment
+                  </div>
+                  <div style="font-size:1.6rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">${fleet_capex:,.0f} CapEx</div>
+                  <div style="font-size:0.67rem;color:{text_muted};margin-top:3px;">{_fr_dfr_amort_str} amortized (7-yr) · {actual_k_responder + actual_k_guardian} units deployed</div>
+                  <div style="margin-top:10px;display:flex;flex-direction:column;gap:3px;font-size:0.65rem;color:{text_muted};">
+                    <div>Pre-arrival scene intel: ✅ live HD + thermal, &lt;90 sec</div>
+                    <div>Night/thermal visibility: ✅ 640px FLIR, full-scene</div>
+                    <div>Command situational awareness: ✅ live shared video feed</div>
+                  </div>
+                </div>
+
+              </div>
+
+              <div style="font-size:0.6rem;color:{text_muted};border-top:1px solid {card_border};padding-top:8px;line-height:1.8;">
+                <strong style="color:{text_main};">Data Sources:</strong>
+                UL Fire Safety Research Institute (FSRI) — synthetic vs. natural furnishings burn studies ·
+                NFPA 1710 Standard for the Organization and Deployment of Fire Suppression Operations (2020 ed.) ·
+                FHWA Office of Operations — Secondary Crash Research: A Multistate Analysis (2023) ·
+                CDC Drowning Prevention data &amp; research ·
+                BRINC Drones technical specifications
+              </div>
+            </div>
+            """
+            _fr_full_html = (
+                "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
+                "<meta name='viewport' content='width=device-width,initial-scale=1.0'>"
+                "</head>"
+                f"<body style='margin:0;padding:12px 4px 16px;background:#000000;"
+                "font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;'>"
+                f"{_fr_html}</body></html>"
+            )
+            components.html(_fr_full_html, height=1550, scrolling=False)
+
         _show_lte_section = st.toggle(
             "Show 4G LTE Cell Coverage",
             value=True,

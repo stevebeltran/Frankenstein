@@ -10470,21 +10470,6 @@ body{{background:transparent;overflow:hidden}}
 
               </div>
 
-              <div style="background:{card_bg};border:1px solid {card_border};border-radius:8px;padding:16px;margin-bottom:16px;">
-                <div style="font-size:0.7rem;font-weight:700;color:{text_main};text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">
-                  📋 Suggested Evaluation Plan
-                </div>
-                <div style="font-size:0.75rem;color:{text_muted};line-height:1.7;">
-                  A path-forward pilot would track outcomes quarterly across four fire/rescue-specific dimensions:
-                  (1) pre-arrival intel delivery rate — % of structure fire and hazmat calls where BRINC video reached
-                  command before the first ground unit arrived; (2) hazmat/gas-leak incidents assessed remotely without
-                  committing personnel inside the isolation perimeter; (3) time-to-first-visual on water/river rescue
-                  calls, measured against the drowning response window above; and (4) structure-fire size-up lead time
-                  versus the NFPA 1710 first-engine benchmark. All flight data, incident assignments, and outcome
-                  records are retained for department reporting.
-                </div>
-              </div>
-
               <div style="font-size:0.6rem;color:{text_muted};border-top:1px solid {card_border};padding-top:8px;line-height:1.8;">
                 <strong style="color:{text_main};">Data Sources:</strong>
                 UL Fire Safety Research Institute (FSRI) — synthetic vs. natural furnishings burn studies ·
@@ -10504,7 +10489,7 @@ body{{background:transparent;overflow:hidden}}
                 "font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;'>"
                 f"{_fr_html}</body></html>"
             )
-            components.html(_fr_full_html, height=2350, scrolling=False)
+            components.html(_fr_full_html, height=2130, scrolling=False)
 
         _show_lte_section = st.toggle(
             "Show 4G LTE Cell Coverage",

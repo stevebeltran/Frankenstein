@@ -1683,6 +1683,20 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                             res['lon'] = _lon_micro
                             res['lat'] = _lat_micro
                             converted = True
+                        else:
+                            # Some CAD exports store microdegree longitudes without the
+                            # minus sign for western-hemisphere positions
+                            # (e.g. 80957135 instead of -80957135). Flip only the
+                            # positive values and re-check before giving up.
+                            _lon_micro_fixed = _lon_micro.where(_lon_micro < 0, -_lon_micro)
+                            _micro_valid_fixed = (
+                                _lat_micro.between(18, 72) &
+                                _lon_micro_fixed.between(-170, -60)
+                            ).mean()
+                            if _micro_valid_fixed > 0.80:
+                                res['lon'] = _lon_micro_fixed
+                                res['lat'] = _lat_micro
+                                converted = True
 
                         # Strategy 1: Try common State Plane CRS at /100 and /1 scales
                         if not converted:

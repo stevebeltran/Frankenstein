@@ -2135,11 +2135,15 @@ def compute_station_suggestions(
         chosen.append(best_idx)
         remaining.remove(best_idx)
         if rank_by == 'land':
+            marginal_pct = (best_gain / city_area * 100) if city_area > 0 else 0.0
             geom = station_metadata[best_idx].get('clipped_2m')
             if geom is not None and not getattr(geom, 'is_empty', True):
                 current_land_geom = geom if current_land_geom is None else current_land_geom.union(geom)
         else:
+            marginal_pct = (best_gain / total_calls * 100) if total_calls > 0 else 0.0
             current_call_mask |= np.asarray(resp_matrix[best_idx], dtype=bool)
+        scored[best_idx]['marginal_pct'] = round(marginal_pct, 1)
+        scored[best_idx]['marginal_metric'] = rank_by
 
     suggestions = [scored[idx] for idx in chosen]
 
@@ -2187,6 +2191,16 @@ def station_suggestion_role_pcts(suggestion):
         'land_pct_r': round(float(suggestion.get('land_pct_responder', suggestion.get('land_pct', 0)) or 0), 1),
         'land_pct_g': round(float(suggestion.get('land_pct_guardian', suggestion.get('land_pct', 0)) or 0), 1),
     }
+
+
+def station_suggestion_marginal_label(suggestion):
+    """Return this station's added (non-overlapping) coverage vs. the picks ranked above it."""
+    metric = suggestion.get('marginal_metric')
+    pct = suggestion.get('marginal_pct')
+    if not metric or pct is None:
+        return ''
+    unit = 'land' if metric == 'land' else 'calls'
+    return f"+{pct}% new {unit}"
 
 
 def deployed_station_indices(active_drones):
@@ -2762,6 +2776,7 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
             mode = modes.get(idx, 'Off')
             display_metrics = station_suggestion_display_metrics(s, mode)
             role_pcts = station_suggestion_role_pcts(s)
+            marginal_label = station_suggestion_marginal_label(s)
             mode_color = '#FFD700' if mode == 'Guardian' else '#00D2FF' if mode == 'Responder' else '#9aa0b4'
             mode_abbr = 'G' if mode == 'Guardian' else 'R' if mode == 'Responder' else 'O'
             bg = card_bg if mode != 'Off' else 'rgba(30,30,40,0.4)'
@@ -2791,7 +2806,9 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
                     f"<div style='color:{text_muted}; font-size:0.62rem;'>"
                     f"Calls {display_metrics['call_count']:,} · "
                     f"City R {role_pcts['call_pct_r']}% / G {role_pcts['call_pct_g']}% · "
-                    f"Land R {role_pcts['land_pct_r']}% / G {role_pcts['land_pct_g']}%</div>"
+                    f"Land R {role_pcts['land_pct_r']}% / G {role_pcts['land_pct_g']}%"
+                    + (f" · {marginal_label}" if marginal_label else '')
+                    + "</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -2923,6 +2940,7 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                 mode = modes.get(idx, 'Off')
                 display_metrics = station_suggestion_display_metrics(s, mode)
                 role_pcts = station_suggestion_role_pcts(s)
+                marginal_label = station_suggestion_marginal_label(s)
                 mode_abbr = 'G' if mode == 'Guardian' else 'R' if mode == 'Responder' else 'O'
                 mode_key = str(mode or '').upper()
                 is_active_mode = mode in {'Guardian', 'Responder'}
@@ -2971,7 +2989,9 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                     f"<div style='color:{text_muted}; font-size:0.62rem;'>"
                     f"Calls {display_metrics['call_count']:,} · "
                     f"City R {role_pcts['call_pct_r']}% / G {role_pcts['call_pct_g']}% · "
-                    f"Land R {role_pcts['land_pct_r']}% / G {role_pcts['land_pct_g']}%</div>"
+                    f"Land R {role_pcts['land_pct_r']}% / G {role_pcts['land_pct_g']}%"
+                    + (f" · {marginal_label}" if marginal_label else '')
+                    + "</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )

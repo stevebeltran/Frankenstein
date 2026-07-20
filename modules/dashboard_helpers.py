@@ -2742,10 +2742,13 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
                     f"</div>",
                     unsafe_allow_html=True,
                 )
+                if widget_key not in session_state:
+                    # Seed state instead of passing index= so the radio never mixes
+                    # a widget default with Session State API writes (Streamlit warning).
+                    session_state[widget_key] = mode if mode in mode_options else 'Off'
                 new_mode = st.radio(
                     'Fleet Mode',
                     options=mode_options,
-                    index=mode_options.index(mode) if mode in mode_options else 2,
                     key=widget_key,
                     horizontal=True,
                     label_visibility="collapsed",
@@ -2917,10 +2920,13 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                     f"</div>",
                     unsafe_allow_html=True,
                 )
+                if widget_key not in session_state:
+                    # Seed state instead of passing index= so the radio never mixes
+                    # a widget default with Session State API writes (Streamlit warning).
+                    session_state[widget_key] = mode if mode in mode_options else 'Off'
                 new_mode = st.radio(
                     'Fleet Mode',
                     options=mode_options,
-                    index=mode_options.index(mode) if mode in mode_options else 2,
                     key=widget_key,
                     horizontal=True,
                     label_visibility="collapsed",

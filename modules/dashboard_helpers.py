@@ -1065,8 +1065,11 @@ def manage_custom_stations(
     val_r = min(max(0, int(val_r)), max_resp_calc)
     val_g = min(max(0, int(val_g)), max_guard_calc)
 
-    k_responder = st.sidebar.slider('🚁 Responder Count', 0, max(1, max_resp_calc), value=val_r, help='Short-range tactical drones (2-3mi radius).')
-    k_guardian = st.sidebar.slider('🦅 Guardian Count', 0, max(1, max_guard_calc), value=val_g, help='Long-range overwatch drones (5-8mi radius).')
+    stations_uploaded = bool(session_state.get('stations_user_uploaded', False))
+    if stations_uploaded:
+        st.sidebar.caption('📍 Select stations on the cards below the map')
+    k_responder = st.sidebar.slider('🚁 Responder Count', 0, max(1, max_resp_calc), value=val_r, help='Short-range tactical drones (2-3mi radius).', disabled=stations_uploaded)
+    k_guardian = st.sidebar.slider('🦅 Guardian Count', 0, max(1, max_guard_calc), value=val_g, help='Long-range overwatch drones (5-8mi radius).', disabled=stations_uploaded)
     if int(k_responder or 0) != int(val_r) or int(k_guardian or 0) != int(val_g):
         session_state['_suggestion_apply_fleet_counts'] = True
     _set_fleet_counts(resp_value=k_responder or 0, guard_value=k_guardian or 0)
@@ -2140,6 +2143,11 @@ def compute_station_suggestions(
 
     suggestions = [scored[idx] for idx in chosen]
 
+    suggestions.sort(
+        key=lambda s: float(s.get('call_pct_guardian', s.get('call_pct', 0)) or 0),
+        reverse=True,
+    )
+
     # The current slider-driven assignment can override this label on render.
     for rank, suggestion in enumerate(suggestions):
         suggestion['rank'] = rank + 1
@@ -2167,6 +2175,16 @@ def station_suggestion_display_metrics(suggestion, mode):
         'call_count': call_count,
         'call_pct': round(call_pct, 1),
         'land_pct': round(land_pct, 1),
+    }
+
+
+def station_suggestion_role_pcts(suggestion):
+    """Return responder/guardian call and land coverage percentages for a card."""
+    return {
+        'call_pct_r': round(float(suggestion.get('call_pct_responder', suggestion.get('call_pct', 0)) or 0), 1),
+        'call_pct_g': round(float(suggestion.get('call_pct_guardian', suggestion.get('call_pct', 0)) or 0), 1),
+        'land_pct_r': round(float(suggestion.get('land_pct_responder', suggestion.get('land_pct', 0)) or 0), 1),
+        'land_pct_g': round(float(suggestion.get('land_pct_guardian', suggestion.get('land_pct', 0)) or 0), 1),
     }
 
 
@@ -2742,6 +2760,7 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
             idx = s['station_idx']
             mode = modes.get(idx, 'Off')
             display_metrics = station_suggestion_display_metrics(s, mode)
+            role_pcts = station_suggestion_role_pcts(s)
             mode_color = '#FFD700' if mode == 'Guardian' else '#00D2FF' if mode == 'Responder' else '#9aa0b4'
             mode_abbr = 'G' if mode == 'Guardian' else 'R' if mode == 'Responder' else 'O'
             bg = card_bg if mode != 'Off' else 'rgba(30,30,40,0.4)'
@@ -2770,7 +2789,8 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
                     f"{display_text}</div>"
                     f"<div style='color:{text_muted}; font-size:0.62rem;'>"
                     f"Calls {display_metrics['call_count']:,} · "
-                    f"City {display_metrics['call_pct']}% · Land {display_metrics['land_pct']}%</div>"
+                    f"City R {role_pcts['call_pct_r']}% / G {role_pcts['call_pct_g']}% · "
+                    f"Land R {role_pcts['land_pct_r']}% / G {role_pcts['land_pct_g']}%</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -2901,6 +2921,7 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                 idx = s['station_idx']
                 mode = modes.get(idx, 'Off')
                 display_metrics = station_suggestion_display_metrics(s, mode)
+                role_pcts = station_suggestion_role_pcts(s)
                 mode_abbr = 'G' if mode == 'Guardian' else 'R' if mode == 'Responder' else 'O'
                 mode_key = str(mode or '').upper()
                 is_active_mode = mode in {'Guardian', 'Responder'}
@@ -2948,7 +2969,8 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                     f"{address_html}"
                     f"<div style='color:{text_muted}; font-size:0.62rem;'>"
                     f"Calls {display_metrics['call_count']:,} · "
-                    f"City {display_metrics['call_pct']}% · Land {display_metrics['land_pct']}%</div>"
+                    f"City R {role_pcts['call_pct_r']}% / G {role_pcts['call_pct_g']}% · "
+                    f"Land R {role_pcts['land_pct_r']}% / G {role_pcts['land_pct_g']}%</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )

@@ -937,12 +937,16 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
 
         dept_col = next((c for c in res.columns if c in ('department name', 'department', 'dept', 'agency', 'agency name')), None)
         if dept_col is not None:
-            dept_vals = res[dept_col].fillna('').astype(str).str.strip()
-            res['agency'] = dept_vals.str.contains(
-                r'\b(?:fire|ems|medic|rescue|ambulance|engine|ladder|battalion)\b',
-                regex=True,
-                na=False,
-            ).map({True: 'fire', False: 'police'})
+            dept_vals = res[dept_col].fillna('').astype(str).str.strip().str.lower()
+            _canonical_buckets = {'fire', 'police', 'medical', 'mva', 'water'}
+            if set(dept_vals.unique()).issubset(_canonical_buckets):
+                res['agency'] = dept_vals
+            else:
+                res['agency'] = dept_vals.str.contains(
+                    r'\b(?:fire|ems|medic|rescue|ambulance|engine|ladder|battalion)\b',
+                    regex=True,
+                    na=False,
+                ).map({True: 'fire', False: 'police'})
         else:
             res['agency'] = 'police'
 
@@ -1350,12 +1354,16 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
                             res['call_type_desc'] = raw_df[desc_col].fillna('').astype(str).str.strip()
                         dept_col = next((c for c in raw_df.columns if c in ('department name', 'department', 'dept', 'agency', 'agency name')), None)
                         if dept_col is not None:
-                            dept_vals = raw_df[dept_col].fillna('').astype(str).str.strip()
-                            res['agency'] = dept_vals.str.contains(
-                                r'\b(?:fire|ems|medic|rescue|ambulance|engine|ladder|battalion)\b',
-                                regex=True,
-                                na=False,
-                            ).map({True: 'fire', False: 'police'})
+                            dept_vals = raw_df[dept_col].fillna('').astype(str).str.strip().str.lower()
+                            _canonical_buckets = {'fire', 'police', 'medical', 'mva', 'water'}
+                            if set(dept_vals.unique()).issubset(_canonical_buckets):
+                                res['agency'] = dept_vals
+                            else:
+                                res['agency'] = dept_vals.str.contains(
+                                    r'\b(?:fire|ems|medic|rescue|ambulance|engine|ladder|battalion)\b',
+                                    regex=True,
+                                    na=False,
+                                ).map({True: 'fire', False: 'police'})
                         else:
                             res['agency'] = 'police'
                         top_city_name = _infer_city_from_location_text(raw_df)
@@ -1808,12 +1816,19 @@ def aggressive_parse_calls(uploaded_files, require_valid_coordinates=True):
 
             if _agency_col:
                 _raw_agency = raw_df[_agency_col].astype(str).str.strip().str.lower()
-                # Normalize to canonical 'fire' / 'police' so the renderer colours correctly.
-                # If a raw value already IS 'fire' or 'police', keep it; otherwise look for
-                # fire-department keywords and fall back to 'police'.
-                _fire_kw = r'fire|ems|medic|rescue|ambulance|engine|ladder|battalion'
-                _is_fire = _raw_agency.str.contains(_fire_kw, regex=True, na=False)
-                res['agency'] = _is_fire.map({True: 'fire', False: 'police'})
+                # Pre-classified files (e.g. our own exports) already use the
+                # canonical call-color buckets — pass them through untouched
+                # instead of collapsing them back down to fire/police.
+                _canonical_buckets = {'fire', 'police', 'medical', 'mva', 'water'}
+                if set(_raw_agency.unique()).issubset(_canonical_buckets):
+                    res['agency'] = _raw_agency
+                else:
+                    # Normalize to canonical 'fire' / 'police' so the renderer colours correctly.
+                    # If a raw value already IS 'fire' or 'police', keep it; otherwise look for
+                    # fire-department keywords and fall back to 'police'.
+                    _fire_kw = r'fire|ems|medic|rescue|ambulance|engine|ladder|battalion'
+                    _is_fire = _raw_agency.str.contains(_fire_kw, regex=True, na=False)
+                    res['agency'] = _is_fire.map({True: 'fire', False: 'police'})
             else:
                 # Fall back to filename-based agency detection when no agency column exists
                 _fname_lower = str(cfile.name).lower()

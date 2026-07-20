@@ -107,6 +107,16 @@ from modules.config import (
     get_hero_message, get_faa_message, get_airfield_message,
     get_jurisdiction_message, get_spatial_message
 )
+# Incident-dot color buckets, keyed by the 'agency' column value. Any value
+# not listed here (e.g. 'police', or files predating this scheme) falls back
+# to the theme's map_incident_color under the "Other Incidents" trace.
+CALL_COLOR_BUCKETS = [
+    ('mva', '#ff9500', 'MVA Incidents'),
+    ('medical', '#ffd400', 'Medical Incidents'),
+    ('water', '#8a2be2', 'Water Rescue Incidents'),
+    ('fire', '#ff3b3b', 'Fire Incidents'),
+]
+
 try:
     from modules.config import calculate_max_flights_per_day
 except ImportError:
@@ -8729,18 +8739,23 @@ body{{background:transparent;overflow:hidden}}
             elif show_dots and not display_calls.empty:
                 point_size = 2 if len(display_calls) > 150000 else 3 if len(display_calls) > 50000 else 4 if len(display_calls) > 20000 else 5
                 point_opacity = 0.06 if len(display_calls) > 150000 else 0.10 if len(display_calls) > 50000 else 0.18 if len(display_calls) > 20000 else 0.28 if len(display_calls) > 10000 else 0.4
-                # Split by agency so fire calls render red and police calls use the theme colour
+                # Split by agency into call-color buckets: fire=red, medical=yellow,
+                # mva=orange, water=purple; anything else falls back to the theme colour.
                 _has_agency = 'agency' in display_calls.columns
-                _fire_calls   = display_calls[display_calls['agency'].str.lower() == 'fire'] if _has_agency else display_calls.iloc[0:0]
-                _police_calls = display_calls[display_calls['agency'].str.lower() != 'fire'] if _has_agency else display_calls
-                if not _police_calls.empty:
-                    fig.add_trace(go.Scattermap(lat=_police_calls.geometry.y, lon=_police_calls.geometry.x,
+                _agency_lower = display_calls['agency'].str.lower() if _has_agency else pd.Series('police', index=display_calls.index)
+                _bucketed_mask = pd.Series(False, index=display_calls.index)
+                for _bucket_value, _bucket_color, _bucket_label in CALL_COLOR_BUCKETS:
+                    _bucket_calls = display_calls[_agency_lower == _bucket_value]
+                    if not _bucket_calls.empty:
+                        fig.add_trace(go.Scattermap(lat=_bucket_calls.geometry.y, lon=_bucket_calls.geometry.x,
+                            mode='markers', marker=dict(size=point_size, color=_bucket_color, opacity=point_opacity),
+                            name=_bucket_label, hoverinfo='skip'))
+                        _bucketed_mask |= (_agency_lower == _bucket_value)
+                _other_calls = display_calls[~_bucketed_mask]
+                if not _other_calls.empty:
+                    fig.add_trace(go.Scattermap(lat=_other_calls.geometry.y, lon=_other_calls.geometry.x,
                         mode='markers', marker=dict(size=point_size, color=map_incident_color, opacity=point_opacity),
-                        name="Police Incidents", hoverinfo='skip'))
-                if not _fire_calls.empty:
-                    fig.add_trace(go.Scattermap(lat=_fire_calls.geometry.y, lon=_fire_calls.geometry.x,
-                        mode='markers', marker=dict(size=point_size, color='#ff3b3b', opacity=point_opacity),
-                        name="Fire Incidents", hoverinfo='skip'))
+                        name="Other Incidents", hoverinfo='skip'))
 
             if show_faa and faa_geojson and faa_geojson.get("features"):
                 try:
@@ -11307,21 +11322,25 @@ body{{background:transparent;overflow:hidden}}
                     _exp_opacity = (0.18 if len(_export_calls) > 20_000 else
                                     0.28 if len(_export_calls) > 8_000 else 0.40)
                     _has_agency = 'agency' in _export_calls.columns
-                    _exp_fire   = _export_calls[_export_calls['agency'].str.lower() == 'fire'] if _has_agency else _export_calls.iloc[0:0]
-                    _exp_police = _export_calls[_export_calls['agency'].str.lower() != 'fire'] if _has_agency else _export_calls
-                    if not _exp_police.empty:
+                    _exp_agency_lower = _export_calls['agency'].str.lower() if _has_agency else pd.Series('police', index=_export_calls.index)
+                    _exp_bucketed_mask = pd.Series(False, index=_export_calls.index)
+                    for _bucket_value, _bucket_color, _bucket_label in CALL_COLOR_BUCKETS:
+                        _exp_bucket_calls = _export_calls[_exp_agency_lower == _bucket_value]
+                        if not _exp_bucket_calls.empty:
+                            fig_for_export.add_trace(go.Scattermap(
+                                lat=_exp_bucket_calls.geometry.y, lon=_exp_bucket_calls.geometry.x,
+                                mode='markers',
+                                marker=dict(size=_exp_pt_size, color=_bucket_color, opacity=_exp_opacity),
+                                name=_bucket_label, hoverinfo='skip'
+                            ))
+                            _exp_bucketed_mask |= (_exp_agency_lower == _bucket_value)
+                    _exp_other = _export_calls[~_exp_bucketed_mask]
+                    if not _exp_other.empty:
                         fig_for_export.add_trace(go.Scattermap(
-                            lat=_exp_police.geometry.y, lon=_exp_police.geometry.x,
+                            lat=_exp_other.geometry.y, lon=_exp_other.geometry.x,
                             mode='markers',
                             marker=dict(size=_exp_pt_size, color=map_incident_color, opacity=_exp_opacity),
-                            name="Incidents", hoverinfo='skip'
-                        ))
-                    if not _exp_fire.empty:
-                        fig_for_export.add_trace(go.Scattermap(
-                            lat=_exp_fire.geometry.y, lon=_exp_fire.geometry.x,
-                            mode='markers',
-                            marker=dict(size=_exp_pt_size, color='#ff3b3b', opacity=_exp_opacity),
-                            name="Fire Incidents", hoverinfo='skip'
+                            name="Other Incidents", hoverinfo='skip'
                         ))
     
                 # ── 4G LTE coverage polygons (legendonly, toggleable in export) ─────

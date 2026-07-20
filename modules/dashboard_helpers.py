@@ -2145,13 +2145,11 @@ def compute_station_suggestions(
         scored[best_idx]['marginal_pct'] = round(marginal_pct, 1)
         scored[best_idx]['marginal_metric'] = rank_by
 
+    # `chosen` is already in overlap-aware marginal-gain order — each station was
+    # picked for the coverage it adds over everything picked before it. Re-sorting
+    # by solo pct here would rank two overlapping stations above a freestanding one
+    # whenever their individual scores are higher, undoing that overlap awareness.
     suggestions = [scored[idx] for idx in chosen]
-
-    _sort_key = 'land_pct_guardian' if rank_by == 'land' else 'call_pct_guardian'
-    suggestions.sort(
-        key=lambda s: float(s.get(_sort_key, 0) or 0),
-        reverse=True,
-    )
 
     # The current slider-driven assignment can override this label on render.
     for rank, suggestion in enumerate(suggestions):

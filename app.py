@@ -7439,10 +7439,18 @@ body{{background:transparent;overflow:hidden}}
             st.session_state['_suggestion_selected_resp_count'] = _suggestion_resp_count
             st.session_state['_suggestion_selected_guard_count'] = _suggestion_guard_count
             if st.session_state.get('_suggestion_sync_source') == 'cards':
+                _slider_shown_resp = int(k_responder or 0)
+                _slider_shown_guard = int(k_guardian or 0)
                 k_responder = _suggestion_resp_count
                 k_guardian = _suggestion_guard_count
                 st.session_state['_fleet_k_resp'] = int(k_responder)
                 st.session_state['_fleet_k_guard'] = int(k_guardian)
+                if (_slider_shown_resp, _slider_shown_guard) != (int(k_responder), int(k_guardian)):
+                    # Sliders already rendered this run with stale counts; queue the
+                    # card-derived counts and rerun so they display before the optimizer.
+                    st.session_state['_pending_k_resp'] = int(k_responder)
+                    st.session_state['_pending_k_guard'] = int(k_guardian)
+                    st.rerun()
 
         # ── OPTIMIZATION ──────────────────────────────────────────────────
         _pins_key = f"{sorted(locked_g_pins)}_{sorted(locked_r_pins)}"

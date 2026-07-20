@@ -275,6 +275,7 @@ optimize_fleet_selection = _dashboard_helpers_mod.optimize_fleet_selection
 compute_station_suggestions = _dashboard_helpers_mod.compute_station_suggestions
 station_suggestion_display_metrics = _dashboard_helpers_mod.station_suggestion_display_metrics
 deployed_station_indices = _dashboard_helpers_mod.deployed_station_indices
+assign_station_colors = _dashboard_helpers_mod.assign_station_colors
 sync_station_suggestion_modes = _dashboard_helpers_mod.sync_station_suggestion_modes
 render_station_suggestions_grid = _dashboard_helpers_mod.render_station_suggestions_grid
 apply_manual_suggestion_deployments = _dashboard_helpers_mod.apply_manual_suggestion_deployments
@@ -7636,28 +7637,15 @@ body{{background:transparent;overflow:hidden}}
             c for c in STATION_COLORS
             if c not in {guardian_color, responder_color}
         ]
-        active_color_map = {}
-        role_color_counts = {"GUARDIAN": 0, "RESPONDER": 0}
-        extra_color_idx = 0
-        for idx, d_type in ordered_deployments_raw:
-            key = f"{idx}_{d_type}"
-            if key in active_color_map:
-                continue
-            if d_type == "GUARDIAN":
-                if role_color_counts["GUARDIAN"] == 0:
-                    color = guardian_color
-                else:
-                    color = extra_station_colors[extra_color_idx % len(extra_station_colors)]
-                    extra_color_idx += 1
-                role_color_counts["GUARDIAN"] += 1
-            else:
-                if role_color_counts["RESPONDER"] == 0:
-                    color = responder_color
-                else:
-                    color = extra_station_colors[extra_color_idx % len(extra_station_colors)]
-                    extra_color_idx += 1
-                role_color_counts["RESPONDER"] += 1
-            active_color_map[key] = color
+        # Sticky per-station colors: persisted in session state so toggling one
+        # station never recolors the others. Toggled-off stations release theirs.
+        active_color_map = assign_station_colors(
+            st.session_state,
+            ordered_deployments_raw,
+            guardian_color,
+            responder_color,
+            extra_station_colors,
+        )
 
         guard_geos = [station_metadata[i]['clipped_guard'] for i in active_guard_idx]
         resp_geos  = [station_metadata[i]['clipped_2m']    for i in active_resp_idx]

@@ -2186,6 +2186,38 @@ def deployed_station_indices(active_drones):
     return deployed
 
 
+def assign_station_colors(session_state, ordered_deployments,
+                          guardian_color, responder_color, extra_colors):
+    """Return a stable {"{idx}_{type}": color} map for deployed stations.
+
+    Assignments persist in session_state['station_color_assignments'] so a
+    station keeps its color across reruns regardless of deployment order.
+    Stations no longer deployed release their color for reuse.
+    """
+    assignments = session_state.setdefault('station_color_assignments', {})
+    active_keys = [f"{idx}_{d_type}" for idx, d_type in ordered_deployments]
+    active_set = set(active_keys)
+    for stale in [k for k in assignments if k not in active_set]:
+        del assignments[stale]
+    used = set(assignments.values())
+    color_map = {}
+    for (idx, d_type), key in zip(ordered_deployments, active_keys):
+        if key not in assignments:
+            if d_type == 'GUARDIAN' and guardian_color not in used:
+                color = guardian_color
+            elif d_type == 'RESPONDER' and responder_color not in used:
+                color = responder_color
+            else:
+                color = next(
+                    (c for c in extra_colors if c not in used),
+                    extra_colors[len(assignments) % len(extra_colors)] if extra_colors else guardian_color,
+                )
+            assignments[key] = color
+            used.add(color)
+        color_map[key] = assignments[key]
+    return color_map
+
+
 def _ranked_suggestion_modes(suggestions, k_guardian=0, k_responder=0, forced_modes=None):
     """Assign visible suggestions from the slider counts in rank order."""
     forced_modes = dict(forced_modes or {})

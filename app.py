@@ -10199,8 +10199,17 @@ body{{background:transparent;overflow:hidden}}
                 _fr_row("Multi-Unit Coordination",
                         "Sequential arrival, staggered intel per unit",
                         "✅ One aerial asset, shared live view for all responding units",
-                        True, card_border, text_muted, text_main, accent_color, last=True)
+                        True, card_border, text_muted, text_main, accent_color) +
+                _fr_row("Multi-Agency Data Sharing",
+                        "Separate feeds per agency, verbal coordination only",
+                        "✅ One live feed shared across Fire, EMS, Sheriff/PD &amp; DOT on joint incidents",
+                        False, card_border, text_muted, text_main, accent_color, last=True)
             )
+
+            _fr_dispatch_rate = float(dfr_dispatch_rate or 0.30)
+            _fr_est_fire = round(float(_fr_agency_counts.get('fire', 0)) * _fr_dispatch_rate)
+            _fr_est_mva = round(float(_fr_agency_counts.get('mva', 0)) * _fr_dispatch_rate)
+            _fr_est_water = round(float(_fr_agency_counts.get('water', 0)) * _fr_dispatch_rate)
 
             _fr_jurisdiction_block = ""
             if _fr_total > 0:
@@ -10209,13 +10218,84 @@ body{{background:transparent;overflow:hidden}}
                 <div style="font-size:0.68rem;font-weight:700;color:{accent_color};text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
                   This Jurisdiction's Uploaded Call Data — {_fr_total:,} calls categorized
                 </div>
-                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:0.68rem;color:{text_muted};">
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:0.68rem;color:{text_muted};margin-bottom:10px;">
                   <div>🔴 Fire: <strong style="color:{text_main};">{f'{_fr_fire_pct:.1f}%' if _fr_fire_pct is not None else '—'}</strong></div>
                   <div>🟠 MVA: <strong style="color:{text_main};">{f'{_fr_mva_pct:.1f}%' if _fr_mva_pct is not None else '—'}</strong></div>
                   <div>🟣 Water Rescue: <strong style="color:{text_main};">{f'{_fr_water_pct:.2f}%' if _fr_water_pct is not None else '—'}</strong></div>
                   <div>🟡 Medical: <strong style="color:{text_main};">{f'{_fr_medical_pct:.1f}%' if _fr_medical_pct is not None else '—'}</strong></div>
                 </div>
+                <div style="font-size:0.65rem;color:{text_muted};border-top:1px solid rgba(0,210,255,0.15);padding-top:8px;">
+                  Est. DFR-eligible dispatches at a {_fr_dispatch_rate:.0%} assumed dispatch rate:
+                  <strong style="color:{text_main};">Fire ~{_fr_est_fire:,}</strong> ·
+                  <strong style="color:{text_main};">MVA ~{_fr_est_mva:,}</strong> ·
+                  <strong style="color:{text_main};">Water ~{_fr_est_water:,}</strong>
+                  (of the calls above; same dispatch-rate assumption used elsewhere in this report)
+                </div>
               </div>"""
+
+            _fr_station_block = ""
+            try:
+                if (
+                    df_stations_all is not None and not df_stations_all.empty and
+                    'name' in df_stations_all.columns and hasattr(df_stations_all, 'geometry') and
+                    _fr_has_agency and hasattr(_fr_df, 'geometry')
+                ):
+                    _fr_st_lat = df_stations_all.geometry.y.to_numpy()
+                    _fr_st_lon = df_stations_all.geometry.x.to_numpy()
+                    _fr_st_name = df_stations_all['name'].astype(str).to_numpy()
+                    _fr_call_lat = _fr_df.geometry.y.to_numpy()
+                    _fr_call_lon = _fr_df.geometry.x.to_numpy()
+                    _fr_call_agency = _fr_df['agency'].astype(str).str.lower().to_numpy()
+
+                    if len(_fr_st_lat) > 0 and len(_fr_call_lat) > 0:
+                        _fr_d2 = (
+                            (_fr_call_lat[:, None] - _fr_st_lat[None, :]) ** 2 +
+                            (_fr_call_lon[:, None] - _fr_st_lon[None, :]) ** 2
+                        )
+                        _fr_nearest_idx = _fr_d2.argmin(axis=1)
+                        _fr_assign_df = pd.DataFrame({'station': _fr_st_name[_fr_nearest_idx], 'agency': _fr_call_agency})
+
+                        _fr_top_fire = _fr_assign_df[_fr_assign_df['agency'] == 'fire']['station'].value_counts().head(3)
+                        _fr_top_mva = _fr_assign_df[_fr_assign_df['agency'] == 'mva']['station'].value_counts().head(3)
+
+                        def _fr_top_list(series):
+                            if series.empty:
+                                return f"<div style='color:{text_muted};'>No data</div>"
+                            return "".join(
+                                f"<div>{i + 1}. {html.escape(str(name))} — <strong style='color:{text_main};'>{cnt:,}</strong></div>"
+                                for i, (name, cnt) in enumerate(series.items())
+                            )
+
+                        if not _fr_top_fire.empty or not _fr_top_mva.empty:
+                            _fr_station_block = f"""
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;font-size:0.68rem;color:{text_muted};">
+                <div style="background:{card_bg};border:1px solid {card_border};border-radius:8px;padding:12px 14px;">
+                  <div style="font-weight:700;color:#ef4444;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;font-size:0.63rem;">Top Stations — Fire Call Volume</div>
+                  {_fr_top_list(_fr_top_fire)}
+                </div>
+                <div style="background:{card_bg};border:1px solid {card_border};border-radius:8px;padding:12px 14px;">
+                  <div style="font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;font-size:0.63rem;">Top Stations — MVA Call Volume</div>
+                  {_fr_top_list(_fr_top_mva)}
+                </div>
+              </div>"""
+            except Exception:
+                _fr_station_block = ""
+
+            # Local color: only true for Columbia, SC — gate on the active jurisdiction so
+            # this doesn't render a false claim for any other customer's data.
+            _fr_corridor_note = ""
+            try:
+                _fr_jurisdiction_name = str(_get_document_jurisdiction_name(st.session_state, selected_names, fallback='')).lower()
+                _fr_active_state = str(st.session_state.get('active_state', '') or '').upper()
+                if 'columbia' in _fr_jurisdiction_name and _fr_active_state == 'SC':
+                    _fr_corridor_note = f"""
+              <div style="font-size:0.72rem;color:{text_muted};font-style:italic;margin-bottom:14px;max-width:740px;line-height:1.5;">
+                Columbia sits at the I-20 / I-26 / I-77 interchange — locally known as "Malfunction Junction" — one of
+                South Carolina's highest-volume truck and vehicle corridors, and a direct match for the secondary-crash
+                risk data below.
+              </div>"""
+            except Exception:
+                _fr_corridor_note = ""
 
             _fr_html = f"""
             <style>
@@ -10245,6 +10325,7 @@ body{{background:transparent;overflow:hidden}}
                 shrinking the blind window on structure fires, hazmat leaks, interstate MVAs, and water rescues where
                 every minute materially changes outcomes.
               </div>
+              {_fr_corridor_note}
 
               <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;">
 
@@ -10311,7 +10392,35 @@ body{{background:transparent;overflow:hidden}}
                 </div>
               </div>
 
+              <div style="background:rgba(139,92,246,0.06);border-left:3px solid #8b5cf6;border-radius:0 6px 6px 0;padding:12px 16px;margin-bottom:16px;">
+                <div style="font-size:0.7rem;font-weight:700;color:#8b5cf6;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">
+                  ☣️ Hazmat Standoff Distance
+                  <span class="fr-tip" data-tip="Source: US DOT/PHMSA Emergency Response Guidebook (ERG). Initial isolation distances are baseline guidance only — actual distance depends on the material, quantity, and conditions; always follow ERG guidance specific to the placard/material identified.">?</span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
+                  <div style="text-align:center;background:rgba(0,0,0,0.25);border-radius:6px;padding:10px 8px;">
+                    <div style="font-size:1.15rem;font-weight:900;color:#8b5cf6;font-family:'IBM Plex Mono',monospace;">75–330 ft</div>
+                    <div style="font-size:0.63rem;color:{text_muted};margin-top:3px;">ERG baseline initial isolation<br>(solids to gases, small spills)</div>
+                  </div>
+                  <div style="text-align:center;background:rgba(0,0,0,0.25);border-radius:6px;padding:10px 8px;">
+                    <div style="font-size:1.15rem;font-weight:900;color:#f59e0b;font-family:'IBM Plex Mono',monospace;">0.2+ mi</div>
+                    <div style="font-size:0.63rem;color:{text_muted};margin-top:3px;">protective-action distance for<br>toxic-inhalation gases (e.g. chlorine)</div>
+                  </div>
+                  <div style="text-align:center;background:rgba(0,0,0,0.25);border-radius:6px;padding:10px 8px;">
+                    <div style="font-size:1.15rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">0 personnel</div>
+                    <div style="font-size:0.63rem;color:{text_muted};margin-top:3px;">in the hot zone — BRINC assesses<br>the scene remotely from outside it</div>
+                  </div>
+                </div>
+                <div style="font-size:0.69rem;color:{text_muted};font-style:italic;line-height:1.55;">
+                  A gas leak, suspicious package, or unknown-material call doesn't require a crew member inside the
+                  isolation perimeter just to see what's there — BRINC can assess visually and thermally from
+                  well outside it.
+                </div>
+              </div>
+
               {_fr_jurisdiction_block}
+
+              {_fr_station_block}
 
               <div style="font-size:0.7rem;font-weight:700;color:{text_main};text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
                 Traditional Ground Response vs. BRINC DFR — Capability Matrix
@@ -10361,12 +10470,28 @@ body{{background:transparent;overflow:hidden}}
 
               </div>
 
+              <div style="background:{card_bg};border:1px solid {card_border};border-radius:8px;padding:16px;margin-bottom:16px;">
+                <div style="font-size:0.7rem;font-weight:700;color:{text_main};text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">
+                  📋 Suggested Evaluation Plan
+                </div>
+                <div style="font-size:0.75rem;color:{text_muted};line-height:1.7;">
+                  A path-forward pilot would track outcomes quarterly across four fire/rescue-specific dimensions:
+                  (1) pre-arrival intel delivery rate — % of structure fire and hazmat calls where BRINC video reached
+                  command before the first ground unit arrived; (2) hazmat/gas-leak incidents assessed remotely without
+                  committing personnel inside the isolation perimeter; (3) time-to-first-visual on water/river rescue
+                  calls, measured against the drowning response window above; and (4) structure-fire size-up lead time
+                  versus the NFPA 1710 first-engine benchmark. All flight data, incident assignments, and outcome
+                  records are retained for department reporting.
+                </div>
+              </div>
+
               <div style="font-size:0.6rem;color:{text_muted};border-top:1px solid {card_border};padding-top:8px;line-height:1.8;">
                 <strong style="color:{text_main};">Data Sources:</strong>
                 UL Fire Safety Research Institute (FSRI) — synthetic vs. natural furnishings burn studies ·
                 NFPA 1710 Standard for the Organization and Deployment of Fire Suppression Operations (2020 ed.) ·
                 FHWA Office of Operations — Secondary Crash Research: A Multistate Analysis (2023) ·
                 CDC Drowning Prevention data &amp; research ·
+                US DOT/PHMSA Emergency Response Guidebook (ERG) ·
                 BRINC Drones technical specifications
               </div>
             </div>
@@ -10379,7 +10504,7 @@ body{{background:transparent;overflow:hidden}}
                 "font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;'>"
                 f"{_fr_html}</body></html>"
             )
-            components.html(_fr_full_html, height=1550, scrolling=False)
+            components.html(_fr_full_html, height=2350, scrolling=False)
 
         _show_lte_section = st.toggle(
             "Show 4G LTE Cell Coverage",

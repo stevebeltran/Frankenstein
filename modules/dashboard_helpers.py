@@ -2201,6 +2201,41 @@ def station_suggestion_marginal_label(suggestion):
     return f"+{pct}% new {unit}"
 
 
+def _upload_suggestion_sort_key(suggestion, mode, guard_rank_by, resp_rank_by):
+    """Sort key: each card ranks by whichever metric matches its OWN assigned role."""
+    if mode == 'Guardian':
+        primary = suggestion.get('land_pct_guardian', 0) if guard_rank_by == 'land' else suggestion.get('call_pct_guardian', 0)
+    else:
+        primary = suggestion.get('land_pct_responder', 0) if resp_rank_by == 'land' else suggestion.get('call_pct_responder', 0)
+    return (
+        float(primary or 0),
+        float(suggestion.get('call_pct', 0) or 0),
+        float(suggestion.get('land_pct', 0) or 0),
+        float(suggestion.get('marginal_calls', 0) or 0),
+        -int(suggestion.get('station_idx', 0) or 0),
+    )
+
+
+def sort_uploaded_station_suggestions(suggestions, modes, guard_rank_by='call', resp_rank_by='call'):
+    """Sort uploaded-station suggestion cards highest-to-lowest by each card's own role metric.
+
+    Unlike the auto-detected-pool marginal-gain ranking used by compute_station_suggestions,
+    this is a plain descending sort: uploaded mode already shows every candidate station, so
+    there is no overlap-aware subset to pick, just a display order.
+    """
+    guard_rank_by = 'land' if str(guard_rank_by).strip().lower() == 'land' else 'call'
+    resp_rank_by = 'land' if str(resp_rank_by).strip().lower() == 'land' else 'call'
+    modes = modes or {}
+    ordered = sorted(
+        suggestions,
+        key=lambda s: _upload_suggestion_sort_key(
+            s, modes.get(s.get('station_idx'), 'Off'), guard_rank_by, resp_rank_by
+        ),
+        reverse=True,
+    )
+    return [{**s, 'rank': i + 1} for i, s in enumerate(ordered)]
+
+
 def deployed_station_indices(active_drones):
     """Return station indices already rendered as deployed drones."""
     deployed = set()

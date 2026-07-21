@@ -13480,7 +13480,7 @@ body{{background:transparent;overflow:hidden}}
         _brinc_data = _json_export_download(_brinc_payload)
         if _brinc_export_slot.download_button("💾 Save Deployment Plan", data=_brinc_data,
                                               file_name=f"BRINC_Deployment_Plan_{_safe_city}_{_version_slug}_{_ts}.brinc",
-                                              mime="application/octet-stream", width="stretch"):
+                                              mime="application/json", width="stretch"):
             # ── Track export event ───────────────────────────────────────────────
             sentry_breadcrumb(
                 "Export downloaded",

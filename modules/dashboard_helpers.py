@@ -2886,7 +2886,8 @@ def render_station_suggestions(st, session_state, suggestions, text_main, text_m
 
 def render_station_suggestions_grid(st, session_state, suggestions, text_main, text_muted,
                                     card_bg, card_border, accent_color, source_label='public data',
-                                    k_guardian=None, k_responder=None, suggestion_color_map=None):
+                                    k_guardian=None, k_responder=None, suggestion_color_map=None,
+                                    stations_uploaded=False):
     """Render station suggestions with synced widget state and a fixed 5-column grid."""
     if not suggestions:
         return False
@@ -2939,6 +2940,35 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
         unsafe_allow_html=True,
     )
     st.caption('Click a card to compare role assignment. These suggestions are advisory only and do not force the deployment objective or lock the optimizer.')
+
+    if stations_uploaded:
+        _sort_cols = st.columns(2)
+        with _sort_cols[0]:
+            _guard_sort_raw = st.radio(
+                'Guardian Sort',
+                ('Calls', 'Land'),
+                index=0 if session_state.get('guard_strat_idx', 1) == 0 else 1,
+                horizontal=True,
+                key='_guard_sort_radio',
+                help='Sort Guardian-assigned cards by Call Coverage or Land Coverage.',
+            )
+        with _sort_cols[1]:
+            _resp_sort_raw = st.radio(
+                'Responder Sort',
+                ('Calls', 'Land'),
+                index=0 if session_state.get('resp_strat_idx', 1) == 0 else 1,
+                horizontal=True,
+                key='_resp_sort_radio',
+                help='Sort Responder-assigned cards by Call Coverage or Land Coverage.',
+            )
+        session_state['guard_strat_idx'] = 0 if _guard_sort_raw == 'Calls' else 1
+        session_state['resp_strat_idx'] = 0 if _resp_sort_raw == 'Calls' else 1
+        suggestions = sort_uploaded_station_suggestions(
+            suggestions,
+            modes,
+            guard_rank_by='land' if _guard_sort_raw == 'Land' else 'call',
+            resp_rank_by='land' if _resp_sort_raw == 'Land' else 'call',
+        )
 
     st.markdown(
         """

@@ -9104,6 +9104,7 @@ body{{background:transparent;overflow:hidden}}
                 k_guardian=k_guardian,
                 k_responder=k_responder,
                 suggestion_color_map=_suggestion_color_map,
+                stations_uploaded=st.session_state.get('stations_user_uploaded', False),
             )
 
         # ── ARRIVAL ADVANTAGE ────────────────────────────────────────────────────

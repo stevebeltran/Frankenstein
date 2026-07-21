@@ -696,34 +696,42 @@ def render_deployment_strategy(st, session_state, config, text_muted):
         complement_mode = deployment_mode == 'Complement — push apart'
         shared_mode = deployment_mode == 'Shared — allow full overlap'
 
-        st.markdown(
-            f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Guardian Objective</div>",
-            unsafe_allow_html=True,
-        )
-        guard_strategy_raw = st.radio(
-            'Guardian Objective',
-            ('Call Coverage', 'Land Coverage'),
-            index=session_state.get('guard_strat_idx', 1),
-            horizontal=True,
-            label_visibility='collapsed',
-            help='What the Guardian optimizer maximises. Land Coverage = wide area patrol. Call Coverage = respond to highest-volume locations.',
-        )
-        session_state['guard_strat_idx'] = 0 if guard_strategy_raw == 'Call Coverage' else 1
+        _stations_uploaded_for_objective = bool(session_state.get('stations_user_uploaded', False))
+
+        if not _stations_uploaded_for_objective:
+            st.markdown(
+                f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Guardian Objective</div>",
+                unsafe_allow_html=True,
+            )
+            guard_strategy_raw = st.radio(
+                'Guardian Objective',
+                ('Call Coverage', 'Land Coverage'),
+                index=session_state.get('guard_strat_idx', 1),
+                horizontal=True,
+                label_visibility='collapsed',
+                help='What the Guardian optimizer maximises. Land Coverage = wide area patrol. Call Coverage = respond to highest-volume locations.',
+            )
+            session_state['guard_strat_idx'] = 0 if guard_strategy_raw == 'Call Coverage' else 1
+        else:
+            guard_strategy_raw = 'Call Coverage' if session_state.get('guard_strat_idx', 1) == 0 else 'Land Coverage'
         guard_strategy = 'Maximize Call Coverage' if guard_strategy_raw == 'Call Coverage' else 'Maximize Land Coverage'
 
-        st.markdown(
-            f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Responder Objective</div>",
-            unsafe_allow_html=True,
-        )
-        resp_strategy_raw = st.radio(
-            'Responder Objective',
-            ('Call Coverage', 'Land Coverage'),
-            index=session_state.get('resp_strat_idx', 1),
-            horizontal=True,
-            label_visibility='collapsed',
-            help='What the Responder optimizer maximises. Call Coverage = densest incident areas. Land Coverage = broadest geographic reach.',
-        )
-        session_state['resp_strat_idx'] = 0 if resp_strategy_raw == 'Call Coverage' else 1
+        if not _stations_uploaded_for_objective:
+            st.markdown(
+                f"<div style='font-size:0.7rem; color:{text_muted}; margin:10px 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;'>Responder Objective</div>",
+                unsafe_allow_html=True,
+            )
+            resp_strategy_raw = st.radio(
+                'Responder Objective',
+                ('Call Coverage', 'Land Coverage'),
+                index=session_state.get('resp_strat_idx', 1),
+                horizontal=True,
+                label_visibility='collapsed',
+                help='What the Responder optimizer maximises. Call Coverage = densest incident areas. Land Coverage = broadest geographic reach.',
+            )
+            session_state['resp_strat_idx'] = 0 if resp_strategy_raw == 'Call Coverage' else 1
+        else:
+            resp_strategy_raw = 'Call Coverage' if session_state.get('resp_strat_idx', 1) == 0 else 'Land Coverage'
         resp_strategy = 'Maximize Call Coverage' if resp_strategy_raw == 'Call Coverage' else 'Maximize Land Coverage'
 
         st.markdown(

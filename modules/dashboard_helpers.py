@@ -2324,9 +2324,8 @@ def _suggestion_widget_version(session_state):
 
 def _suggestion_widget_identity(suggestion):
     station_idx = int(suggestion.get('station_idx', 0))
-    rank = int(suggestion.get('rank', 0) or 0)
     name = re.sub(r'[^a-zA-Z0-9]+', '_', str(suggestion.get('name', '') or '').strip()).strip('_')[:40]
-    return f"{station_idx}_{rank}_{name}"
+    return f"{station_idx}_{name}"
 
 
 def _suggestion_widget_key(session_state, idx, suggestion=None):

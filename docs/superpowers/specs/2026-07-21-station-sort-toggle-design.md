@@ -88,11 +88,14 @@ happening at display time.
 
 ### 5. Rerun behavior
 
-Changing either sort radio triggers `st.rerun()`, matching the existing
-pattern used on per-card mode change (`dashboard_helpers.py:2834`, `3016`).
-Flipping a card's own Guardian/Responder/Off mode continues to trigger
-rerun as today, and the new sort is applied on that rerun using the card's
-new mode.
+Changing either sort radio relies on Streamlit's automatic rerun-on-widget-change
+— no explicit `st.rerun()` call is needed, since the new radio value is read
+inline and the re-sort applies within that same run. This differs from the
+per-card mode radio, which does call `st.rerun()` explicitly
+(`dashboard_helpers.py:2834`, `3016`) because it also needs to update derived
+slider-count state before the next render. Flipping a card's own
+Guardian/Responder/Off mode continues to trigger that rerun as today, and the
+new sort is applied on that rerun using the card's new mode.
 
 ## Edge Cases
 

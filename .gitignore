@@ -4,6 +4,7 @@
 .streamlit/*secret*.toml
 !.streamlit/secrets.toml.template
 .venv/
+.worktrees/
 *.pyc
 __pycache__/
 cell_coverage/raw/

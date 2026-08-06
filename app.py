@@ -7627,8 +7627,12 @@ body{{background:transparent;overflow:hidden}}
         area_covered_perc = overlap_perc = calls_covered_perc = 0.0
         guard_calls_perc  = guard_area_perc  = 0.0
         resp_calls_perc   = resp_area_perc   = 0.0
-        cov_r = np.zeros(total_calls, bool) if total_calls > 0 else np.zeros(0, bool)
-        cov_g = np.zeros(total_calls, bool) if total_calls > 0 else np.zeros(0, bool)
+        cov_r, cov_g = optimization.combine_active_coverage_masks(
+            resp_matrix,
+            guard_matrix,
+            active_resp_idx,
+            active_guard_idx,
+        )
 
         ordered_deployments_raw = []
         for idx in chrono_g:
@@ -7663,50 +7667,127 @@ body{{background:transparent;overflow:hidden}}
 
         city_area = city_m.area if (city_m and not city_m.is_empty) else 1.0
         _metric_total_calls = total_calls
-        _station_city_call_counts = {}
+        _station_city_call_counts = {
+            ('RESPONDER', _idx): int(np.asarray(resp_matrix[_idx], dtype=bool).sum())
+            for _idx in active_resp_idx
+        }
+        _station_city_call_counts.update({
+            ('GUARDIAN', _idx): int(np.asarray(guard_matrix[_idx], dtype=bool).sum())
+            for _idx in active_guard_idx
+        })
         _station_city_weighted_counts = {}
-        _station_city_masks = {}
+        _station_city_masks = {
+            ('RESPONDER', _idx): np.asarray(resp_matrix[_idx], dtype=bool)
+            for _idx in active_resp_idx
+        }
+        _station_city_masks.update({
+            ('GUARDIAN', _idx): np.asarray(guard_matrix[_idx], dtype=bool)
+            for _idx in active_guard_idx
+        })
         _metric_cov_r = cov_r.copy()
         _metric_cov_g = cov_g.copy()
-        _metric_calls_in_city = None
+        _metric_calls_in_city = calls_in_city
+        _metric_coverage_is_sampled = False
 
+        _sample_metric_result = {
+            "total_calls": _metric_total_calls,
+            "calls_in_city": _metric_calls_in_city,
+            "cov_r": _metric_cov_r,
+            "cov_g": _metric_cov_g,
+            "station_masks": _station_city_masks,
+            "station_counts": _station_city_call_counts,
+        }
         _metric_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
+        _metric_fallback_reason = None
         if _metric_df is not None and len(_metric_df) > 0:
-            try:
-                _metric_gdf = gpd.GeoDataFrame(
+            def _build_exact_call_coverage_result():
+                _candidate_metric_gdf = gpd.GeoDataFrame(
                     _metric_df,
                     geometry=gpd.points_from_xy(_metric_df.lon, _metric_df.lat),
                     crs='EPSG:4326'
                 ).to_crs(epsg=int(epsg_code))
                 _metric_clip_geom = city_m.buffer(300) if city_m is not None else city_m
-                _metric_calls_in_city = _metric_gdf[_metric_gdf.within(_metric_clip_geom)] if _metric_clip_geom is not None else _metric_gdf
-            except Exception:
-                _metric_calls_in_city = None
-            if _metric_calls_in_city is not None and len(_metric_calls_in_city) > 0:
-                _metric_total_calls = len(_metric_calls_in_city)
-                _metric_xy = np.array(list(zip(_metric_calls_in_city.geometry.x, _metric_calls_in_city.geometry.y)))
+                _candidate_calls_in_city = _candidate_metric_gdf[_candidate_metric_gdf.within(_metric_clip_geom)] if _metric_clip_geom is not None else _candidate_metric_gdf
+                if len(_candidate_calls_in_city) == 0:
+                    raise ValueError("No calls remained inside the metric boundary")
+
+                _candidate_total_calls = len(_candidate_calls_in_city)
+                _metric_xy = np.column_stack((
+                    _candidate_calls_in_city.geometry.x.to_numpy(),
+                    _candidate_calls_in_city.geometry.y.to_numpy(),
+                ))
+                _candidate_cov_r = np.zeros(_candidate_total_calls, dtype=bool)
+                _candidate_cov_g = np.zeros(_candidate_total_calls, dtype=bool)
+                _candidate_station_masks = {}
+                _candidate_station_counts = {}
                 if active_resp_idx:
-                    _metric_cov_r = np.zeros(_metric_total_calls, dtype=bool)
                     for _idx in active_resp_idx:
                         _station_pt = gpd.GeoSeries([Point(station_metadata[_idx]['lon'], station_metadata[_idx]['lat'])], crs='EPSG:4326').to_crs(epsg=int(epsg_code)).iloc[0]
                         _d = np.sqrt((_metric_xy[:, 0] - _station_pt.x) ** 2 + (_metric_xy[:, 1] - _station_pt.y) ** 2)
                         _mask = _d <= (resp_radius_mi * 1609.34)
-                        _metric_cov_r |= _mask
-                        _station_city_masks[('RESPONDER', _idx)] = _mask
-                        _station_city_call_counts[('RESPONDER', _idx)] = int(_mask.sum())
+                        _candidate_cov_r |= _mask
+                        _candidate_station_masks[('RESPONDER', _idx)] = _mask
+                        _candidate_station_counts[('RESPONDER', _idx)] = int(_mask.sum())
                 if active_guard_idx:
-                    _metric_cov_g = np.zeros(_metric_total_calls, dtype=bool)
                     for _idx in active_guard_idx:
                         _station_pt = gpd.GeoSeries([Point(station_metadata[_idx]['lon'], station_metadata[_idx]['lat'])], crs='EPSG:4326').to_crs(epsg=int(epsg_code)).iloc[0]
                         _d = np.sqrt((_metric_xy[:, 0] - _station_pt.x) ** 2 + (_metric_xy[:, 1] - _station_pt.y) ** 2)
                         _mask = _d <= (guard_radius_mi * 1609.34)
-                        _metric_cov_g |= _mask
-                        _station_city_masks[('GUARDIAN', _idx)] = _mask
-                        _station_city_call_counts[('GUARDIAN', _idx)] = int(_mask.sum())
-        if _metric_cov_r.shape[0] != _metric_total_calls:
-            _metric_cov_r = np.zeros(_metric_total_calls, dtype=bool)
-        if _metric_cov_g.shape[0] != _metric_total_calls:
-            _metric_cov_g = np.zeros(_metric_total_calls, dtype=bool)
+                        _candidate_cov_g |= _mask
+                        _candidate_station_masks[('GUARDIAN', _idx)] = _mask
+                        _candidate_station_counts[('GUARDIAN', _idx)] = int(_mask.sum())
+
+                return {
+                    "total_calls": _candidate_total_calls,
+                    "calls_in_city": _candidate_calls_in_city,
+                    "cov_r": _candidate_cov_r,
+                    "cov_g": _candidate_cov_g,
+                    "station_masks": _candidate_station_masks,
+                    "station_counts": _candidate_station_counts,
+                }
+
+            _metric_result, _metric_fallback_reason, _metric_exc = optimization.resolve_call_coverage_result(
+                _sample_metric_result,
+                full_call_count=len(_metric_df),
+                exact_result_factory=_build_exact_call_coverage_result,
+            )
+            _metric_total_calls = _metric_result["total_calls"]
+            _metric_calls_in_city = _metric_result["calls_in_city"]
+            _metric_cov_r = _metric_result["cov_r"]
+            _metric_cov_g = _metric_result["cov_g"]
+            _station_city_masks = _metric_result["station_masks"]
+            _station_city_call_counts = _metric_result["station_counts"]
+            _metric_coverage_is_sampled = _metric_fallback_reason is not None
+            if _metric_fallback_reason == "large_dataset":
+                sentry_breadcrumb(
+                    "Using sampled call coverage for a large dataset",
+                    category="coverage",
+                    full_call_count=len(_metric_df),
+                    sampled_call_count=total_calls,
+                )
+            elif _metric_exc is not None:
+                log_crash(
+                    "full call coverage recompute",
+                    _metric_exc,
+                    "".join(traceback.format_exception(type(_metric_exc), _metric_exc, _metric_exc.__traceback__)),
+                    details={
+                        "full_call_count": len(_metric_df),
+                        "sampled_call_count": total_calls,
+                    },
+                    source_app=APP_DIR.name,
+                )
+        if _metric_coverage_is_sampled:
+            _fallback_action = "was not run" if _metric_fallback_reason == "large_dataset" else "could not be completed"
+            if _metric_total_calls > 0:
+                st.warning(
+                    f"Exact coverage for all {len(_metric_df):,} calls {_fallback_action}. "
+                    f"Showing representative coverage from {_metric_total_calls:,} sampled calls."
+                )
+            else:
+                st.warning(
+                    f"Exact coverage for all {len(_metric_df):,} calls {_fallback_action}, "
+                    "and no valid sampled calls were available for fallback."
+                )
         cov_r = _metric_cov_r
         cov_g = _metric_cov_g
         for _fleet_type, _fleet_order in (

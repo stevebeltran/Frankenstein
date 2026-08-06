@@ -11,6 +11,45 @@ from pyproj import Transformer
 from modules.config import CONFIG
 from modules.geospatial import build_display_calls
 
+
+def combine_active_coverage_masks(
+    resp_matrix,
+    guard_matrix,
+    active_resp_idx,
+    active_guard_idx,
+):
+    """Combine active station rows into responder and guardian call masks."""
+    resp = np.asarray(resp_matrix, dtype=bool)
+    guard = np.asarray(guard_matrix, dtype=bool)
+    if resp.ndim != 2 or guard.ndim != 2:
+        raise ValueError("Coverage matrices must be two-dimensional")
+    if resp.shape[1] != guard.shape[1]:
+        raise ValueError("Coverage matrices must contain the same calls")
+
+    def _combine(matrix, active_indices):
+        indices = [int(idx) for idx in (active_indices or [])]
+        if not indices:
+            return np.zeros(matrix.shape[1], dtype=bool)
+        return np.any(matrix[indices, :], axis=0)
+
+    return _combine(resp, active_resp_idx), _combine(guard, active_guard_idx)
+
+
+def resolve_call_coverage_result(
+    sample_result,
+    full_call_count,
+    exact_result_factory,
+    max_exact_rows=100_000,
+):
+    """Return exact metrics when safe, otherwise preserve sampled metrics."""
+    if int(full_call_count or 0) > int(max_exact_rows):
+        return sample_result, "large_dataset", None
+    try:
+        return exact_result_factory(), None, None
+    except Exception as exc:
+        return sample_result, "exact_failure", exc
+
+
 def mean_covered_distance_miles(dist_matrix, cover_matrix, station_idx, fallback_miles=0.0):
     """Return the mean covered distance for one station from the live coverage matrices."""
     try:

@@ -7687,7 +7687,6 @@ body{{background:transparent;overflow:hidden}}
         _metric_cov_r = cov_r.copy()
         _metric_cov_g = cov_g.copy()
         _metric_calls_in_city = calls_in_city
-        _metric_coverage_is_sampled = False
 
         _sample_metric_result = {
             "total_calls": _metric_total_calls,
@@ -7757,7 +7756,6 @@ body{{background:transparent;overflow:hidden}}
             _metric_cov_g = _metric_result["cov_g"]
             _station_city_masks = _metric_result["station_masks"]
             _station_city_call_counts = _metric_result["station_counts"]
-            _metric_coverage_is_sampled = _metric_fallback_reason is not None
             if _metric_fallback_reason == "large_dataset":
                 sentry_breadcrumb(
                     "Using sampled call coverage for a large dataset",
@@ -7775,18 +7773,6 @@ body{{background:transparent;overflow:hidden}}
                         "sampled_call_count": total_calls,
                     },
                     source_app=APP_DIR.name,
-                )
-        if _metric_coverage_is_sampled:
-            _fallback_action = "was not run" if _metric_fallback_reason == "large_dataset" else "could not be completed"
-            if _metric_total_calls > 0:
-                st.warning(
-                    f"Exact coverage for all {len(_metric_df):,} calls {_fallback_action}. "
-                    f"Showing representative coverage from {_metric_total_calls:,} sampled calls."
-                )
-            else:
-                st.warning(
-                    f"Exact coverage for all {len(_metric_df):,} calls {_fallback_action}, "
-                    "and no valid sampled calls were available for fallback."
                 )
         cov_r = _metric_cov_r
         cov_g = _metric_cov_g

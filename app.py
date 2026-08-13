@@ -263,6 +263,9 @@ from modules.arrival_advantage import (
     compute_arrival_advantage,
     find_column as find_arrival_column,
 )
+from modules.fire.classification import classify_calls, recommend_fire_mode
+from modules.fire.models import FIRE_EMS_MODE, GENERAL_MODE
+from modules.fire.schema import filter_fire_calls
 _transient_notice_mod = _load_local_module("transient_notice")
 render_transient_build_notice = _transient_notice_mod.render_transient_build_notice
 _session_state_mod = _load_local_module("session_state")
@@ -7118,6 +7121,35 @@ body{{background:transparent;overflow:hidden}}
         else:
             df_calls_full = df_calls_full.copy()
         df_stations_all = st.session_state['df_stations'].copy()
+
+        # Stage 1 Fire / EMS foundation. General calculations keep their
+        # existing inputs unless the user explicitly selects Fire / EMS mode.
+        _app_mode = st.sidebar.radio(
+            "Analysis mode",
+            [GENERAL_MODE, FIRE_EMS_MODE],
+            key="app_mode",
+            help="Fire / EMS mode adds classification and category filters without changing General calculations.",
+        )
+        st.session_state["fire_feature_gate"] = _app_mode == FIRE_EMS_MODE
+        _fire_recommended = recommend_fire_mode(df_calls_full)
+        st.session_state["fire_dataset_recommendation"] = _fire_recommended
+        if _app_mode == GENERAL_MODE and _fire_recommended:
+            st.sidebar.info("This dataset contains substantial Fire / EMS activity. Fire / EMS mode is available to review; selection remains manual.")
+        if _app_mode == FIRE_EMS_MODE:
+            st.markdown("### Fire / EMS Intelligence")
+            st.caption("Stage 1 foundation: call classification and filters. Ground, drone, and financial models are not enabled yet.")
+            _fire_calls = classify_calls(df_calls_full)
+            _fire_categories = sorted(str(value) for value in _fire_calls["fire_category"].dropna().unique())
+            _fire_selected = st.multiselect(
+                "Fire call categories",
+                _fire_categories,
+                default=[value for value in st.session_state.get("fire_category_filter", []) if value in _fire_categories],
+                key="fire_category_filter",
+            )
+            _fire_filtered = filter_fire_calls(_fire_calls, _fire_selected)
+            st.metric("Displayed classified calls", f"{len(_fire_filtered):,}")
+            df_calls = _fire_filtered
+
         full_total_calls = _get_annualized_calls(int(st.session_state.get('total_original_calls', len(df_calls_full) if df_calls_full is not None else len(df_calls)) or 0))
         full_daily_calls = max(1, int(full_total_calls / 365)) if full_total_calls else 1
 
@@ -12242,71 +12274,6 @@ body{{background:transparent;overflow:hidden}}
                         portal_deadline="JustGrants deadline: June 10, 2026, 8:59 p.m. ET",
                         nofo_number="O-BJA-2026-172609",
                         expires_on=datetime.datetime(2026, 6, 10, 20, 59, tzinfo=zoneinfo.ZoneInfo("America/New_York")),
-                    ),
-                    _render_federal_grant_card_html(
-                        title="SAMHSA Tribal Opioid Response (TOR)",
-                        description=(
-                            "Supports opioid and stimulant prevention, harm reduction, treatment, recovery support, and "
-                            "MOUD access for tribal communities."
-                        ),
-                        narrative=(
-                            "When the applicant is a Tribe or tribal organization, TOR can support a DFR deployment framed "
-                            "around faster overdose-scene assessment, safer responder approach, and stronger connection between "
-                            "dispatch, tribal public safety, EMS, and treatment or recovery partners."
-                        ),
-                        status_label="Forecasted / watchlist",
-                        status_tone="watch",
-                        eligibility_note="Eligible applicants are federally recognized Tribes and tribal organizations",
-                        links=[
-                            ("Simpler.Grants.gov forecast search", "https://simpler.grants.gov/search?query=opioid+use+disorder"),
-                            ("SAMHSA TOR program page", "https://www.samhsa.gov/grants/grant-announcements/ti-24-009"),
-                        ],
-                        status_note="FY26 forecast posted March 20, 2026; close date not yet published",
-                        require_tribal=True,
-                    ),
-                    _render_federal_grant_card_html(
-                        title="COPS Anti-Heroin Task Force (AHTF)",
-                        description=(
-                            "Funds statewide collaborative law-enforcement efforts focused on heroin, fentanyl, carfentanil, "
-                            "and unlawful prescription-opioid distribution."
-                        ),
-                        narrative=(
-                            "For state law-enforcement applicants, AHTF can support a DFR narrative centered on earlier aerial "
-                            "scene intelligence for trafficking investigations, safer operational planning, and faster coordination "
-                            "across state task-force partners confronting opioid distribution networks."
-                        ),
-                        status_label="Recurring program",
-                        status_tone="closed",
-                        eligibility_note="Eligible applicants are state law-enforcement agencies with statewide jurisdiction",
-                        links=[
-                            ("COPS AHTF program page", "https://cops.usdoj.gov/ahtf"),
-                            ("COPS grants page", "https://cops.usdoj.gov/grants"),
-                        ],
-                        grants_gov_deadline="June 25, 2025, 4:59 p.m. ET",
-                        portal_deadline="JustGrants deadline: July 2, 2025, 4:59 p.m. ET",
-                        status_note="Most recent posted cycle is closed; keep on the watchlist for the next federal round",
-                        require_state_law_enforcement=True,
-                    ),
-                    _render_federal_grant_card_html(
-                        title="SAMHSA State Opioid Response (SOR)",
-                        description=(
-                            "Supports opioid and stimulant prevention, harm reduction, treatment, recovery support, and "
-                            "MOUD access through Single State Agencies and territorial applicants."
-                        ),
-                        narrative=(
-                            "For state behavioral-health or Single State Agency applicants, SOR can support a DFR narrative "
-                            "focused on overdose-scene intelligence, faster linkage to care, coordinated field response, and "
-                            "safer interoperability between public safety and treatment systems."
-                        ),
-                        status_label="State-only program",
-                        status_tone="closed",
-                        eligibility_note="Eligible applicants are Single State Agencies and territories",
-                        links=[
-                            ("SAMHSA SOR program page", "https://www.samhsa.gov/grants/grant-announcements/ti-24-008"),
-                        ],
-                        grants_gov_deadline="July 1, 2024",
-                        status_note="Most recent public NOFO is historical; include only for state-level behavioral-health applicants",
-                        require_state_agency=True,
                     ),
                 ])
                 export_html = f"""<!DOCTYPE html>

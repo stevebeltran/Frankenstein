@@ -104,7 +104,9 @@ def _resolve_build_meta():
     Resolve build metadata from git history when available.
 
     The version is now read-only at runtime so local app launches do not mutate
-    .build_meta. That keeps the displayed version tied to the commit history.
+    .build_meta. When git metadata is unavailable, use the current runtime time
+    instead of a stale checked-in timestamp so the splash notice reflects the
+    active deployment.
     """
     _git_revision_value = _git_revision()
     _git_timestamp_value = _git_commit_timestamp()
@@ -115,13 +117,13 @@ def _resolve_build_meta():
             _git_revision_value if _git_revision_value is not None else _stored_revision
         )
 
+    _runtime_timestamp = float(datetime.datetime.now().timestamp())
     if _stored_mtime > 0:
-        return _stored_mtime, (
+        return _runtime_timestamp, (
             _git_revision_value if _git_revision_value is not None else _stored_revision
         )
 
-    _fallback_timestamp = float(datetime.datetime.now().timestamp())
-    return _fallback_timestamp, 1
+    return _runtime_timestamp, 1
 
 
 def _count_app_lines():

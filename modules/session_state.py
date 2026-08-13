@@ -8,12 +8,6 @@ import urllib.parse
 
 
 DEFAULTS = {
-    # Stage 1 Fire / EMS foundation. General remains the default path.
-    "app_mode": "General",
-    "fire_feature_gate": False,
-    "fire_dataset_recommendation": False,
-    "fire_category_filter": [],
-    "fire_session_version": 1,
     "csvs_ready": False,
     "df_calls": None,
     "df_calls_full": None,

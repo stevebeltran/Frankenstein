@@ -897,7 +897,7 @@ def _render_public_report_route():
         </div>
     """, unsafe_allow_html=True)
 
-    components.html(_html_path.read_text(encoding="utf-8"), height=1320, scrolling=True)
+    st.html(_html_path.read_text(encoding="utf-8"), unsafe_allow_javascript=True)
 
     st.markdown('<div id="qr-lead-form"></div>', unsafe_allow_html=True)
     st.markdown("""

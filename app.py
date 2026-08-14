@@ -3864,7 +3864,7 @@ def _build_historical_response_time_summary(df: pd.DataFrame):
 st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
-    page_title="BRINC Drone-as-First-Responder",
+    page_title="BRINC DFR",
     page_icon="https://brincdrones.com/favicon.ico"
 )
 configure_crash_logging(

@@ -56,12 +56,20 @@ def load_brinc_save_data(brinc_file):
 def restore_brinc_session(session_state, save_data):
     session_state['active_city'] = str(save_data.get('city', 'Unknown')).title()
     session_state['active_state'] = save_data.get('state', 'US')
-    session_state['k_resp'] = save_data.get('k_resp', 0)
-    session_state['k_guard'] = save_data.get('k_guard', 0)
+    session_state['k_resp'] = int(save_data.get('k_resp', 0) or 0)
+    session_state['k_guard'] = int(save_data.get('k_guard', 0) or 0)
     session_state['r_resp'] = save_data.get('r_resp', 2.0)
     session_state['r_guard'] = save_data.get('r_guard', 8.0)
     session_state['dfr_rate'] = save_data.get('dfr_rate', 25)
     session_state['deflect_rate'] = save_data.get('deflect_rate', 30)
+    # Seed the live fleet keys used by the rerun path so restored deployments
+    # keep their counts after a download-triggered refresh.
+    session_state['_fleet_k_resp'] = int(session_state['k_resp'] or 0)
+    session_state['_fleet_k_guard'] = int(session_state['k_guard'] or 0)
+    session_state['_pending_k_resp'] = int(session_state['k_resp'] or 0)
+    session_state['_pending_k_guard'] = int(session_state['k_guard'] or 0)
+    session_state['_suggestion_selected_resp_count'] = int(session_state['k_resp'] or 0)
+    session_state['_suggestion_selected_guard_count'] = int(session_state['k_guard'] or 0)
 
     session_state['pinned_guard_names'] = save_data.get('pinned_guard_names', [])
     session_state['pinned_resp_names'] = save_data.get('pinned_resp_names', [])
@@ -90,6 +98,7 @@ def restore_brinc_session(session_state, save_data):
     session_state['use_county_boundary'] = save_data.get('use_county_boundary', False)
     session_state['pin_drop_used'] = save_data.get('pin_drop_used', False)
     session_state['_brinc_k_override'] = True
+    session_state['_suggestion_apply_fleet_counts'] = True
     session_state.pop('_auto_minimums_sig', None)
 
     target_cities = save_data.get('target_cities')

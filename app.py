@@ -3381,12 +3381,16 @@ def _carrier_coverage_analysis(state_abbr: str, boundary_geom):
 def _build_carrier_mini_map(cinfo, boundary_geom, center_lat, center_lon, zoom, map_style):
     """Build a small Plotly map showing jurisdiction boundary + one carrier's coverage."""
     fig = go.Figure()
+    all_lats = []
+    all_lons = []
 
     # Jurisdiction outline
     if boundary_geom is not None and not boundary_geom.is_empty:
         geoms = [boundary_geom] if isinstance(boundary_geom, Polygon) else list(boundary_geom.geoms)
         for gi, g in enumerate(geoms):
             bx, by = g.exterior.coords.xy
+            all_lons.extend(list(bx))
+            all_lats.extend(list(by))
             fig.add_trace(go.Scattermap(
                 mode='lines', lon=list(bx), lat=list(by),
                 line=dict(color='#ffffff', width=1.5),
@@ -3405,12 +3409,23 @@ def _build_carrier_mini_map(cinfo, boundary_geom, center_lat, center_lon, zoom, 
             xs, ys = ring.coords.xy
             lons.extend(list(xs) + [None])
             lats.extend(list(ys) + [None])
+            all_lons.extend(list(xs))
+            all_lats.extend(list(ys))
         fig.add_trace(go.Scattermap(
             lon=lons, lat=lats, mode='lines', fill='toself',
             fillcolor=f"rgba({r},{g_c},{b},0.40)",
             line=dict(color=color, width=1),
             showlegend=False, hoverinfo='skip'
         ))
+
+    if all_lats and all_lons:
+        min_lat = float(np.nanmin(all_lats))
+        max_lat = float(np.nanmax(all_lats))
+        min_lon = float(np.nanmin(all_lons))
+        max_lon = float(np.nanmax(all_lons))
+        center_lat = (min_lat + max_lat) / 2.0
+        center_lon = (min_lon + max_lon) / 2.0
+        zoom = calculate_zoom(min_lon, max_lon, min_lat, max_lat)
 
     fig.update_layout(
         map=dict(center=dict(lat=center_lat, lon=center_lon),
@@ -7845,6 +7860,18 @@ body{{background:transparent;overflow:hidden}}
         capex_resp  = actual_k_responder * CONFIG["RESPONDER_COST"]
         capex_guard = actual_k_guardian  * CONFIG["GUARDIAN_COST"]
         fleet_capex = capex_resp + capex_guard
+        if fleet_capex > 0:
+            # Keep the canonical fleet counts aligned with what the optimizer
+            # just produced so a download-triggered rerun cannot fall back to
+            # the sidebar defaults.
+            st.session_state['k_resp'] = int(actual_k_responder)
+            st.session_state['k_guard'] = int(actual_k_guardian)
+            st.session_state['_fleet_k_resp'] = int(actual_k_responder)
+            st.session_state['_fleet_k_guard'] = int(actual_k_guardian)
+            st.session_state['_pending_k_resp'] = int(actual_k_responder)
+            st.session_state['_pending_k_guard'] = int(actual_k_guardian)
+            st.session_state['_suggestion_selected_resp_count'] = int(actual_k_responder)
+            st.session_state['_suggestion_selected_guard_count'] = int(actual_k_guardian)
 
         annual_savings = 0
         break_even_text = "N/A"

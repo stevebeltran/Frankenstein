@@ -65,7 +65,13 @@ def test_uploaded_station_counts_follow_all_active_cards():
     assert changed is True
     assert session_state["_pending_k_resp"] == 5
     assert session_state["_pending_k_guard"] == 0
-    assert session_state["_suggestion_apply_fleet_counts"] is True
+    # Must NOT set _suggestion_apply_fleet_counts: that flag tells
+    # sync_station_suggestion_modes to re-rank cards from budget via
+    # _ranked_suggestion_modes, which has no concept of 'Both' and would
+    # silently collapse a user's Guardian+Responder card selection back to
+    # a single role on the very next rerun. That flag is reserved for real
+    # slider drags (see the sidebar slider-change handler).
+    assert "_suggestion_apply_fleet_counts" not in session_state
 
 
 def test_slider_assigns_ranked_station_suggestions():

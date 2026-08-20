@@ -2499,7 +2499,6 @@ def sync_uploaded_station_fleet_counts(session_state, current_k_guardian=None, c
 
     session_state['_pending_k_resp'] = target_resp
     session_state['_pending_k_guard'] = target_guard
-    session_state['_suggestion_apply_fleet_counts'] = True
     return True
 
 

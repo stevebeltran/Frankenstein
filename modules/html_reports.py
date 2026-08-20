@@ -2486,6 +2486,10 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
         d_display_be = f"{d_cost/d_display_monthly:.1f} MO" if d_display_monthly > 0 else "N/A"
 
+        d_be_months = (d_cost / d_display_monthly) if d_display_monthly > 0 else None
+
+        d_show_be = d_be_months is not None and d_be_months <= 12
+
         d_serviceable_day = min(d_assigned_flights_day, d_max_cap) if d_max_cap > 0 else d_assigned_flights_day
 
         d_actual_resolved_day = float(d.get('handled_calls_day', 0) or 0) * deflection_rate
@@ -2701,7 +2705,7 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
 
             f'</div>'
 
-        ) if show_financials else (
+        ) if (show_financials and d_show_be) else (
 
             f'<div style="background:rgba(255,255,255,0.04);border:1px solid {card_border};border-radius:5px;padding:6px 8px;text-align:center;">'
 
@@ -3012,10 +3016,12 @@ def _build_unit_cards_html(active_drones, text_main, text_muted, card_bg, card_b
       <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Dispatches Avoided/day<span class="tip" data-tip="Calls per day closed without dispatching an officer: drone-handled calls times the deflection rate.">?</span></div>
       <div style="font-weight:800; color:{card_title}; font-size:0.82rem;">{d_actual_resolved_day:.1f}</div>
     </div>
-    <div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px; text-align:center;">
-      <div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Break-Even<span class="tip" data-tip="Months to recover the unit CapEx from annual capacity savings at current DFR and deflection rates.">?</span></div>
-      <div style="font-weight:800; color:{accent_color}; font-size:0.82rem;">{d_best_be}</div>
-    </div>
+    {(
+      f'<div style="background:rgba(255,255,255,0.04); border:1px solid {card_border}; border-radius:5px; padding:5px 7px; text-align:center;">'
+      f'<div style="color:{text_muted}; font-size:0.60rem; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:1px;">Break-Even<span class="tip" data-tip="Months to recover the unit CapEx from annual capacity savings at current DFR and deflection rates.">?</span></div>'
+      f'<div style="font-weight:800; color:{accent_color}; font-size:0.82rem;">{d_best_be}</div>'
+      f'</div>'
+    ) if d_show_be else ''}
   </div>
   {_full_fin_capex_roi}
    { (f'<div style="border-top:1px solid rgba(240,180,41,0.35);margin-top:4px;padding-top:5px;">'  
@@ -3366,6 +3372,18 @@ def generate_community_impact_dashboard_html(
     """
 
     import json as _json
+
+
+
+    try:
+
+        _cid_be_months = float(str(break_even_text).split()[0])
+
+    except (ValueError, IndexError):
+
+        _cid_be_months = None
+
+    _show_break_even = _cid_be_months is not None and _cid_be_months <= 12
 
 
 
@@ -5148,13 +5166,13 @@ def generate_community_impact_dashboard_html(
 
       </div>
 
-      <div class="roi-line">
+      {f'''<div class="roi-line">
 
         <span class="roi-line-label">Break-Even Timeline <span class="tip-cid" data-tip="Months until cumulative operational savings fully offset the initial fleet hardware investment. Calculated as fleet CapEx ÷ monthly savings.">?</span></span>
 
         <span class="roi-line-val">{break_even_text}</span>
 
-      </div>
+      </div>''' if _show_break_even else ''}
 
       <div class="roi-line">
 

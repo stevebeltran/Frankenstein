@@ -8421,6 +8421,14 @@ body{{background:transparent;overflow:hidden}}
                         _d['be_text']      = f"{_d['cost']/_d['monthly_savings']:.1f} MO" if _d['monthly_savings'] > 0 else "N/A"
                         _d['best_be_text'] = _d['be_text']
 
+        # Break-even is only a meaningful sales figure inside a 1-year payback window;
+        # beyond that it reads as a red flag, so every break-even display checks this.
+        try:
+            break_even_months = float(str(break_even_text).split()[0])
+        except (ValueError, IndexError):
+            break_even_months = None
+        show_break_even_box = break_even_months is not None and break_even_months <= 12
+
         # ── SIDEBAR: fill Annual Capacity Value box with specialty values that match unit cards ──
         if fleet_capex > 0 and show_financials:
             _s_THERMAL_RATE     = float(CONFIG.get("THERMAL_DEFAULT_APPLICABLE_RATE", 0.12) or 0)
@@ -8447,6 +8455,12 @@ body{{background:transparent;overflow:hidden}}
 
             _s_specialty_total = _s_thermal_total + _s_k9_total + _s_fire_total
 
+            _sidebar_be_row = (
+                f'<div style="display:flex; justify-content:space-between; font-size:0.72rem;">'
+                f'<span style="color:{text_muted};">Break-even:</span>'
+                f'<span style="color:{budget_box_border}; font-weight:700;">{break_even_text}</span>'
+                f'</div>'
+            ) if show_break_even_box else ''
             _sidebar_annual_cap_placeholder.markdown(f"""
             <div style="background:{budget_box_bg}; border:1px solid {budget_box_border}; padding:12px; border-radius:4px;
                  text-align:center; margin:8px 0 12px 0; box-shadow:0 2px 5px {budget_box_shadow};">
@@ -8484,10 +8498,7 @@ body{{background:transparent;overflow:hidden}}
                     <span style="color:{text_muted};">Fleet CapEx:</span>
                     <span style="color:{text_main}; font-weight:700;">${fleet_capex:,.0f}</span>
                 </div>
-                <div style="display:flex; justify-content:space-between; font-size:0.72rem;">
-                    <span style="color:{text_muted};">Break-even:</span>
-                    <span style="color:{budget_box_border}; font-weight:700;">{break_even_text}</span>
-                </div>
+                {_sidebar_be_row}
             </div>
             """, unsafe_allow_html=True)
 
@@ -12705,11 +12716,11 @@ body{{background:transparent;overflow:hidden}}
             <a href="#map"><span class="nav-num">03</span>Coverage Map</a>
             <a href="#incident-data"><span class="nav-num">04</span>Incident Analysis</a>
             <a href="#deployment"><span class="nav-num">05</span>Deployment Locations</a>
-            <a href="#grant"><span class="nav-num">06</span>Grant Narrative</a>
-            <a href="#narcotics"><span class="nav-num">06C</span>Narcotics Response</a>
-            <a href="#infrastructure"><span class="nav-num">07</span>Infrastructure Directory</a>
-            <a href="#community"><span class="nav-num">08</span>Community Partnership</a>
-            [ANALYTICS_NAV]
+            {'<a href="#analytics"><span class="nav-num">06</span>DFR Analytics</a>' if _show_analytics_section and analytics_html_export else ''}
+            <a href="#grant"><span class="nav-num">07</span>Grant Narrative</a>
+            <a href="#narcotics"><span class="nav-num">07C</span>Narcotics Response</a>
+            <a href="#infrastructure"><span class="nav-num">08</span>Infrastructure Directory</a>
+            <a href="#community"><span class="nav-num">09</span>Community Partnership</a>
             [COMMUNITY_IMPACT_NAV]
             <a href="#school-safety"><span class="nav-num">11</span>School Safety</a>
           </nav>
@@ -12742,7 +12753,7 @@ body{{background:transparent;overflow:hidden}}
                 <div class="cover-meta-cell"><div class="label">Fleet CapEx</div><div class="value accent">${fleet_capex:,.0f}</div></div>
                 <div class="cover-meta-cell"><div class="label">Annual Savings</div><div class="value gold">${annual_savings:,.0f}</div></div>
                 <div class="cover-meta-cell"><div class="label">Add'l Thermal + K-9</div><div class="value accent">${possible_additional_savings:,.0f}</div></div>
-                <div class="cover-meta-cell"><div class="label">Break-Even</div><div class="value">{break_even_text}</div></div>
+                {f'<div class="cover-meta-cell"><div class="label">Break-Even</div><div class="value">{break_even_text}</div></div>' if show_break_even_box else ''}
                 <div class="cover-meta-cell"><div class="label">Call Coverage</div><div class="value accent">{calls_covered_perc:.1f}%</div></div>
                 <div class="cover-meta-cell"><div class="label">Avg Response</div><div class="value">{avg_resp_time:.1f} min</div></div>
                 <div class="cover-meta-cell"><div class="label">Time Saved</div><div class="value gold">{avg_time_saved:.1f} min</div></div>
@@ -12766,7 +12777,7 @@ body{{background:transparent;overflow:hidden}}
             <div class="metric-cell"><div class="m-label">Fleet Capital Expenditure</div><div class="m-value cyan">${fleet_capex:,.0f}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
             <div class="metric-cell"><div class="m-label">Annual Savings Capacity</div><div class="m-value gold">${annual_savings:,.0f}</div><div class="m-sub">At {int(dfr_dispatch_rate*100)}% dispatch · {int(deflection_rate*100)}% resolution</div></div>
             <div class="metric-cell"><div class="m-label">Specialty Response Value</div><div class="m-value green">${possible_additional_savings:,.0f}</div><div class="m-sub">Thermal ${thermal_savings:,.0f} · K-9 ${k9_savings:,.0f} · Fire ${fire_savings:,.0f}</div></div>
-            <div class="metric-cell"><div class="m-label">Program Break-Even</div><div class="m-value">{break_even_text}</div><div class="m-sub">Full cost recovery timeline</div></div>
+            {f'<div class="metric-cell"><div class="m-label">Program Break-Even</div><div class="m-value">{break_even_text}</div><div class="m-sub">Full cost recovery timeline</div></div>' if show_break_even_box else ''}
             <div class="metric-cell"><div class="m-label">911 Call Coverage</div><div class="m-value cyan">{calls_covered_perc:.1f}%</div><div class="m-sub">of {st.session_state.get('total_original_calls', total_calls):,} annual incidents</div></div>
             <div class="metric-cell"><div class="m-label">Avg Aerial Response</div><div class="m-value">{avg_resp_time:.1f} min</div><div class="m-sub">vs. ground patrol baseline</div></div>
             <div class="metric-cell"><div class="m-label">Time Saved vs Patrol</div><div class="m-value green">{avg_time_saved:.1f} min</div><div class="m-sub">per incident, on average</div></div>
@@ -12803,7 +12814,7 @@ body{{background:transparent;overflow:hidden}}
             &nbsp;·&nbsp; Jurisdiction: <strong>{_selected_labels_str}</strong>
           </div>
         </section>
-    
+
         <!-- ── 02: FLEET & COVERAGE ───────────────────────────────────── -->
         <section class="doc-section" id="fleet">
           <div class="section-eyebrow"><span class="pg-num">02</span><span class="pg-title">Fleet &amp; Coverage</span><span class="src" data-src="Source: BRINC Drones technical specifications. Responder: 60 mph, 1-mile radius, ~2-min avg response. Guardian: 45 mph, up to 8-mile Starlink-connected radius, 25-min flight cycles with auto-recharge. Coverage % derived from geospatial analysis of uploaded incident locations.">ⓘ</span></div>
@@ -12861,11 +12872,17 @@ body{{background:transparent;overflow:hidden}}
             <tbody>{station_rows}</tbody>
           </table>
         </section>
-    
-        <!-- ── 06: GRANT NARRATIVE ───────────────────────────────────── -->
+
+        <!-- ── 06: DFR ANALYTICS ─────────────────────────────────────── -->
+        {f'''<section class="doc-section" id="analytics">
+          <div class="section-eyebrow"><span class="pg-num">06</span><span class="pg-title">DFR Analytics</span></div>
+          {analytics_html_export}
+        </section>''' if _show_analytics_section and analytics_html_export else ''}
+
+        <!-- ── 07: GRANT NARRATIVE ───────────────────────────────────── -->
         <section class="doc-section" id="grant">
           <div class="section-eyebrow">
-            <span class="pg-num">06</span>
+            <span class="pg-num">07</span>
             <span class="pg-title">Grant Narrative</span>
             <span class="src" data-src="Grant programs referenced: DOJ Byrne JAG · FEMA HSGP · DOJ COPS Office · DOT RAISE · DOJ Smart Policing Initiative · DOJ/BJA De-escalation and Crisis Response Training · DOJ/BJA Rural Law Enforcement Violent Crime Reduction Initiative · DOJ/BJA Justice Reinvestment Initiative · SAMHSA TOR · SAMHSA SOR. Federal grant dates and eligibility are based on current public federal postings as of May 28, 2026. Grant cards self-hide after their application deadline. Financial figures are BRINC model estimates. Narrative is AI-generated — must be reviewed, localized, and fact-checked by your grants administrator before submission.">ⓘ</span>
             <button class="copy-section-btn grant-law" onclick="copyGrantText('grant-body-law', this)">
@@ -12962,7 +12979,7 @@ body{{background:transparent;overflow:hidden}}
     
         <!-- ── 06B: FIRE DEPARTMENT VALUE ─────────────────────────────── -->
         <section class="doc-section" id="fire-value">
-          <div class="section-eyebrow"><span class="pg-num">06B</span><span class="pg-title">Fire Department Value</span><span class="src" data-src="Sources: NFPA Fire Loss Research (aerial ladder deployment costs $3K–$8K/deploy); USFA Firefighter Fatality Statistics; FEMA AFG program eligibility. Savings model: 15% of attended fire calls avoid aerial ladder deployment + thermal overhaul guidance (45 min/4-person crew saved at $200/hr, NFPA labor benchmarks).">ⓘ</span></div>
+          <div class="section-eyebrow"><span class="pg-num">07B</span><span class="pg-title">Fire Department Value</span><span class="src" data-src="Sources: NFPA Fire Loss Research (aerial ladder deployment costs $3K–$8K/deploy); USFA Firefighter Fatality Statistics; FEMA AFG program eligibility. Savings model: 15% of attended fire calls avoid aerial ladder deployment + thermal overhaul guidance (45 min/4-person crew saved at $200/hr, NFPA labor benchmarks).">ⓘ</span></div>
     
           <div class="metrics-hero">
             <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
@@ -13075,7 +13092,7 @@ body{{background:transparent;overflow:hidden}}
 
         <!-- ── 06C: NARCOTICS PREVENTION, DETERRENCE & RESPONSE ──────────── -->
         <section class="doc-section" id="narcotics">
-          <div class="section-eyebrow"><span class="pg-num">06C</span><span class="pg-title">Illicit Narcotics Prevention, Deterrence &amp; Response</span><span class="src" data-src="Sources: CDC/NCHS Provisional Overdose Data (cdc.gov/nchs/pressroom/releases/20260513.html) · NIJ Hot Spots Policing and Crime Reduction (nij.ojp.gov/library/publications/hot-spots-policing-and-crime-reduction-update-ongoing-systematic-review-and) · NIJ Drone as First Responder: Practical Insights (nij.ojp.gov/library/publications/drone-first-responder-practical-insights-law-enforcement-implementation) · DEA 2025 National Drug Threat Assessment (dea.gov/press-releases/2025/05/15/dea-releases-2025-national-drug-threat-assessment) · BRINC Responder &amp; Guardian technical specifications (brincdrones.com).">ⓘ</span></div>
+          <div class="section-eyebrow"><span class="pg-num">07C</span><span class="pg-title">Illicit Narcotics Prevention, Deterrence &amp; Response</span><span class="src" data-src="Sources: CDC/NCHS Provisional Overdose Data (cdc.gov/nchs/pressroom/releases/20260513.html) · NIJ Hot Spots Policing and Crime Reduction (nij.ojp.gov/library/publications/hot-spots-policing-and-crime-reduction-update-ongoing-systematic-review-and) · NIJ Drone as First Responder: Practical Insights (nij.ojp.gov/library/publications/drone-first-responder-practical-insights-law-enforcement-implementation) · DEA 2025 National Drug Threat Assessment (dea.gov/press-releases/2025/05/15/dea-releases-2025-national-drug-threat-assessment) · BRINC Responder &amp; Guardian technical specifications (brincdrones.com).">ⓘ</span></div>
 
           <div class="grant-layout">
           <div class="grant-body">
@@ -13137,7 +13154,7 @@ body{{background:transparent;overflow:hidden}}
 
         <!-- ── 07: COMMUNITY INFRASTRUCTURE & ASSET PROTECTION ──────────────────────────── -->
         <section class="doc-section" id="infrastructure">
-          <div class="section-eyebrow"><span class="pg-num">07</span><span class="pg-title">Community Infrastructure &amp; Asset Protection</span><span class="src" data-src="Sources: OpenStreetMap (© contributors, ODbL license) · DHS HIFLD Open Data (public domain) · NCES Common Core of Data · CMS Hospital Compare · NEMSIS National EMS Database · NTD National Transit Database · IMLS Public Libraries Survey · US Courts PACER · EPA Infrastructure Maps · US Energy Information Administration · FAA LAANC UAS Facility Maps · User-verified locations.">ⓘ</span></div>
+          <div class="section-eyebrow"><span class="pg-num">08</span><span class="pg-title">Community Infrastructure &amp; Asset Protection</span><span class="src" data-src="Sources: OpenStreetMap (© contributors, ODbL license) · DHS HIFLD Open Data (public domain) · NCES Common Core of Data · CMS Hospital Compare · NEMSIS National EMS Database · NTD National Transit Database · IMLS Public Libraries Survey · US Courts PACER · EPA Infrastructure Maps · US Energy Information Administration · FAA LAANC UAS Facility Maps · User-verified locations.">ⓘ</span></div>
     
           <p style="color:var(--text);font-size:14px;line-height:1.6;margin-bottom:20px;">
             This deployment protects <strong>{len(df_stations_all):,} indexed public facilities</strong> across {prop_city}, {prop_state} — from emergency response centers and schools to hospitals, power plants, water treatment facilities, places of worship, and community services. The BRINC DFR network provides 24/7 aerial first-response coverage prioritizing assets most critical to public safety, economic continuity, and community resilience — including <strong>⚡ power stations</strong> and <strong>💧 water treatment facilities</strong> that serve as essential infrastructure for the entire region. All facility coordinates have been verified against FAA LAANC facility maps and current data sources.
@@ -13158,7 +13175,7 @@ body{{background:transparent;overflow:hidden}}
         <!-- ── 08: COMMUNITY PARTNERSHIP ─────────────────────────────── -->
         <section class="doc-section" id="community">
           <div class="section-eyebrow">
-            <span class="pg-num">08</span>
+            <span class="pg-num">09</span>
             <span class="pg-title">Community Business Partnership</span>
             <span class="src" data-src="Crime cost benchmarks: National Retail Federation 2023 Retail Security Survey ($559 avg shoplifting loss) · DOJ/NIJ commercial burglary cost estimates ($3K–$8.5K) · FBI UCR property crime data. Peer DFR outcomes: Chula Vista PD · El Cajon PD · Westerville OH PD (15–30% property crime reduction in covered zones).">ⓘ</span>
             <button class="copy-section-btn community" id="copyPartnershipBtn" onclick="copyCommunitySection()">
@@ -13494,14 +13511,11 @@ body{{background:transparent;overflow:hidden}}
         </script>
         </body></html>""".replace("{{", "{").replace("}}", "}")
     
-                # Section 09 (Analytics Dashboard) removed — its content (cad_charts_html_export)
-                # is already rendered in Section 04 (Incident Data Analysis). Duplicating it
-                # caused "Top Call Types" to appear twice and broke the Chart.js canvas binding
-                # because both instances shared the same element id="expTypeChart".
-                _analytics_section_html = ''
-                _analytics_nav = ''
-                export_html = export_html.replace("[ANALYTICS_SECTION]", _analytics_section_html)
-                export_html = export_html.replace("[ANALYTICS_NAV]", _analytics_nav)
+                # analytics_html_export (calendar heatmap, DOW/shift breakdown) is spliced
+                # directly into Section 01 (Executive Summary) above instead of its own
+                # section here, so this placeholder stays empty.
+                export_html = export_html.replace("[ANALYTICS_SECTION]", '')
+                export_html = export_html.replace("[ANALYTICS_NAV]", '')
     
                 # ── Community Impact section (light theme for print/export) ─────────
                 _cid_export_html = html_reports.generate_community_impact_dashboard_html(
@@ -13577,17 +13591,12 @@ body{{background:transparent;overflow:hidden}}
     
     
                 if not _show_analytics_section:
+                    # The #analytics nav link and section are already omitted at template
+                    # build time (both are gated on _show_analytics_section inline), so only
+                    # Section 04 (Incident Analysis) needs stripping here.
                     export_html = export_html.replace('<a href="#incident-data"><span class="nav-num">04</span>Incident Analysis</a>', '')
-                    export_html = export_html.replace('<a href="#analytics"><span class="nav-num">09</span>Analytics Dashboard</a>', '')
                     export_html = re.sub(
                         r'\s*<!-- .*?04: INCIDENT ANALYSIS .*?-->\s*<section class="doc-section" id="incident-data">.*?</section>',
-                        '',
-                        export_html,
-                        count=1,
-                        flags=re.DOTALL,
-                    )
-                    export_html = re.sub(
-                        r'\s*<!-- .*?09: ANALYTICS DASHBOARD .*?-->\s*<section class="doc-section" id="analytics">.*?</section>',
                         '',
                         export_html,
                         count=1,

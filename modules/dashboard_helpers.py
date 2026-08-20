@@ -964,8 +964,8 @@ def manage_custom_stations(
 
     # Count selected stations from Suggested Station Placements (Guardian and Responder only)
     suggestion_modes = session_state.get('suggestion_modes', {})
-    n_selected_responder = sum(1 for mode in suggestion_modes.values() if mode == 'Responder')
-    n_selected_guardian = sum(1 for mode in suggestion_modes.values() if mode == 'Guardian')
+    n_selected_responder = sum(1 for mode in suggestion_modes.values() if mode in ('Responder', 'Both'))
+    n_selected_guardian = sum(1 for mode in suggestion_modes.values() if mode in ('Guardian', 'Both'))
     n_selected_total = sum(1 for mode in suggestion_modes.values() if mode != 'Off')
 
     # Count custom stations by locked fleet role
@@ -1041,6 +1041,9 @@ def manage_custom_stations(
                     resp_value=max(_current_fleet_count(resp_state_key, 'k_resp', pin_r_count), pin_r_count),
                     guard_value=max(_current_fleet_count(guard_state_key, 'k_guard', pin_g_count), pin_g_count),
                 )
+            elif session_state.get('stations_user_uploaded', False):
+                # Custom station file loaded — no need for 2 responder / 1 guardian default.
+                pass
             else:
                 resp_default = 2
                 try:
@@ -2333,8 +2336,31 @@ def _suggestion_widget_key(session_state, idx, suggestion=None):
     return f"suggest_mode_{_suggestion_widget_version(session_state)}_{identity}"
 
 
+def _suggestion_checkbox_mode(session_state, idx, suggestion):
+    """Read the live Guardian/Responder checkbox state for a suggestion card.
+
+    The card UI (render_station_suggestions_grid) stores its state under
+    "{widget_key}_g" / "{widget_key}_r", not the bare widget_key, so callers
+    that need the value the user actually clicked must read those.
+    """
+    widget_key = _suggestion_widget_key(session_state, idx, suggestion)
+    guard_key = f"{widget_key}_g"
+    resp_key = f"{widget_key}_r"
+    if guard_key not in session_state and resp_key not in session_state:
+        return None
+    guard_on = bool(session_state.get(guard_key, False))
+    resp_on = bool(session_state.get(resp_key, False))
+    if guard_on and resp_on:
+        return 'Both'
+    if guard_on:
+        return 'Guardian'
+    if resp_on:
+        return 'Responder'
+    return 'Off'
+
+
 def _suggestion_widget_mode(session_state, idx, suggestion, valid_modes):
-    current_value = session_state.get(_suggestion_widget_key(session_state, idx, suggestion))
+    current_value = _suggestion_checkbox_mode(session_state, idx, suggestion)
     return current_value if current_value in valid_modes else None
 
 
@@ -2362,12 +2388,12 @@ def _forced_custom_suggestion_modes(session_state, suggestions):
     return forced_modes
 
 
-def sync_station_suggestion_modes(session_state, suggestions, k_guardian=None, k_responder=None):
+def sync_station_suggestion_modes(session_state, suggestions, k_guardian=None, k_responder=None, stations_uploaded=False):
     """Keep suggestion mode state aligned with either cards or slider counts."""
     if not suggestions:
         return {}
 
-    valid_modes = {'Guardian', 'Responder', 'Off'}
+    valid_modes = {'Guardian', 'Responder', 'Both', 'Off'}
     current_rank_by = str(session_state.get('_station_suggestion_rank_by', 'call') or 'call').strip().lower()
     if current_rank_by not in {'call', 'land'}:
         current_rank_by = 'call'
@@ -2404,11 +2430,18 @@ def sync_station_suggestion_modes(session_state, suggestions, k_guardian=None, k
         session_state['_suggestion_manual_modes'] = manual_modes
         session_state['suggestion_modes'] = synced_modes
         session_state['suggestion_toggles'] = {idx: (mode != 'Off') for idx, mode in synced_modes.items()}
-        session_state['_pending_k_resp'] = sum(1 for mode in synced_modes.values() if mode == 'Responder')
-        session_state['_pending_k_guard'] = sum(1 for mode in synced_modes.values() if mode == 'Guardian')
+        session_state['_pending_k_resp'] = sum(1 for mode in synced_modes.values() if mode in ('Responder', 'Both'))
+        session_state['_pending_k_guard'] = sum(1 for mode in synced_modes.values() if mode in ('Guardian', 'Both'))
         return synced_modes
 
-    if (k_guardian is not None) or (k_responder is not None):
+    if not existing_modes and stations_uploaded:
+        synced_modes = {s['station_idx']: 'Responder' for s in suggestions}
+        for idx, mode in forced_custom_modes.items():
+            synced_modes[idx] = mode
+        session_state['_suggestion_sync_source'] = 'upload'
+        session_state['_suggestion_widget_version'] = _suggestion_widget_version(session_state) + 1
+        session_state['_suggestion_manual_modes'] = {}
+    elif (k_guardian is not None) or (k_responder is not None):
         apply_fleet_counts = bool(session_state.pop('_suggestion_apply_fleet_counts', False))
         requested_guard = max(0, int(k_guardian or 0) - forced_guard)
         requested_resp = max(0, int(k_responder or 0) - forced_resp)
@@ -2478,7 +2511,7 @@ def apply_manual_suggestion_deployments(
     station_count = len(station_metadata or [])
     resp_idx = list(active_resp_idx or [])
     guard_idx = list(active_guard_idx or [])
-    valid_modes = {'Guardian', 'Responder', 'Off'}
+    valid_modes = {'Guardian', 'Responder', 'Both', 'Off'}
     forced_resp = []
     forced_guard = []
     manual_by_idx = {}
@@ -2498,6 +2531,9 @@ def apply_manual_suggestion_deployments(
         if mode == 'Guardian':
             forced_guard.append(idx)
         elif mode == 'Responder':
+            forced_resp.append(idx)
+        elif mode == 'Both':
+            forced_guard.append(idx)
             forced_resp.append(idx)
 
     def _unique_ints(values):
@@ -2526,8 +2562,14 @@ def apply_manual_suggestion_deployments(
 
     forced_resp_set = set(forced_resp)
     forced_guard_set = set(forced_guard)
-    resp_idx = [idx for idx in resp_idx if idx not in forced_guard_set and manual_by_idx.get(idx) != 'Off']
-    guard_idx = [idx for idx in guard_idx if idx not in forced_resp_set and manual_by_idx.get(idx) != 'Off']
+    resp_idx = [
+        idx for idx in resp_idx
+        if (idx not in forced_guard_set or manual_by_idx.get(idx) == 'Both') and manual_by_idx.get(idx) != 'Off'
+    ]
+    guard_idx = [
+        idx for idx in guard_idx
+        if (idx not in forced_resp_set or manual_by_idx.get(idx) == 'Both') and manual_by_idx.get(idx) != 'Off'
+    ]
 
     def _trim_to_target(values, target_count, forced_set):
         if target_count is None:
@@ -2582,9 +2624,13 @@ def reconcile_suggestion_modes_from_deployments(
             idx = int(suggestion.get('station_idx'))
         except Exception:
             continue
-        if idx in guard_set:
+        in_guard = idx in guard_set
+        in_resp = idx in resp_set
+        if in_guard and in_resp:
+            modes[idx] = 'Both'
+        elif in_guard:
             modes[idx] = 'Guardian'
-        elif idx in resp_set:
+        elif in_resp:
             modes[idx] = 'Responder'
         else:
             modes[idx] = 'Off'
@@ -2599,14 +2645,16 @@ def reconcile_suggestion_modes_from_deployments(
         widget_key = _suggestion_widget_key(session_state, idx, suggestion)
         if idx in modes:
             session_state[widget_key] = modes[idx]
-    session_state['_suggestion_selected_resp_count'] = sum(1 for mode in modes.values() if mode == 'Responder')
-    session_state['_suggestion_selected_guard_count'] = sum(1 for mode in modes.values() if mode == 'Guardian')
+            session_state[f"{widget_key}_g"] = modes[idx] in ('Guardian', 'Both')
+            session_state[f"{widget_key}_r"] = modes[idx] in ('Responder', 'Both')
+    session_state['_suggestion_selected_resp_count'] = sum(1 for mode in modes.values() if mode in ('Responder', 'Both'))
+    session_state['_suggestion_selected_guard_count'] = sum(1 for mode in modes.values() if mode in ('Guardian', 'Both'))
     return modes
 
 
 def apply_suggestion_widget_overrides(session_state, suggestions, modes):
-    """Apply live radio widget values to a suggestion mode map before optimization."""
-    valid_modes = {'Guardian', 'Responder', 'Off'}
+    """Apply live card widget values to a suggestion mode map before optimization."""
+    valid_modes = {'Guardian', 'Responder', 'Both', 'Off'}
     updated = dict(modes or {})
     changed = {}
     for suggestion in suggestions or []:
@@ -2614,7 +2662,7 @@ def apply_suggestion_widget_overrides(session_state, suggestions, modes):
             idx = int(suggestion.get('station_idx'))
         except Exception:
             continue
-        widget_mode = session_state.get(_suggestion_widget_key(session_state, idx, suggestion))
+        widget_mode = _suggestion_checkbox_mode(session_state, idx, suggestion)
         if widget_mode not in valid_modes:
             continue
         old_mode = updated.get(idx, 'Off')
@@ -2630,8 +2678,8 @@ def apply_suggestion_widget_overrides(session_state, suggestions, modes):
         session_state['suggestion_modes'] = updated
         session_state['suggestion_toggles'] = {idx: (mode != 'Off') for idx, mode in updated.items()}
         session_state['_suggestion_sync_source'] = 'cards'
-        session_state['_pending_k_resp'] = sum(1 for mode in updated.values() if mode == 'Responder')
-        session_state['_pending_k_guard'] = sum(1 for mode in updated.values() if mode == 'Guardian')
+        session_state['_pending_k_resp'] = sum(1 for mode in updated.values() if mode in ('Responder', 'Both'))
+        session_state['_pending_k_guard'] = sum(1 for mode in updated.values() if mode in ('Guardian', 'Both'))
     return updated
 
 
@@ -2644,13 +2692,14 @@ def reconcile_unique_deployment_indices(
     target_guard_count=None,
     preferred_modes=None,
 ):
-    """Ensure one station index is not deployed as both roles."""
+    """Ensure one station index is not deployed as both roles, unless preferred as 'Both'."""
     station_count = len(station_metadata or [])
     preferred_modes = {
         int(idx): mode
         for idx, mode in (preferred_modes or {}).items()
-        if str(mode) in {'Guardian', 'Responder', 'Off'}
+        if str(mode) in {'Guardian', 'Responder', 'Both', 'Off'}
     }
+    both_idx = {idx for idx, mode in preferred_modes.items() if mode == 'Both'}
 
     def _unique(values):
         result = []
@@ -2673,6 +2722,8 @@ def reconcile_unique_deployment_indices(
 
     for idx in sorted(resp_set & guard_set):
         preferred = preferred_modes.get(idx)
+        if preferred == 'Both':
+            continue
         if preferred == 'Responder':
             guard_idx = [value for value in guard_idx if value != idx]
             guard_set.discard(idx)
@@ -2708,18 +2759,18 @@ def reconcile_unique_deployment_indices(
         rest = [idx for idx in values if idx not in protected]
         return (keep + rest)[:target]
 
-    protected_resp = {idx for idx, mode in preferred_modes.items() if mode == 'Responder'}
-    protected_guard = {idx for idx, mode in preferred_modes.items() if mode == 'Guardian'}
+    protected_resp = {idx for idx, mode in preferred_modes.items() if mode in ('Responder', 'Both')}
+    protected_guard = {idx for idx, mode in preferred_modes.items() if mode in ('Guardian', 'Both')}
     forbidden = {idx for idx, mode in preferred_modes.items() if mode == 'Off'}
     resp_idx = _trim(resp_idx, target_resp, protected_resp)
     guard_idx = _trim(guard_idx, target_guard, protected_guard)
 
     def _fill(values, target, other_values, preferred_role):
         values = list(values)
-        used = set(values) | set(other_values) | forbidden
+        used = (set(values) | set(other_values) | forbidden) - both_idx
         preferred = [
             idx for idx, mode in preferred_modes.items()
-            if mode == preferred_role and idx not in used and 0 <= idx < station_count
+            if mode in (preferred_role, 'Both') and idx not in used and 0 <= idx < station_count
         ]
         for idx in preferred + station_order:
             if len(values) >= target:
@@ -2899,9 +2950,10 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
     if not suggestions:
         return False
 
-    mode_options = ['Guardian', 'Responder', 'Off']
     if 'suggestion_modes' not in session_state:
-        if 'suggestion_toggles' in session_state:
+        if stations_uploaded:
+            session_state['suggestion_modes'] = {s['station_idx']: 'Responder' for s in suggestions}
+        elif 'suggestion_toggles' in session_state:
             session_state['suggestion_modes'] = {
                 s['station_idx']: (
                     s['role'] if session_state['suggestion_toggles'].get(s['station_idx']) else 'Off'
@@ -2933,6 +2985,7 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
         suggestions,
         k_guardian=k_guardian,
         k_responder=k_responder,
+        stations_uploaded=stations_uploaded,
     )
     changed = False
 
@@ -3011,14 +3064,14 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                 display_metrics = station_suggestion_display_metrics(s, mode)
                 role_pcts = station_suggestion_role_pcts(s)
                 marginal_label = station_suggestion_marginal_label(s)
-                mode_abbr = 'G' if mode == 'Guardian' else 'R' if mode == 'Responder' else 'O'
+                mode_abbr = 'G' if mode == 'Guardian' else 'R' if mode == 'Responder' else 'G+R' if mode == 'Both' else 'O'
                 mode_key = str(mode or '').upper()
-                is_active_mode = mode in {'Guardian', 'Responder'}
+                is_active_mode = mode in {'Guardian', 'Responder', 'Both'}
                 ring_color = (
                     suggestion_color_map.get((int(idx), mode_key))
                     or suggestion_color_map.get((str(idx), mode_key))
                     or suggestion_color_map.get(f"{idx}_{mode_key}")
-                    or ('#FFD700' if mode == 'Guardian' else '#00D2FF' if mode == 'Responder' else card_border)
+                    or ('#FFD700' if mode == 'Guardian' else '#00D2FF' if mode == 'Responder' else '#B266FF' if mode == 'Both' else card_border)
                 )
                 bg = card_bg if is_active_mode else 'rgba(30,30,40,0.4)'
                 opacity = '1.0' if is_active_mode else '0.55'
@@ -3065,17 +3118,22 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                     f"</div>",
                     unsafe_allow_html=True,
                 )
-                if widget_key not in session_state:
-                    # Seed state instead of passing index= so the radio never mixes
-                    # a widget default with Session State API writes (Streamlit warning).
-                    session_state[widget_key] = mode if mode in mode_options else 'Off'
-                new_mode = st.radio(
-                    'Fleet Mode',
-                    options=mode_options,
-                    key=widget_key,
-                    horizontal=True,
-                    label_visibility="collapsed",
-                )
+                guard_key = f"{widget_key}_g"
+                resp_key = f"{widget_key}_r"
+                off_key = f"{widget_key}_off"
+                if guard_key not in session_state:
+                    session_state[guard_key] = mode in ('Guardian', 'Both')
+                if resp_key not in session_state:
+                    session_state[resp_key] = mode in ('Responder', 'Both')
+                if st.button('Off', key=off_key, help='Turn off both Guardian and Responder for this station.'):
+                    session_state[guard_key] = False
+                    session_state[resp_key] = False
+                cb_cols = st.columns(2)
+                with cb_cols[0]:
+                    guard_on = st.checkbox('Guardian', key=guard_key)
+                with cb_cols[1]:
+                    resp_on = st.checkbox('Responder', key=resp_key)
+                new_mode = 'Both' if (guard_on and resp_on) else 'Guardian' if guard_on else 'Responder' if resp_on else 'Off'
                 if new_mode != mode:
                     modes[idx] = new_mode
                     manual_modes = dict(session_state.get('_suggestion_manual_modes', {}) or {})
@@ -3083,8 +3141,8 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                     session_state['_suggestion_manual_modes'] = manual_modes
                     session_state['suggestion_modes'] = modes
                     session_state['suggestion_toggles'] = {i: (m != 'Off') for i, m in modes.items()}
-                    session_state['_pending_k_resp'] = sum(1 for m in modes.values() if m == 'Responder')
-                    session_state['_pending_k_guard'] = sum(1 for m in modes.values() if m == 'Guardian')
+                    session_state['_pending_k_resp'] = sum(1 for m in modes.values() if m in ('Responder', 'Both'))
+                    session_state['_pending_k_guard'] = sum(1 for m in modes.values() if m in ('Guardian', 'Both'))
                     changed = True
                     st.rerun()
 

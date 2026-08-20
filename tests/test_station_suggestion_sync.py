@@ -24,12 +24,33 @@ def _suggestions(count=5):
     ]
 
 
+def _set_card_mode(session_state, idx, suggestion, mode):
+    """Simulate a user clicking the Guardian/Responder checkboxes on a card."""
+    widget_key = _suggestion_widget_key(session_state, idx, suggestion)
+    session_state[f"{widget_key}_g"] = mode in ("Guardian", "Both")
+    session_state[f"{widget_key}_r"] = mode in ("Responder", "Both")
+
+
 def _counts(modes):
     return {
         "guardian": sum(1 for mode in modes.values() if mode == "Guardian"),
         "responder": sum(1 for mode in modes.values() if mode == "Responder"),
         "off": sum(1 for mode in modes.values() if mode == "Off"),
     }
+
+
+def test_stations_uploaded_defaults_all_cards_to_responder():
+    session_state = {"_station_suggestion_rank_by": "call"}
+
+    modes = sync_station_suggestion_modes(
+        session_state,
+        _suggestions(),
+        k_guardian=1,
+        k_responder=2,
+        stations_uploaded=True,
+    )
+
+    assert set(modes.values()) == {"Responder"}
 
 
 def test_slider_assigns_ranked_station_suggestions():
@@ -54,7 +75,7 @@ def test_card_toggle_to_responder_records_manual_mode_and_increments_slider_coun
         "_station_suggestion_rank_by": "call",
         "suggestion_modes": {0: "Guardian", 1: "Responder", 2: "Off", 3: "Off", 4: "Off"},
     }
-    session_state[_suggestion_widget_key(session_state, 2, suggestions[2])] = "Responder"
+    _set_card_mode(session_state, 2, suggestions[2], "Responder")
 
     modes = sync_station_suggestion_modes(
         session_state,
@@ -75,7 +96,7 @@ def test_card_toggle_to_guardian_records_manual_mode_and_increments_slider_count
         "_station_suggestion_rank_by": "call",
         "suggestion_modes": {0: "Guardian", 1: "Responder", 2: "Off", 3: "Off", 4: "Off"},
     }
-    session_state[_suggestion_widget_key(session_state, 2, suggestions[2])] = "Guardian"
+    _set_card_mode(session_state, 2, suggestions[2], "Guardian")
 
     modes = sync_station_suggestion_modes(
         session_state,
@@ -96,7 +117,7 @@ def test_card_toggle_to_off_records_manual_mode_and_decrements_slider_count():
         "_station_suggestion_rank_by": "call",
         "suggestion_modes": {0: "Guardian", 1: "Responder", 2: "Responder", 3: "Off", 4: "Off"},
     }
-    session_state[_suggestion_widget_key(session_state, 2, suggestions[2])] = "Off"
+    _set_card_mode(session_state, 2, suggestions[2], "Off")
 
     modes = sync_station_suggestion_modes(
         session_state,
@@ -117,7 +138,7 @@ def test_card_role_change_records_manual_mode_and_updates_slider_counts():
         "_station_suggestion_rank_by": "call",
         "suggestion_modes": {0: "Guardian", 1: "Responder", 2: "Off", 3: "Off", 4: "Off"},
     }
-    session_state[_suggestion_widget_key(session_state, 0, suggestions[0])] = "Responder"
+    _set_card_mode(session_state, 0, suggestions[0], "Responder")
 
     modes = sync_station_suggestion_modes(
         session_state,
@@ -138,7 +159,7 @@ def test_card_role_switch_uses_exact_card_counts_not_delta_guess():
         "_station_suggestion_rank_by": "call",
         "suggestion_modes": {0: "Guardian", 1: "Responder", 2: "Responder", 3: "Off", 4: "Off"},
     }
-    session_state[_suggestion_widget_key(session_state, 2, suggestions[2])] = "Guardian"
+    _set_card_mode(session_state, 2, suggestions[2], "Guardian")
 
     modes = sync_station_suggestion_modes(
         session_state,
@@ -160,7 +181,7 @@ def test_apply_suggestion_widget_overrides_updates_counts_before_optimizer():
         "_suggestion_widget_version": 0,
         "suggestion_modes": dict(modes),
     }
-    session_state[_suggestion_widget_key(session_state, 8, suggestions[8])] = "Guardian"
+    _set_card_mode(session_state, 8, suggestions[8], "Guardian")
 
     updated = apply_suggestion_widget_overrides(session_state, suggestions, modes)
 
@@ -220,6 +241,57 @@ def test_forced_custom_suggestion_mode_is_respected():
     assert _counts(modes) == {"guardian": 1, "responder": 1, "off": 3}
 
 
+def test_manual_suggestion_deployments_both_mode_deploys_to_both_roles():
+    station_metadata = [{"name": f"Station {i}"} for i in range(5)]
+
+    resp_idx, guard_idx = apply_manual_suggestion_deployments(
+        station_metadata,
+        active_resp_idx=[],
+        active_guard_idx=[],
+        manual_modes={2: "Both"},
+        target_resp_count=1,
+        target_guard_count=1,
+    )
+
+    assert 2 in resp_idx
+    assert 2 in guard_idx
+
+
+def test_reconcile_unique_deployment_indices_keeps_both_preferred_station_in_both_roles():
+    station_metadata = [{"name": f"Station {i}"} for i in range(5)]
+
+    resp_idx, guard_idx = reconcile_unique_deployment_indices(
+        station_metadata,
+        active_resp_idx=[1],
+        active_guard_idx=[1],
+        suggestions=_suggestions(5),
+        target_resp_count=1,
+        target_guard_count=1,
+        preferred_modes={1: "Both"},
+    )
+
+    assert resp_idx == [1]
+    assert guard_idx == [1]
+
+
+def test_reconcile_suggestion_modes_reports_both_when_deployed_as_both_roles():
+    session_state = {
+        "suggestion_modes": {0: "Off", 1: "Off"},
+        "suggestion_toggles": {0: False, 1: False},
+    }
+
+    modes = reconcile_suggestion_modes_from_deployments(
+        session_state,
+        _suggestions(2),
+        active_resp_idx=[1],
+        active_guard_idx=[1],
+    )
+
+    assert modes[1] == "Both"
+    assert session_state["_suggestion_selected_resp_count"] == 1
+    assert session_state["_suggestion_selected_guard_count"] == 1
+
+
 def test_deployed_station_indices_normalizes_active_drone_indices():
     assert deployed_station_indices(
         [
@@ -270,7 +342,7 @@ def test_lower_rank_widget_key_updates_exact_station_not_next_card():
         "_station_suggestion_rank_by": "call",
         "suggestion_modes": {s["station_idx"]: "Off" for s in suggestions},
     }
-    session_state[_suggestion_widget_key(session_state, 26, suggestions[26])] = "Responder"
+    _set_card_mode(session_state, 26, suggestions[26], "Responder")
 
     modes = sync_station_suggestion_modes(
         session_state,

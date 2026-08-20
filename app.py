@@ -7454,14 +7454,15 @@ body{{background:transparent;overflow:hidden}}
                 _suggestions,
                 k_guardian=k_guardian,
                 k_responder=k_responder,
+                stations_uploaded=st.session_state.get('stations_user_uploaded', False),
             )
             _current_modes = apply_suggestion_widget_overrides(
                 st.session_state,
                 _suggestions,
                 _current_modes,
             )
-            _suggestion_resp_count = sum(1 for mode in _current_modes.values() if mode == 'Responder')
-            _suggestion_guard_count = sum(1 for mode in _current_modes.values() if mode == 'Guardian')
+            _suggestion_resp_count = sum(1 for mode in _current_modes.values() if mode in ('Responder', 'Both'))
+            _suggestion_guard_count = sum(1 for mode in _current_modes.values() if mode in ('Guardian', 'Both'))
             st.session_state['_suggestion_selected_resp_count'] = _suggestion_resp_count
             st.session_state['_suggestion_selected_guard_count'] = _suggestion_guard_count
             if st.session_state.get('_suggestion_sync_source') == 'cards':

@@ -307,17 +307,23 @@ def estimate_specialty_response_savings(df_calls_full, total_calls_annual, calls
 
         'fire_rate': float(CONFIG["FIRE_DEFAULT_APPLICABLE_RATE"]),
 
+        'narcotics_rate': float(CONFIG["NARCOTICS_DEFAULT_APPLICABLE_RATE"]),
+
         'thermal_calls_annual': 0.0,
 
         'k9_calls_annual': 0.0,
 
         'fire_calls_annual': 0.0,
 
+        'narcotics_calls_annual': 0.0,
+
         'thermal_savings': 0.0,
 
         'k9_savings': 0.0,
 
         'fire_savings': 0.0,
+
+        'narcotics_savings': 0.0,
 
         'additional_savings_total': 0.0,
 
@@ -383,11 +389,23 @@ def estimate_specialty_response_savings(df_calls_full, total_calls_annual, calls
 
             fire_rate_raw = float(s.str.contains(fire_pattern, regex=True, na=False).mean())
 
+            narcotics_pattern = (
+
+                r'narcotic|drug|overdose|\bod\b|fentanyl|meth(amphetamine)?|paraphernalia|'
+
+                r'controlled substance|possession|dealing|distribution|drug activity'
+
+            )
+
+            narcotics_rate_raw = float(s.str.contains(narcotics_pattern, regex=True, na=False).mean())
+
             out['thermal_rate'] = min(0.25, max(CONFIG["THERMAL_DEFAULT_APPLICABLE_RATE"] * 0.5, thermal_rate_raw if thermal_rate_raw > 0 else CONFIG["THERMAL_DEFAULT_APPLICABLE_RATE"]))
 
             out['k9_rate'] = min(0.08, max(CONFIG["K9_DEFAULT_APPLICABLE_RATE"] * 0.5, k9_rate_raw if k9_rate_raw > 0 else CONFIG["K9_DEFAULT_APPLICABLE_RATE"]))
 
             out['fire_rate'] = min(0.20, max(CONFIG["FIRE_DEFAULT_APPLICABLE_RATE"] * 0.5, fire_rate_raw if fire_rate_raw > 0 else CONFIG["FIRE_DEFAULT_APPLICABLE_RATE"]))
+
+            out['narcotics_rate'] = min(0.15, max(CONFIG["NARCOTICS_DEFAULT_APPLICABLE_RATE"] * 0.5, narcotics_rate_raw if narcotics_rate_raw > 0 else CONFIG["NARCOTICS_DEFAULT_APPLICABLE_RATE"]))
 
             out['source'] = f'cad_call_types:{call_type_col}'
 
@@ -399,11 +417,15 @@ def estimate_specialty_response_savings(df_calls_full, total_calls_annual, calls
 
     out['fire_calls_annual'] = addressable_calls * out['fire_rate']
 
+    out['narcotics_calls_annual'] = addressable_calls * out['narcotics_rate']
+
     out['thermal_savings'] = out['thermal_calls_annual'] * float(CONFIG["THERMAL_SAVINGS_PER_CALL"])
 
     out['k9_savings'] = out['k9_calls_annual'] * float(CONFIG["K9_SAVINGS_PER_CALL"])
 
     out['fire_savings'] = out['fire_calls_annual'] * float(CONFIG["FIRE_SAVINGS_PER_CALL"])
+
+    out['narcotics_savings'] = out['narcotics_calls_annual'] * float(CONFIG["NARCOTICS_SAVINGS_PER_CALL"])
 
     out['additional_savings_total'] = out['thermal_savings'] + out['k9_savings'] + out['fire_savings']
 

@@ -7897,6 +7897,8 @@ body{{background:transparent;overflow:hidden}}
         k9_savings      = float(specialty_savings.get('k9_savings', 0) or 0)
         fire_savings    = float(specialty_savings.get('fire_savings', 0) or 0)
         fire_calls_annual = float(specialty_savings.get('fire_calls_annual', 0) or 0)
+        narcotics_savings = float(specialty_savings.get('narcotics_savings', 0) or 0)
+        narcotics_calls_annual = float(specialty_savings.get('narcotics_calls_annual', 0) or 0)
         possible_additional_savings = float(specialty_savings.get('additional_savings_total', 0) or 0)
 
         _sidebar_annual_cap_placeholder = st.sidebar.empty()
@@ -12696,6 +12698,7 @@ body{{background:transparent;overflow:hidden}}
             <a href="#incident-data"><span class="nav-num">04</span>Incident Analysis</a>
             <a href="#deployment"><span class="nav-num">05</span>Deployment Locations</a>
             <a href="#grant"><span class="nav-num">06</span>Grant Narrative</a>
+            <a href="#narcotics"><span class="nav-num">06C</span>Narcotics Response</a>
             <a href="#infrastructure"><span class="nav-num">07</span>Infrastructure Directory</a>
             <a href="#community"><span class="nav-num">08</span>Community Partnership</a>
             [ANALYTICS_NAV]
@@ -13061,7 +13064,69 @@ body{{background:transparent;overflow:hidden}}
           </div>
           </div>
         </section>
-    
+
+        <!-- ── 06C: NARCOTICS PREVENTION, DETERRENCE & RESPONSE ──────────── -->
+        <section class="doc-section" id="narcotics">
+          <div class="section-eyebrow"><span class="pg-num">06C</span><span class="pg-title">Illicit Narcotics Prevention, Deterrence &amp; Response</span><span class="src" data-src="Sources: CDC/NCHS Provisional Overdose Data (cdc.gov/nchs/pressroom/releases/20260513.html) · NIJ Hot Spots Policing and Crime Reduction (nij.ojp.gov/library/publications/hot-spots-policing-and-crime-reduction-update-ongoing-systematic-review-and) · NIJ Drone as First Responder: Practical Insights (nij.ojp.gov/library/publications/drone-first-responder-practical-insights-law-enforcement-implementation) · DEA 2025 National Drug Threat Assessment (dea.gov/press-releases/2025/05/15/dea-releases-2025-national-drug-threat-assessment) · BRINC Responder &amp; Guardian technical specifications (brincdrones.com).">ⓘ</span></div>
+
+          <div class="grant-layout">
+          <div class="grant-body">
+          <p style="color:var(--text);font-size:14px;line-height:1.8;margin-bottom:16px;">
+            Illicit narcotics remain a persistent public-safety threat in {jurisdiction_list} even as national overdose deaths have fallen substantially — CDC provisional data estimate <strong>69,973 overdose deaths nationally in 2025</strong>, down nearly 14% from 2024, while DEA continues to identify fentanyl, methamphetamine, cocaine, heroin, and increasingly complex polysubstance mixtures as significant threats. A strategically placed BRINC Drone as First Responder network — using <strong>Responder</strong> for rapid tactical coverage and <strong>Guardian</strong> for persistent wide-area overwatch — gives {dept_summary} an added layer of prevention, deterrence, detection, and rapid response around known narcotics hot spots. The value case rests not on drones independently stopping drug activity, but on persistent, rapidly deployable aerial intelligence strengthening proven <strong>place-based and intelligence-led policing strategies</strong>: NIJ finds robust evidence that concentrating law-enforcement resources at identified crime hot spots reduces crime, and earlier drug-market studies found targeted interventions reduced calls for service without simply displacing activity to surrounding areas.
+          </p>
+
+          <ul style="color:var(--text);font-size:13.5px;line-height:1.8;margin:0 0 18px 20px;padding:0;">
+            <li><strong>Narcotics hot-spot coverage</strong> — persistent aerial coverage of known open-air drug markets, trafficking corridors, transit centers, and locations tied to repeated narcotics calls.</li>
+            <li><strong>Rapid detection &amp; verification</strong> — Responder/Guardian establishes visual situational awareness before ground officers arrive, often before dispatch, helping distinguish active criminal activity from calls needing a different response.</li>
+            <li><strong>Deterrence through visible presence</strong> — regular, policy-governed deployment over established hot spots raises the perceived likelihood of detection; framed as a deterrence/disruption capability, not a claim that drones alone prevent narcotics crime.</li>
+            <li><strong>Intelligence-led enforcement</strong> — repeated deployments surface recurring locations, times, movement patterns, and vehicles, supporting narcotics units, patrol, and multiagency task forces in allocating personnel more precisely.</li>
+            <li><strong>Officer safety</strong> — aerial reconnaissance ahead of ground entry identifies subjects, vehicles, escape routes, and hazards before officers commit to a scene.</li>
+            <li><strong>Suspect &amp; vehicle tracking</strong> — where legally and operationally appropriate, aerial overwatch maintains awareness of departing suspects/vehicles, reducing pressure on officers to immediately close distance.</li>
+            <li><strong>Fentanyl &amp; polysubstance threat</strong> — DEA forensic data cited in the 2025 National Drug Threat Assessment finds fentanyl mixed into roughly <strong>1 in 4 cocaine</strong> and <strong>1 in 8 methamphetamine</strong> submissions, reinforcing narcotics response as both a criminal-enforcement and immediate life-safety problem.</li>
+            <li><strong>24/7 persistent coverage</strong> — Guardian's robotic battery/payload swapping supports continuous DFR operations without conventional charging downtime.</li>
+            <li><strong>Night &amp; low-visibility operations</strong> — Responder's visual/thermal sensing and Guardian's enhanced imaging, spotlight, and laser rangefinder improve observation of narcotics incidents after dark.</li>
+            <li><strong>Evidence &amp; case development</strong> — LiveOps evidence and data-storage functionality supports secure digital evidence handling for narcotics case files.</li>
+            <li><strong>Force multiplication</strong> — a centralized DFR/RTCC team can triage narcotics-related calls across a wider area, reserving detectives and patrol officers for incidents requiring physical intervention.</li>
+            <li><strong>Community protection</strong> — framed around reducing visible drug markets, associated violence/disorder, overdose risk, and loss of public space, rather than maximizing arrests; open-air drug markets are independently associated with robbery, theft, firearms activity, and neighborhood deterioration.</li>
+          </ul>
+
+          <p style="color:var(--text);font-size:14px;line-height:1.8;margin-bottom:14px;">
+            <strong>Estimated Annual Value:</strong> The modeled narcotics prevention, deterrence &amp; response value of <strong>${narcotics_savings:,.0f} per year</strong> is derived from an estimated <strong>{narcotics_calls_annual:,.0f} narcotics-related calls</strong> annually within the coverage area, split between hot-spot deterrence coverage (persistent overwatch of known drug markets and trafficking corridors) and officer safety/reconnaissance value (aerial intelligence ahead of ground entry). Figures are conservative and do not capture reduced use-of-force incidents, faster case clearance, or avoided overtime from extended scene operations.
+          </p>
+
+          <div style="margin-bottom:20px;">
+            <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Narcotics Value Breakdown</div>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+              <div style="width:150px;font-size:12px;color:var(--text);flex-shrink:0;">Hot-Spot Deterrence</div>
+              <div style="flex:1;background:#eef6fb;border-radius:4px;overflow:hidden;height:18px;">
+                <div style="width:60%;height:100%;background:#00D2FF;"></div>
+              </div>
+              <div style="width:90px;text-align:right;font-size:12px;font-weight:700;color:#0077aa;flex-shrink:0;">${narcotics_savings*0.6:,.0f}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="width:150px;font-size:12px;color:var(--text);flex-shrink:0;">Officer Safety &amp; Recon</div>
+              <div style="flex:1;background:#eef6fb;border-radius:4px;overflow:hidden;height:18px;">
+                <div style="width:40%;height:100%;background:#7fe3ff;"></div>
+              </div>
+              <div style="width:90px;text-align:right;font-size:12px;font-weight:700;color:#0077aa;flex-shrink:0;">${narcotics_savings*0.4:,.0f}</div>
+            </div>
+          </div>
+
+          <div style="background:#f0f9ff;border-left:3px solid #00D2FF;border-radius:0 8px 8px 0;padding:14px 18px;margin-bottom:0;font-size:13px;color:#333;line-height:1.7;">
+            <strong style="color:#0077aa;">Overdose response overlap:</strong> Guardian's payload capability includes Narcan/naloxone delivery, creating potential for the same station network used for narcotics response to support overdose emergencies while EMS and officers are en route.
+          </div>
+          </div>
+          <div class="grant-sidebar">
+            <div class="grant-stat" style="border-color:rgba(0,210,255,0.4)"><div class="gs-label">Narcotics Calls/Year</div><div class="gs-val">{narcotics_calls_annual:,.0f}</div><div class="gs-sub">within coverage zone</div></div>
+            <div class="grant-stat" style="border-color:rgba(0,210,255,0.4)"><div class="gs-label">Hot-Spot Deterrence Value</div><div class="gs-val">${narcotics_savings*0.6:,.0f}</div><div class="gs-sub">persistent hot-spot overwatch</div></div>
+            <div class="grant-stat" style="border-color:rgba(0,210,255,0.4)"><div class="gs-label">Officer Safety Value</div><div class="gs-val">${narcotics_savings*0.4:,.0f}</div><div class="gs-sub">recon ahead of ground entry</div></div>
+            <div class="grant-stat gold"><div class="gs-label">Total Narcotics Value</div><div class="gs-val">${narcotics_savings:,.0f}/yr</div><div class="gs-sub">${CONFIG["NARCOTICS_SAVINGS_PER_CALL"]}/call blended</div></div>
+            <div class="grant-stat green"><div class="gs-label">Avg Drone Response</div><div class="gs-val">{avg_resp_time:.1f} min</div><div class="gs-sub">{avg_time_saved:.1f} min faster than patrol</div></div>
+            <div class="grant-stat" style="border-color:rgba(0,210,255,0.4)"><div class="gs-label">10-Year Narcotics Value</div><div class="gs-val">${narcotics_savings*12.58:,.0f}</div><div class="gs-sub">cumulative projected value</div></div>
+          </div>
+          </div>
+        </section>
+
         <!-- ── 07: COMMUNITY INFRASTRUCTURE & ASSET PROTECTION ──────────────────────────── -->
         <section class="doc-section" id="infrastructure">
           <div class="section-eyebrow"><span class="pg-num">07</span><span class="pg-title">Community Infrastructure &amp; Asset Protection</span><span class="src" data-src="Sources: OpenStreetMap (© contributors, ODbL license) · DHS HIFLD Open Data (public domain) · NCES Common Core of Data · CMS Hospital Compare · NEMSIS National EMS Database · NTD National Transit Database · IMLS Public Libraries Survey · US Courts PACER · EPA Infrastructure Maps · US Energy Information Administration · FAA LAANC UAS Facility Maps · User-verified locations.">ⓘ</span></div>

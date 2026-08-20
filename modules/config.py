@@ -26,6 +26,10 @@ CONFIG = {
     # (15% aerial ladder avoidance at $4,500/deploy + $90 overhaul crew time saved)
     "FIRE_DEFAULT_APPLICABLE_RATE": 0.05,
     "FIRE_SAVINGS_PER_CALL": 450,
+    # Narcotics prevention/deterrence/response value: hot-spot deterrence coverage
+    # + officer safety/recon ahead of entry on narcotics-related calls
+    "NARCOTICS_DEFAULT_APPLICABLE_RATE": 0.04,
+    "NARCOTICS_SAVINGS_PER_CALL": 165,
     "DEFAULT_TRAFFIC_SPEED": 35.0, "RESPONDER_SPEED": 30.0, "GUARDIAN_SPEED": 60.0,
     # Guardian duty cycle: 60 min flight + 3 min charge = 63 min cycle
     # Daily airtime = (24*60) / 63 * 60 = 1371.4 min = 22.86 hrs

@@ -3147,14 +3147,10 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
                 )
                 guard_key = f"{widget_key}_g"
                 resp_key = f"{widget_key}_r"
-                off_key = f"{widget_key}_off"
                 if guard_key not in session_state:
                     session_state[guard_key] = mode in ('Guardian', 'Both')
                 if resp_key not in session_state:
                     session_state[resp_key] = mode in ('Responder', 'Both')
-                if st.button('Off', key=off_key, help='Turn off both Guardian and Responder for this station.'):
-                    session_state[guard_key] = False
-                    session_state[resp_key] = False
                 cb_cols = st.columns(2)
                 with cb_cols[0]:
                     guard_on = st.checkbox('Guardian', key=guard_key)

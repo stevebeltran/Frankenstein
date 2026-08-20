@@ -2476,6 +2476,33 @@ def sync_station_suggestion_modes(session_state, suggestions, k_guardian=None, k
     return synced_modes
 
 
+def sync_uploaded_station_fleet_counts(session_state, current_k_guardian=None, current_k_responder=None):
+    """Keep uploaded-station fleet counts aligned with the active suggestion cards."""
+    if not session_state.get('stations_user_uploaded', False):
+        return False
+
+    modes = dict(session_state.get('suggestion_modes', {}) or {})
+    target_resp = sum(1 for mode in modes.values() if mode in ('Responder', 'Both'))
+    target_guard = sum(1 for mode in modes.values() if mode in ('Guardian', 'Both'))
+
+    try:
+        current_resp = int(current_k_responder or 0)
+    except Exception:
+        current_resp = 0
+    try:
+        current_guard = int(current_k_guardian or 0)
+    except Exception:
+        current_guard = 0
+
+    if target_resp == current_resp and target_guard == current_guard:
+        return False
+
+    session_state['_pending_k_resp'] = target_resp
+    session_state['_pending_k_guard'] = target_guard
+    session_state['_suggestion_apply_fleet_counts'] = True
+    return True
+
+
 def _queue_suggestion_mode_delta(session_state, idx, current_resp, current_guard, old_mode, new_mode):
     """Record a manual suggestion-card role change and queue matching fleet counts."""
     if old_mode == new_mode:

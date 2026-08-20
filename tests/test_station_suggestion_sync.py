@@ -8,6 +8,7 @@ from modules.dashboard_helpers import (
     reconcile_suggestion_modes_from_deployments,
     reconcile_unique_deployment_indices,
     sort_uploaded_station_suggestions,
+    sync_uploaded_station_fleet_counts,
     sync_station_suggestion_modes,
 )
 
@@ -51,6 +52,20 @@ def test_stations_uploaded_defaults_all_cards_to_responder():
     )
 
     assert set(modes.values()) == {"Responder"}
+
+
+def test_uploaded_station_counts_follow_all_active_cards():
+    session_state = {
+        "stations_user_uploaded": True,
+        "suggestion_modes": {0: "Responder", 1: "Responder", 2: "Responder", 3: "Responder", 4: "Responder"},
+    }
+
+    changed = sync_uploaded_station_fleet_counts(session_state, current_k_guardian=1, current_k_responder=2)
+
+    assert changed is True
+    assert session_state["_pending_k_resp"] == 5
+    assert session_state["_pending_k_guard"] == 0
+    assert session_state["_suggestion_apply_fleet_counts"] is True
 
 
 def test_slider_assigns_ranked_station_suggestions():

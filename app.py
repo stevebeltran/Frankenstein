@@ -287,6 +287,7 @@ station_suggestion_display_metrics = _dashboard_helpers_mod.station_suggestion_d
 deployed_station_indices = _dashboard_helpers_mod.deployed_station_indices
 assign_station_colors = _dashboard_helpers_mod.assign_station_colors
 sync_station_suggestion_modes = _dashboard_helpers_mod.sync_station_suggestion_modes
+sync_uploaded_station_fleet_counts = _dashboard_helpers_mod.sync_uploaded_station_fleet_counts
 render_station_suggestions_grid = _dashboard_helpers_mod.render_station_suggestions_grid
 apply_manual_suggestion_deployments = _dashboard_helpers_mod.apply_manual_suggestion_deployments
 reconcile_suggestion_modes_from_deployments = _dashboard_helpers_mod.reconcile_suggestion_modes_from_deployments
@@ -7465,6 +7466,12 @@ body{{background:transparent;overflow:hidden}}
             _suggestion_guard_count = sum(1 for mode in _current_modes.values() if mode in ('Guardian', 'Both'))
             st.session_state['_suggestion_selected_resp_count'] = _suggestion_resp_count
             st.session_state['_suggestion_selected_guard_count'] = _suggestion_guard_count
+            if sync_uploaded_station_fleet_counts(
+                st.session_state,
+                current_k_guardian=k_guardian,
+                current_k_responder=k_responder,
+            ):
+                st.rerun()
             if st.session_state.get('_suggestion_sync_source') == 'cards':
                 _slider_shown_resp = int(k_responder or 0)
                 _slider_shown_guard = int(k_guardian or 0)

@@ -11570,6 +11570,7 @@ body{{background:transparent;overflow:hidden}}
             area_sq_mi_est   = max(1, int((maxx - minx) * (maxy - miny) * 3280))
             export_details = {
                 # Session
+                "report_id":            _report_id,
                 "session_id":            st.session_state.get('session_id', ''),
                 "session_start":         _session_start,
                 "session_duration_min":  _dur_min,
@@ -11577,6 +11578,7 @@ body{{background:transparent;overflow:hidden}}
                 # Jurisdiction (user-selected)
                 "population":            pop_metric,
                 "total_calls":           st.session_state.get('total_original_calls', 0),
+                "modeled_calls":         len(df_calls) if df_calls is not None else st.session_state.get('total_modeled_calls', 0),
                 "daily_calls":           max(1, int(st.session_state.get('total_original_calls', 0) / 365)),
                 "area_sq_mi":            area_sq_mi_est,
                 # City/state enrichment
@@ -11603,6 +11605,7 @@ body{{background:transparent;overflow:hidden}}
                 "avg_response_min":      round(avg_resp_time, 2),
                 "avg_time_saved_min":    round(avg_time_saved, 2),
                 "area_covered_pct":      round(area_covered_perc, 1),
+                "city_calls":            st.session_state.get('total_original_calls', 0),
                 "calls_per_capita":      round(st.session_state.get('total_original_calls', 0) / max(pop_metric, 1), 4),
                 # Engagement / depth signals
                 "r_resp_radius":         st.session_state.get('r_resp', ''),

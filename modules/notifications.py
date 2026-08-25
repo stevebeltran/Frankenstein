@@ -35,6 +35,7 @@ EXPORT_HEADERS = [
     "Session ID",
     "Session Start",
     "Session Duration (min)",
+    "Export Type",
     "Data Source",
     "BRINC Rep Name",
     "BRINC Rep Email",
@@ -43,6 +44,21 @@ EXPORT_HEADERS = [
     "Population",
     "Area (sq mi)",
     "Total Annual Calls",
+    "City Calls",
+    "Modeled Calls",
+    "Daily Calls",
+    "Responder Stations",
+    "Guardian Stations",
+    "Total Fleet Units",
+    "Fleet CapEx ($)",
+    "Annual Savings ($)",
+    "Break Even",
+    "Call Coverage (%)",
+    "Average Response (min)",
+    "Average Time Saved (min)",
+    "Area Covered (%)",
+    "Report ID",
+    "Export Details JSON",
 ]
 
 SESSION_HEADERS = [
@@ -132,6 +148,16 @@ def _truncate_sheet_cell(value, limit=49000):
     if len(text) <= limit:
         return text
     return text[:limit] + "\n...[truncated]"
+
+
+def _count_active_drones(details, drone_type=None):
+    drones = details.get("active_drones", [])
+    if not isinstance(drones, list):
+        return ""
+    if drone_type is None:
+        return len(drones)
+    wanted = str(drone_type).strip().upper()
+    return sum(1 for drone in drones if str(drone.get("type", "")).strip().upper() == wanted)
 
 
 def _log_crash_to_sheets(
@@ -278,12 +304,17 @@ def _build_sheets_row(city, state, event_type, k_resp, k_guard, coverage, name, 
         source_app = st.secrets.get("SOURCE_APP", "") or Path(__file__).resolve().parent.parent.name
     except Exception:
         source_app = ""
+    responder_count = _count_active_drones(d, "RESPONDER")
+    guardian_count = _count_active_drones(d, "GUARDIAN")
+    total_fleet_units = _count_active_drones(d)
+    export_details_json = json.dumps(d, ensure_ascii=True, sort_keys=True, default=str)
     return [
         source_app,
         now,
         d.get('session_id', ''),
         session_start,
         dur,
+        event_type,
         d.get('data_source', ''),
         name,
         email,
@@ -292,6 +323,21 @@ def _build_sheets_row(city, state, event_type, k_resp, k_guard, coverage, name, 
         d.get('population', ''),
         d.get('area_sq_mi', ''),
         d.get('total_calls', ''),
+        d.get('city_calls', d.get('total_calls', '')),
+        d.get('modeled_calls', ''),
+        d.get('daily_calls', ''),
+        responder_count,
+        guardian_count,
+        total_fleet_units,
+        d.get('fleet_capex', ''),
+        d.get('annual_savings', ''),
+        d.get('break_even', ''),
+        d.get('call_coverage', coverage),
+        d.get('avg_response_min', ''),
+        d.get('avg_time_saved_min', ''),
+        d.get('area_covered_pct', ''),
+        d.get('report_id', ''),
+        export_details_json,
     ]
 
 

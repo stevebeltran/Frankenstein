@@ -63,3 +63,66 @@ def test_build_sheets_row_includes_html_export_metrics(monkeypatch):
     payload = json.loads(row_map["Export Details JSON"])
     assert payload["session_id"] == "sess-123"
     assert len(payload["active_drones"]) == 3
+
+
+def test_log_to_sheets_uses_fallback_sheet_id_when_secret_missing(monkeypatch):
+    monkeypatch.setattr(notifications.st, "secrets", {"gcp_service_account": {"project_id": "demo"}}, raising=False)
+
+    captured = {}
+
+    class FakeSheet:
+        def row_values(self, row):
+            return notifications.EXPORT_HEADERS if row == 1 else []
+
+        def append_row(self, row):
+            captured["row"] = row
+
+    class FakeSpreadsheet:
+        sheet1 = FakeSheet()
+
+        def open_by_key(self, sheet_id):
+            captured["sheet_id"] = sheet_id
+            return self
+
+    monkeypatch.setattr(notifications, "_ensure_sheet_headers", lambda sheet: None)
+    monkeypatch.setattr(notifications, "_upsert_user", lambda *args, **kwargs: None)
+    monkeypatch.setattr(notifications.Credentials, "from_service_account_info", lambda info, scopes=None: object())
+    monkeypatch.setattr(notifications.gspread, "authorize", lambda creds: FakeSpreadsheet())
+
+    details = {
+        "session_id": "sess-456",
+        "session_start": "2026-08-25 11:00:00",
+        "session_duration_min": 7.0,
+        "data_source": "simulation",
+        "population": 1000,
+        "area_sq_mi": 12.0,
+        "total_calls": 50,
+        "city_calls": 50,
+        "modeled_calls": 45,
+        "daily_calls": 1,
+        "fleet_capex": 1000000,
+        "annual_savings": 125000,
+        "break_even": "8.0 MONTHS",
+        "avg_response_min": 2.0,
+        "avg_time_saved_min": 1.5,
+        "area_covered_pct": 66.7,
+        "report_id": "report-xyz",
+        "active_drones": [{"type": "RESPONDER"}],
+    }
+
+    notifications._log_to_sheets(
+        "Richland County",
+        "SC",
+        "HTML",
+        1,
+        0,
+        66.7,
+        "Steven Beltran",
+        "steven.beltran@brincdrones.com",
+        details,
+    )
+
+    assert captured["sheet_id"] == notifications.DEFAULT_EXPORT_SHEET_ID
+    assert captured["row"][0] == "Frankenstein"
+    assert captured["row"][5] == "HTML"
+    assert captured["row"][9] == "Richland County"

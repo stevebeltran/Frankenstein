@@ -28,6 +28,8 @@ from modules.crash_logging import log_crash
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_EXPORT_SHEET_ID = "1Qga6qzuoRS-BfT-0FE_RgfnX1lFpxDo1gBa55f86oUE"
+
 
 EXPORT_HEADERS = [
     "Source App",
@@ -117,6 +119,25 @@ _LOGIN_WRITE_RECENT = {}
 _LOGIN_WRITE_SUPPRESSION_SECONDS = 5
 
 
+def _get_main_sheet_id():
+    """Return the primary export spreadsheet ID, with a repo-local fallback."""
+    try:
+        sheet_id = str(st.secrets.get("GOOGLE_SHEET_ID", "") or "").strip()
+    except Exception:
+        sheet_id = ""
+    if sheet_id:
+        return sheet_id
+
+    try:
+        env_sheet_id = str(os.environ.get("GOOGLE_SHEET_ID", "") or "").strip()
+    except Exception:
+        env_sheet_id = ""
+    if env_sheet_id:
+        return env_sheet_id
+
+    return DEFAULT_EXPORT_SHEET_ID
+
+
 def _split_recipients(value):
     """Return a cleaned list of email recipients from a string or iterable."""
     if not value:
@@ -173,7 +194,7 @@ def _log_crash_to_sheets(
 ):
     """Best-effort durable crash log in the configured Google Sheet."""
     try:
-        sheet_id = st.secrets.get("GOOGLE_SHEET_ID", "")
+        sheet_id = _get_main_sheet_id()
         creds_dict = st.secrets.get("gcp_service_account", {})
         if not sheet_id or not creds_dict:
             return False
@@ -699,7 +720,7 @@ def _upsert_user(spreadsheet, email, name, *, increment_logins=False, increment_
 def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, email, details=None):
     """Log deployment to Google Sheets. MAP_BUILD events go to Sessions sheet; all others to sheet1."""
     try:
-        sheet_id = st.secrets.get("GOOGLE_SHEET_ID", "")
+        sheet_id = _get_main_sheet_id()
         creds_dict = st.secrets.get("gcp_service_account", {})
         if not sheet_id or not creds_dict:
             return
@@ -828,7 +849,7 @@ def _log_login_to_sheets(email, name):
             if _should_skip_login_write(normalized_email):
                 return
 
-            sheet_id = st.secrets.get("GOOGLE_SHEET_ID", "")
+            sheet_id = _get_main_sheet_id()
             creds_dict = st.secrets.get("gcp_service_account", {})
             if not sheet_id or not creds_dict:
                 return
@@ -855,7 +876,7 @@ def _log_qr_scan_to_sheets(report_id, city, state, rep_name, rep_email,
                            device="", user_agent="", language="", ip=""):
     """Log a QR code scan to a dedicated QR Scans sheet."""
     try:
-        sheet_id = st.secrets.get("GOOGLE_SHEET_ID", "")
+        sheet_id = _get_main_sheet_id()
         creds_dict = st.secrets.get("gcp_service_account", {})
         if not sheet_id or not creds_dict:
             return

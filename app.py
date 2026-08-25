@@ -11568,6 +11568,7 @@ body{{background:transparent;overflow:hidden}}
             miny = float(_calls_lats.min()) if len(_calls_lats) else 0
             maxy = float(_calls_lats.max()) if len(_calls_lats) else 0
             area_sq_mi_est   = max(1, int((maxx - minx) * (maxy - miny) * 3280))
+            _report_id = str(st.session_state.get('public_report_id', '') or '')
             export_details = {
                 # Session
                 "report_id":            _report_id,

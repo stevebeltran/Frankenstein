@@ -4060,6 +4060,7 @@ try:
             # Derive brinc_user (first.last prefix) from email for backwards compatibility
             _prefix = _authed_email.split("@")[0]
             st.session_state['brinc_user'] = _prefix
+            st.session_state['auth_timestamp'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             st.session_state['_oauth_logged'] = True
             st.session_state['_pending_login_sheet_log'] = True
 
@@ -7305,20 +7306,6 @@ body{{background:transparent;overflow:hidden}}
         r_resp_est = st.session_state.get('r_resp', 2.0)
         r_guard_est = st.session_state.get('r_guard', 8.0)
         df_curve = pd.DataFrame()
-
-        if st.session_state.pop('_pending_login_sheet_log', False) and not st.session_state.get('_login_sheet_logged', False):
-            try:
-                _log_login_to_sheets(
-                    st.session_state.get('google_user_email', '') or _authed_email,
-                    st.session_state.get('google_user_name', '') or _authed_name,
-                    city=str(st.session_state.get('active_city', '') or '').strip(),
-                    state=str(st.session_state.get('active_state', '') or '').strip().upper(),
-                    lat=center_lat,
-                    lon=center_lon,
-                )
-                st.session_state['_login_sheet_logged'] = True
-            except Exception:
-                pass
 
         _custom_station_state = manage_custom_stations(
             st,
@@ -11581,19 +11568,65 @@ body{{background:transparent;overflow:hidden}}
             maxy = float(_calls_lats.max()) if len(_calls_lats) else 0
             area_sq_mi_est   = max(1, int((maxx - minx) * (maxy - miny) * 3280))
             _report_id = str(st.session_state.get('public_report_id', '') or '')
+            _total_stations = len(df_stations_all) if df_stations_all is not None else 0
+            _active_stations = len(active_drones) if active_drones else 0
+            _total_calls = int(st.session_state.get('total_original_calls', 0) or 0)
+            _session_snapshot_details = {
+                "auth_timestamp": st.session_state.get("auth_timestamp", ""),
+                "source_app": st.secrets.get("SOURCE_APP", "") or APP_DIR.name,
+                "session_id": st.session_state.get("session_id", ""),
+                "session_start": _session_start,
+                "rep_name": prop_name,
+                "rep_email": prop_email,
+                "population": pop_metric,
+                "total_annual_calls": _total_calls,
+                "data_source": st.session_state.get("data_source", "unknown"),
+                "sim_or_upload": st.session_state.get("data_source", "unknown"),
+                "total_calls": _total_calls,
+                "active_stations": _active_stations,
+                "total_stations": _total_stations,
+                "responder_stations": actual_k_responder,
+                "guardian_stations": actual_k_guardian,
+                "call_coverage_pct": round(calls_covered_perc, 1),
+                "land_coverage_pct": round(area_covered_perc, 1),
+                "station_count": n,
+                "lat": center_lat,
+                "lon": center_lon,
+            }
+            if st.session_state.pop('_pending_login_sheet_log', False) and not st.session_state.get('_login_sheet_logged', False):
+                try:
+                    _log_login_to_sheets(
+                        st.session_state.get('google_user_email', '') or _authed_email,
+                        st.session_state.get('google_user_name', '') or _authed_name,
+                        city=str(st.session_state.get('active_city', '') or '').strip(),
+                        state=str(st.session_state.get('active_state', '') or '').strip().upper(),
+                        lat=center_lat,
+                        lon=center_lon,
+                        details=_session_snapshot_details,
+                    )
+                    st.session_state['_login_sheet_logged'] = True
+                except Exception:
+                    pass
             export_details = {
                 # Session
                 "report_id":            _report_id,
                 "session_id":            st.session_state.get('session_id', ''),
                 "session_start":         _session_start,
                 "session_duration_min":  _dur_min,
+                "auth_timestamp":        st.session_state.get("auth_timestamp", ""),
+                "source_app":            st.secrets.get("SOURCE_APP", "") or APP_DIR.name,
+                "rep_name":              prop_name,
+                "rep_email":             prop_email,
                 "data_source":           st.session_state.get('data_source', 'unknown'),
                 # Jurisdiction (user-selected)
                 "population":            pop_metric,
                 "total_calls":           st.session_state.get('total_original_calls', 0),
+                "total_annual_calls":    _total_calls,
                 "modeled_calls":         len(df_calls) if df_calls is not None else st.session_state.get('total_modeled_calls', 0),
                 "daily_calls":           max(1, int(st.session_state.get('total_original_calls', 0) / 365)),
                 "area_sq_mi":            area_sq_mi_est,
+                "lat":                   center_lat,
+                "lon":                   center_lon,
                 # City/state enrichment
                 "city_confirmed_match":  (
                     st.session_state.get('file_meta', {}).get('file_inferred_city', '').lower().strip() ==
@@ -11620,6 +11653,13 @@ body{{background:transparent;overflow:hidden}}
                 "area_covered_pct":      round(area_covered_perc, 1),
                 "city_calls":            st.session_state.get('total_original_calls', 0),
                 "calls_per_capita":      round(st.session_state.get('total_original_calls', 0) / max(pop_metric, 1), 4),
+                "active_stations":       _active_stations,
+                "total_stations":        _total_stations,
+                "responder_stations":    actual_k_responder,
+                "guardian_stations":     actual_k_guardian,
+                "call_coverage_pct":     round(calls_covered_perc, 1),
+                "land_coverage_pct":     round(area_covered_perc, 1),
+                "station_count":         n,
                 # Engagement / depth signals
                 "r_resp_radius":         st.session_state.get('r_resp', ''),
                 "r_guard_radius":        st.session_state.get('r_guard', ''),

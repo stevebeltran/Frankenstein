@@ -74,34 +74,49 @@ def test_log_to_sheets_uses_fallback_sheet_id_when_secret_missing(monkeypatch):
 
     class FakeSheet:
         def row_values(self, row):
-            return notifications.EXPORT_HEADERS if row == 1 else []
+            return ["Timestamp", "Email", "Name", "Event"] if row == 1 else []
 
         def append_row(self, row):
             captured["row"] = row
 
     class FakeSpreadsheet:
-        sheet1 = FakeSheet()
-
         def open_by_key(self, sheet_id):
             captured["sheet_id"] = sheet_id
             return self
 
-    monkeypatch.setattr(notifications, "_ensure_sheet_headers", lambda sheet: None)
+        def worksheet(self, name):
+            captured.setdefault("worksheets", []).append(name)
+            return FakeSheet()
+
     monkeypatch.setattr(notifications, "_upsert_user", lambda *args, **kwargs: None)
     monkeypatch.setattr(notifications.Credentials, "from_service_account_info", lambda info, scopes=None: object())
     monkeypatch.setattr(notifications.gspread, "authorize", lambda creds: FakeSpreadsheet())
 
     details = {
+        "auth_timestamp": "2026-08-25 10:00:00",
         "session_id": "sess-456",
         "session_start": "2026-08-25 11:00:00",
         "session_duration_min": 7.0,
+        "source_app": "Frankenstein",
+        "rep_name": "Steven Beltran",
+        "rep_email": "steven.beltran@brincdrones.com",
         "data_source": "simulation",
         "population": 1000,
         "area_sq_mi": 12.0,
         "total_calls": 50,
+        "total_annual_calls": 50,
         "city_calls": 50,
         "modeled_calls": 45,
         "daily_calls": 1,
+        "lat": 38.6,
+        "lon": -90.2,
+        "active_stations": 3,
+        "total_stations": 7,
+        "responder_stations": 1,
+        "guardian_stations": 2,
+        "call_coverage_pct": 66.7,
+        "land_coverage_pct": 42.1,
+        "station_count": 7,
         "fleet_capex": 1000000,
         "annual_savings": 125000,
         "break_even": "8.0 MONTHS",
@@ -125,9 +140,20 @@ def test_log_to_sheets_uses_fallback_sheet_id_when_secret_missing(monkeypatch):
     )
 
     assert captured["sheet_id"] == notifications.DEFAULT_EXPORT_SHEET_ID
-    assert captured["row"][0] == "Frankenstein"
-    assert captured["row"][5] == "HTML"
-    assert captured["row"][9] == "Richland County"
+    assert captured["worksheets"][0] == "Reports"
+    assert captured["row"][1] == "steven.beltran@brincdrones.com"
+    assert captured["row"][2] == "Steven Beltran"
+    assert captured["row"][3] == "REPORT"
+    assert captured["row"][4] == "Frankenstein"
+    assert captured["row"][5] == "Richland County"
+    assert captured["row"][9] == "2026-08-25 10:00:00"
+    assert captured["row"][10] == "sess-456"
+    assert captured["row"][12] == "Steven Beltran"
+    assert captured["row"][13] == "steven.beltran@brincdrones.com"
+    assert captured["row"][15] == 50
+    assert captured["row"][19] == 3
+    assert captured["row"][20] == 7
+    assert captured["row"][-1] == "HTML"
 
 
 def test_log_login_to_sheets_records_source_app_and_run_location(monkeypatch):
@@ -172,22 +198,32 @@ def test_log_login_to_sheets_records_source_app_and_run_location(monkeypatch):
         state="MO",
         lat=39.0997,
         lon=-94.5786,
+        details={
+            "auth_timestamp": "2026-08-25 09:59:11",
+            "source_app": "beta-optimizer",
+            "session_id": "sess-789",
+            "session_start": "2026-08-25 09:45:00",
+            "rep_name": "Steven Beltran",
+            "rep_email": "steven.beltran@brincdrones.com",
+            "population": 12345,
+            "total_annual_calls": 678,
+            "data_source": "simulation",
+            "sim_or_upload": "simulation",
+            "total_calls": 678,
+            "active_stations": 4,
+            "total_stations": 8,
+            "responder_stations": 2,
+            "guardian_stations": 2,
+            "call_coverage_pct": 66.7,
+            "land_coverage_pct": 42.0,
+            "station_count": 8,
+        },
     )
 
     assert captured["worksheets"][0] == "Logins"
     assert "Users" in captured["worksheets"]
-    assert captured["header_range"] == "A1:I1"
-    assert captured["headers"] == [
-        "Timestamp",
-        "Email",
-        "Name",
-        "Event",
-        "Source App",
-        "City",
-        "State",
-        "Latitude",
-        "Longitude",
-    ]
+    assert captured["header_range"] == "A1:Z1"
+    assert captured["headers"] == notifications.LOGIN_HEADERS
     assert captured["row"][1] == "steven.beltran@brincdrones.com"
     assert captured["row"][2] == "Steven Beltran"
     assert captured["row"][3] == "LOGIN"
@@ -196,3 +232,10 @@ def test_log_login_to_sheets_records_source_app_and_run_location(monkeypatch):
     assert captured["row"][6] == "MO"
     assert captured["row"][7] == 39.0997
     assert captured["row"][8] == -94.5786
+    assert captured["row"][9] == "2026-08-25 09:59:11"
+    assert captured["row"][10] == "sess-789"
+    assert captured["row"][12] == "Steven Beltran"
+    assert captured["row"][13] == "steven.beltran@brincdrones.com"
+    assert captured["row"][15] == 678
+    assert captured["row"][19] == 4
+    assert captured["row"][20] == 8

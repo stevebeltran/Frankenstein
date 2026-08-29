@@ -5,6 +5,7 @@ Email and Google Sheets notification system for BRINC app.
 import datetime
 import json
 import logging
+import os
 import smtplib
 import html
 import re
@@ -115,7 +116,7 @@ CRASH_REPORT_HEADERS = [
     "Traceback",
 ]
 
-LOGIN_HEADERS = [
+LEGACY_LOGIN_HEADERS = [
     "Timestamp",
     "Email",
     "Name",
@@ -125,6 +126,32 @@ LOGIN_HEADERS = [
     "State",
     "Latitude",
     "Longitude",
+]
+
+SESSION_SNAPSHOT_HEADERS = [
+    "Auth Timestamp",
+    "Session ID",
+    "Session Start",
+    "BRINC Rep Name",
+    "BRINC Rep Email",
+    "Population",
+    "Total Annual Calls",
+    "Data Source",
+    "Sim or Upload",
+    "Total Calls",
+    "Active Stations",
+    "Total Stations",
+    "Responder Stations",
+    "Guardian Stations",
+    "Call Coverage %",
+    "Land Coverage %",
+    "Station Count",
+]
+
+LOGIN_HEADERS = LEGACY_LOGIN_HEADERS + SESSION_SNAPSHOT_HEADERS
+
+REPORT_HEADERS = LEGACY_LOGIN_HEADERS + SESSION_SNAPSHOT_HEADERS + [
+    "File Type",
 ]
 
 _LOGIN_WRITE_LOCK = threading.RLock()
@@ -628,12 +655,11 @@ def _notify_crash_email_html_only_legacy(step, error_message, traceback_text, de
         )
 
 
-def _ensure_sheet_headers(sheet):
-    """Best-effort header sync for the main export log worksheet."""
+def _ensure_sheet_headers(sheet, desired_headers):
+    """Best-effort header sync for a worksheet."""
     try:
         first_row = sheet.row_values(1)
         current_headers = [value.strip() if isinstance(value, str) else value for value in first_row]
-        desired_headers = EXPORT_HEADERS[:]
         if current_headers == desired_headers:
             return
         target_len = max(len(current_headers), len(desired_headers))
@@ -642,6 +668,78 @@ def _ensure_sheet_headers(sheet):
         sheet.update(f"A1:{end_col}1", [padded_headers])
     except Exception:
         pass
+
+
+def _build_snapshot_row(
+    *,
+    timestamp,
+    email,
+    name,
+    event,
+    city,
+    state,
+    lat,
+    lon,
+    details=None,
+    file_type="",
+):
+    """Build the session snapshot row shared by Logins and Reports."""
+    d = details or {}
+    try:
+        source_app = d.get("source_app", "") or st.secrets.get("SOURCE_APP", "") or Path(__file__).resolve().parent.parent.name
+    except Exception:
+        source_app = ""
+    auth_timestamp = d.get("auth_timestamp", "")
+    session_id = d.get("session_id", "")
+    session_start = d.get("session_start", "")
+    rep_name = d.get("rep_name", name)
+    rep_email = d.get("rep_email", email)
+    population = d.get("population", "")
+    total_annual_calls = d.get("total_annual_calls", d.get("total_calls", ""))
+    data_source = d.get("data_source", "")
+    sim_or_upload = d.get("sim_or_upload", data_source)
+    total_calls = d.get("total_calls", "")
+    active_stations = d.get("active_stations", "")
+    total_stations = d.get("total_stations", "")
+    responder_stations = d.get("responder_stations", "")
+    guardian_stations = d.get("guardian_stations", "")
+    call_coverage_pct = d.get("call_coverage_pct", d.get("call_coverage", ""))
+    land_coverage_pct = d.get("land_coverage_pct", d.get("area_covered_pct", ""))
+    station_count = d.get("station_count", "")
+
+    row = [
+        timestamp,
+        email,
+        name,
+        event,
+        source_app,
+        city,
+        state,
+        lat,
+        lon,
+    ]
+    row.extend([
+        auth_timestamp,
+        session_id,
+        session_start,
+        rep_name,
+        rep_email,
+        population,
+        total_annual_calls,
+        data_source,
+        sim_or_upload,
+        total_calls,
+        active_stations,
+        total_stations,
+        responder_stations,
+        guardian_stations,
+        call_coverage_pct,
+        land_coverage_pct,
+        station_count,
+    ])
+    if file_type != "":
+        row.append(file_type)
+    return row
 
 
 USER_HEADERS = [
@@ -732,7 +830,7 @@ def _upsert_user(spreadsheet, email, name, *, increment_logins=False, increment_
 
 
 def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, email, details=None):
-    """Log deployment to Google Sheets. MAP_BUILD events go to Sessions sheet; all others to sheet1."""
+    """Log deployment to Google Sheets. MAP_BUILD events go to Sessions; finalized exports go to Reports."""
     try:
         sheet_id = _get_main_sheet_id()
         creds_dict = st.secrets.get("gcp_service_account", {})
@@ -771,9 +869,46 @@ def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, emai
             ])
             return
 
-        sheet = spreadsheet.sheet1
-        _ensure_sheet_headers(sheet)
-        row = _build_sheets_row(city, state, file_type, k_resp, k_guard, coverage, name, email, details)
+        try:
+            sheet = spreadsheet.worksheet("Reports")
+        except gspread.exceptions.WorksheetNotFound:
+            sheet = spreadsheet.add_worksheet(title="Reports", rows=1000, cols=len(REPORT_HEADERS))
+            sheet.append_row(REPORT_HEADERS)
+
+        _ensure_sheet_headers(sheet, REPORT_HEADERS)
+        d = details or {}
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        row = _build_snapshot_row(
+            timestamp=timestamp,
+            email=email,
+            name=name,
+            event="REPORT",
+            city=city,
+            state=state,
+            lat=d.get("lat", ""),
+            lon=d.get("lon", ""),
+            details={
+                **d,
+                "source_app": d.get("source_app", "") or st.secrets.get("SOURCE_APP", "") or Path(__file__).resolve().parent.parent.name,
+                "session_id": d.get("session_id", ""),
+                "session_start": d.get("session_start", ""),
+                "rep_name": d.get("rep_name", name),
+                "rep_email": d.get("rep_email", email),
+                "population": d.get("population", ""),
+                "total_annual_calls": d.get("total_annual_calls", d.get("total_calls", "")),
+                "data_source": d.get("data_source", ""),
+                "sim_or_upload": d.get("sim_or_upload", d.get("data_source", "")),
+                "total_calls": d.get("total_calls", ""),
+                "active_stations": d.get("active_stations", ""),
+                "total_stations": d.get("total_stations", ""),
+                "responder_stations": d.get("responder_stations", ""),
+                "guardian_stations": d.get("guardian_stations", ""),
+                "call_coverage_pct": d.get("call_coverage_pct", d.get("call_coverage", coverage)),
+                "land_coverage_pct": d.get("land_coverage_pct", d.get("area_covered_pct", "")),
+                "station_count": d.get("station_count", ""),
+            },
+            file_type=file_type,
+        )
         sheet.append_row(row)
         d = details or {}
         _upsert_user(spreadsheet, email, name,
@@ -868,8 +1003,8 @@ def _ensure_login_headers(sheet):
         pass
 
 
-def _log_login_to_sheets(email, name, city="", state="", lat="", lon=""):
-    """Log user login to Google Sheets (separate LOGIN sheet)."""
+def _log_login_to_sheets(email, name, city="", state="", lat="", lon="", details=None):
+    """Log the loaded session snapshot to Google Sheets (separate LOGIN sheet)."""
     try:
         normalized_email = str(email or "").strip().lower()
         if not normalized_email:
@@ -894,21 +1029,21 @@ def _log_login_to_sheets(email, name, city="", state="", lat="", lon=""):
                 sheet = spreadsheet.add_worksheet(title="Logins", rows=1000, cols=max(10, len(LOGIN_HEADERS)))
                 sheet.append_row(LOGIN_HEADERS)
 
-            _ensure_login_headers(sheet)
+            _ensure_sheet_headers(sheet, LOGIN_HEADERS)
 
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            source_app = st.secrets.get("SOURCE_APP", "") or Path(__file__).resolve().parent.parent.name
-            sheet.append_row([
-                timestamp,
-                email,
-                name,
-                "LOGIN",
-                source_app,
-                city,
-                state,
-                lat,
-                lon,
-            ])
+            row = _build_snapshot_row(
+                timestamp=timestamp,
+                email=email,
+                name=name,
+                event="LOGIN",
+                city=city,
+                state=state,
+                lat=lat,
+                lon=lon,
+                details=details,
+            )
+            sheet.append_row(row)
             _upsert_user(spreadsheet, email, name, increment_logins=True)
             _LOGIN_WRITE_RECENT[normalized_email] = datetime.datetime.now(datetime.timezone.utc)
     except:

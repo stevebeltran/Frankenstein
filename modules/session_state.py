@@ -28,6 +28,7 @@ DEFAULTS = {
     "trigger_sim": False,
     "city_count": 1,
     "brinc_user": "",
+    "auth_timestamp": "",
     "session_start": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     "session_id": str(uuid.uuid4())[:8],
     "public_report_id": "",

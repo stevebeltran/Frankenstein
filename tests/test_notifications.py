@@ -23,6 +23,7 @@ def test_build_sheets_row_includes_html_export_metrics(monkeypatch):
         "avg_response_min": 1.9,
         "avg_time_saved_min": 2.7,
         "area_covered_pct": 74.2,
+        "contract_value": 4200000,
         "report_id": "report-abc",
         "active_drones": [
             {"type": "RESPONDER"},
@@ -50,6 +51,7 @@ def test_build_sheets_row_includes_html_export_metrics(monkeypatch):
     assert row_map["Total Fleet Units"] == 3
     assert row_map["Fleet CapEx ($)"] == 2500000
     assert row_map["Annual Savings ($)"] == 350000
+    assert row_map["Contract Value ($)"] == 4200000
     assert row_map["Break Even"] == "7.1 MONTHS"
     assert row_map["Call Coverage (%)"] == 88.5
     assert row_map["Average Response (min)"] == 1.9
@@ -126,3 +128,71 @@ def test_log_to_sheets_uses_fallback_sheet_id_when_secret_missing(monkeypatch):
     assert captured["row"][0] == "Frankenstein"
     assert captured["row"][5] == "HTML"
     assert captured["row"][9] == "Richland County"
+
+
+def test_log_login_to_sheets_records_source_app_and_run_location(monkeypatch):
+    monkeypatch.setattr(
+        notifications.st,
+        "secrets",
+        {"SOURCE_APP": "beta-optimizer", "gcp_service_account": {"project_id": "demo"}},
+        raising=False,
+    )
+
+    captured = {}
+
+    class FakeSheet:
+        def row_values(self, row):
+            return ["Timestamp", "Email", "Name", "Event"] if row == 1 else []
+
+        def update(self, cell_range, values):
+            captured["header_range"] = cell_range
+            captured["headers"] = values[0]
+
+        def append_row(self, row):
+            captured["row"] = row
+
+    class FakeSpreadsheet:
+        def open_by_key(self, sheet_id):
+            captured["sheet_id"] = sheet_id
+            return self
+
+        def worksheet(self, name):
+            captured.setdefault("worksheets", []).append(name)
+            return FakeSheet()
+
+    notifications._LOGIN_WRITE_RECENT.clear()
+    monkeypatch.setattr(notifications, "_should_skip_login_write", lambda email: False)
+    monkeypatch.setattr(notifications.Credentials, "from_service_account_info", lambda info, scopes=None: object())
+    monkeypatch.setattr(notifications.gspread, "authorize", lambda creds: FakeSpreadsheet())
+
+    notifications._log_login_to_sheets(
+        "steven.beltran@brincdrones.com",
+        "Steven Beltran",
+        city="Kansas City",
+        state="MO",
+        lat=39.0997,
+        lon=-94.5786,
+    )
+
+    assert captured["worksheets"][0] == "Logins"
+    assert "Users" in captured["worksheets"]
+    assert captured["header_range"] == "A1:I1"
+    assert captured["headers"] == [
+        "Timestamp",
+        "Email",
+        "Name",
+        "Event",
+        "Source App",
+        "City",
+        "State",
+        "Latitude",
+        "Longitude",
+    ]
+    assert captured["row"][1] == "steven.beltran@brincdrones.com"
+    assert captured["row"][2] == "Steven Beltran"
+    assert captured["row"][3] == "LOGIN"
+    assert captured["row"][4] == "beta-optimizer"
+    assert captured["row"][5] == "Kansas City"
+    assert captured["row"][6] == "MO"
+    assert captured["row"][7] == 39.0997
+    assert captured["row"][8] == -94.5786

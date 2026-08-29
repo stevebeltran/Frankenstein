@@ -53,6 +53,7 @@ EXPORT_HEADERS = [
     "Guardian Stations",
     "Total Fleet Units",
     "Fleet CapEx ($)",
+    "Contract Value ($)",
     "Annual Savings ($)",
     "Break Even",
     "Call Coverage (%)",
@@ -112,6 +113,18 @@ CRASH_REPORT_HEADERS = [
     "Crash Report Path",
     "Uploaded Files",
     "Traceback",
+]
+
+LOGIN_HEADERS = [
+    "Timestamp",
+    "Email",
+    "Name",
+    "Event",
+    "Source App",
+    "City",
+    "State",
+    "Latitude",
+    "Longitude",
 ]
 
 _LOGIN_WRITE_LOCK = threading.RLock()
@@ -351,6 +364,7 @@ def _build_sheets_row(city, state, event_type, k_resp, k_guard, coverage, name, 
         guardian_count,
         total_fleet_units,
         d.get('fleet_capex', ''),
+        d.get('contract_value', ''),
         d.get('annual_savings', ''),
         d.get('break_even', ''),
         d.get('call_coverage', coverage),
@@ -838,7 +852,23 @@ def _should_skip_login_write(email):
         return False
 
 
-def _log_login_to_sheets(email, name):
+def _ensure_login_headers(sheet):
+    """Best-effort header sync for the login worksheet."""
+    try:
+        first_row = sheet.row_values(1)
+        current_headers = [value.strip() if isinstance(value, str) else value for value in first_row]
+        desired_headers = LOGIN_HEADERS[:]
+        if current_headers == desired_headers:
+            return
+        target_len = max(len(current_headers), len(desired_headers))
+        padded_headers = desired_headers + [""] * (target_len - len(desired_headers))
+        end_col = _sheet_col_label(target_len)
+        sheet.update(f"A1:{end_col}1", [padded_headers])
+    except Exception:
+        pass
+
+
+def _log_login_to_sheets(email, name, city="", state="", lat="", lon=""):
     """Log user login to Google Sheets (separate LOGIN sheet)."""
     try:
         normalized_email = str(email or "").strip().lower()
@@ -861,11 +891,24 @@ def _log_login_to_sheets(email, name):
             try:
                 sheet = spreadsheet.worksheet("Logins")
             except gspread.exceptions.WorksheetNotFound:
-                sheet = spreadsheet.add_worksheet(title="Logins", rows=1000, cols=10)
-                sheet.append_row(["Timestamp", "Email", "Name", "Event"])
+                sheet = spreadsheet.add_worksheet(title="Logins", rows=1000, cols=max(10, len(LOGIN_HEADERS)))
+                sheet.append_row(LOGIN_HEADERS)
+
+            _ensure_login_headers(sheet)
 
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            sheet.append_row([timestamp, email, name, "LOGIN"])
+            source_app = st.secrets.get("SOURCE_APP", "") or Path(__file__).resolve().parent.parent.name
+            sheet.append_row([
+                timestamp,
+                email,
+                name,
+                "LOGIN",
+                source_app,
+                city,
+                state,
+                lat,
+                lon,
+            ])
             _upsert_user(spreadsheet, email, name, increment_logins=True)
             _LOGIN_WRITE_RECENT[normalized_email] = datetime.datetime.now(datetime.timezone.utc)
     except:

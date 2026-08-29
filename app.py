@@ -4061,10 +4061,7 @@ try:
             _prefix = _authed_email.split("@")[0]
             st.session_state['brinc_user'] = _prefix
             st.session_state['_oauth_logged'] = True
-            try:
-                _log_login_to_sheets(_authed_email, _authed_name)
-            except Exception:
-                pass
+            st.session_state['_pending_login_sheet_log'] = True
 
 except Exception:
     # Fail CLOSED: if auth is configured, never fall through to the app
@@ -7308,6 +7305,21 @@ body{{background:transparent;overflow:hidden}}
         r_resp_est = st.session_state.get('r_resp', 2.0)
         r_guard_est = st.session_state.get('r_guard', 8.0)
         df_curve = pd.DataFrame()
+
+        if st.session_state.pop('_pending_login_sheet_log', False) and not st.session_state.get('_login_sheet_logged', False):
+            try:
+                _log_login_to_sheets(
+                    st.session_state.get('google_user_email', '') or _authed_email,
+                    st.session_state.get('google_user_name', '') or _authed_name,
+                    city=str(st.session_state.get('active_city', '') or '').strip(),
+                    state=str(st.session_state.get('active_state', '') or '').strip().upper(),
+                    lat=center_lat,
+                    lon=center_lon,
+                )
+                st.session_state['_login_sheet_logged'] = True
+            except Exception:
+                pass
+
         _custom_station_state = manage_custom_stations(
             st,
             st.session_state,

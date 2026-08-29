@@ -6,9 +6,13 @@ import pandas as pd
 
 import numpy as np
 
-import json, re, math
+import json, re, math, io, datetime
 
 import simplekml
+
+from PIL import Image, ImageDraw, ImageFont
+
+from pathlib import Path
 
 from shapely.geometry import Polygon
 
@@ -3147,6 +3151,310 @@ def to_kml_color(hex_str):
 
 
 
+
+
+_SUMMARY_PDF_DPI = 150
+
+
+def _summary_pdf_wrap(draw, text, font, max_width_px):
+
+    """Greedy word-wrap `text` to fit `max_width_px` at the given font, measured in pixels."""
+
+    words = text.split()
+
+    if not words:
+
+        return []
+
+    lines = []
+
+    current = words[0]
+
+    for word in words[1:]:
+
+        trial = f"{current} {word}"
+
+        if draw.textlength(trial, font=font) <= max_width_px:
+
+            current = trial
+
+        else:
+
+            lines.append(current)
+
+            current = word
+
+    lines.append(current)
+
+    return lines
+
+
+def _summary_pdf_logo(logo_path, height_px):
+
+    """Load the BRINC wordmark and recolor it white for the dark summary page. Returns None on any failure."""
+
+    try:
+
+        logo = Image.open(logo_path).convert("RGBA")
+
+    except Exception:
+
+        return None
+
+    alpha = logo.split()[-1]
+
+    white_logo = Image.new("RGBA", logo.size, (255, 255, 255, 0))
+
+    white_logo.putalpha(alpha)
+
+    scale = height_px / logo.height
+
+    width_px = max(1, round(logo.width * scale))
+
+    return white_logo.resize((width_px, height_px), Image.LANCZOS)
+
+
+def build_coverage_summary_pdf(
+    jurisdiction, state_abbr, population, total_calls, calls_covered_pct,
+    land_covered_pct, land_sq_mi, total_sq_mi, responder_count, guardian_count,
+    fleet_capex, annual_savings, break_even_text, map_fig=None, prepared_by=None,
+    logo_path=None,
+):
+
+    """Render the 1-page BRINC coverage summary as a real PDF file.
+
+    Pillow-drawn raster page (US Letter, `_SUMMARY_PDF_DPI` dpi) rather than a vector
+    PDF — no reportlab/fpdf dependency, matches the dark BRINC branding used across
+    the app. Mirrors the DFR optimizer's 1-page summary export: header, coverage map
+    snapshot, 2x4 stat grid, cost line, footer.
+    """
+
+    dpi = _SUMMARY_PDF_DPI
+
+    def px(inches):
+
+        return round(inches * dpi)
+
+    page_w, page_h, margin = px(8.5), px(11.0), px(0.5)
+
+    content_w = page_w - margin * 2
+
+    ink, cyan, gold, green = (10, 10, 15), (0, 210, 255), (255, 215, 0), (34, 197, 94)
+
+    white, gray, muted = (255, 255, 255), (138, 138, 146), (168, 154, 144)
+
+    img = Image.new("RGB", (page_w, page_h), ink)
+
+    draw = ImageDraw.Draw(img)
+
+    font_eyebrow = ImageFont.load_default(size=px(9 / 72))
+
+    font_headline = ImageFont.load_default(size=px(28 / 72))
+
+    font_sub = ImageFont.load_default(size=px(10 / 72))
+
+    font_cell_label = ImageFont.load_default(size=px(7.5 / 72))
+
+    font_cell_value = ImageFont.load_default(size=px(15 / 72))
+
+    font_cell_sub = ImageFont.load_default(size=px(7.5 / 72))
+
+    font_cost_label = ImageFont.load_default(size=px(9 / 72))
+
+    font_cost_sub = ImageFont.load_default(size=px(7.5 / 72))
+
+    font_disclaimer = ImageFont.load_default(size=px(8 / 72))
+
+    # ---- header ----
+
+    y = margin + px(0.15)
+
+    logo_path = logo_path or (Path(__file__).resolve().parent.parent / "logo.png")
+
+    logo_img = _summary_pdf_logo(logo_path, px(0.32))
+
+    if logo_img is not None:
+
+        img.paste(logo_img, (margin, y), logo_img)
+
+    else:
+
+        draw.text((margin, y), "BRINC", font=font_headline, fill=white)
+
+    y += px(0.5)
+
+    draw.text((margin, y), "DRONE AS A FIRST RESPONDER · COVERAGE PLAN SUMMARY", font=font_eyebrow, fill=cyan)
+
+    y += px(0.34)
+
+    headline = f"{jurisdiction}, {state_abbr}" if state_abbr else str(jurisdiction)
+
+    draw.text((margin, y), headline, font=font_headline, fill=white)
+
+    y += px(0.44)
+
+    generated_at = datetime.datetime.now().strftime("%m/%d/%Y, %I:%M:%S %p")
+
+    draw.text((margin, y), f"{total_calls:,} calls analyzed · generated {generated_at}", font=font_sub, fill=muted)
+
+    # ---- map ----
+
+    map_top = y + px(0.3)
+
+    map_h = px(4.0)
+
+    map_bottom = map_top + map_h
+
+    draw.rectangle([margin, map_top, margin + content_w, map_bottom], outline=white, width=2)
+
+    map_drawn = False
+
+    if map_fig is not None:
+
+        try:
+
+            png_bytes = map_fig.to_image(format="png", width=content_w * 2, height=map_h * 2, scale=1)
+
+            map_img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+
+            scale = min(content_w / map_img.width, map_h / map_img.height)
+
+            draw_w, draw_h = round(map_img.width * scale), round(map_img.height * scale)
+
+            map_img = map_img.resize((draw_w, draw_h), Image.LANCZOS)
+
+            img.paste(map_img, (margin + (content_w - draw_w) // 2, map_top + (map_h - draw_h) // 2))
+
+            map_drawn = True
+
+        except Exception:
+
+            map_drawn = False
+
+    if not map_drawn:
+
+        draw.rectangle([margin + 2, map_top + 2, margin + content_w - 2, map_bottom - 2], fill=(30, 30, 36))
+
+        msg = "Map snapshot unavailable at export time"
+
+        msg_w = draw.textlength(msg, font=font_sub)
+
+        draw.text((margin + (content_w - msg_w) / 2, map_top + map_h / 2 - px(0.08)), msg, font=font_sub, fill=gray)
+
+    # ---- stats row ----
+
+    def fmt_num(n):
+
+        # Plain "N/A", not an em dash — the Pillow default font has no glyph for it.
+        return f"{n:,.0f}" if n else "N/A"
+
+    def fmt_pct(n):
+
+        return f"{n:.1f}%" if n is not None else "N/A"
+
+    def fmt_usd(n):
+
+        return f"${n:,.0f}" if n is not None else "N/A"
+
+    cost_sub = f"{responder_count} responder, {guardian_count} guardian"
+
+    if annual_savings:
+
+        cost_sub += f" · ${annual_savings:,.0f}/yr savings, break-even {break_even_text}"
+
+    cells = [
+        ("ACTIVE STATIONS", str(responder_count + guardian_count), "Deployed responder + guardian units", white),
+        ("RESPONDER UNITS", str(responder_count), "Active responder stations", cyan),
+        ("GUARDIAN UNITS", str(guardian_count), "Active guardian stations", gold),
+        ("POPULATION", fmt_num(population), "Jurisdiction resident population", white),
+        ("CALLS ANALYZED", fmt_num(total_calls), "Inside the jurisdiction boundary", white),
+        ("CALLS COVERED", fmt_num(round(total_calls * calls_covered_pct / 100.0)), "Within any active ring", green),
+        ("CALL COVERAGE", fmt_pct(calls_covered_pct), "Share of analyzed calls", cyan),
+        ("LAND COVERAGE", fmt_pct(land_covered_pct), f"{land_sq_mi:,.2f} sq mi of {total_sq_mi:,.2f} sq mi", gold),
+    ]
+
+    stats_top = map_bottom + px(0.18)
+
+    stats_cols, stats_rows = 4, 2
+
+    row_h = px(0.88)
+
+    stats_h = row_h * stats_rows
+
+    col_w = content_w / stats_cols
+
+    draw.rectangle([margin, stats_top, margin + content_w, stats_top + stats_h], outline=(70, 70, 78), width=1)
+
+    for i, (label, value, sub, color) in enumerate(cells):
+
+        row, col = divmod(i, stats_cols)
+
+        cx = margin + col_w * col
+
+        cy = stats_top + row_h * row
+
+        if col > 0:
+
+            draw.line([(cx, cy), (cx, cy + row_h)], fill=(70, 70, 78), width=1)
+
+        if row > 0:
+
+            draw.line([(margin, cy), (margin + content_w, cy)], fill=(70, 70, 78), width=1)
+
+        tx = cx + px(0.12)
+
+        draw.text((tx, cy + px(0.14)), label, font=font_cell_label, fill=gray)
+
+        draw.text((tx, cy + px(0.32)), value, font=font_cell_value, fill=color)
+
+        for j, line in enumerate(_summary_pdf_wrap(draw, sub, font_cell_sub, col_w - px(0.22))[:3]):
+
+            draw.text((tx, cy + px(0.58) + j * px(0.13)), line, font=font_cell_sub, fill=muted)
+
+    # ---- footer ----
+
+    cost_top = stats_top + stats_h + px(0.14)
+
+    cost_label = f"Fleet CapEx {fmt_usd(fleet_capex)}"
+
+    draw.text((margin, cost_top), cost_label, font=font_cost_label, fill=gold)
+
+    cost_label_w = draw.textlength(cost_label, font=font_cost_label)
+
+    draw.text((margin + cost_label_w + px(0.15), cost_top + px(0.02)), cost_sub, font=font_cost_sub, fill=muted)
+
+    foot_top = cost_top + px(0.35)
+
+    draw.line([(margin, foot_top), (margin + content_w, foot_top)], fill=(60, 60, 68), width=1)
+
+    disclaimer = (
+        "Figures are computed from the loaded CAD dataset and the coverage assumptions configured at export "
+        "time. Call coverage is the union across all active station rings."
+    )
+
+    disc_lines = _summary_pdf_wrap(draw, disclaimer, font_disclaimer, content_w)
+
+    for j, line in enumerate(disc_lines):
+
+        draw.text((margin, foot_top + px(0.18) + j * px(0.16)), line, font=font_disclaimer, fill=gray)
+
+    attrib_top = foot_top + px(0.18) + len(disc_lines) * px(0.16) + px(0.12)
+
+    if prepared_by:
+
+        draw.text((margin, attrib_top), f"Prepared by {prepared_by}", font=font_disclaimer, fill=gray)
+
+    jur_text = str(jurisdiction)
+
+    jur_w = draw.textlength(jur_text, font=font_disclaimer)
+
+    draw.text((margin + content_w - jur_w, attrib_top), jur_text, font=font_disclaimer, fill=gray)
+
+    buf = io.BytesIO()
+
+    img.save(buf, format="PDF", resolution=dpi)
+
+    return buf.getvalue()
 
 
 def generate_kml(active_gdf, active_drones, calls_gdf):

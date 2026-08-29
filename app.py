@@ -9112,6 +9112,11 @@ body{{background:transparent;overflow:hidden}}
                             font=dict(size=12, color=legend_text), itemclick="toggle"),
                 **_layout_extra)
 
+            # Stashed here (not read back out of the local `fig` name later) so the
+            # 1-page coverage summary PDF export can grab a snapshot of the fully
+            # configured map regardless of which branch below actually renders it.
+            st.session_state['_coverage_map_fig'] = fig
+
             if _pin_drop_active:
                 fig.add_annotation(
                     text=(
@@ -11277,6 +11282,7 @@ body{{background:transparent;overflow:hidden}}
         _report_notice_slot = st.sidebar.empty()
         _brinc_export_slot = st.sidebar.empty()
         _html_export_slot = st.sidebar.empty()
+        _summary_pdf_export_slot = st.sidebar.empty()
         _fernandina_export_slot = st.sidebar.empty()
         _kml_export_slot = st.sidebar.empty()
 
@@ -11294,6 +11300,17 @@ body{{background:transparent;overflow:hidden}}
             key="html_export_wait_btn",
             help=(
                 "Deploy at least one drone to generate the executive summary."
+                if fleet_capex <= 0
+                else _report_wait_note
+            ),
+        )
+        _summary_pdf_export_slot.button(
+            "🧾 Coverage Summary PDF",
+            disabled=True,
+            width="stretch",
+            key="summary_pdf_export_wait_btn",
+            help=(
+                "Deploy at least one drone to generate the coverage summary."
                 if fleet_capex <= 0
                 else _report_wait_note
             ),
@@ -13704,6 +13721,38 @@ body{{background:transparent;overflow:hidden}}
             f"Reports ready in {st.session_state['report_build_seconds']:.1f}s. The download buttons below are active."
         )
 
+        def _log_export_completion(file_type, responder_count, guardian_count):
+            """Record export completion without letting email failure suppress the sheet write."""
+            try:
+                _log_to_sheets(
+                    st.session_state.get('active_city', ''),
+                    st.session_state.get('active_state', ''),
+                    file_type,
+                    responder_count,
+                    guardian_count,
+                    calls_covered_perc,
+                    prop_name,
+                    prop_email,
+                    details=export_details,
+                )
+            except Exception as _sheet_exc:
+                print(f"[BRINC] Failed to log {file_type} export to Sheets: {_sheet_exc}")
+
+            try:
+                _notify_email(
+                    st.session_state.get('active_city', ''),
+                    st.session_state.get('active_state', ''),
+                    file_type,
+                    responder_count,
+                    guardian_count,
+                    calls_covered_perc,
+                    prop_name,
+                    prop_email,
+                    details=export_details,
+                )
+            except Exception as _email_exc:
+                print(f"[BRINC] Failed to send {file_type} export email: {_email_exc}")
+
         # 1. Save Deployment Plan (.brinc) — always available
         _brinc_payload = export_dict if fleet_capex > 0 else {
             **export_dict,
@@ -13723,12 +13772,7 @@ body{{background:transparent;overflow:hidden}}
                 guardian_count=actual_k_guardian,
             )
             sentry_metric("count", "export.downloaded", 1, export_type="brinc_plan")
-            _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                          "BRINC", actual_k_responder, actual_k_guardian, calls_covered_perc,
-                          prop_name, prop_email, details=export_details)
-            _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                           "BRINC", actual_k_responder, actual_k_guardian, calls_covered_perc,
-                           prop_name, prop_email, details=export_details)
+            _log_export_completion("BRINC", actual_k_responder, actual_k_guardian)
         # 2. Executive Summary / proposal HTML export
         _export_html_ready = isinstance(export_html, str) and export_html.lstrip().lower().startswith("<!doctype html")
         if fleet_capex > 0:
@@ -13748,12 +13792,7 @@ body{{background:transparent;overflow:hidden}}
                 sentry_metric("count", "export.downloaded", 1, export_type="html_summary")
                 st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['HTML']
                 st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
-                _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                              "HTML", k_responder, k_guardian, calls_covered_perc,
-                              prop_name, prop_email, details=export_details)
-                _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                               "HTML", k_responder, k_guardian, calls_covered_perc,
-                               prop_name, prop_email, details=export_details)
+                _log_export_completion("HTML", k_responder, k_guardian)
             elif not _export_html_ready:
                 _html_export_slot.button(
                     f"📄 {prop_city}, {prop_state} — Executive Summary",
@@ -13771,7 +13810,68 @@ body{{background:transparent;overflow:hidden}}
                 help="Deploy at least one drone to generate the executive summary.",
             )
 
-        # 3. Google Earth KML — only when drones are placed
+        # 3. Coverage Summary PDF — a 1-page leave-behind, same data as the
+        # Executive Summary HTML export but small enough to email or print.
+        if fleet_capex > 0:
+            try:
+                _summary_pdf_data = html_reports.build_coverage_summary_pdf(
+                    jurisdiction=prop_city,
+                    state_abbr=prop_state,
+                    population=int(st.session_state.get('estimated_pop', 0) or 0),
+                    total_calls=int(total_calls or 0),
+                    calls_covered_pct=float(calls_covered_perc or 0),
+                    land_covered_pct=float(area_covered_perc or 0),
+                    land_sq_mi=float(area_covered_perc / 100.0 * area_sq_mi) if area_sq_mi else 0.0,
+                    total_sq_mi=float(area_sq_mi or 0),
+                    responder_count=int(actual_k_responder or 0),
+                    guardian_count=int(actual_k_guardian or 0),
+                    fleet_capex=float(fleet_capex or 0),
+                    annual_savings=float(annual_savings or 0),
+                    break_even_text=break_even_text,
+                    map_fig=st.session_state.get('_coverage_map_fig'),
+                    prepared_by=prop_email,
+                )
+            except Exception as _summary_pdf_exc:
+                _summary_pdf_data = None
+                log_crash(
+                    "coverage summary PDF export",
+                    _summary_pdf_exc,
+                    "".join(traceback.format_exception(type(_summary_pdf_exc), _summary_pdf_exc, _summary_pdf_exc.__traceback__)),
+                    source_app=APP_DIR.name,
+                )
+            if _summary_pdf_data and _summary_pdf_export_slot.download_button(
+                    "🧾 Coverage Summary PDF",
+                    data=_summary_pdf_data,
+                    file_name=f"BRINC_Coverage_Summary_{_safe_city}_{_version_slug}_{_ts}.pdf",
+                    mime="application/pdf",
+                    width="stretch"):
+                sentry_breadcrumb(
+                    "Export downloaded",
+                    category="export",
+                    export_type="summary_pdf",
+                    responder_count=actual_k_responder,
+                    guardian_count=actual_k_guardian,
+                )
+                sentry_metric("count", "export.downloaded", 1, export_type="summary_pdf")
+                _log_export_completion("Summary PDF", actual_k_responder, actual_k_guardian)
+            elif not _summary_pdf_data:
+                _summary_pdf_export_slot.button(
+                    "🧾 Coverage Summary PDF",
+                    disabled=True,
+                    width="stretch",
+                    key="summary_pdf_export_failed_btn",
+                    help="Coverage summary PDF could not be generated for this run.",
+                )
+        else:
+            _summary_pdf_export_slot.button(
+                "🧾 Coverage Summary PDF",
+                disabled=True,
+                width="stretch",
+                key="summary_pdf_export_no_drones_btn",
+                help="Deploy at least one drone to generate the coverage summary.",
+            )
+
+        # 4. Google Earth KML — only when drones are placed
         _kml_data = None
         _kml_error = ""
         if active_drones:
@@ -13799,12 +13899,7 @@ body{{background:transparent;overflow:hidden}}
                 sentry_metric("count", "export.downloaded", 1, export_type="kml")
                 st.session_state['export_event_log'] = st.session_state.get('export_event_log', []) + ['KML']
                 st.session_state['export_count'] = st.session_state.get('export_count', 0) + 1
-                _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                              "KML", k_responder, k_guardian, calls_covered_perc,
-                              prop_name, prop_email, details=export_details)
-                _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
-                               "KML", k_responder, k_guardian, calls_covered_perc,
-                               prop_name, prop_email, details=export_details)
+                _log_export_completion("KML", k_responder, k_guardian)
             st.sidebar.caption(
                 "By downloading this file, you confirm your use complies with all applicable company policy and U.S. law."
             )

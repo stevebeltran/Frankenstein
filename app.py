@@ -5472,6 +5472,9 @@ def main():
                         st.session_state['df_stations'] = df_s
                         st.session_state['total_original_calls'] = int(merge_summary.get('rows_total', len(df_c_full)) or len(df_c_full))
                         st.session_state['total_modeled_calls'] = len(df_c)
+                        # Clear any stale daily-calls override (e.g. from a prior demo/simulation
+                        # run) so the slider re-derives from this newly uploaded dataset.
+                        st.session_state['inferred_daily_calls_override'] = None
 
                         with st.spinner(get_jurisdiction_message()):
                             resolve_uploaded_boundaries(
@@ -6363,6 +6366,9 @@ def main():
                         st.session_state['df_stations'] = df_s
                         st.session_state['total_original_calls'] = len(df_c_full)
                         st.session_state['total_modeled_calls'] = len(df_c)
+                        # Clear any stale daily-calls override (e.g. from a prior demo/simulation
+                        # run) so the slider re-derives from this newly uploaded dataset.
+                        st.session_state['inferred_daily_calls_override'] = None
 
                         _push_upload_log("Resolving uploaded boundaries and final session state.")
                         _mark_upload_step("resolving uploaded boundaries")
@@ -9111,11 +9117,6 @@ body{{background:transparent;overflow:hidden}}
                             bgcolor=legend_bg, bordercolor=accent_color, borderwidth=1,
                             font=dict(size=12, color=legend_text), itemclick="toggle"),
                 **_layout_extra)
-
-            # Stashed here (not read back out of the local `fig` name later) so the
-            # 1-page coverage summary PDF export can grab a snapshot of the fully
-            # configured map regardless of which branch below actually renders it.
-            st.session_state['_coverage_map_fig'] = fig
 
             if _pin_drop_active:
                 fig.add_annotation(
@@ -12429,6 +12430,35 @@ body{{background:transparent;overflow:hidden}}
                         status_note="Most recent public NOFO is historical; include only for state-level behavioral-health applicants",
                         require_state_agency=True,
                     ),
+                    _render_federal_grant_card_html(
+                        title="CDBG-DR / CDBG-MIT — Disaster Recovery & Mitigation Funding",
+                        description=(
+                            "HUD Community Development Block Grant — Disaster Recovery, and its Mitigation set-aside "
+                            "(CDBG-MIT), funds permanent public-safety infrastructure in jurisdictions tied to a "
+                            "Presidentially-declared disaster — 100% federally funded, no local match required."
+                        ),
+                        narrative=(
+                            "Framed as mitigation infrastructure positioned before the next storm, flood, or wildfire — "
+                            "not response equipment bought after one — CDBG-DR/CDBG-MIT can fund a full DFR station "
+                            "network. Pasco County, FL used $9M in CDBG-DR hurricane-relief funds (Category: Mitigation) "
+                            "to fund 22 drones and 21 rooftop docks countywide, with 100% CDBG-DR share and zero local "
+                            "match, citing rapid damage assessment, search-and-rescue support, and live situational "
+                            "awareness during floods and storms as the public-benefit case."
+                        ),
+                        status_label="Disaster-specific — verify allocation",
+                        status_tone="watch",
+                        eligibility_note=(
+                            "Only available where the state or local government holds an active CDBG-DR/CDBG-MIT "
+                            "allocation tied to a specific Presidentially-declared disaster — not a standing program "
+                            "like JAG or HSGP"
+                        ),
+                        links=[
+                            ("HUD Exchange — CDBG-DR overview", "https://www.hudexchange.info/programs/cdbg-dr/"),
+                            ("HUD Exchange — CDBG-MIT (Mitigation set-aside)", "https://www.hudexchange.info/programs/cdbg-mit/"),
+                            ("FEMA disaster declarations", "https://www.fema.gov/disaster/declarations"),
+                        ],
+                        status_note="Check your state's CDBG-DR/CDBG-MIT Action Plan for current allocation and eligible activities before citing this in a submission",
+                    ),
                 ])
                 export_html = f"""<!DOCTYPE html>
         <html lang="en"><head>
@@ -13814,6 +13844,37 @@ body{{background:transparent;overflow:hidden}}
         # Executive Summary HTML export but small enough to email or print.
         if fleet_capex > 0:
             try:
+                # Station rings + call scatter projected into the same metered CRS as
+                # city_m, so the PDF's schematic map lines up with it directly — no
+                # kaleido/Chrome round trip through the live Plotly figure.
+                _map_stations = []
+                for _idx, _radius_mi, _kind in (
+                    *[(i, resp_radius_mi, 'RESPONDER') for i in (active_resp_idx or [])],
+                    *[(i, guard_radius_mi, 'GUARDIAN') for i in (active_guard_idx or [])],
+                ):
+                    _station_pt = gpd.GeoSeries(
+                        [Point(station_metadata[_idx]['lon'], station_metadata[_idx]['lat'])],
+                        crs='EPSG:4326',
+                    ).to_crs(epsg=int(epsg_code)).iloc[0]
+                    # Same sticky per-station color the live map uses (active_color_map,
+                    # keyed the same way at line ~7678) — not a flat cyan/gold-by-kind
+                    # scheme, so two guardians that render as different colors on screen
+                    # (to stay distinguishable) render as those same two colors here.
+                    _station_color = active_color_map.get(
+                        f"{_idx}_{_kind}", "#FFD700" if _kind == "GUARDIAN" else "#00D2FF"
+                    )
+                    _map_stations.append({
+                        'x': _station_pt.x, 'y': _station_pt.y,
+                        'radius_m': _radius_mi * 1609.34, 'kind': _kind, 'color': _station_color,
+                    })
+                _map_calls_xy = []
+                if calls_in_city is not None and not calls_in_city.empty:
+                    _calls_xy_geom = calls_in_city.geometry
+                    _map_calls_xy = list(zip(
+                        _calls_xy_geom.x.to_numpy()[:3000].tolist(),
+                        _calls_xy_geom.y.to_numpy()[:3000].tolist(),
+                    ))
+
                 _summary_pdf_data = html_reports.build_coverage_summary_pdf(
                     jurisdiction=prop_city,
                     state_abbr=prop_state,
@@ -13828,7 +13889,9 @@ body{{background:transparent;overflow:hidden}}
                     fleet_capex=float(fleet_capex or 0),
                     annual_savings=float(annual_savings or 0),
                     break_even_text=break_even_text,
-                    map_fig=st.session_state.get('_coverage_map_fig'),
+                    map_boundary_geom=city_m,
+                    map_stations=_map_stations,
+                    map_calls_xy=_map_calls_xy,
                     prepared_by=prop_email,
                 )
             except Exception as _summary_pdf_exc:

@@ -3156,6 +3156,21 @@ def to_kml_color(hex_str):
 _SUMMARY_PDF_DPI = 150
 
 
+def _summary_pdf_hex_to_rgb(hex_color, fallback=(255, 255, 255)):
+
+    """Parse a "#RRGGBB" string into an (r, g, b) tuple; anything unparseable falls back."""
+
+    try:
+
+        h = hex_color.lstrip("#")
+
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+    except Exception:
+
+        return fallback
+
+
 def _summary_pdf_wrap(draw, text, font, max_width_px):
 
     """Greedy word-wrap `text` to fit `max_width_px` at the given font, measured in pixels."""
@@ -3214,11 +3229,131 @@ def _summary_pdf_logo(logo_path, height_px):
     return white_logo.resize((width_px, height_px), Image.LANCZOS)
 
 
+def _summary_pdf_schematic_map(boundary_geom, stations, calls_xy, width_px, height_px):
+
+    """Draw a schematic coverage-map panel: boundary outline + call-dot scatter + station
+    rings, straight from already-projected (meters) geometry. No basemap tiles, no browser
+    dependency (this is what keeps kaleido/Chrome off the requirements list) — just the same
+    lat/lon and radius data the live Plotly map uses, rasterized directly with Pillow.
+    """
+
+    panel = Image.new("RGBA", (width_px, height_px), (11, 14, 20, 255))
+
+    if boundary_geom is None or boundary_geom.is_empty:
+
+        return panel
+
+    minx, miny, maxx, maxy = boundary_geom.bounds
+
+    # A station's ring can extend past the jurisdiction boundary (e.g. a station
+    # near the edge with a wide radius) — widen the viewport to every ring's full
+    # extent so no station gets clipped or pushed off-panel.
+    for station in stations or []:
+
+        r = station.get("radius_m", 0) or 0
+
+        minx, maxx = min(minx, station["x"] - r), max(maxx, station["x"] + r)
+
+        miny, maxy = min(miny, station["y"] - r), max(maxy, station["y"] + r)
+
+    pad_x = (maxx - minx) * 0.06 or 1.0
+
+    pad_y = (maxy - miny) * 0.06 or 1.0
+
+    minx, maxx = minx - pad_x, maxx + pad_x
+
+    miny, maxy = miny - pad_y, maxy + pad_y
+
+    span_x, span_y = maxx - minx, maxy - miny
+
+    scale = min(width_px / span_x, height_px / span_y) if span_x and span_y else 1.0
+
+    off_x = (width_px - span_x * scale) / 2.0
+
+    off_y = (height_px - span_y * scale) / 2.0
+
+    def to_px(x, y):
+
+        # Image y grows downward; projected-geometry y grows upward — flip here.
+        return (off_x + (x - minx) * scale, off_y + (maxy - y) * scale)
+
+    draw = ImageDraw.Draw(panel, "RGBA")
+
+    def _iter_boundary_rings(geom):
+
+        geoms = geom.geoms if hasattr(geom, "geoms") else [geom]
+
+        for g in geoms:
+
+            if not g.is_empty:
+
+                yield list(g.exterior.coords)
+
+    dash_color = (255, 106, 61, 200)
+
+    for ring in _iter_boundary_rings(boundary_geom):
+
+        pts = [to_px(x, y) for x, y in ring]
+
+        for i in range(len(pts) - 1):
+
+            if i % 2 == 0:
+
+                draw.line([pts[i], pts[i + 1]], fill=dash_color, width=2)
+
+    for cx, cy in (calls_xy or []):
+
+        px_x, px_y = to_px(cx, cy)
+
+        draw.ellipse([px_x - 1.4, px_y - 1.4, px_x + 1.4, px_y + 1.4], fill=(120, 170, 255, 130))
+
+    default_ring_color = {"RESPONDER": "#00D2FF", "GUARDIAN": "#FFD700"}
+
+    # ImageDraw's fill on an RGBA image overwrites pixels outright rather than
+    # compositing — a second ring drawn straight onto `panel` would erase any
+    # ring already under it instead of blending. Each ring gets its own
+    # transparent layer, composited in with alpha_composite (real source-over
+    # blending), so overlapping rings mix/brighten like the reference design
+    # instead of the last-drawn ring hiding everything beneath it.
+    for station in stations or []:
+
+        cx, cy = to_px(station["x"], station["y"])
+
+        r = station["radius_m"] * scale
+
+        # Same hex color the live coverage map assigns this station (sticky
+        # per-station, not just cyan-for-responder/gold-for-guardian) — the
+        # PDF's rings are meant to match what's on screen exactly.
+        rgb = _summary_pdf_hex_to_rgb(
+            station.get("color") or default_ring_color.get(station.get("kind"), "#FFFFFF")
+        )
+
+        fill = (*rgb, 90)
+
+        outline = (*rgb, 230)
+
+        ring_layer = Image.new("RGBA", panel.size, (0, 0, 0, 0))
+
+        ImageDraw.Draw(ring_layer, "RGBA").ellipse([cx - r, cy - r, cx + r, cy + r], fill=fill, outline=outline, width=2)
+
+        panel = Image.alpha_composite(panel, ring_layer)
+
+    draw = ImageDraw.Draw(panel, "RGBA")
+
+    for station in stations or []:
+
+        cx, cy = to_px(station["x"], station["y"])
+
+        draw.ellipse([cx - 5, cy - 5, cx + 5, cy + 5], fill=(255, 220, 60, 255), outline=(20, 20, 24, 255), width=1)
+
+    return panel
+
+
 def build_coverage_summary_pdf(
     jurisdiction, state_abbr, population, total_calls, calls_covered_pct,
     land_covered_pct, land_sq_mi, total_sq_mi, responder_count, guardian_count,
-    fleet_capex, annual_savings, break_even_text, map_fig=None, prepared_by=None,
-    logo_path=None,
+    fleet_capex, annual_savings, break_even_text, map_boundary_geom=None,
+    map_stations=None, map_calls_xy=None, prepared_by=None, logo_path=None,
 ):
 
     """Render the 1-page BRINC coverage summary as a real PDF file.
@@ -3305,25 +3440,15 @@ def build_coverage_summary_pdf(
 
     map_bottom = map_top + map_h
 
-    draw.rectangle([margin, map_top, margin + content_w, map_bottom], outline=white, width=2)
-
     map_drawn = False
 
-    if map_fig is not None:
+    if map_boundary_geom is not None:
 
         try:
 
-            png_bytes = map_fig.to_image(format="png", width=content_w * 2, height=map_h * 2, scale=1)
+            map_panel = _summary_pdf_schematic_map(map_boundary_geom, map_stations, map_calls_xy, content_w, map_h)
 
-            map_img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
-
-            scale = min(content_w / map_img.width, map_h / map_img.height)
-
-            draw_w, draw_h = round(map_img.width * scale), round(map_img.height * scale)
-
-            map_img = map_img.resize((draw_w, draw_h), Image.LANCZOS)
-
-            img.paste(map_img, (margin + (content_w - draw_w) // 2, map_top + (map_h - draw_h) // 2))
+            img.paste(map_panel, (margin, map_top), map_panel)
 
             map_drawn = True
 
@@ -3340,6 +3465,10 @@ def build_coverage_summary_pdf(
         msg_w = draw.textlength(msg, font=font_sub)
 
         draw.text((margin + (content_w - msg_w) / 2, map_top + map_h / 2 - px(0.08)), msg, font=font_sub, fill=gray)
+
+    # Frame drawn last — the map panel above is a fully opaque paste and would
+    # otherwise cover a border drawn before it.
+    draw.rectangle([margin, map_top, margin + content_w, map_bottom], outline=white, width=2)
 
     # ---- stats row ----
 

@@ -2100,6 +2100,7 @@ def compute_station_suggestions(
             'land_pct_responder': round(resp_land_pct, 1),
             'land_pct_guardian': round(guard_land_pct, 1),
             'marginal_calls': marginal_calls,
+            'station_role': meta.get('station_role', ''),
         })
 
     rank_by = str(rank_by or 'call').strip().lower()
@@ -2435,7 +2436,10 @@ def sync_station_suggestion_modes(session_state, suggestions, k_guardian=None, k
         return synced_modes
 
     if not existing_modes and stations_uploaded:
-        synced_modes = {s['station_idx']: 'Responder' for s in suggestions}
+        synced_modes = {
+            s['station_idx']: ('Guardian' if str(s.get('station_role', '')).upper() == 'GUARDIAN' else 'Responder')
+            for s in suggestions
+        }
         for idx, mode in forced_custom_modes.items():
             synced_modes[idx] = mode
         session_state['_suggestion_sync_source'] = 'upload'

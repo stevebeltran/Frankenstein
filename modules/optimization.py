@@ -219,6 +219,7 @@ def precompute_spatial_data(df_calls, df_calls_full, df_stations_all, _city_m, e
             'centrality': 1.0 - (dist_c / max_dist),
             'raw_calls_r': raw_calls_r,
             'raw_calls_g': raw_calls_g,
+            'station_role': row.get('station_role', '') if pd.notna(row.get('station_role', '')) else '',
         })
 
     return calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls

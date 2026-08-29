@@ -5,6 +5,7 @@ import pandas as pd
 from modules.onboarding import (
     infer_simulation_targets_from_station_file,
     load_simulation_custom_stations,
+    load_station_file,
     resolve_demo_stations,
     restore_brinc_session,
 )
@@ -82,6 +83,25 @@ def test_resolve_demo_stations_reports_uploaded_station_count():
     assert warnings == []
     assert notices == ["Loaded 1 station row from uploaded stations file."]
     assert len(stations_df) == 1
+
+
+GUARDIAN_RESPONDER_STATIONS_CSV = """Station,Drone Size,Address,City,State,ZIP,Latitude,Longitude,type
+Omaha Fire Station #71 Large Drone Station,Large,20474 Laramie Rd,Elkhorn,NE,68022,41.2951755,-96.23575231,g
+Irvington Vol. Fire Dept. Small Drone Station,Small,9111 Fremont St,Omaha,NE,68122,41.3188324,-96.05513763,r
+"""
+
+
+def test_load_station_file_recognizes_guardian_responder_type_column():
+    stations_df, note = load_station_file(UploadedFile("stations.csv", GUARDIAN_RESPONDER_STATIONS_CSV))
+
+    assert note == "Loaded stations from file."
+    assert stations_df["station_role"].tolist() == ["GUARDIAN", "RESPONDER"]
+
+
+def test_load_station_file_defaults_to_blank_role_when_type_is_a_facility_label():
+    stations_df, _note = load_station_file(UploadedFile("stations.csv", STATIONS_CSV))
+
+    assert stations_df["station_role"].tolist() == [""]
 
 
 def test_restore_brinc_session_missing_responder_count_defaults_to_zero():

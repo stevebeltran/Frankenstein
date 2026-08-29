@@ -319,6 +319,39 @@ def _looks_like_station_upload_content(uploaded_file):
         return False
 
 
+_STATION_ROLE_TOKENS = {
+    'guardian': 'GUARDIAN', 'g': 'GUARDIAN',
+    'responder': 'RESPONDER', 'r': 'RESPONDER',
+}
+
+_STATION_ROLE_COLUMN_ALIASES = (
+    'station_role', 'drone_type', 'unit_type', 'fleet_type', 'role', 'mode', 'ring_type',
+)
+
+
+def _map_station_role_token(value):
+    text = str(value if value is not None else '').strip().lower()
+    return _STATION_ROLE_TOKENS.get(text, '')
+
+
+def _extract_station_role(stations_df):
+    """Recognize an initial Guardian/Responder placement hint from the upload.
+
+    Looks for a dedicated role column first (station_role, drone_type, role, ...);
+    falls back to the generic 'type' column when its values are guardian/g/responder/r
+    tokens rather than a facility label like Police/Fire. Unrecognized or missing
+    values return '' so downstream code keeps its existing default behavior.
+    """
+    role_col = next((c for c in _STATION_ROLE_COLUMN_ALIASES if c in stations_df.columns), None)
+    if role_col:
+        return stations_df[role_col].map(_map_station_role_token)
+    if 'type' in stations_df.columns:
+        candidate = stations_df['type'].map(_map_station_role_token)
+        if candidate.ne('').any():
+            return candidate
+    return pd.Series([''] * len(stations_df), index=stations_df.index)
+
+
 def _read_station_upload(uploaded_file):
     station_name = str(getattr(uploaded_file, 'name', '')).lower()
     if station_name.endswith(('.xlsx', '.xls', '.xlsm', '.xlsb')):
@@ -620,6 +653,8 @@ def load_station_file(station_file):
             counts[name] = 0
             deduped_names.append(name)
     stations_df['name'] = deduped_names
+
+    stations_df['station_role'] = _extract_station_role(stations_df)
 
     if 'type' not in stations_df.columns:
         stations_df['type'] = 'Police'

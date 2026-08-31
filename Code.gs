@@ -18,6 +18,12 @@ function doGet(e) {
       return HtmlService.createHtmlOutput("<h3>Unauthorized</h3>").setTitle("BRINC");
     }
   }
+  // Skip logging bare hits with no report data (link-preview bots, health checks,
+  // base URL loads) so they don't pollute the sheet with blank rows.
+  if (!params.report_id && !params.public_report && !params.sig) {
+    return HtmlService.createHtmlOutput("").setTitle("BRINC DFR");
+  }
+
   var queryString = String(e && e.queryString ? e.queryString : "");
   var requestUrl = String(e && e.url ? e.url : "");
 

@@ -3972,6 +3972,15 @@ try:
             """, unsafe_allow_html=True)
             st.button("Sign in with Google", on_click=st.login, args=("google",),
                       type="primary", width="content")
+            st.markdown(
+                """<div style="text-align:center;color:#5d6f89;font-size:0.72rem;
+                max-width:340px;margin:14px auto 0;line-height:1.4;">
+                By signing in, you acknowledge that your email address and
+                session activity are logged for internal security, auditing,
+                and support purposes.
+                </div>""",
+                unsafe_allow_html=True,
+            )
             st.html("""
 <script>
 (function() {

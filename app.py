@@ -6999,6 +6999,7 @@ body{{background:transparent;overflow:hidden}}
                         save_boundary_gdf,
                         fetch_census_population,
                         fetch_census_state_population,
+                        fetch_tiger_city_shapefile=fetch_tiger_city_shapefile,
                     )
                 for _msg in boundary_messages:
                     st.toast(_msg)

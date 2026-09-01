@@ -30,7 +30,7 @@ from modules.geocoding import (
 )
 from modules.boundaries import (
     fetch_county_boundary_local, fetch_place_boundary_local, fetch_tiger_state_shapefile,
-    save_boundary_gdf, reverse_geocode_state,
+    fetch_tiger_city_shapefile, save_boundary_gdf, reverse_geocode_state,
 )
 from modules.stations import generate_stations_from_calls
 from modules.image_utils import get_themed_logo_base64, get_transparent_product_base64
@@ -240,6 +240,7 @@ def render(submit_demo, _is_boundary_sidecar, _looks_like_stations, _load_upload
                 save_boundary_gdf,
                 fetch_census_population,
                 fetch_census_state_population,
+                fetch_tiger_city_shapefile=fetch_tiger_city_shapefile,
             )
             for _msg in boundary_messages:
                 st.toast(_msg)

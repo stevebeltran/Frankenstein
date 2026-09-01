@@ -1211,6 +1211,7 @@ def build_demo_boundaries(
     fetch_census_population,
     fetch_census_state_population,
     suggest_boundary_matches=None,
+    fetch_tiger_city_shapefile=None,
 ):
     all_gdfs = []
     boundary_records = []
@@ -1228,6 +1229,7 @@ def build_demo_boundaries(
         is_county = city_name_lower.endswith(' county')
         is_township = city_name_lower.endswith(' township')
         boundary_kind = 'state' if is_state else ('county' if is_county else 'place')
+        used_tiger_fallback = False
 
         if is_state:
             success, temp_gdf = fetch_tiger_state_shapefile(state_fips[state_name], state_name, 'jurisdiction_data')
@@ -1254,6 +1256,17 @@ def build_demo_boundaries(
                     success, temp_gdf = fetch_county_boundary_local(state_name, city_name + ' County')
                 if success:
                     boundary_kind = 'county'
+                elif fetch_tiger_city_shapefile is not None:
+                    # Local places_lite.parquet only carries incorporated cities/towns —
+                    # unincorporated Census-designated places (e.g. Edwards, CO) are
+                    # missing from it. Fall back to a live TIGER place lookup, which
+                    # includes CDPs, before giving up on the target.
+                    success, temp_gdf = fetch_tiger_city_shapefile(
+                        state_fips[state_name], city_name, 'jurisdiction_data'
+                    )
+                    if success:
+                        boundary_kind = 'place'
+                        used_tiger_fallback = True
 
         is_county = boundary_kind == 'county'
         is_state = boundary_kind == 'state'
@@ -1263,6 +1276,11 @@ def build_demo_boundaries(
             saved_path = save_boundary_gdf(temp_gdf, boundary_kind, city_name, state_name)
             if index == 0:
                 session_state['boundary_source_path'] = saved_path or ''
+
+        if success and used_tiger_fallback:
+            boundary_messages.append(
+                f"ℹ️ {city_name} not found in local boundary data — used live TIGER fallback."
+            )
 
         if success:
             all_gdfs.append(temp_gdf)

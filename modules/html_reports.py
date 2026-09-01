@@ -4139,9 +4139,9 @@ def generate_community_impact_dashboard_html(
 
     _fac_src_map = {
 
-        "Police":          "DHS HIFLD Law Enforcement Locations · OpenStreetMap (amenity=police, ODbL)",
+        "Police":          "USGS National Structures Dataset · DHS HIFLD Law Enforcement Locations · OpenStreetMap (amenity=police, ODbL)",
 
-        "Fire":            "DHS HIFLD Fire Stations (public domain) · OpenStreetMap (amenity=fire_station)",
+        "Fire":            "USGS National Structures Dataset · DHS HIFLD Fire Stations (public domain) · OpenStreetMap (amenity=fire_station)",
 
         "EMS":             "OpenStreetMap (amenity=ambulance_station) · NEMSIS National EMS Database (nemsis.org)",
 

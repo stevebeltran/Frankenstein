@@ -886,9 +886,9 @@ def resolve_uploaded_boundaries(
             'kind': boundary_kind,
             # Preserve call counts so the sidebar can show the true jurisdiction
             # share instead of falling back to equal weights.
-            'gdf': coord_gdf[['DISPLAY_NAME', 'data_count', 'geometry']].copy()
-            if 'data_count' in coord_gdf.columns
-            else coord_gdf[['DISPLAY_NAME', 'geometry']].copy(),
+            'gdf': coord_gdf[
+                [column for column in ('DISPLAY_NAME', 'data_count', 'call_share', 'geometry') if column in coord_gdf.columns]
+            ].copy(),
             'hits': int(top.get('data_count', 0) or 0),
         }
 

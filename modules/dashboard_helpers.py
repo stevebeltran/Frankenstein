@@ -3010,6 +3010,7 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
 
     # Use the live widget/session state for rendering so a user edit is not
     # immediately overwritten by the current slider assignment.
+    _prev_modes = dict(session_state.get('suggestion_modes', {}) or {})
     modes = sync_station_suggestion_modes(
         session_state,
         suggestions,
@@ -3018,6 +3019,13 @@ def render_station_suggestions_grid(st, session_state, suggestions, text_main, t
         stations_uploaded=stations_uploaded,
     )
     changed = False
+
+    # A card checkbox click resolves here, but the deployment/map-building
+    # code above this section in app.py already ran this pass using the
+    # stale mode — rerun now so it picks up the new mode immediately instead
+    # of leaving the map one interaction behind.
+    if session_state.get('_suggestion_sync_source') == 'cards' and modes != _prev_modes:
+        st.rerun()
 
     n_on = sum(1 for v in modes.values() if v != 'Off')
     st.markdown(

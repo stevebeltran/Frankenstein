@@ -276,34 +276,6 @@ def resolve_master_boundary(
     return master_gdf, boundary_kind_note, boundary_src_note
 
 
-def build_jurisdiction_option_labels(master_gdf):
-    """Build independent call-containment labels for nested jurisdictions."""
-    labeled = master_gdf.copy()
-    if 'DISPLAY_NAME' not in labeled.columns:
-        labeled['DISPLAY_NAME'] = labeled.index.astype(str)
-    if 'data_count' not in labeled.columns:
-        labeled['data_count'] = 1
-    else:
-        labeled['data_count'] = pd.to_numeric(labeled['data_count'], errors='coerce').fillna(0)
-        if float(labeled['data_count'].sum() or 0) <= 0:
-            labeled['data_count'] = 1
-
-    legacy_total = float(labeled['data_count'].sum() or len(labeled) or 1)
-    if 'call_share' in labeled.columns:
-        call_share = pd.to_numeric(labeled['call_share'], errors='coerce')
-    else:
-        call_share = pd.Series(np.nan, index=labeled.index, dtype=float)
-    fallback_share = labeled['data_count'] / legacy_total
-    display_share = call_share.where(call_share.notna(), fallback_share).clip(lower=0.0, upper=1.0)
-    labeled['LABEL'] = (
-        labeled['DISPLAY_NAME'].astype(str)
-        + ' ('
-        + (display_share * 100).round(1).astype(str)
-        + '% of calls)'
-    )
-    return labeled
-
-
 def render_sidebar_jurisdiction_selector(
     st,
     session_state,
@@ -362,7 +334,23 @@ def render_sidebar_jurisdiction_selector(
             else:
                 st.sidebar.warning(sidebar_overlay_status['message'])
 
-    master_gdf = build_jurisdiction_option_labels(master_gdf)
+    master_gdf = master_gdf.copy()
+    if 'DISPLAY_NAME' not in master_gdf.columns:
+        master_gdf['DISPLAY_NAME'] = master_gdf.index.astype(str)
+    if 'data_count' not in master_gdf.columns:
+        master_gdf['data_count'] = 1
+    else:
+        master_gdf['data_count'] = pd.to_numeric(master_gdf['data_count'], errors='coerce').fillna(0)
+        if float(master_gdf['data_count'].sum() or 0) <= 0:
+            master_gdf['data_count'] = 1
+
+    total_pts = float(master_gdf['data_count'].sum() or len(master_gdf) or 1)
+    master_gdf['LABEL'] = (
+        master_gdf['DISPLAY_NAME'].astype(str)
+        + ' ('
+        + (master_gdf['data_count'] / total_pts * 100).round(1).astype(str)
+        + '%)'
+    )
     options_map = dict(zip(master_gdf['LABEL'], master_gdf['DISPLAY_NAME']))
     all_options = master_gdf['LABEL'].tolist()
     default_selection = [all_options[0]] if all_options else []
@@ -851,10 +839,8 @@ def prepare_station_candidates(
             except Exception:
                 pass
         else:
-            from modules.stations import _filter_station_candidates_to_boundary
-            df_inside = _filter_station_candidates_to_boundary(
-                df_stations_all, city_boundary_geom, epsg_code
-            )
+            mask = station_gdf_utm.within(city_m)
+            df_inside = df_stations_all[mask].reset_index(drop=True)
 
             if df_inside.empty:
                 st.info(
@@ -888,11 +874,16 @@ def prepare_station_candidates(
 
             if not df_stations_all.empty:
                 try:
-                    df_stations_all = _filter_station_candidates_to_boundary(
-                        df_stations_all, city_boundary_geom, epsg_code
-                    )
+                    final_station_gdf = gpd.GeoDataFrame(
+                        df_stations_all,
+                        geometry=gpd.points_from_xy(df_stations_all.lon, df_stations_all.lat),
+                        crs='EPSG:4326',
+                    ).to_crs(epsg=epsg_code)
+                    final_mask = final_station_gdf.within(city_m)
+                    if final_mask.any():
+                        df_stations_all = df_stations_all[final_mask].reset_index(drop=True)
                 except Exception:
-                    df_stations_all = df_stations_all.iloc[0:0].copy()
+                    pass
 
         if df_stations_all.empty:
             st.error(

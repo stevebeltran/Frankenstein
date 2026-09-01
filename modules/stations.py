@@ -22,11 +22,6 @@ from modules.geocoding import search_public_facility_candidates
 from modules.geospatial import _count_points_within_boundary as _count_points_within_geometry
 
 SHAPEFILE_DIR = "jurisdiction_data"
-USGS_STRUCTURES_MAPSERVER = "https://carto.nationalmap.gov/arcgis/rest/services/structures/MapServer"
-USGS_STATION_LAYERS = (
-    (51, 74026, "Fire"),
-    (53, 74034, "Police"),
-)
 
 
 def _count_points_within_boundary(df_calls, boundary_gdf_or_geom):
@@ -39,22 +34,6 @@ def _count_points_within_boundary(df_calls, boundary_gdf_or_geom):
     except Exception:
         boundary_geom = boundary_gdf_or_geom
     return _count_points_within_geometry(df_calls, boundary_geom)
-
-
-def _filter_station_candidates_to_boundary(df_stations, boundary_geom_4326, epsg_code):
-    """Keep only generated candidate points strictly inside the active boundary."""
-    if df_stations is None or df_stations.empty or boundary_geom_4326 is None:
-        return pd.DataFrame() if df_stations is None else df_stations.iloc[0:0].copy()
-    try:
-        candidate_gdf = gpd.GeoDataFrame(
-            df_stations.copy(),
-            geometry=gpd.points_from_xy(df_stations['lon'], df_stations['lat']),
-            crs='EPSG:4326',
-        ).to_crs(epsg=int(epsg_code))
-        boundary_m = gpd.GeoSeries([boundary_geom_4326], crs='EPSG:4326').to_crs(epsg=int(epsg_code)).iloc[0]
-        return df_stations.loc[candidate_gdf.within(boundary_m).to_numpy()].reset_index(drop=True)
-    except Exception:
-        return df_stations.iloc[0:0].copy()
 
 
 def _standardize_lat_lon_columns(df):
@@ -205,11 +184,14 @@ def _make_random_stations(df_calls, n=40, boundary_geom=None, epsg_code=None):
     station_lons = np.array([lon for _, lon in deduped])
 
     k_actual = len(station_lats)
+    types = (['Police'] * max(1, math.ceil(k_actual * 0.5)) +
+             ['Fire']   * max(1, math.ceil(k_actual * 0.3)) +
+             ['School'] * max(1, math.ceil(k_actual * 0.2)))[:k_actual]
     return pd.DataFrame({
-        'name': [f"Proposed Call-Density Site {i+1}" for i in range(k_actual)],
+        'name': [f"Call-Density {types[i]} Station {i+1}" for i in range(k_actual)],
         'lat':  station_lats,
         'lon':  station_lons,
-        'type': ['Proposed'] * k_actual,
+        'type': types,
         'source': ['CALL_DENSITY'] * k_actual,
     })
 
@@ -349,8 +331,8 @@ def _build_context_station_rows(df_calls, city_text, state_abbr, max_stations=10
     min_lon_r = round(float(work['lon'].min()) - pad, 2)
     max_lon_r = round(float(work['lon'].max()) + pad, 2)
 
-    osm_rows, hifld_rows, usgs_rows = None, None, None
-    pool = cf.ThreadPoolExecutor(max_workers=3)
+    osm_rows, hifld_rows = None, None
+    pool = cf.ThreadPoolExecutor(max_workers=2)
     try:
         futures = {
             'OSM': pool.submit(
@@ -370,13 +352,6 @@ def _build_context_station_rows(df_calls, city_text, state_abbr, max_stations=10
                 max_lat_r,
                 max_lon_r,
             ),
-            'USGS': pool.submit(
-                _fetch_usgs_nsd_stations_cached,
-                min_lat_r,
-                min_lon_r,
-                max_lat_r,
-                max_lon_r,
-            ),
         }
         _, not_done = cf.wait(futures.values(), timeout=12)
         for name, fut in futures.items():
@@ -389,162 +364,36 @@ def _build_context_station_rows(df_calls, city_text, state_abbr, max_stations=10
                 rows = None
             if name == 'OSM':
                 osm_rows = rows
-            elif name == 'HIFLD':
-                hifld_rows = rows
             else:
-                usgs_rows = rows
+                hifld_rows = rows
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
+
+    combined = []
+    if osm_rows:
+        combined.extend(osm_rows)
+    if hifld_rows:
+        combined.extend(hifld_rows)
 
     public_facility_df = _build_public_facility_rows(work, city_text, state_abbr, max_stations=max_stations)
-    df_combined = _merge_station_candidate_rows(
-        usgs_rows,
-        hifld_rows,
-        osm_rows,
-        public_facility_df,
-        max_stations=max_stations,
-    )
+    if not public_facility_df.empty:
+        combined.extend(public_facility_df.to_dict('records'))
+
+    if not combined:
+        return pd.DataFrame()
+
+    df_combined = pd.DataFrame(combined)
+    df_combined = df_combined.replace([np.inf, -np.inf], np.nan).dropna(subset=['lat', 'lon']).reset_index(drop=True)
     if df_combined.empty:
-        return pd.DataFrame()
-    return df_combined
-
-
-def _format_usgs_address(attributes):
-    street = str(attributes.get('address') or '').strip()
-    city = str(attributes.get('city') or '').strip()
-    state = str(attributes.get('state') or '').strip()
-    zipcode = str(attributes.get('zipcode') or '').strip()
-    locality = ' '.join(part for part in (state, zipcode) if part)
-    return ', '.join(part for part in (street, city, locality) if part)
-
-
-def _fetch_usgs_nsd_stations(min_lat, min_lon, max_lat, max_lon):
-    """Fetch official fire/EMS and police structures from USGS The National Map."""
-    bounds = f"{float(min_lon)},{float(min_lat)},{float(max_lon)},{float(max_lat)}"
-
-    def _fetch_layer(layer_id, expected_fcode, station_type):
-        params = urllib.parse.urlencode({
-            'f': 'json',
-            'where': f'fcode={expected_fcode}',
-            'geometry': bounds,
-            'geometryType': 'esriGeometryEnvelope',
-            'inSR': '4326',
-            'spatialRel': 'esriSpatialRelIntersects',
-            'outFields': 'fcode,name,address,city,state,zipcode',
-            'returnGeometry': 'true',
-            'outSR': '4326',
-        })
-        request = urllib.request.Request(
-            f"{USGS_STRUCTURES_MAPSERVER}/{layer_id}/query?{params}",
-            headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'},
-        )
-        with urllib.request.urlopen(request, timeout=8) as response:
-            payload = json.loads(response.read().decode('utf-8'))
-
-        rows = []
-        for feature in payload.get('features', []):
-            attributes = feature.get('attributes') or {}
-            geometry = feature.get('geometry') or {}
-            try:
-                fcode = int(attributes.get('fcode'))
-                lon = float(geometry.get('x'))
-                lat = float(geometry.get('y'))
-            except (TypeError, ValueError):
-                continue
-            if fcode != expected_fcode or not (-90 <= lat <= 90 and -180 <= lon <= 180):
-                continue
-            rows.append({
-                'name': str(attributes.get('name') or f"USGS {station_type} Station").strip(),
-                'address': _format_usgs_address(attributes),
-                'lat': lat,
-                'lon': lon,
-                'type': station_type,
-                'source': 'USGS_NSD',
-            })
-        return rows
-
-    rows = []
-    pool = cf.ThreadPoolExecutor(max_workers=2)
-    try:
-        futures = [
-            pool.submit(_fetch_layer, layer_id, fcode, station_type)
-            for layer_id, fcode, station_type in USGS_STATION_LAYERS
-        ]
-        for future in futures:
-            try:
-                rows.extend(future.result())
-            except Exception:
-                continue
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
-
-    if rows:
-        return rows, f"Found {len(rows)} stations from USGS National Structures Dataset."
-    return None, "USGS unavailable"
-
-
-@st.cache_data(show_spinner=False)
-def _fetch_usgs_nsd_stations_cached(min_lat, min_lon, max_lat, max_lon):
-    return _fetch_usgs_nsd_stations(min_lat, min_lon, max_lat, max_lon)
-
-
-def _merge_station_candidate_rows(*row_groups, max_stations=100):
-    """Merge facility sources, preferring authoritative records for colocated types."""
-    frames = []
-    for group in row_groups:
-        if group is None:
-            continue
-        frame = group.copy() if isinstance(group, pd.DataFrame) else pd.DataFrame(group)
-        if not frame.empty:
-            frames.append(frame)
-    if not frames:
-        return pd.DataFrame()
-
-    merged = pd.concat(frames, ignore_index=True, sort=False)
-    merged['lat'] = pd.to_numeric(merged.get('lat'), errors='coerce')
-    merged['lon'] = pd.to_numeric(merged.get('lon'), errors='coerce')
-    merged = merged.replace([np.inf, -np.inf], np.nan).dropna(subset=['lat', 'lon']).copy()
-    merged = merged[
-        merged['lat'].between(-90, 90)
-        & merged['lon'].between(-180, 180)
-    ].copy()
-    if merged.empty:
-        return merged.reset_index(drop=True)
-
-    source_priority = {'USGS_NSD': 0, 'HIFLD': 1, 'OSM': 2, 'PUBLIC_FACILITY': 3}
-    type_priority = {'Police': 0, 'Fire': 1, 'EMS': 2, 'School': 3, 'Hospital': 4, 'Government': 5, 'Library': 6}
-    merged['_source_priority'] = merged.get('source', '').map(source_priority).fillna(9)
-    merged['_type_priority'] = merged.get('type', '').map(type_priority).fillna(9)
-    merged = merged.sort_values(['_source_priority', '_type_priority', 'name'], kind='stable')
-
-    kept_indices = []
-    kept_points = []
-    for idx, row in merged.iterrows():
-        station_type = str(row.get('type', '') or '').strip().lower()
-        lat = float(row['lat'])
-        lon = float(row['lon'])
-        duplicate = False
-        for kept_type, kept_lat, kept_lon in kept_points:
-            if station_type != kept_type:
-                continue
-            mean_lat = math.radians((lat + kept_lat) / 2.0)
-            dy_m = (lat - kept_lat) * 111_320.0
-            dx_m = (lon - kept_lon) * 111_320.0 * math.cos(mean_lat)
-            if math.hypot(dx_m, dy_m) <= 100.0:
-                duplicate = True
-                break
-        if duplicate:
-            continue
-        kept_indices.append(idx)
-        kept_points.append((station_type, lat, lon))
-        if len(kept_indices) >= int(max_stations):
-            break
-
-    return (
-        merged.loc[kept_indices]
-        .drop(columns=['_source_priority', '_type_priority'])
-        .reset_index(drop=True)
-    )
+        return df_combined
+    df_combined = df_combined.round({'lat': 3, 'lon': 3})
+    df_combined = df_combined.drop_duplicates(subset=['lat', 'lon', 'name']).reset_index(drop=True)
+    _pri_map = {'PUBLIC_FACILITY': 0, 'OSM': 1, 'HIFLD': 2, 'Police': 3, 'Fire': 4, 'School': 5, 'Government': 6, 'Library': 7, 'Hospital': 8}
+    df_combined['_pri'] = df_combined['source'].map(_pri_map).fillna(9)
+    _type_map = {'Police': 0, 'Fire': 1, 'School': 2, 'Hospital': 3, 'Government': 4, 'Library': 5}
+    df_combined['_type_pri'] = df_combined['type'].map(_type_map).fillna(9)
+    df_combined = df_combined.sort_values(['_pri', '_type_pri', 'name']).drop(columns=['_pri', '_type_pri']).reset_index(drop=True)
+    return df_combined.head(max_stations)
 
 @st.cache_data(show_spinner=False)
 def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations: int = 200,
@@ -827,15 +676,13 @@ def generate_stations_from_calls(df_calls, max_stations=100):
 
     osm_rows, osm_note = None, "OSM unavailable"
     hifld_rows, hifld_note = None, "HIFLD unavailable"
-    usgs_rows, usgs_note = None, "USGS unavailable"
 
-    pool = cf.ThreadPoolExecutor(max_workers=3)
+    pool = cf.ThreadPoolExecutor(max_workers=2)
     try:
         futures = {
             'OSM': pool.submit(_fetch_osm_stations_cached, cen_lat_r, cen_lon_r, max_stations,
                                min_lat_r, min_lon_r, max_lat_r, max_lon_r),
             'HIFLD': pool.submit(_fetch_hifld_stations_cached, min_lat_r, min_lon_r, max_lat_r, max_lon_r),
-            'USGS': pool.submit(_fetch_usgs_nsd_stations_cached, min_lat_r, min_lon_r, max_lat_r, max_lon_r),
         }
         _, not_done = cf.wait(futures.values(), timeout=12)
 
@@ -851,26 +698,30 @@ def generate_stations_from_calls(df_calls, max_stations=100):
                 print(f"[BRINC] generate_stations_from_calls: {name} raised {e}")
             if name == 'OSM':
                 osm_rows, osm_note = rows, note
-            elif name == 'HIFLD':
-                hifld_rows, hifld_note = rows, note
             else:
-                usgs_rows, usgs_note = rows, note
+                hifld_rows, hifld_note = rows, note
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
 
-    df_combined = _merge_station_candidate_rows(
-        usgs_rows,
-        hifld_rows,
-        osm_rows,
-        max_stations=max_stations,
-    )
-    if not df_combined.empty:
-        sources = [s for s, r in [('USGS', usgs_rows), ('HIFLD', hifld_rows), ('OSM', osm_rows)] if r]
+    combined = []
+    if osm_rows:
+        combined.extend(osm_rows)
+    if hifld_rows:
+        combined.extend(hifld_rows)
+
+    if combined:
+        df_combined = pd.DataFrame(combined)
+        df_combined = df_combined.round({'lat': 3, 'lon': 3})
+        df_combined = df_combined.drop_duplicates(subset=['lat', 'lon']).reset_index(drop=True)
+        _pri_map = {'Police': 0, 'Fire': 1, 'School': 2, 'Hospital': 3, 'Government': 4, 'Library': 5}
+        df_combined['_pri'] = df_combined['type'].map(_pri_map).fillna(9)
+        df_combined = df_combined.sort_values('_pri').head(max_stations).drop(columns='_pri').reset_index(drop=True)
+        sources = [s for s, r in [('OSM', osm_rows), ('HIFLD', hifld_rows)] if r]
         note = f"Found {len(df_combined)} candidate sites from {' + '.join(sources)}."
         return df_combined, note
 
     df_fallback = _make_random_stations(df_calls, n=40)
     if not df_fallback.empty:
-        notes = [n for n in [usgs_note, osm_note, hifld_note] if n]
+        notes = [n for n in [osm_note, hifld_note] if n]
         return df_fallback, "Fallback stations generated from call data. " + " | ".join(notes)
     return None, "Could not generate stations ? no valid call coordinates."

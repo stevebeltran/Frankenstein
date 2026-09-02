@@ -24,6 +24,22 @@ from modules.geospatial import _count_points_within_boundary as _count_points_wi
 SHAPEFILE_DIR = "jurisdiction_data"
 
 
+def _filter_station_candidates_to_boundary(df_stations, boundary_geom_4326, epsg_code):
+    """Keep only generated candidate points strictly inside the active boundary."""
+    if df_stations is None or df_stations.empty or boundary_geom_4326 is None:
+        return pd.DataFrame() if df_stations is None else df_stations.iloc[0:0].copy()
+    try:
+        candidate_gdf = gpd.GeoDataFrame(
+            df_stations.copy(),
+            geometry=gpd.points_from_xy(df_stations['lon'], df_stations['lat']),
+            crs='EPSG:4326',
+        ).to_crs(epsg=int(epsg_code))
+        boundary_m = gpd.GeoSeries([boundary_geom_4326], crs='EPSG:4326').to_crs(epsg=int(epsg_code)).iloc[0]
+        return df_stations.loc[candidate_gdf.within(boundary_m).to_numpy()].reset_index(drop=True)
+    except Exception:
+        return df_stations.iloc[0:0].copy()
+
+
 def _count_points_within_boundary(df_calls, boundary_gdf_or_geom):
     """Count calls inside either a boundary GeoDataFrame/GeoSeries or raw geometry."""
     boundary_geom = boundary_gdf_or_geom

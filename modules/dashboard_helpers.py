@@ -1633,6 +1633,7 @@ def prepare_runtime_context(
     get_spatial_message,
     get_faa_message,
     get_airfield_message,
+    show_faa=False,
 ):
     prog2 = st.sidebar.empty()
     prog2.caption(get_spatial_message())
@@ -1653,11 +1654,20 @@ def prepare_runtime_context(
     )
     prog2.empty()
 
-    with st.spinner(get_faa_message()):
-        faa_geojson = faa_rf_module.load_faa_parquet(minx, miny, maxx, maxy)
+    if show_faa:
+        faa_cache = session_state.setdefault('_faa_geojson_cache', {})
+        faa_cache_key = f"{minx}_{miny}_{maxx}_{maxy}"
+        if faa_cache_key in faa_cache:
+            faa_geojson = faa_cache[faa_cache_key]
+        else:
+            with st.spinner('Fetching current FAA airspace…'):
+                faa_geojson = faa_rf_module.load_faa_parquet(minx, miny, maxx, maxy)
+            faa_cache[faa_cache_key] = faa_geojson
         faa_feature_count = len(faa_geojson.get('features', [])) if isinstance(faa_geojson, dict) and faa_geojson.get('features') else 0
         if faa_feature_count == 0:
             st.sidebar.warning('FAA data not loading (0 zones). Check Display Options.')
+    else:
+        faa_geojson = {}
     airfield_cache = session_state.setdefault('_airfields_cache', {})
     airfield_cache_key = f"{str(session_state.get('active_city', '')).strip().lower()}|{str(session_state.get('active_state', '')).strip().lower()}|{bounds_hash}"
     if airfield_cache_key in airfield_cache:

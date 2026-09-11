@@ -452,7 +452,7 @@ def _render_public_report_route():
         ip=_ip,
     )
 
-    st.set_page_config(layout="wide", page_title="BRINC DFR", page_icon="https://brincdrones.com/favicon.ico")
+    st.set_page_config(layout="wide", page_title="BRINC DFR", page_icon="🧟")
     st.markdown("""
         <style>
             header, footer, #MainMenu,
@@ -3881,7 +3881,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
     page_title="BRINC DFR",
-    page_icon="https://brincdrones.com/favicon.ico"
+    page_icon="🧟"
 )
 configure_crash_logging(
     source_app=APP_DIR.name,
@@ -7382,6 +7382,7 @@ body{{background:transparent;overflow:hidden}}
             get_spatial_message,
             get_faa_message,
             get_airfield_message,
+            show_faa=show_faa,
         )
         calls_in_city = _runtime_ctx['calls_in_city']
         display_calls = _runtime_ctx['display_calls']

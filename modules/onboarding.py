@@ -16,6 +16,8 @@ import pandas as pd
 import datetime
 import random
 
+from modules.boundaries_ca import is_ca_region, fetch_ca_population
+
 
 def _normalize_display_text(value):
     text = str(value)
@@ -1232,7 +1234,8 @@ def build_demo_boundaries(
         used_tiger_fallback = False
 
         if is_state:
-            success, temp_gdf = fetch_tiger_state_shapefile(state_fips[state_name], state_name, 'jurisdiction_data')
+            _sfips = state_fips.get(state_name)
+            success, temp_gdf = (fetch_tiger_state_shapefile(_sfips, state_name, 'jurisdiction_data') if _sfips else (False, None))
             if success:
                 boundary_kind = 'state'
                 city_name = state_name
@@ -1261,8 +1264,10 @@ def build_demo_boundaries(
                     # unincorporated Census-designated places (e.g. Edwards, CO) are
                     # missing from it. Fall back to a live TIGER place lookup, which
                     # includes CDPs, before giving up on the target.
-                    success, temp_gdf = fetch_tiger_city_shapefile(
-                        state_fips[state_name], city_name, 'jurisdiction_data'
+                    _sfips = state_fips.get(state_name)
+                    success, temp_gdf = (
+                        fetch_tiger_city_shapefile(_sfips, city_name, 'jurisdiction_data')
+                        if _sfips else (False, None)
                     )
                     if success:
                         boundary_kind = 'place'
@@ -1284,11 +1289,18 @@ def build_demo_boundaries(
 
         if success:
             all_gdfs.append(temp_gdf)
-            population = (
-                fetch_census_state_population(state_fips[state_name])
-                if is_state else
-                fetch_census_population(state_fips[state_name], city_name, is_county=is_county)
-            )
+            if is_ca_region(state_name):
+                population = fetch_ca_population(
+                    state_name,
+                    city_name or state_name,
+                    boundary_kind=('state' if is_state else ('county' if is_county else 'place')),
+                )
+            else:
+                population = (
+                    fetch_census_state_population(state_fips[state_name])
+                    if is_state else
+                    fetch_census_population(state_fips[state_name], city_name, is_county=is_county)
+                )
             if population:
                 total_estimated_pop += population
                 boundary_messages.append(f"✅ {city_name or state_name} population verified: {population:,}")

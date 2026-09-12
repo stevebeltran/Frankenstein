@@ -14,6 +14,15 @@ from difflib import SequenceMatcher
 from shapely.geometry import Point
 from modules.config import STATE_FIPS, KNOWN_POPULATIONS
 from modules.geocoding import forward_geocode
+from modules.boundaries_ca import (
+    is_ca_region,
+    detect_country_from_postal,
+    lookup_postal_code_ca,
+    fetch_cd_boundary_local,
+    fetch_csd_boundary_local,
+    fetch_cd_by_centroid,
+    fetch_ca_population,
+)
 
 def _safe_extractall(zip_file, dest_dir):
     """Extract a zip while blocking path traversal (zip slip)."""
@@ -33,11 +42,16 @@ def _safe_name_token(value):
 
 def lookup_zip_code(zip_code: str):
     """
-    Look up a US ZIP code and return (city, state_abbr, county) using the free
-    Zippopotam.us API.  Returns (None, None, None) on failure.
+    Look up a ZIP/postal code and return (city, state_or_province_abbr,
+    county_or_cd). Routes to the US or Canadian Zippopotam.us endpoint
+    based on the code's format. Returns (None, None, None) on failure or
+    an unrecognized format.
     """
     zip_code = zip_code.strip()
-    if not re.match(r'^\d{5}$', zip_code):
+    country = detect_country_from_postal(zip_code)
+    if country == 'CA':
+        return lookup_postal_code_ca(zip_code)
+    if country != 'US':
         return None, None, None
     try:
         url = f"https://api.zippopotam.us/us/{zip_code}"
@@ -222,6 +236,8 @@ def fetch_county_by_centroid(df_calls, state_abbr):
     Uses a pure spatial lookup against counties_lite.parquet — no network calls,
     no name-matching.  Returns (True, GeoDataFrame) or (False, None).
     """
+    if is_ca_region(state_abbr):
+        return fetch_cd_by_centroid(df_calls, state_abbr)
     local_file = "counties_lite.parquet"
     if not os.path.exists(local_file):
         return False, None
@@ -264,6 +280,8 @@ def fetch_county_by_centroid(df_calls, state_abbr):
 
 @st.cache_data
 def fetch_county_boundary_local(state_abbr, county_name_input):
+    if is_ca_region(state_abbr):
+        return fetch_cd_boundary_local(state_abbr, county_name_input)
     # 1. Clean the input
     search_name = normalize_jurisdiction_name(county_name_input)
         
@@ -328,6 +346,8 @@ def _match_local_boundary_rows(gdf, state_fips, search_name):
 def fetch_place_boundary_local(state_abbr, place_name_input):
     """Look up a city/town/CDP boundary from local parquet caches.
     Connecticut and Rhode Island towns fall back to county-subdivision data when needed."""
+    if is_ca_region(state_abbr):
+        return fetch_csd_boundary_local(state_abbr, place_name_input)
     local_files = ["places_lite.parquet"]
     if str(state_abbr or '').strip().upper() in {"CT", "RI"}:
         local_files.append("county_subdivisions_lite.parquet")
@@ -437,6 +457,8 @@ def _get_census_api_key():
 
 
 def _lookup_population_for_boundary(state_abbr, city_name, boundary_kind='place'):
+    if is_ca_region(state_abbr):
+        return fetch_ca_population(state_abbr, city_name or state_abbr, boundary_kind=boundary_kind)
     state_fips = STATE_FIPS.get(str(state_abbr or '').strip().upper(), '')
     if not state_fips:
         return None

@@ -5030,7 +5030,7 @@ def main():
             # Column headers
             _h_city, _h_state = st.columns([3, 1])
             _h_city.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>City or County</div>", unsafe_allow_html=True)
-            _h_state.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>State</div>", unsafe_allow_html=True)
+            _h_state.markdown("<div style='font-size:12px;color:#888;padding-bottom:2px'>State / Province</div>", unsafe_allow_html=True)
 
             while len(st.session_state['target_cities']) < st.session_state.city_count:
                 st.session_state['target_cities'].append({"city": "", "state": st.session_state.get('active_state', 'IL')})
@@ -5043,10 +5043,10 @@ def main():
 
                 c_name = col_city.text_input(
                     f"city_or_county_{i}", value=c_val,
-                    placeholder="e.g. Rockford or Winnebago County",
+                    placeholder="e.g. Rockford or Toronto",
                     label_visibility="collapsed",
                     key=f"c_{i}",
-                    help="Official municipality or county name."
+                    help="Official municipality or county name (US or Canada)."
                 )
 
                 # State input: text field with autocomplete validation
@@ -5057,7 +5057,7 @@ def main():
                     placeholder="CA",
                     label_visibility="collapsed",
                     key=f"s_{i}",
-                    help="Two-letter state abbreviation (e.g., CA, TX, NY)."
+                    help="Two-letter state or province abbreviation (e.g., CA, TX, NY, ON, BC)."
                 ).upper()
 
                 # Validate state abbreviation

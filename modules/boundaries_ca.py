@@ -91,6 +91,23 @@ def _match_ca_boundary_rows(gdf, pruid, search_name):
 
 
 @st.cache_data
+def fetch_province_boundary_local(province_abbr):
+    """Look up a whole-province boundary from the bundled provinces_lite.parquet.
+    Used for a standalone province entry with no city/CD/CSD given."""
+    pruid = PROVINCE_FIPS.get(str(province_abbr or '').strip().upper())
+    if not pruid or not os.path.exists("provinces_lite.parquet"):
+        return False, None
+    try:
+        gdf = gpd.read_parquet("provinces_lite.parquet")
+        match = gdf[gdf['PRUID'].astype(str) == str(pruid)]
+        if not match.empty:
+            return True, match[["NAME", "geometry"]]
+    except Exception as e:
+        print(f"[BRINC] fetch_province_boundary_local failed: {e}")
+    return False, None
+
+
+@st.cache_data
 def fetch_cd_boundary_local(province_abbr, cd_name_input):
     """Look up a Census Division boundary from the bundled cd_lite.parquet."""
     pruid = PROVINCE_FIPS.get(str(province_abbr or '').strip().upper())

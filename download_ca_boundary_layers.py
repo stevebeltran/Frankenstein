@@ -112,13 +112,12 @@ BOUNDARY_FILES = {
 # table (~5,468 rows), so we use it for all three geography levels.
 POPULATION_CSV_URL = "https://www150.statcan.gc.ca/n1/tbl/csv/98100002-eng.zip"
 
-SIMPLIFY_TOLERANCE_DEGREES = 0.001  # ~100m — matches the visual detail of the existing US lite files
 # Simplify is applied BEFORE reprojection, in the source CRS's native metres
-# (see _to_wgs84 below), so this is the metre-equivalent of
-# SIMPLIFY_TOLERANCE_DEGREES (~100m). Doing it in this order is both faster
-# (vertex count drops before the expensive per-vertex reprojection instead of
-# after) and more correct (a degrees tolerance is not a uniform real-world
-# distance at Canada's latitudes, whereas metres in EPSG:3347 are).
+# (see _simplify_then_reproject below) — ~100m, matching the visual detail of
+# the existing US lite files. Doing it in this order is both faster (vertex
+# count drops before the expensive per-vertex reprojection instead of after)
+# and more correct (a degrees tolerance is not a uniform real-world distance
+# at Canada's latitudes, whereas metres in EPSG:3347 are).
 SIMPLIFY_TOLERANCE_METERS = 100
 # See "File-size note" above. 1 km^2: empirically drops ~97% of Nunavut's
 # polygon-ring count while keeping 99.87% of its area.

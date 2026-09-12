@@ -16,7 +16,7 @@ import pandas as pd
 import datetime
 import random
 
-from modules.boundaries_ca import is_ca_region, fetch_ca_population
+from modules.boundaries_ca import is_ca_region, fetch_ca_population, fetch_province_boundary_local
 
 
 def _normalize_display_text(value):
@@ -1226,7 +1226,7 @@ def build_demo_boundaries(
     for index, loc in enumerate(active_targets):
         city_name = loc['city'].strip()
         state_name = loc['state']
-        is_state = not city_name and state_name in state_fips
+        is_state = not city_name and (state_name in state_fips or is_ca_region(state_name))
         city_name_lower = city_name.lower()
         is_county = city_name_lower.endswith(' county')
         is_township = city_name_lower.endswith(' township')
@@ -1234,12 +1234,11 @@ def build_demo_boundaries(
         used_tiger_fallback = False
 
         if is_state:
-            # `.get()` guard (Task 9): defensive only — `is_state` above already
-            # requires `state_name in state_fips` (US-only), so this branch is
-            # never reached by a Canadian province; the CA province-only
-            # fallback actually happens at the `.get()` guard further below.
-            _sfips = state_fips.get(state_name)
-            success, temp_gdf = (fetch_tiger_state_shapefile(_sfips, state_name, 'jurisdiction_data') if _sfips else (False, None))
+            if is_ca_region(state_name):
+                success, temp_gdf = fetch_province_boundary_local(state_name)
+            else:
+                _sfips = state_fips.get(state_name)
+                success, temp_gdf = (fetch_tiger_state_shapefile(_sfips, state_name, 'jurisdiction_data') if _sfips else (False, None))
             if success:
                 boundary_kind = 'state'
                 city_name = state_name
@@ -1268,7 +1267,8 @@ def build_demo_boundaries(
                     # unincorporated Census-designated places (e.g. Edwards, CO) are
                     # missing from it. Fall back to a live TIGER place lookup, which
                     # includes CDPs, before giving up on the target.
-                    # `.get()` guard (Task 9): fails gracefully for a province-only Canadian entry rather than crashing, but doesn't produce a real boundary here — full province-level CA support needs a separate fetch function (out of scope).
+                    # `.get()` guard: US-only TIGER path, so this is a no-op (not a
+                    # crash) for an unrecognized state/province code.
                     _sfips = state_fips.get(state_name)
                     success, temp_gdf = (
                         fetch_tiger_city_shapefile(_sfips, city_name, 'jurisdiction_data')

@@ -1234,6 +1234,7 @@ def build_demo_boundaries(
         used_tiger_fallback = False
 
         if is_state:
+            # `.get()` guard (Task 9): fails gracefully for a province-only Canadian entry rather than crashing, but doesn't produce a real boundary here — full province-level CA support needs a separate fetch function (out of scope).
             _sfips = state_fips.get(state_name)
             success, temp_gdf = (fetch_tiger_state_shapefile(_sfips, state_name, 'jurisdiction_data') if _sfips else (False, None))
             if success:
@@ -1264,6 +1265,7 @@ def build_demo_boundaries(
                     # unincorporated Census-designated places (e.g. Edwards, CO) are
                     # missing from it. Fall back to a live TIGER place lookup, which
                     # includes CDPs, before giving up on the target.
+                    # `.get()` guard (Task 9): fails gracefully for a province-only Canadian entry rather than crashing, but doesn't produce a real boundary here — full province-level CA support needs a separate fetch function (out of scope).
                     _sfips = state_fips.get(state_name)
                     success, temp_gdf = (
                         fetch_tiger_city_shapefile(_sfips, city_name, 'jurisdiction_data')

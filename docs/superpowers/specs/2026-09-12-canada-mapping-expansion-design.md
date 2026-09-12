@@ -127,6 +127,15 @@ paths):
 
 No user-facing country toggle — routing is internal and automatic.
 
+**Implementation note:** the lat/lon + Nominatim `country_code` mechanism
+above was superseded during implementation. Every call site in this
+codebase resolves a state/province abbreviation before reaching a boundary
+or population lookup, so dispatch was implemented once, at that point, via
+`is_ca_region(state_abbr)` checks. This is a strict superset of the
+`country_code` mechanism — there was never a code path that had lat/lon
+but not an abbreviation — so the reverse-geocode branch was a deliberate
+simplification, not an oversight.
+
 ## Error Handling
 
 Bundled lite parquet lookup only (fast, offline) — no live fallback, since

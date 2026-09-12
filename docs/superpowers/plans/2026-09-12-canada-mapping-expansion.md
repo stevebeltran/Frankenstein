@@ -922,6 +922,131 @@ git commit -m "feat(ca): mirror Canada dispatch into app.py's inline boundary fu
 
 ---
 
+### Task 8: Fix pre-existing US-only state validation gates (found during Task 7)
+
+**Discovered during the Task 7 manual UI smoke check, not anticipated by the
+original 7-task plan.** Both `app.py`'s Path 01 manual-entry form and
+`modules/census_batch.py`'s CAD-file state-column parser validate a typed/
+uploaded state value against US states only, BEFORE the request ever
+reaches the functions Tasks 5/6 dispatched. A Canadian province
+abbreviation is silently rejected (app.py reverts to the previous US
+value; census_batch.py cleans it to `''`), making the whole Canada
+feature unreachable through either live entry point. This is in scope
+per the spec's own goal statement ("so station-siting works for Canadian
+incident/CAD data").
+
+**Files:**
+- Modify: `app.py` (add `PROVINCE_FIPS` to the existing `modules.config`
+  import block at line ~100-109; extend `_state_keys` at line 5027)
+- Modify: `modules/census_batch.py` (extend `_STATE_ABBRS`/`_STATE_NAMES`
+  at lines 24-29 to also recognize Canadian province abbreviations/names)
+- Test: `tests/test_census_batch.py` (extend with a Canadian-state case)
+
+**Interfaces:**
+- Consumes: `PROVINCE_FIPS`, `CA_PROVINCES_ABBR` from `modules.config` (Task 1).
+
+- [ ] **Step 1: Fix `app.py`'s Path 01 state validation gate**
+
+Add `PROVINCE_FIPS` to the existing import block (currently lines 100-109):
+
+```python
+from modules.config import (
+    CONFIG, GUARDIAN_FLIGHT_HOURS_PER_DAY, SIMULATOR_DISCLAIMER_SHORT,
+    STATE_FIPS, US_STATES_ABBR, KNOWN_POPULATIONS, DEMO_CITIES, FAST_DEMO_CITIES,
+    FAA_CEILING_COLORS, FAA_DEFAULT_COLOR, STATION_COLORS,
+    PROVINCE_FIPS,
+    bg_main, bg_sidebar, text_main, text_muted, accent_color, card_bg, card_border,
+    card_text, card_title, budget_box_bg, budget_box_border, budget_box_shadow,
+    map_style, map_boundary_color, map_incident_color, legend_bg, legend_text,
+    get_hero_message, get_faa_message, get_airfield_message,
+    get_jurisdiction_message, get_spatial_message
+)
+```
+
+Change line 5027 from:
+```python
+            _state_keys = list(STATE_FIPS.keys())
+```
+to:
+```python
+            _state_keys = list(STATE_FIPS.keys()) + list(PROVINCE_FIPS.keys())
+```
+
+The validation block at lines 5062-5069 needs no other change — it already
+just checks membership in `_state_keys`, which now includes both.
+
+- [ ] **Step 2: Verify the app.py fix compiles**
+
+Run: `python -m py_compile app.py`
+Expected: no output, exit code 0.
+
+- [ ] **Step 3: Write the failing test for `modules/census_batch.py`**
+
+```python
+# append to tests/test_census_batch.py
+from modules.census_batch import _clean_state
+
+
+def test_clean_state_accepts_canadian_province_abbreviation():
+    assert _clean_state("ON") == "ON"
+    assert _clean_state("on") == "ON"
+
+
+def test_clean_state_accepts_canadian_province_full_name():
+    assert _clean_state("Ontario") == "ON"
+
+
+def test_clean_state_still_rejects_unknown_value():
+    assert _clean_state("Neverland") == ""
+```
+
+- [ ] **Step 4: Run test to verify it fails**
+
+Run: `pytest tests/test_census_batch.py -k canadian -v`
+Expected: FAIL — `_clean_state("ON")` currently returns `""`.
+
+- [ ] **Step 5: Fix `modules/census_batch.py`**
+
+Add the import and extend the two sets (currently lines 24-29):
+
+```python
+from modules.config import STATE_FIPS, US_STATES_ABBR, PROVINCE_FIPS, CA_PROVINCES_ABBR
+...
+_STATE_ABBRS = set(STATE_FIPS.keys()) | set(PROVINCE_FIPS.keys())
+_STATE_NAMES = {name.upper(): abbr for name, abbr in US_STATES_ABBR.items()}
+_STATE_NAMES.update({name.upper(): abbr for name, abbr in CA_PROVINCES_ABBR.items()})
+```
+
+(Exact surrounding import line depends on what's already imported in that
+file — add `PROVINCE_FIPS, CA_PROVINCES_ABBR` to the existing
+`from modules.config import ...` line rather than adding a new import
+statement.)
+
+- [ ] **Step 6: Run test to verify it passes**
+
+Run: `pytest tests/test_census_batch.py -v`
+Expected: PASS, full file, no regressions on the pre-existing US-state tests.
+
+- [ ] **Step 7: Re-run the manual UI smoke check**
+
+Restart `streamlit run app.py`, repeat Task 7 Step 2's Canadian case
+(state `ON`, city `Toronto`) through the Path 01 form. Expected: a
+boundary now resolves (no "Could not find a boundary" warning), and the
+estimated population field populates.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add app.py modules/census_batch.py tests/test_census_batch.py
+git commit -m "fix(ca): accept Canadian province codes in state-validation gates
+
+Task 7's manual UI smoke check found two pre-existing US-only
+validation gates (app.py Path 01 form, census_batch.py CAD state
+parser) that silently rejected Canadian province abbreviations before
+requests ever reached the Tasks 5/6 dispatch logic, making the Canada
+feature unreachable from both live entry points."
+```
+
 ### Task 7: End-to-end smoke check
 
 **Files:** none (verification only)

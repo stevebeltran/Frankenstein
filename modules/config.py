@@ -121,6 +121,19 @@ US_STATES_ABBR = {
     "Virginia": "VA", "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY"
 }
 
+# StatCan PRUID codes — Canadian province/territory equivalent of STATE_FIPS.
+PROVINCE_FIPS = {
+    "AB": "48", "BC": "59", "MB": "46", "NB": "13", "NL": "10", "NS": "12",
+    "NT": "61", "NU": "62", "ON": "35", "PE": "11", "QC": "24", "SK": "47", "YT": "60",
+}
+
+CA_PROVINCES_ABBR = {
+    "Alberta": "AB", "British Columbia": "BC", "Manitoba": "MB", "New Brunswick": "NB",
+    "Newfoundland and Labrador": "NL", "Nova Scotia": "NS", "Northwest Territories": "NT",
+    "Nunavut": "NU", "Ontario": "ON", "Prince Edward Island": "PE", "Quebec": "QC",
+    "Saskatchewan": "SK", "Yukon": "YT",
+}
+
 KNOWN_POPULATIONS = {
     "Victoria": 65534, "New York": 8336817, "Los Angeles": 3822238, "Chicago": 2665039,
     "Houston": 1304379, "Phoenix": 1644409, "Philadelphia": 1567258, "San Antonio": 2302878,

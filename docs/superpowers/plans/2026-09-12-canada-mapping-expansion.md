@@ -1047,6 +1047,153 @@ requests ever reached the Tasks 5/6 dispatch logic, making the Canada
 feature unreachable from both live entry points."
 ```
 
+### Task 9: Fix population-lookup crash in modules/onboarding.py (found during Task 7 re-check)
+
+**Discovered during the Task 7 re-check after Task 8's fix.** With Task 8's
+fix applied, "Toronto, ON" now resolves a boundary correctly (proof: the
+app rendered a "TORONTO" results header) — but crashed with an unhandled
+`KeyError` immediately after, in `modules/onboarding.py:1290`:
+
+```
+File "app.py", line 7006, in main
+    all_gdfs, ... = build_demo_boundaries(st.session_state, ..., fetch_census_population, fetch_census_state_population, ...)
+File "modules/onboarding.py", line 1290, in build_demo_boundaries
+    fetch_census_population(state_fips[state_name], city_name, is_county=is_county)
+KeyError: 'ON'
+```
+
+Root cause: `build_demo_boundaries` (in `modules/onboarding.py`) is a fourth
+consumer of the boundary/population functions, injected directly from
+`app.py`'s call site (`app.py:7006-7019`) — it receives the raw `STATE_FIPS`
+dict and the raw `fetch_census_population`/`fetch_census_state_population`
+functions directly (bypassing `_lookup_population_for_boundary` entirely,
+by design — see Task 5's FIPS/PRUID-collision ruling). Nobody added a
+CA-aware branch at this fourth call site because neither the original
+7-task plan nor Task 8 knew it existed; Tasks 5/6 only patched
+`_lookup_population_for_boundary`, and this function doesn't use it.
+
+**Files:**
+- Modify: `modules/onboarding.py` only. Do not change `app.py`'s call site
+  signature (no new args needed — the fix lives entirely inside
+  `build_demo_boundaries`).
+- Test: no new automated test (this function has no existing unit test
+  harness for CA cases and the existing `tests/test_onboarding_station_uploads.py`
+  doesn't cover `build_demo_boundaries`'s population branch at all — adding
+  one from scratch is beyond this fix's scope). Verification is the same
+  manual UI re-check as Task 7/8.
+
+- [ ] **Step 1: Add the import**
+
+Near the top of `modules/onboarding.py`, alongside its other `modules.*`
+imports, add:
+
+```python
+from modules.boundaries_ca import is_ca_region, fetch_ca_population
+```
+
+- [ ] **Step 2: Replace the population-lookup block**
+
+Find the block (currently around lines 1285-1294):
+
+```python
+        if success:
+            all_gdfs.append(temp_gdf)
+            population = (
+                fetch_census_state_population(state_fips[state_name])
+                if is_state else
+                fetch_census_population(state_fips[state_name], city_name, is_county=is_county)
+            )
+```
+
+Replace with:
+
+```python
+        if success:
+            all_gdfs.append(temp_gdf)
+            if is_ca_region(state_name):
+                population = fetch_ca_population(
+                    state_name,
+                    city_name or state_name,
+                    boundary_kind=('state' if is_state else ('county' if is_county else 'place')),
+                )
+            else:
+                population = (
+                    fetch_census_state_population(state_fips[state_name])
+                    if is_state else
+                    fetch_census_population(state_fips[state_name], city_name, is_county=is_county)
+                )
+```
+
+The rest of the function (population-estimate fallback, `boundary_records`
+append, etc.) is unchanged — it already just checks `if population:` /
+`else:`, which works the same regardless of which branch produced the value.
+
+- [ ] **Step 3: Guard the two other raw `state_fips[state_name]` indexes against the same KeyError shape**
+
+These are unreachable in the Toronto test (it took the `fetch_place_boundary_local`
+success path), but are the same crash shape for a province-only entry (no
+city) or a CDP-fallback path, and cost nothing to guard defensively. There
+is no live-TIGER equivalent for Canada (out of scope, live TIGER fetch is
+US-only) — these should fail gracefully (`success = False`), not crash.
+
+Change (currently line 1235):
+```python
+            success, temp_gdf = fetch_tiger_state_shapefile(state_fips[state_name], state_name, 'jurisdiction_data')
+```
+to:
+```python
+            _sfips = state_fips.get(state_name)
+            success, temp_gdf = (fetch_tiger_state_shapefile(_sfips, state_name, 'jurisdiction_data') if _sfips else (False, None))
+```
+
+Change (currently line 1265):
+```python
+                    success, temp_gdf = fetch_tiger_city_shapefile(
+                        state_fips[state_name], city_name, 'jurisdiction_data'
+                    )
+```
+to:
+```python
+                    _sfips = state_fips.get(state_name)
+                    success, temp_gdf = (
+                        fetch_tiger_city_shapefile(_sfips, city_name, 'jurisdiction_data')
+                        if _sfips else (False, None)
+                    )
+```
+
+This means a standalone Canadian province-level entry (state-only, no
+city) still won't get a real province boundary rendered through this
+particular fallback path — that's a real, narrower gap than the one this
+task fixes, worth a follow-up if the app needs province-only (not
+city/CD-level) Canadian entries. Note it in your report as a known
+limitation, don't try to build province-level TIGER-equivalent support
+here — out of scope for this fix.
+
+- [ ] **Step 4: Verify**
+
+Run: `python -m py_compile modules/onboarding.py` — expect no output.
+Run: `pytest tests/ -q` — expect the same 79 passed as before (no
+regressions; this file has no direct existing test coverage of the
+changed lines, confirmed by grepping `tests/` for `build_demo_boundaries`
+usage before you start).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add modules/onboarding.py
+git commit -m "fix(ca): route population lookup through fetch_ca_population in build_demo_boundaries
+
+Task 7's re-check (after Task 8) found build_demo_boundaries in
+modules/onboarding.py bypasses _lookup_population_for_boundary and
+calls fetch_census_population directly with a raw STATE_FIPS-only
+dict index, crashing with KeyError for any Canadian province. Route
+through fetch_ca_population when the region is Canadian; guard two
+other raw state_fips[state_name] indexes defensively so a
+province-only entry fails gracefully instead of crashing (real
+province-level Canadian boundary support through this path is a
+separate, narrower follow-up)."
+```
+
 ### Task 7: End-to-end smoke check
 
 **Files:** none (verification only)

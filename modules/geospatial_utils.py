@@ -14,6 +14,7 @@ from modules.boundaries import (
     fetch_county_boundary_local,
     save_boundary_gdf,
 )
+from modules.boundaries_ca import is_ca_region, fetch_ca_population
 from modules.config import KNOWN_POPULATIONS
 from modules.onboarding import build_demo_calls
 
@@ -154,7 +155,13 @@ def load_fast_demo_payload(city_name, state_name, station_count=FAST_DEMO_STATIO
     state_fips = STATE_FIPS.get(state_name, "")
     population = 0
     try:
-        if boundary_kind == "state":
+        if is_ca_region(state_name):
+            population = int(fetch_ca_population(
+                state_name,
+                city_name or state_name,
+                boundary_kind=boundary_kind,
+            ) or 0)
+        elif boundary_kind == "state":
             population = int(fetch_census_state_population(state_fips) or 0)
         else:
             population = int(fetch_census_population(state_fips, city_name, is_county=is_county_input) or 0)

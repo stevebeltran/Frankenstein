@@ -47,8 +47,16 @@ Out of scope (explicitly deferred):
 | Province/territory boundary | StatCan Cartographic Boundary Files (CBF) | Bundled lite parquet |
 | Census Division (CD) boundary | StatCan CBF | Bundled lite parquet |
 | Census Subdivision (CSD) boundary | StatCan CBF | Bundled lite parquet |
-| Population (CD/CSD) | StatCan Census Profile (WDS API) | Live, mirrors existing `fetch_census_population` |
+| Population (province/CD/CSD) | StatCan 2021 Population and Dwelling Counts | Bundled as a `POPULATION` column, joined at build time |
 | Postal code → city/province | `api.zippopotam.us/ca/{FSA}` | Live, same provider already used for US |
+
+**Revised during implementation planning:** population is bundled, not a
+live call. StatCan's Web Data Service has no simple "population by name"
+REST endpoint analogous to the US Census Bureau API (`fetch_census_population`
+in the US path) — the practical option is joining population once at
+lite-parquet build time and shipping it as a `POPULATION` column alongside
+the boundary geometry it's already bundling. One fewer live integration,
+one fewer runtime failure mode; no scope change.
 
 ### Why bundle the boundary geometry
 
@@ -64,34 +72,46 @@ subdivisions — expect a bundled CA set well under US size (rough estimate
 2-4MB), comfortably inside GitHub's per-file limits and Streamlit Cloud's
 repo size ceiling.
 
-Population and postal lookups stay live-only (no bundling), matching how
-the US path already treats those two (`fetch_census_population` and
-`lookup_zip_code` are not bundled today either) — no reliability
+Unlike the US TIGER lite files (a partial subset needing a live fallback
+for misses), the bundled CA set is StatCan's *complete* province/CD/CSD
+list — so no live StatCan boundary-fetch fallback is needed at all.
+
+Only the postal-code lookup stays live, matching how the US path already
+treats `lookup_zip_code` (not bundled today either) — no reliability
 regression introduced.
 
 ## Code Shape (additive, minimal-diff)
 
 New module: `modules/boundaries_ca.py`
-- `lookup_postal_code()` — CA equivalent of `lookup_zip_code()`, calls
+- `is_ca_region()` / `detect_country_from_postal()` — country routing helpers.
+- `lookup_postal_code_ca()` — CA equivalent of `lookup_zip_code()`, calls
   `api.zippopotam.us/ca/{fsa}`.
-- `fetch_cd_boundary_local()` / `fetch_csd_boundary_local()` — read bundled
-  `cd_lite.parquet` / `csd_lite.parquet`.
-- `fetch_statcan_province_shapefile()` / `fetch_statcan_cd_shapefile()` /
-  `fetch_statcan_csd_shapefile()` — live StatCan CBF fetch, fallback only.
-- `fetch_census_profile_population()` — live StatCan WDS call, mirrors
-  `fetch_census_population()`.
+- `fetch_cd_boundary_local()` / `fetch_csd_boundary_local()` / `fetch_cd_by_centroid()`
+  — read bundled `cd_lite.parquet` / `csd_lite.parquet` (no live fallback needed;
+  see "Why bundle the boundary geometry" above).
+- `fetch_ca_population()` — reads the bundled `POPULATION` column from
+  `provinces_lite.parquet` / `cd_lite.parquet` / `csd_lite.parquet`.
 
-`modules/boundaries.py` changes: thin dispatch shim at existing entrypoints
-only — detect country, route to existing US logic or `boundaries_ca`
-functions. No rewrite of US logic, no shared abstraction layer forced in
-(YAGNI — revisit if a third country is ever added).
+**Revised during implementation planning — there are two call sites, not
+one.** `modules/boundaries.py` is a "library" copy consumed by
+`modules/stations.py`, `modules/onboarding.py`, and
+`modules/geospatial_utils.py`. But `app.py` — the live entry point for the
+main manual-entry UI — does **not** import `modules/boundaries.py`; it has
+its own near-identical inline duplicate of `lookup_zip_code`,
+`fetch_county_boundary_local`, `fetch_place_boundary_local`,
+`fetch_county_by_centroid`, and the population functions. Both copies need
+the same thin dispatch branch added (detect country, route to
+`boundaries_ca` or fall through to existing US logic unchanged) — this
+mirrors the duplication already present in the repo rather than
+introducing a refactor to deduplicate it, per the "don't refactor shared
+code unless required" repo rule. `app.py`'s own `lookup_zip_code` is
+confirmed dead code (no callers anywhere in the repo) and is left
+untouched.
 
 New bundled files (repo root, same convention as existing `*_lite.parquet`):
+- `provinces_lite.parquet`
 - `cd_lite.parquet`
 - `csd_lite.parquet`
-- (province boundary set is tiny — may fold into one of the above or its
-  own `provinces_lite.parquet`, decided during implementation based on
-  actual StatCan CBF schema)
 
 `download_regulatory_layers.py`, `faa_uasfm.parquet`,
 `modules/geocoding.py`: untouched.
@@ -107,14 +127,26 @@ paths):
 
 No user-facing country toggle — routing is internal and automatic.
 
+**Implementation note:** the lat/lon + Nominatim `country_code` mechanism
+above was superseded during implementation. Every call site in this
+codebase resolves a state/province abbreviation before reaching a boundary
+or population lookup, so dispatch was implemented once, at that point, via
+`is_ca_region(state_abbr)` checks. This is a strict superset of the
+`country_code` mechanism — there was never a code path that had lat/lon
+but not an abbreviation — so the reverse-geocode branch was a deliberate
+simplification, not an oversight.
+
 ## Error Handling
 
-Same fallback chain as the US path:
-1. Bundled lite parquet lookup (fast, offline).
-2. On miss, live StatCan CBF fetch, cached to disk for the session.
-3. On no match, falls through to existing `suggest_boundary_matches()`
-   fuzzy matcher — works unmodified once CA boundary rows are loaded,
-   since it matches on name strings without a country-specific branch.
+Bundled lite parquet lookup only (fast, offline) — no live fallback, since
+the bundled CD/CSD set is StatCan's complete list rather than a partial
+subset. A miss returns `(False, None)` the same way the US path does for
+an unmatched county/place.
+
+`suggest_boundary_matches()` (fuzzy name suggestions used in onboarding
+warning messages) is not extended for Canada in this pass — out of scope;
+it degrades gracefully (returns `[]`) for a CA province abbreviation since
+`STATE_FIPS.get()` returns `None` for it.
 
 ## Testing
 

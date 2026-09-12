@@ -80,3 +80,19 @@ def test_cad_parser_does_not_treat_zip_as_coordinates():
     assert summary["rows_ready"] == 2
     assert summary["intersection_rows"] == 1
     assert summary["files"][0]["zip_col"] == "zip"
+
+
+from modules.census_batch import _clean_state
+
+
+def test_clean_state_accepts_canadian_province_abbreviation():
+    assert _clean_state("ON") == "ON"
+    assert _clean_state("on") == "ON"
+
+
+def test_clean_state_accepts_canadian_province_full_name():
+    assert _clean_state("Ontario") == "ON"
+
+
+def test_clean_state_still_rejects_unknown_value():
+    assert _clean_state("Neverland") == ""

@@ -101,11 +101,19 @@ from modules.config import (
     CONFIG, GUARDIAN_FLIGHT_HOURS_PER_DAY, SIMULATOR_DISCLAIMER_SHORT,
     STATE_FIPS, US_STATES_ABBR, KNOWN_POPULATIONS, DEMO_CITIES, FAST_DEMO_CITIES,
     FAA_CEILING_COLORS, FAA_DEFAULT_COLOR, STATION_COLORS,
+    PROVINCE_FIPS,
     bg_main, bg_sidebar, text_main, text_muted, accent_color, card_bg, card_border,
     card_text, card_title, budget_box_bg, budget_box_border, budget_box_shadow,
     map_style, map_boundary_color, map_incident_color, legend_bg, legend_text,
     get_hero_message, get_faa_message, get_airfield_message,
     get_jurisdiction_message, get_spatial_message
+)
+from modules.boundaries_ca import (
+    is_ca_region,
+    fetch_cd_boundary_local,
+    fetch_csd_boundary_local,
+    fetch_cd_by_centroid,
+    fetch_ca_population,
 )
 # Incident-dot color buckets, keyed by the 'agency' column value. Any value
 # not listed here (e.g. 'police', or files predating this scheme) falls back
@@ -2237,6 +2245,8 @@ def fetch_county_by_centroid(df_calls, state_abbr):
     Uses a pure spatial lookup against counties_lite.parquet — no network calls,
     no name-matching.  Returns (True, GeoDataFrame) or (False, None).
     """
+    if is_ca_region(state_abbr):
+        return fetch_cd_by_centroid(df_calls, state_abbr)
     local_file = "counties_lite.parquet"
     if not os.path.exists(local_file):
         return False, None
@@ -2279,6 +2289,8 @@ def fetch_county_by_centroid(df_calls, state_abbr):
 
 @st.cache_data
 def fetch_county_boundary_local(state_abbr, county_name_input):
+    if is_ca_region(state_abbr):
+        return fetch_cd_boundary_local(state_abbr, county_name_input)
     # 1. Clean the input
     search_name = normalize_jurisdiction_name(county_name_input)
         
@@ -2343,6 +2355,8 @@ def _match_local_boundary_rows(gdf, state_fips, search_name):
 def fetch_place_boundary_local(state_abbr, place_name_input):
     """Look up a city/town/CDP boundary from local parquet caches.
     Connecticut and Rhode Island towns fall back to county-subdivision data when needed."""
+    if is_ca_region(state_abbr):
+        return fetch_csd_boundary_local(state_abbr, place_name_input)
     local_files = ["places_lite.parquet"]
     if str(state_abbr or '').strip().upper() in {"CT", "RI"}:
         local_files.append("county_subdivisions_lite.parquet")
@@ -2452,6 +2466,8 @@ def _get_census_api_key():
 
 
 def _lookup_population_for_boundary(state_abbr, city_name, boundary_kind='place'):
+    if is_ca_region(state_abbr):
+        return fetch_ca_population(state_abbr, city_name or state_abbr, boundary_kind=boundary_kind)
     state_fips = STATE_FIPS.get(str(state_abbr or '').strip().upper(), '')
     if not state_fips:
         return None
@@ -5009,7 +5025,7 @@ def main():
             st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
             # ── CITY / STATE — simplified single-row inputs ─────────────────────
-            _state_keys = list(STATE_FIPS.keys())
+            _state_keys = list(STATE_FIPS.keys()) + list(PROVINCE_FIPS.keys())
 
             # Column headers
             _h_city, _h_state = st.columns([3, 1])

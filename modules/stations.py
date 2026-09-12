@@ -154,6 +154,29 @@ def _make_random_stations(df_calls, n=40, boundary_geom=None, epsg_code=None):
         if work.empty:
             return pd.DataFrame()
 
+    contexts = _derive_jurisdiction_lookup_contexts(work, min_call_share=0.10)
+    context_rows = []
+    for context in contexts:
+        city_text = context.get('city', '')
+        state_abbr = context.get('state', '')
+        if not city_text:
+            continue
+        try:
+            context_df = _build_context_station_rows(
+                work,
+                city_text,
+                state_abbr,
+                max_stations=n,
+                call_share=context.get('share', 0.0),
+            )
+        except Exception:
+            context_df = pd.DataFrame()
+        if not context_df.empty:
+            context_rows.append(context_df)
+
+    if context_rows:
+        return _rank_station_candidates(pd.concat(context_rows, ignore_index=True)).head(n)
+
     lats = work['lat'].dropna().values
     lons = work['lon'].dropna().values
     if len(lats) == 0:
@@ -263,7 +286,7 @@ def _derive_jurisdiction_lookup_contexts(df_calls, min_call_share=0.10):
     return contexts
 
 
-def _build_public_facility_rows(df_calls, city_text, state_abbr, max_stations=100):
+def _build_public_facility_rows(df_calls, city_text, state_abbr, max_stations=100, call_share=None):
     facility_types = ['Police', 'Fire', 'School', 'Government', 'Library']
     rows = []
     for facility_type in facility_types:
@@ -290,6 +313,7 @@ def _build_public_facility_rows(df_calls, city_text, state_abbr, max_stations=10
                 'type': facility_type,
                 'source': 'PUBLIC_FACILITY',
                 'address': str(match.get('matched_address') or match.get('label') or '').strip(),
+                'call_share': float(call_share or 0.0),
             })
 
     if not rows:
@@ -304,7 +328,7 @@ def _build_public_facility_rows(df_calls, city_text, state_abbr, max_stations=10
     return df_rows.head(max_stations)
 
 
-def _build_context_station_rows(df_calls, city_text, state_abbr, max_stations=100):
+def _build_context_station_rows(df_calls, city_text, state_abbr, max_stations=100, call_share=None):
     if df_calls is None or df_calls.empty:
         return pd.DataFrame()
 
@@ -391,7 +415,13 @@ def _build_context_station_rows(df_calls, city_text, state_abbr, max_stations=10
     if hifld_rows:
         combined.extend(hifld_rows)
 
-    public_facility_df = _build_public_facility_rows(work, city_text, state_abbr, max_stations=max_stations)
+    public_facility_df = _build_public_facility_rows(
+        work,
+        city_text,
+        state_abbr,
+        max_stations=max_stations,
+        call_share=call_share,
+    )
     if not public_facility_df.empty:
         combined.extend(public_facility_df.to_dict('records'))
 
@@ -408,8 +438,34 @@ def _build_context_station_rows(df_calls, city_text, state_abbr, max_stations=10
     df_combined['_pri'] = df_combined['source'].map(_pri_map).fillna(9)
     _type_map = {'Police': 0, 'Fire': 1, 'School': 2, 'Hospital': 3, 'Government': 4, 'Library': 5}
     df_combined['_type_pri'] = df_combined['type'].map(_type_map).fillna(9)
-    df_combined = df_combined.sort_values(['_pri', '_type_pri', 'name']).drop(columns=['_pri', '_type_pri']).reset_index(drop=True)
+    if 'call_share' not in df_combined.columns:
+        df_combined['call_share'] = 0.0
+    df_combined['call_share'] = pd.to_numeric(df_combined['call_share'], errors='coerce').fillna(0.0)
+    df_combined = df_combined.sort_values(
+        ['call_share', '_pri', '_type_pri', 'name'],
+        ascending=[False, True, True, True],
+    ).drop(columns=['_pri', '_type_pri']).reset_index(drop=True)
     return df_combined.head(max_stations)
+
+
+def _rank_station_candidates(df_rows):
+    """Order station candidates by call share, then by source priority."""
+    if df_rows is None or df_rows.empty:
+        return pd.DataFrame() if df_rows is None else df_rows
+
+    ranked = df_rows.copy()
+    if 'call_share' not in ranked.columns:
+        ranked['call_share'] = 0.0
+    ranked['call_share'] = pd.to_numeric(ranked['call_share'], errors='coerce').fillna(0.0)
+    _pri_map = {'PUBLIC_FACILITY': 0, 'OSM': 1, 'HIFLD': 2, 'Police': 3, 'Fire': 4, 'School': 5, 'Government': 6, 'Library': 7, 'Hospital': 8, 'CALL_DENSITY': 9}
+    ranked['_pri'] = ranked['source'].map(_pri_map).fillna(9)
+    _type_map = {'Police': 0, 'Fire': 1, 'School': 2, 'Hospital': 3, 'Government': 4, 'Library': 5}
+    ranked['_type_pri'] = ranked['type'].map(_type_map).fillna(9)
+    ranked = ranked.sort_values(
+        ['call_share', '_pri', '_type_pri', 'name'],
+        ascending=[False, True, True, True],
+    ).drop(columns=['_pri', '_type_pri']).reset_index(drop=True)
+    return ranked
 
 @st.cache_data(show_spinner=False)
 def _fetch_osm_stations_cached(cen_lat_r: float, cen_lon_r: float, max_stations: int = 200,
@@ -646,7 +702,13 @@ def generate_stations_from_calls(df_calls, max_stations=100):
     for context in contexts:
         city_text = context['city']
         state_abbr = context.get('state', '')
-        context_df = _build_context_station_rows(work, city_text, state_abbr, max_stations=max_stations)
+        context_df = _build_context_station_rows(
+            work,
+            city_text,
+            state_abbr,
+            max_stations=max_stations,
+            call_share=context.get('share', 0.0),
+        )
         if not context_df.empty:
             context_rows.append(context_df)
             context_notes.append(f"{city_text}{', ' + state_abbr if state_abbr else ''} ({context['share']*100:.1f}%)")
@@ -656,11 +718,7 @@ def generate_stations_from_calls(df_calls, max_stations=100):
         df_context = df_context.replace([np.inf, -np.inf], np.nan).dropna(subset=['lat', 'lon']).reset_index(drop=True)
         df_context = df_context.round({'lat': 3, 'lon': 3})
         df_context = df_context.drop_duplicates(subset=['lat', 'lon', 'name']).reset_index(drop=True)
-        _pri_map = {'PUBLIC_FACILITY': 0, 'OSM': 1, 'HIFLD': 2, 'Police': 3, 'Fire': 4, 'School': 5, 'Government': 6, 'Library': 7, 'Hospital': 8}
-        df_context['_pri'] = df_context['source'].map(_pri_map).fillna(9)
-        _type_map = {'Police': 0, 'Fire': 1, 'School': 2, 'Hospital': 3, 'Government': 4, 'Library': 5}
-        df_context['_type_pri'] = df_context['type'].map(_type_map).fillna(9)
-        df_context = df_context.sort_values(['_pri', '_type_pri', 'name']).drop(columns=['_pri', '_type_pri']).reset_index(drop=True)
+        df_context = _rank_station_candidates(df_context)
         if not df_context.empty:
             note = "Found {0} candidate sites from jurisdiction-specific real-location lookups: {1}.".format(
                 len(df_context),
@@ -729,9 +787,7 @@ def generate_stations_from_calls(df_calls, max_stations=100):
         df_combined = pd.DataFrame(combined)
         df_combined = df_combined.round({'lat': 3, 'lon': 3})
         df_combined = df_combined.drop_duplicates(subset=['lat', 'lon']).reset_index(drop=True)
-        _pri_map = {'Police': 0, 'Fire': 1, 'School': 2, 'Hospital': 3, 'Government': 4, 'Library': 5}
-        df_combined['_pri'] = df_combined['type'].map(_pri_map).fillna(9)
-        df_combined = df_combined.sort_values('_pri').head(max_stations).drop(columns='_pri').reset_index(drop=True)
+        df_combined = _rank_station_candidates(df_combined).head(max_stations).reset_index(drop=True)
         sources = [s for s, r in [('OSM', osm_rows), ('HIFLD', hifld_rows)] if r]
         note = f"Found {len(df_combined)} candidate sites from {' + '.join(sources)}."
         return df_combined, note

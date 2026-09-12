@@ -5242,8 +5242,10 @@ def main():
               input.blur();
             } catch (e) {}
             evt.preventDefault();
-            setTimeout(function(){ deployBtn.click(); }, 60);
-          });
+            evt.stopPropagation();
+            if (evt.stopImmediatePropagation) evt.stopImmediatePropagation();
+            setTimeout(function(){ deployBtn.click(); }, 0);
+          }, true);
         });
       }
 

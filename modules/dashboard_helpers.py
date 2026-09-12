@@ -345,10 +345,15 @@ def render_sidebar_jurisdiction_selector(
             master_gdf['data_count'] = 1
 
     total_pts = float(master_gdf['data_count'].sum() or len(master_gdf) or 1)
+    if 'call_share' in master_gdf.columns:
+        master_gdf['call_share'] = pd.to_numeric(master_gdf['call_share'], errors='coerce')
+    else:
+        master_gdf['call_share'] = np.nan
+    share_pct = master_gdf['call_share'].where(master_gdf['call_share'].notna(), master_gdf['data_count'] / total_pts)
     master_gdf['LABEL'] = (
         master_gdf['DISPLAY_NAME'].astype(str)
         + ' ('
-        + (master_gdf['data_count'] / total_pts * 100).round(1).astype(str)
+        + (share_pct * 100).round(1).astype(str)
         + '%)'
     )
     options_map = dict(zip(master_gdf['LABEL'], master_gdf['DISPLAY_NAME']))

@@ -107,6 +107,13 @@ from modules.config import (
     get_hero_message, get_faa_message, get_airfield_message,
     get_jurisdiction_message, get_spatial_message
 )
+from modules.boundaries_ca import (
+    is_ca_region,
+    fetch_cd_boundary_local,
+    fetch_csd_boundary_local,
+    fetch_cd_by_centroid,
+    fetch_ca_population,
+)
 # Incident-dot color buckets, keyed by the 'agency' column value. Any value
 # not listed here (e.g. 'police', or files predating this scheme) falls back
 # to the theme's map_incident_color under the "Other Incidents" trace.
@@ -2237,6 +2244,8 @@ def fetch_county_by_centroid(df_calls, state_abbr):
     Uses a pure spatial lookup against counties_lite.parquet — no network calls,
     no name-matching.  Returns (True, GeoDataFrame) or (False, None).
     """
+    if is_ca_region(state_abbr):
+        return fetch_cd_by_centroid(df_calls, state_abbr)
     local_file = "counties_lite.parquet"
     if not os.path.exists(local_file):
         return False, None
@@ -2279,6 +2288,8 @@ def fetch_county_by_centroid(df_calls, state_abbr):
 
 @st.cache_data
 def fetch_county_boundary_local(state_abbr, county_name_input):
+    if is_ca_region(state_abbr):
+        return fetch_cd_boundary_local(state_abbr, county_name_input)
     # 1. Clean the input
     search_name = normalize_jurisdiction_name(county_name_input)
         
@@ -2343,6 +2354,8 @@ def _match_local_boundary_rows(gdf, state_fips, search_name):
 def fetch_place_boundary_local(state_abbr, place_name_input):
     """Look up a city/town/CDP boundary from local parquet caches.
     Connecticut and Rhode Island towns fall back to county-subdivision data when needed."""
+    if is_ca_region(state_abbr):
+        return fetch_csd_boundary_local(state_abbr, place_name_input)
     local_files = ["places_lite.parquet"]
     if str(state_abbr or '').strip().upper() in {"CT", "RI"}:
         local_files.append("county_subdivisions_lite.parquet")
@@ -2452,6 +2465,8 @@ def _get_census_api_key():
 
 
 def _lookup_population_for_boundary(state_abbr, city_name, boundary_kind='place'):
+    if is_ca_region(state_abbr):
+        return fetch_ca_population(state_abbr, city_name or state_abbr, boundary_kind=boundary_kind)
     state_fips = STATE_FIPS.get(str(state_abbr or '').strip().upper(), '')
     if not state_fips:
         return None

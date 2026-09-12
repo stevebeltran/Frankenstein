@@ -49,3 +49,49 @@ def test_lookup_postal_code_ca_parses_zippopotam_response(monkeypatch):
 
 def test_lookup_postal_code_ca_rejects_us_zip():
     assert lookup_postal_code_ca("60614") == (None, None, None)
+
+
+# --- Task 4: CD/CSD boundary lookup + bundled population ---
+
+from modules.boundaries_ca import (
+    fetch_cd_boundary_local,
+    fetch_csd_boundary_local,
+    fetch_cd_by_centroid,
+    fetch_ca_population,
+)
+import pandas as pd
+
+
+def test_fetch_csd_boundary_local_finds_toronto_in_ontario():
+    success, gdf = fetch_csd_boundary_local("ON", "Toronto")
+    assert success is True
+    assert gdf is not None and not gdf.empty
+
+
+def test_fetch_cd_boundary_local_returns_false_for_unknown_name():
+    success, gdf = fetch_cd_boundary_local("ON", "Not A Real Census Division")
+    assert success is False
+    assert gdf is None
+
+
+def test_fetch_cd_boundary_local_returns_false_for_us_state_abbr():
+    success, gdf = fetch_cd_boundary_local("NY", "Erie")
+    assert success is False
+    assert gdf is None
+
+
+def test_fetch_cd_by_centroid_finds_containing_division():
+    # Median of these points sits inside downtown Toronto, Ontario.
+    df_calls = pd.DataFrame({"lat": [43.65, 43.66], "lon": [-79.38, -79.39]})
+    success, gdf = fetch_cd_by_centroid(df_calls, "ON")
+    assert success is True
+    assert gdf is not None and not gdf.empty
+
+
+def test_fetch_ca_population_reads_bundled_column():
+    population = fetch_ca_population("ON", "Toronto", boundary_kind="place")
+    assert population is not None and population > 0
+
+
+def test_fetch_ca_population_returns_none_for_us_state_abbr():
+    assert fetch_ca_population("NY", "Buffalo", boundary_kind="place") is None

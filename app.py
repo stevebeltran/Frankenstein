@@ -101,6 +101,7 @@ from modules.config import (
     CONFIG, GUARDIAN_FLIGHT_HOURS_PER_DAY, SIMULATOR_DISCLAIMER_SHORT,
     STATE_FIPS, US_STATES_ABBR, KNOWN_POPULATIONS, DEMO_CITIES, FAST_DEMO_CITIES,
     FAA_CEILING_COLORS, FAA_DEFAULT_COLOR, STATION_COLORS,
+    PROVINCE_FIPS,
     bg_main, bg_sidebar, text_main, text_muted, accent_color, card_bg, card_border,
     card_text, card_title, budget_box_bg, budget_box_border, budget_box_shadow,
     map_style, map_boundary_color, map_incident_color, legend_bg, legend_text,
@@ -5024,7 +5025,7 @@ def main():
             st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
             # ── CITY / STATE — simplified single-row inputs ─────────────────────
-            _state_keys = list(STATE_FIPS.keys())
+            _state_keys = list(STATE_FIPS.keys()) + list(PROVINCE_FIPS.keys())
 
             # Column headers
             _h_city, _h_state = st.columns([3, 1])

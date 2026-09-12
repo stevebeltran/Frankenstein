@@ -18,15 +18,16 @@ import uuid
 
 import pandas as pd
 
-from modules.config import STATE_FIPS, US_STATES_ABBR
+from modules.config import STATE_FIPS, US_STATES_ABBR, PROVINCE_FIPS, CA_PROVINCES_ABBR
 from modules.efficient_merge import merge_census_results_fast
 from modules.data_validation import validate_census_results, validate_merged_data
 from modules.cad_parser import _normalize_jacksonville_cfs_report, _normalize_loxley_priority_calls_report
 from modules.numbers_adapter import load_numbers_dataframe
 
 
-_STATE_ABBRS = set(STATE_FIPS.keys())
+_STATE_ABBRS = set(STATE_FIPS.keys()) | set(PROVINCE_FIPS.keys())
 _STATE_NAMES = {name.upper(): abbr for name, abbr in US_STATES_ABBR.items()}
+_STATE_NAMES.update({name.upper(): abbr for name, abbr in CA_PROVINCES_ABBR.items()})
 _EXCEL_EXTS = ('.xlsx', '.xls', '.xlsb', '.xlsm')
 _ADDRESS_HINTS = [
     'street', 'street_address', 'address', 'location', 'incident_location',

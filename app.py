@@ -10046,7 +10046,7 @@ body{{background:transparent;overflow:hidden}}
             _sro_cost_low   = 75_000
             _sro_cost_high  = 120_000
             _dfr_amortized  = int(fleet_capex / 7) if fleet_capex > 0 else 0
-            _dfr_amort_str  = f"${_dfr_amortized:,}/yr" if _dfr_amortized > 0 else "~$11K–22K/yr"
+            _dfr_amort_str  = f"{format_usd(_dfr_amortized, st.session_state)}/yr" if _dfr_amortized > 0 else "~$11K–22K/yr"
 
             def _ss_row(label, sro_val, dfr_val, alt, cb, cbrd, tm, tmain, acc, last=False):
                 bg = f"background:rgba(255,255,255,0.02);" if alt else ""
@@ -10063,7 +10063,7 @@ body{{background:transparent;overflow:hidden}}
 
             _school_rows = (
                 _ss_row("Annual Cost / Campus",
-                        f"${_sro_cost_low:,}–${_sro_cost_high:,} per officer",
+                        f"{format_usd_range(_sro_cost_low, _sro_cost_high, st.session_state)} per officer",
                         f"{_dfr_amort_str} amortized (7-yr) · {actual_k_responder + actual_k_guardian} units",
                         False, card_bg, card_border, text_muted, text_main, accent_color) +
                 _ss_row("Coverage Hours / Year",
@@ -10237,7 +10237,7 @@ body{{background:transparent;overflow:hidden}}
                     📋 10-School District — Traditional SRO Model
                     <span class="ss-tip" data-tip="Source: ZipRecruiter SRO Salary Data 2025; DeSoto County SRO detailed cost breakdown ($94,147/yr blended total); Volt.ai SRO Cost Analysis. 1 officer per campus at $75K–$120K total annual cost. School-hours coverage only: 7hr/day × 180 school days = 1,260 hrs/yr per campus.">?</span>
                   </div>
-                  <div style="font-size:1.6rem;font-weight:900;color:#f59e0b;font-family:'IBM Plex Mono',monospace;">${940_000:,} – ${1_200_000:,}</div>
+                  <div style="font-size:1.6rem;font-weight:900;color:#f59e0b;font-family:'IBM Plex Mono',monospace;">{format_usd_range(940_000, 1_200_000, st.session_state)}</div>
                   <div style="font-size:0.67rem;color:{text_muted};margin-top:3px;">per year · 10 officers · school hours only</div>
                   <div style="margin-top:10px;display:flex;flex-direction:column;gap:3px;font-size:0.65rem;color:{text_muted};">
                     <div>Coverage: ~1,260 hrs/campus/yr (14.4% of annual hours)</div>
@@ -10252,7 +10252,7 @@ body{{background:transparent;overflow:hidden}}
                     🚁 BRINC DFR — Multi-Campus Deployment
                     <span class="ss-tip" data-tip="BRINC fleet CapEx amortized over 7 years. One hub station covers multiple campuses within patrol radius 24/7. Includes hardware and BRINC support onboarding. Does not include cellular/network costs.">?</span>
                   </div>
-                  <div style="font-size:1.6rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">${fleet_capex:,.0f} CapEx</div>
+                  <div style="font-size:1.6rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">{format_usd(fleet_capex, st.session_state)} CapEx</div>
                   <div style="font-size:0.67rem;color:{text_muted};margin-top:3px;">{_dfr_amort_str} amortized · {actual_k_responder + actual_k_guardian} units deployed</div>
                   <div style="margin-top:10px;display:flex;flex-direction:column;gap:3px;font-size:0.65rem;color:{text_muted};">
                     <div>Coverage: 8,760 hrs/yr — 24/7/365 per hub</div>
@@ -10300,7 +10300,7 @@ body{{background:transparent;overflow:hidden}}
             # ── FIRE & RESCUE CAPABILITY MATRIX ──────────────────────────────────────
             st.markdown("---")
             _fr_dfr_amortized = int(fleet_capex / 7) if fleet_capex > 0 else 0
-            _fr_dfr_amort_str = f"${_fr_dfr_amortized:,}/yr" if _fr_dfr_amortized > 0 else "~$11K–22K/yr"
+            _fr_dfr_amort_str = f"{format_usd(_fr_dfr_amortized, st.session_state)}/yr" if _fr_dfr_amortized > 0 else "~$11K–22K/yr"
 
             _fr_df = df_calls_full if (df_calls_full is not None and not df_calls_full.empty) else df_calls
             _fr_has_agency = _fr_df is not None and not _fr_df.empty and 'agency' in _fr_df.columns
@@ -10624,7 +10624,7 @@ body{{background:transparent;overflow:hidden}}
                   <div style="font-size:0.63rem;font-weight:700;color:{accent_color};text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
                     🚁 BRINC DFR — Fleet Deployment
                   </div>
-                  <div style="font-size:1.6rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">${fleet_capex:,.0f} CapEx</div>
+                  <div style="font-size:1.6rem;font-weight:900;color:{accent_color};font-family:'IBM Plex Mono',monospace;">{format_usd(fleet_capex, st.session_state)} CapEx</div>
                   <div style="font-size:0.67rem;color:{text_muted};margin-top:3px;">{_fr_dfr_amort_str} amortized (7-yr) · {actual_k_responder + actual_k_guardian} units deployed</div>
                   <div style="margin-top:10px;display:flex;flex-direction:column;gap:3px;font-size:0.65rem;color:{text_muted};">
                     <div>Pre-arrival scene intel: ✅ live HD + thermal, &lt;90 sec</div>

@@ -115,6 +115,7 @@ from modules.boundaries_ca import (
     fetch_cd_by_centroid,
     fetch_ca_population,
 )
+from modules.currency import format_usd, format_usd_range, get_usd_cad_context
 # Incident-dot color buckets, keyed by the 'agency' column value. Any value
 # not listed here (e.g. 'police', or files predating this scheme) falls back
 # to the theme's map_incident_color under the "Other Incidents" trace.
@@ -8664,6 +8665,20 @@ body{{background:transparent;overflow:hidden}}
         </div>
         """
         st.markdown(header_html, unsafe_allow_html=True)
+
+        if is_ca_region(st.session_state.get('active_state', '')):
+            _fx_ctx = get_usd_cad_context(st.session_state)
+            if _fx_ctx['source'] == 'unavailable':
+                _fx_badge_text = "CAD rate unavailable"
+            else:
+                _fx_ts = datetime.datetime.fromisoformat(_fx_ctx['timestamp']).strftime('%Y-%m-%d %H:%M')
+                _fx_badge_text = f"1 USD = {_fx_ctx['rate']:.2f} CAD as of {_fx_ts}"
+                if _fx_ctx['source'] == 'cached':
+                    _fx_badge_text += " (cached)"
+            st.markdown(
+                f'<div style="font-size:0.75rem;color:{text_muted};margin-bottom:8px;">{html.escape(_fx_badge_text)}</div>',
+                unsafe_allow_html=True,
+            )
 
         # Cleanly evaluate dynamic CSS to avoid f-string syntax errors
         border_css = 'border-right: 1px solid #222; padding-right: 10px;' if gain_val is not None else ''

@@ -13263,7 +13263,7 @@ body{{background:transparent;overflow:hidden}}
           </ul>
 
           <p style="color:var(--text);font-size:14px;line-height:1.8;margin-bottom:14px;">
-            <strong>Estimated Annual Value:</strong> The modeled narcotics prevention, deterrence &amp; response value of <strong>${narcotics_savings:,.0f} per year</strong> is derived from an estimated <strong>{narcotics_calls_annual:,.0f} narcotics-related calls</strong> annually within the coverage area, split between hot-spot deterrence coverage (persistent overwatch of known drug markets and trafficking corridors) and officer safety/reconnaissance value (aerial intelligence ahead of ground entry). Figures are conservative and do not capture reduced use-of-force incidents, faster case clearance, or avoided overtime from extended scene operations.
+            <strong>Estimated Annual Value:</strong> The modeled narcotics prevention, deterrence &amp; response value of <strong>{format_usd(narcotics_savings, st.session_state)} per year</strong> is derived from an estimated <strong>{narcotics_calls_annual:,.0f} narcotics-related calls</strong> annually within the coverage area, split between hot-spot deterrence coverage (persistent overwatch of known drug markets and trafficking corridors) and officer safety/reconnaissance value (aerial intelligence ahead of ground entry). Figures are conservative and do not capture reduced use-of-force incidents, faster case clearance, or avoided overtime from extended scene operations.
           </p>
 
           <div style="margin-bottom:20px;">
@@ -13273,14 +13273,14 @@ body{{background:transparent;overflow:hidden}}
               <div style="flex:1;background:#eef6fb;border-radius:4px;overflow:hidden;height:18px;">
                 <div style="width:60%;height:100%;background:#00D2FF;"></div>
               </div>
-              <div style="width:90px;text-align:right;font-size:12px;font-weight:700;color:#0077aa;flex-shrink:0;">${narcotics_savings*0.6:,.0f}</div>
+              <div style="width:90px;text-align:right;font-size:12px;font-weight:700;color:#0077aa;flex-shrink:0;">{format_usd(narcotics_savings*0.6, st.session_state)}</div>
             </div>
             <div style="display:flex;align-items:center;gap:10px;">
               <div style="width:150px;font-size:12px;color:var(--text);flex-shrink:0;">Officer Safety &amp; Recon</div>
               <div style="flex:1;background:#eef6fb;border-radius:4px;overflow:hidden;height:18px;">
                 <div style="width:40%;height:100%;background:#7fe3ff;"></div>
               </div>
-              <div style="width:90px;text-align:right;font-size:12px;font-weight:700;color:#0077aa;flex-shrink:0;">${narcotics_savings*0.4:,.0f}</div>
+              <div style="width:90px;text-align:right;font-size:12px;font-weight:700;color:#0077aa;flex-shrink:0;">{format_usd(narcotics_savings*0.4, st.session_state)}</div>
             </div>
           </div>
 
@@ -13290,11 +13290,11 @@ body{{background:transparent;overflow:hidden}}
           </div>
           <div class="grant-sidebar">
             <div class="grant-stat" style="border-color:rgba(0,210,255,0.4)"><div class="gs-label">Narcotics Calls/Year</div><div class="gs-val">{narcotics_calls_annual:,.0f}</div><div class="gs-sub">within coverage zone</div></div>
-            <div class="grant-stat" style="border-color:rgba(0,210,255,0.4)"><div class="gs-label">Hot-Spot Deterrence Value</div><div class="gs-val">${narcotics_savings*0.6:,.0f}</div><div class="gs-sub">persistent hot-spot overwatch</div></div>
-            <div class="grant-stat" style="border-color:rgba(0,210,255,0.4)"><div class="gs-label">Officer Safety Value</div><div class="gs-val">${narcotics_savings*0.4:,.0f}</div><div class="gs-sub">recon ahead of ground entry</div></div>
-            <div class="grant-stat gold"><div class="gs-label">Total Narcotics Value</div><div class="gs-val">${narcotics_savings:,.0f}/yr</div><div class="gs-sub">${CONFIG["NARCOTICS_SAVINGS_PER_CALL"]}/call blended</div></div>
+            <div class="grant-stat" style="border-color:rgba(0,210,255,0.4)"><div class="gs-label">Hot-Spot Deterrence Value</div><div class="gs-val">{format_usd(narcotics_savings*0.6, st.session_state)}</div><div class="gs-sub">persistent hot-spot overwatch</div></div>
+            <div class="grant-stat" style="border-color:rgba(0,210,255,0.4)"><div class="gs-label">Officer Safety Value</div><div class="gs-val">{format_usd(narcotics_savings*0.4, st.session_state)}</div><div class="gs-sub">recon ahead of ground entry</div></div>
+            <div class="grant-stat gold"><div class="gs-label">Total Narcotics Value</div><div class="gs-val">{format_usd(narcotics_savings, st.session_state)}/yr</div><div class="gs-sub">{format_usd(CONFIG["NARCOTICS_SAVINGS_PER_CALL"], st.session_state)}/call blended</div></div>
             <div class="grant-stat green"><div class="gs-label">Avg Drone Response</div><div class="gs-val">{avg_resp_time:.1f} min</div><div class="gs-sub">{avg_time_saved:.1f} min faster than patrol</div></div>
-            <div class="grant-stat" style="border-color:rgba(0,210,255,0.4)"><div class="gs-label">10-Year Narcotics Value</div><div class="gs-val">${narcotics_savings*12.58:,.0f}</div><div class="gs-sub">cumulative projected value</div></div>
+            <div class="grant-stat" style="border-color:rgba(0,210,255,0.4)"><div class="gs-label">10-Year Narcotics Value</div><div class="gs-val">{format_usd(narcotics_savings*12.58, st.session_state)}</div><div class="gs-sub">cumulative projected value</div></div>
           </div>
           </div>
         </section>
@@ -13375,7 +13375,7 @@ body{{background:transparent;overflow:hidden}}
     
           <h3 style="color:var(--text);font-size:16px;margin:24px 0 12px">The Investment We're Requesting</h3>
     
-          <p>Total program CapEx is <strong>${fleet_capex:,.0f}</strong>. The {prop_city} Police Department is seeking community partnership contributions to offset a portion of this cost and accelerate deployment. Every dollar contributed directly funds equipment that protects your street, your block, your customers.</p>
+          <p>Total program CapEx is <strong>{format_usd(fleet_capex, st.session_state)}</strong>. The {prop_city} Police Department is seeking community partnership contributions to offset a portion of this cost and accelerate deployment. Every dollar contributed directly funds equipment that protects your street, your block, your customers.</p>
     
           <table style="margin-bottom:20px">
             <thead><tr><th>Sponsorship Tier</th><th>Contribution</th><th>Recognition &amp; Benefits</th></tr></thead>
@@ -13388,7 +13388,7 @@ body{{background:transparent;overflow:hidden}}
             </tbody>
           </table>
     
-          <p>For every <strong>$10,000</strong> contributed, the program is projected to generate approximately <strong>${int(annual_savings/max(fleet_capex,1)*10000):,}</strong> in annual operational savings and property crime cost avoidance for the {prop_city} business community — a {round(annual_savings/max(fleet_capex,1),1):.1f}x return on community investment.</p>
+          <p>For every <strong>$10,000</strong> contributed, the program is projected to generate approximately <strong>{format_usd(int(annual_savings/max(fleet_capex,1)*10000), st.session_state)}</strong> in annual operational savings and property crime cost avoidance for the {prop_city} business community — a {round(annual_savings/max(fleet_capex,1),1):.1f}x return on community investment.</p>
     
           <p>Together, we can make {prop_city} safer, faster, and more resilient. Thank you for your commitment to this community.</p>
         </section>
@@ -13492,7 +13492,7 @@ body{{background:transparent;overflow:hidden}}
             <tbody>
               <tr><td><strong>Annual Cost / Campus</strong></td>
                   <td style="text-align:center;color:#b45309;">$75,000 – $120,000 per officer</td>
-                  <td style="text-align:center;color:#0369a1;">${int(fleet_capex/7):,}/yr amortized (7-yr) · {actual_k_responder + actual_k_guardian} units</td></tr>
+                  <td style="text-align:center;color:#0369a1;">{format_usd(int(fleet_capex/7), st.session_state)}/yr amortized (7-yr) · {actual_k_responder + actual_k_guardian} units</td></tr>
               <tr><td><strong>Coverage Hours / Year</strong></td>
                   <td style="text-align:center;color:#b45309;">~1,260 hrs (school hours only)</td>
                   <td style="text-align:center;color:var(--green);">8,760 hrs — 24/7/365</td></tr>
@@ -13548,7 +13548,7 @@ body{{background:transparent;overflow:hidden}}
             <div class="fleet-card responder" style="border-top:3px solid var(--resp);">
               <div class="fc-icon">🚁</div>
               <div class="fc-type">BRINC DFR — Multi-Campus</div>
-              <div class="fc-val">${fleet_capex:,.0f} CapEx</div>
+              <div class="fc-val">{format_usd(fleet_capex, st.session_state)} CapEx</div>
               <div class="fc-sub">{_dfr_amort_str} amortized · {actual_k_responder + actual_k_guardian} units</div>
               <div style="margin-top:16px;">
                 <div class="fc-row"><span class="k">Annual hours covered</span><span class="v" style="color:var(--resp);">8,760 hrs (24/7/365)</span></div>

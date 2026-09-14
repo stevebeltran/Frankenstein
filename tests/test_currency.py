@@ -100,3 +100,39 @@ def test_get_usd_cad_context_only_fetches_once_per_session(tmp_path, monkeypatch
     currency.get_usd_cad_context(session_state)
 
     assert call_count["n"] == 1
+
+
+def test_format_usd_non_ca_passthrough():
+    session_state = {"active_state": "IL"}
+    assert currency.format_usd(1234567, session_state) == "$1,234,567"
+
+
+def test_format_usd_ca_with_rate_shows_dual_currency():
+    session_state = {
+        "active_state": "ON",
+        "fx_usd_cad_ctx": {"rate": 1.35, "timestamp": "t", "source": "live"},
+    }
+    assert currency.format_usd(1000, session_state) == "$1,000 (C$1,350)"
+
+
+def test_format_usd_ca_rate_none_falls_back_to_usd_only():
+    session_state = {
+        "active_state": "ON",
+        "fx_usd_cad_ctx": {"rate": None, "timestamp": None, "source": "unavailable"},
+    }
+    assert currency.format_usd(1000, session_state) == "$1,000"
+
+
+def test_format_usd_range_non_ca_passthrough():
+    session_state = {"active_state": "IL"}
+    assert currency.format_usd_range(940_000, 1_200_000, session_state) == "$940,000 – $1,200,000"
+
+
+def test_format_usd_range_ca_with_rate_shows_dual_currency():
+    session_state = {
+        "active_state": "ON",
+        "fx_usd_cad_ctx": {"rate": 1.35, "timestamp": "t", "source": "live"},
+    }
+    assert currency.format_usd_range(1000, 2000, session_state) == (
+        "$1,000 – $2,000 (C$1,350 – C$2,700)"
+    )

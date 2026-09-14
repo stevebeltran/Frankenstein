@@ -9,6 +9,8 @@ import json
 import os
 import urllib.request
 
+from modules.boundaries_ca import is_ca_region
+
 FX_API_URL = "https://open.er-api.com/v6/latest/USD"
 FX_CACHE_PATH = os.path.join("jurisdiction_data", "fx_usd_cad.json")
 
@@ -67,3 +69,25 @@ def get_usd_cad_context(session_state):
 
     session_state["fx_usd_cad_ctx"] = ctx
     return ctx
+
+
+def format_usd(amount, session_state, decimals=0):
+    if not is_ca_region(session_state.get("active_state", "")):
+        return f"${amount:,.{decimals}f}"
+    ctx = get_usd_cad_context(session_state)
+    if ctx["rate"] is None:
+        return f"${amount:,.{decimals}f}"
+    cad_amount = amount * ctx["rate"]
+    return f"${amount:,.{decimals}f} (C${cad_amount:,.{decimals}f})"
+
+
+def format_usd_range(low, high, session_state, decimals=0):
+    base = f"${low:,.{decimals}f} – ${high:,.{decimals}f}"
+    if not is_ca_region(session_state.get("active_state", "")):
+        return base
+    ctx = get_usd_cad_context(session_state)
+    if ctx["rate"] is None:
+        return base
+    cad_low = low * ctx["rate"]
+    cad_high = high * ctx["rate"]
+    return f"{base} (C${cad_low:,.{decimals}f} – C${cad_high:,.{decimals}f})"

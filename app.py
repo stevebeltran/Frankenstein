@@ -8500,20 +8500,20 @@ body{{background:transparent;overflow:hidden}}
             <div style="background:{budget_box_bg}; border:1px solid {budget_box_border}; padding:12px; border-radius:4px;
                  text-align:center; margin:8px 0 12px 0; box-shadow:0 2px 5px {budget_box_shadow};">
                 <div style="font-size:0.7rem; color:{text_muted}; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">Annual Capacity Value</div>
-                <div style="font-size:1.8rem; font-weight:900; color:{budget_box_border}; font-family:monospace;">${annual_savings:,.0f}</div>
+                <div style="font-size:1.8rem; font-weight:900; color:{budget_box_border}; font-family:monospace;">{format_usd(annual_savings, st.session_state)}</div>
                 <div style="font-size:0.68rem; color:{text_muted}; margin-top:4px;">+ specialty response upside</div>
-                <div style="font-size:1.05rem; font-weight:800; color:#39FF14; font-family:monospace; margin-top:2px;">${_s_specialty_total:,.0f}</div>
+                <div style="font-size:1.05rem; font-weight:800; color:#39FF14; font-family:monospace; margin-top:2px;">{format_usd(_s_specialty_total, st.session_state)}</div>
                 <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-top:6px;">
                     <span style="color:{text_muted};">🔥 Thermal response:</span>
-                    <span style="color:#fbbf24; font-weight:700;">${_s_thermal_total:,.0f}/yr</span>
+                    <span style="color:#fbbf24; font-weight:700;">{format_usd(_s_thermal_total, st.session_state)}/yr</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-top:2px;">
                     <span style="color:{text_muted};">🐕 K-9 replacement:</span>
-                    <span style="color:#39FF14; font-weight:700;">${_s_k9_total:,.0f}/yr</span>
+                    <span style="color:#39FF14; font-weight:700;">{format_usd(_s_k9_total, st.session_state)}/yr</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-bottom:2px; margin-top:2px;">
                     <span style="color:{text_muted};">🚒 Fire dept value:</span>
-                    <span style="color:#fb7121; font-weight:700;">${_s_fire_total:,.0f}/yr</span>
+                    <span style="color:#fb7121; font-weight:700;">{format_usd(_s_fire_total, st.session_state)}/yr</span>
                 </div>
                 <div style="border-top:1px solid {card_border}; margin:8px 0;"></div>
                 <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
@@ -8531,7 +8531,7 @@ body{{background:transparent;overflow:hidden}}
                 <div style="border-top:1px dashed {card_border}; margin:6px 0;"></div>
                 <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:3px;">
                     <span style="color:{text_muted};">Fleet CapEx:</span>
-                    <span style="color:{text_main}; font-weight:700;">${fleet_capex:,.0f}</span>
+                    <span style="color:{text_main}; font-weight:700;">{format_usd(fleet_capex, st.session_state)}</span>
                 </div>
                 {_sidebar_be_row}
             </div>

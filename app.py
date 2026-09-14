@@ -13078,7 +13078,7 @@ body{{background:transparent;overflow:hidden}}
     
             <p><strong>Technology Platform:</strong> BRINC Drones provides fully automated launch-on-dispatch, live-streaming HD and thermal video to dispatch and responding officers, FAA-compliant Beyond Visual Line of Sight (BVLOS) operations, chain-of-custody flight logging, and integrated data analytics. All hardware is manufactured in the United States. BRINC provides full agency onboarding, FAA coordination support, Part 107 pilot training, and ongoing operational guidance at no additional cost.</p>
     
-            <p><strong>Fiscal Impact &amp; Return on Investment:</strong> Total program capital expenditure is <strong>${fleet_capex:,.0f}</strong> ({actual_k_responder} Responder × ${CONFIG["RESPONDER_COST"]:,} + {actual_k_guardian} Guardian × ${CONFIG["GUARDIAN_COST"]:,}). At a <strong>{int(dfr_dispatch_rate*100)}% DFR dispatch rate</strong> and <strong>{int(deflection_rate*100)}% call resolution rate</strong> (no officer dispatch required), the program is projected to generate <strong>${annual_savings:,.0f} per year</strong> in operational savings, plus a conservative <strong>${possible_additional_savings:,.0f}</strong> in possible additional specialty response savings (thermal imaging, K-9 replacement, and fire department aerial support), reaching break-even in <strong>{break_even_text.lower()}</strong>. Cost per drone response is ${CONFIG["DRONE_COST_PER_CALL"]} versus ${CONFIG["OFFICER_COST_PER_CALL"]} for a ground patrol dispatch — a <strong>{int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}% cost reduction</strong> per incident. The program also reduces officer exposure to unknown-risk calls, decreasing liability and improving officer retention outcomes.</p>
+            <p><strong>Fiscal Impact &amp; Return on Investment:</strong> Total program capital expenditure is <strong>{format_usd(fleet_capex, st.session_state)}</strong> ({actual_k_responder} Responder × {format_usd(CONFIG["RESPONDER_COST"], st.session_state)} + {actual_k_guardian} Guardian × {format_usd(CONFIG["GUARDIAN_COST"], st.session_state)}). At a <strong>{int(dfr_dispatch_rate*100)}% DFR dispatch rate</strong> and <strong>{int(deflection_rate*100)}% call resolution rate</strong> (no officer dispatch required), the program is projected to generate <strong>{format_usd(annual_savings, st.session_state)} per year</strong> in operational savings, plus a conservative <strong>{format_usd(possible_additional_savings, st.session_state)}</strong> in possible additional specialty response savings (thermal imaging, K-9 replacement, and fire department aerial support), reaching break-even in <strong>{break_even_text.lower()}</strong>. Cost per drone response is {format_usd(CONFIG["DRONE_COST_PER_CALL"], st.session_state)} versus {format_usd(CONFIG["OFFICER_COST_PER_CALL"], st.session_state)} for a ground patrol dispatch — a <strong>{int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}% cost reduction</strong> per incident. The program also reduces officer exposure to unknown-risk calls, decreasing liability and improving officer retention outcomes.</p>
     
             <p><strong>Evaluation Plan:</strong> Program outcomes will be tracked quarterly across four dimensions: (1) response time comparison vs. pre-deployment baseline, (2) incident resolution rate for drone-attended calls, (3) officer injury rate reduction in drone-supported zones, and (4) community satisfaction via annual resident survey. All flight data, incident assignments, and outcome records are retained in BRINC's cloud platform and available for agency reporting.</p>
     
@@ -13086,8 +13086,8 @@ body{{background:transparent;overflow:hidden}}
             <table style="font-size:12px;margin-bottom:16px">
               <thead><tr><th>Metric</th><th>Year 1</th><th>Year 3</th><th>Year 5</th><th>Year 10</th></tr></thead>
               <tbody>
-                <tr><td>Annual Savings</td><td>${annual_savings:,.0f}</td><td>${annual_savings*1.05:,.0f}</td><td>${annual_savings*1.1:,.0f}</td><td>${annual_savings*1.22:,.0f}</td></tr>
-                <tr><td>Cumulative Savings</td><td>${annual_savings:,.0f}</td><td>${annual_savings*3.15:,.0f}</td><td>${annual_savings*5.53:,.0f}</td><td>${annual_savings*12.58:,.0f}</td></tr>
+                <tr><td>Annual Savings</td><td>{format_usd(annual_savings, st.session_state)}</td><td>{format_usd(annual_savings*1.05, st.session_state)}</td><td>{format_usd(annual_savings*1.1, st.session_state)}</td><td>{format_usd(annual_savings*1.22, st.session_state)}</td></tr>
+                <tr><td>Cumulative Savings</td><td>{format_usd(annual_savings, st.session_state)}</td><td>{format_usd(annual_savings*3.15, st.session_state)}</td><td>{format_usd(annual_savings*5.53, st.session_state)}</td><td>{format_usd(annual_savings*12.58, st.session_state)}</td></tr>
                 <tr><td>Drone-Attended Calls</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365*1.03):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365*1.06):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*365*1.13):,}</td></tr>
                 <tr><td>Calls Resolved w/o Dispatch</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365*1.03):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365*1.06):,}</td><td>{int(calls_per_day*dfr_dispatch_rate*(calls_covered_perc/100)*deflection_rate*365*1.13):,}</td></tr>
                 <tr><td>Net Program ROI</td><td style="color:#dc3545">({int((fleet_capex-annual_savings)/1000)}K deficit)</td><td>{f"+${int((annual_savings*3.15-fleet_capex)/1000)}K" if annual_savings*3.15>fleet_capex else f"({int((fleet_capex-annual_savings*3.15)/1000)}K)"}</td><td style="color:#22c55e">+${int((annual_savings*5.53-fleet_capex)/1000):,}K</td><td style="color:#22c55e">+${int((annual_savings*12.58-fleet_capex)/1000):,}K</td></tr>
@@ -13118,7 +13118,7 @@ body{{background:transparent;overflow:hidden}}
             <div class="grant-stat"><div class="gs-label">Citywide Volume</div><div class="gs-val">{st.session_state.get('total_original_calls', total_calls):,}</div><div class="gs-sub">full uploaded CAD total</div></div>
             <div class="grant-stat gold"><div class="gs-label">Call Coverage</div><div class="gs-val">{calls_covered_perc:.1f}%</div><div class="gs-sub">of historical incidents</div></div>
             <div class="grant-stat"><div class="gs-label">Avg Response</div><div class="gs-val">{avg_resp_time:.1f}m</div><div class="gs-sub">{avg_time_saved:.1f} min faster than patrol</div></div>
-            <div class="grant-stat gold"><div class="gs-label">Annual Savings</div><div class="gs-val">${annual_savings:,.0f}</div><div class="gs-sub">break-even {break_even_text.lower()}</div></div>
+            <div class="grant-stat gold"><div class="gs-label">Annual Savings</div><div class="gs-val">{format_usd(annual_savings, st.session_state)}</div><div class="gs-sub">break-even {break_even_text.lower()}</div></div>
             <div class="grant-stat green"><div class="gs-label">Cost Reduction</div><div class="gs-val">{int((1-CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}%</div><div class="gs-sub">per incident vs. patrol dispatch</div></div>
           </div>
           </div>
@@ -13136,18 +13136,18 @@ body{{background:transparent;overflow:hidden}}
             </div>
             <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
               <div class="m-label">Scene Size-Up Savings</div>
-              <div class="m-value" style="color:#fb7121">${fire_savings * 0.8:,.0f}/yr</div>
+              <div class="m-value" style="color:#fb7121">{format_usd(fire_savings * 0.8, st.session_state)}/yr</div>
               <div class="m-sub">Avoided premature aerial ladder deployment</div>
             </div>
             <div class="metric-cell" style="background:rgba(251,113,33,0.07);border:1px solid rgba(251,113,33,0.3)">
               <div class="m-label">Overhaul Hotspot Savings</div>
-              <div class="m-value" style="color:#fb7121">${fire_savings * 0.2:,.0f}/yr</div>
+              <div class="m-value" style="color:#fb7121">{format_usd(fire_savings * 0.2, st.session_state)}/yr</div>
               <div class="m-sub">Crew time saved via thermal detection</div>
             </div>
             <div class="metric-cell" style="background:rgba(251,113,33,0.12);border:1px solid rgba(251,113,33,0.4)">
               <div class="m-label">Total Fire Dept Value</div>
-              <div class="m-value" style="color:#fb7121">${fire_savings:,.0f}/yr</div>
-              <div class="m-sub">${CONFIG["FIRE_SAVINGS_PER_CALL"]} blended savings per fire call</div>
+              <div class="m-value" style="color:#fb7121">{format_usd(fire_savings, st.session_state)}/yr</div>
+              <div class="m-sub">{format_usd(CONFIG["FIRE_SAVINGS_PER_CALL"], st.session_state)} blended savings per fire call</div>
             </div>
           </div>
     
@@ -13158,13 +13158,13 @@ body{{background:transparent;overflow:hidden}}
               <tr>
                 <td><strong>Aerial Scene Size-Up</strong></td>
                 <td>Drone arrives before engine company, streams live roof and exterior view. Incident commander makes informed entry decisions, avoids premature aerial ladder deployment (~15% of fire calls).</td>
-                <td style="color:#fb7121;font-weight:700">${fire_savings * 0.8:,.0f}/yr</td>
+                <td style="color:#fb7121;font-weight:700">{format_usd(fire_savings * 0.8, st.session_state)}/yr</td>
                 <td>NFPA: aerial ladder deployment $3,000–$8,000/call; 15% avoidance rate applied</td>
               </tr>
               <tr>
                 <td><strong>Overhaul Hotspot Detection</strong></td>
                 <td>Thermal imaging pinpoints hidden hotspots in walls and attic after knockdown. Reduces overhaul crew time by ~45 min (4-person crew) per fire call.</td>
-                <td style="color:#fb7121;font-weight:700">${fire_savings * 0.2:,.0f}/yr</td>
+                <td style="color:#fb7121;font-weight:700">{format_usd(fire_savings * 0.2, st.session_state)}/yr</td>
                 <td>IAFC: avg. overhaul crew cost ~$200/hr; 45-min reduction applied to 60% of fire calls</td>
               </tr>
               <tr>
@@ -13202,7 +13202,7 @@ body{{background:transparent;overflow:hidden}}
     
             <p><strong>Operational Application:</strong> Upon dispatch of a fire call within the coverage zone, the nearest BRINC drone auto-launches and arrives on scene in an average of <strong>{avg_resp_time:.1f} minutes</strong> — typically before the first engine company. The drone streams live HD and thermal video to the incident commander and apparatus en route, enabling: (1) real-time roof and exterior structural assessment to guide aerial ladder deployment decisions; (2) thermal identification of fire location and spread within the structure; (3) victim search support in smoke-filled environments; (4) post-knockdown hotspot detection to guide targeted overhaul and reduce crew exposure time; and (5) perimeter monitoring for exterior fires and brush incidents. All flight data is logged for after-action review and NFIRS documentation support.</p>
     
-            <p><strong>Fiscal Impact — Fire Department:</strong> The modeled fire department value of <strong>${fire_savings:,.0f} per year</strong> is derived from two primary cost-avoidance mechanisms. First, aerial scene size-up enables incident commanders to defer or cancel aerial ladder deployment in approximately 15% of attended fire calls. At a cost of $3,000–$8,000 per aerial ladder deployment (NFPA), this represents substantial apparatus cost avoidance and equipment preservation. Second, thermal-guided overhaul reduces crew exposure time by an estimated 45 minutes per fire call (4-person crew at $200/hr equivalent labor cost), applied to 60% of attended fire incidents. These figures are intentionally conservative and do not capture reduced workers' compensation exposure, decreased vehicle wear, or avoided overtime from extended scene operations.</p>
+            <p><strong>Fiscal Impact — Fire Department:</strong> The modeled fire department value of <strong>{format_usd(fire_savings, st.session_state)} per year</strong> is derived from two primary cost-avoidance mechanisms. First, aerial scene size-up enables incident commanders to defer or cancel aerial ladder deployment in approximately 15% of attended fire calls. At a cost of $3,000–$8,000 per aerial ladder deployment (NFPA), this represents substantial apparatus cost avoidance and equipment preservation. Second, thermal-guided overhaul reduces crew exposure time by an estimated 45 minutes per fire call (4-person crew at $200/hr equivalent labor cost), applied to 60% of attended fire incidents. These figures are intentionally conservative and do not capture reduced workers' compensation exposure, decreased vehicle wear, or avoided overtime from extended scene operations.</p>
     
             <p><strong>Officer and Firefighter Safety:</strong> The U.S. Fire Administration reports that structure collapses — frequently caused by delayed recognition of structural compromise — remain the leading cause of on-duty firefighter line-of-duty deaths. Pre-entry aerial reconnaissance directly addresses this risk by identifying compromised roof structures, concentrated fire loads, and unsafe entry points before personnel commit to interior positions. Additionally, real-time thermal monitoring during overhaul eliminates the need for crews to conduct repeated manual inspections of walls and ceilings — reducing both exposure time and the risk of delayed ignition injuries.</p>
     
@@ -13219,20 +13219,20 @@ body{{background:transparent;overflow:hidden}}
               <thead><tr><th>Metric</th><th>Year 1</th><th>Year 3</th><th>Year 5</th><th>Year 10</th></tr></thead>
               <tbody>
                 <tr><td>Fire Calls Assisted</td><td>{fire_calls_annual:,.0f}</td><td>{fire_calls_annual*1.03:,.0f}</td><td>{fire_calls_annual*1.06:,.0f}</td><td>{fire_calls_annual*1.13:,.0f}</td></tr>
-                <tr><td>Annual Fire Dept Value</td><td>${fire_savings:,.0f}</td><td>${fire_savings*1.05:,.0f}</td><td>${fire_savings*1.10:,.0f}</td><td>${fire_savings*1.22:,.0f}</td></tr>
-                <tr><td>Cumulative Fire Value</td><td>${fire_savings:,.0f}</td><td>${fire_savings*3.15:,.0f}</td><td>${fire_savings*5.53:,.0f}</td><td>${fire_savings*12.58:,.0f}</td></tr>
-                <tr><td>Scene Size-Up Savings</td><td>${fire_savings*0.8:,.0f}</td><td>${fire_savings*0.8*1.05:,.0f}</td><td>${fire_savings*0.8*1.10:,.0f}</td><td>${fire_savings*0.8*1.22:,.0f}</td></tr>
-                <tr><td>Overhaul Crew Savings</td><td>${fire_savings*0.2:,.0f}</td><td>${fire_savings*0.2*1.05:,.0f}</td><td>${fire_savings*0.2*1.10:,.0f}</td><td>${fire_savings*0.2*1.22:,.0f}</td></tr>
+                <tr><td>Annual Fire Dept Value</td><td>{format_usd(fire_savings, st.session_state)}</td><td>{format_usd(fire_savings*1.05, st.session_state)}</td><td>{format_usd(fire_savings*1.10, st.session_state)}</td><td>{format_usd(fire_savings*1.22, st.session_state)}</td></tr>
+                <tr><td>Cumulative Fire Value</td><td>{format_usd(fire_savings, st.session_state)}</td><td>{format_usd(fire_savings*3.15, st.session_state)}</td><td>{format_usd(fire_savings*5.53, st.session_state)}</td><td>{format_usd(fire_savings*12.58, st.session_state)}</td></tr>
+                <tr><td>Scene Size-Up Savings</td><td>{format_usd(fire_savings*0.8, st.session_state)}</td><td>{format_usd(fire_savings*0.8*1.05, st.session_state)}</td><td>{format_usd(fire_savings*0.8*1.10, st.session_state)}</td><td>{format_usd(fire_savings*0.8*1.22, st.session_state)}</td></tr>
+                <tr><td>Overhaul Crew Savings</td><td>{format_usd(fire_savings*0.2, st.session_state)}</td><td>{format_usd(fire_savings*0.2*1.05, st.session_state)}</td><td>{format_usd(fire_savings*0.2*1.10, st.session_state)}</td><td>{format_usd(fire_savings*0.2*1.22, st.session_state)}</td></tr>
               </tbody>
             </table>
           </div>
           <div class="grant-sidebar">
             <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Fire Calls/Year</div><div class="gs-val" style="color:#fb7121">{fire_calls_annual:,.0f}</div><div class="gs-sub">within coverage zone</div></div>
-            <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Scene Size-Up Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*0.8:,.0f}</div><div class="gs-sub">aerial ladder cost avoidance</div></div>
-            <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Overhaul Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*0.2:,.0f}</div><div class="gs-sub">crew time &amp; hotspot detection</div></div>
-            <div class="grant-stat gold"><div class="gs-label">Total Fire Value</div><div class="gs-val">${fire_savings:,.0f}/yr</div><div class="gs-sub">${CONFIG["FIRE_SAVINGS_PER_CALL"]}/call blended</div></div>
+            <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Scene Size-Up Value</div><div class="gs-val" style="color:#fb7121">{format_usd(fire_savings*0.8, st.session_state)}</div><div class="gs-sub">aerial ladder cost avoidance</div></div>
+            <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">Overhaul Value</div><div class="gs-val" style="color:#fb7121">{format_usd(fire_savings*0.2, st.session_state)}</div><div class="gs-sub">crew time &amp; hotspot detection</div></div>
+            <div class="grant-stat gold"><div class="gs-label">Total Fire Value</div><div class="gs-val">{format_usd(fire_savings, st.session_state)}/yr</div><div class="gs-sub">{format_usd(CONFIG["FIRE_SAVINGS_PER_CALL"], st.session_state)}/call blended</div></div>
             <div class="grant-stat green"><div class="gs-label">Avg Drone Response</div><div class="gs-val">{avg_resp_time:.1f} min</div><div class="gs-sub">{avg_time_saved:.1f} min faster than apparatus</div></div>
-            <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">10-Year Fire Value</div><div class="gs-val" style="color:#fb7121">${fire_savings*12.58:,.0f}</div><div class="gs-sub">cumulative projected value</div></div>
+            <div class="grant-stat" style="border-color:rgba(251,113,33,0.4)"><div class="gs-label">10-Year Fire Value</div><div class="gs-val" style="color:#fb7121">{format_usd(fire_savings*12.58, st.session_state)}</div><div class="gs-sub">cumulative projected value</div></div>
           </div>
           </div>
         </section>

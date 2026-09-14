@@ -11065,7 +11065,7 @@ body{{background:transparent;overflow:hidden}}
     <div class="metric m-cov"><div class="k">Call Coverage</div><div class="v">{float(calls_covered_perc or 0):.1f}%</div></div>
     <div class="metric m-calls"><div class="k">Annual Calls Covered</div><div class="v">{_qr_covered_calls:,}</div></div>
     <div class="metric m-fleet"><div class="k">Recommended Fleet</div><div class="v">{actual_k_responder}R / {actual_k_guardian}G</div></div>
-    <div class="metric m-roi"><div class="k">Annual Savings</div><div class="v">${float(annual_savings or 0):,.0f}</div></div>
+    <div class="metric m-roi"><div class="k">Annual Savings</div><div class="v">{format_usd(float(annual_savings or 0), st.session_state)}</div></div>
   </section>
 
   <section class="section">
@@ -11970,7 +11970,7 @@ body{{background:transparent;overflow:hidden}}
                 map_html_str = fig_for_export.to_html(full_html=False, include_plotlyjs='inline', default_height='500px', default_width='100%')
                 _visible_export_rows = [d for d in active_drones if not _is_call_density_station(d)]
                 station_rows = "".join(
-                    f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>${d['cost']:,}</td></tr>"
+                    f"<tr><td>{d['name']}</td><td>{d['type']}</td><td>{d['avg_time_min']:.1f} min</td><td>{d['faa_ceiling']}</td><td>{format_usd(d['cost'], st.session_state)}</td></tr>"
                     for d in _visible_export_rows
                 ) or "<tr><td colspan='5'>No verified real facility names available for this scenario.</td></tr>"
     
@@ -12095,7 +12095,7 @@ body{{background:transparent;overflow:hidden}}
     
                 # ── School safety export variables ────────────────────────────────────────
                 _exp_dfr_amortized = int(fleet_capex / 7) if fleet_capex > 0 else 0
-                _dfr_amort_str     = f"${_exp_dfr_amortized:,}/yr" if _exp_dfr_amortized > 0 else "~$11K–22K/yr"
+                _dfr_amort_str     = f"{format_usd(_exp_dfr_amortized, st.session_state)}/yr" if _exp_dfr_amortized > 0 else "~$11K–22K/yr"
     
                 # ── Build custom-content HTML blocks from AE editable fields ────────────
                 _doc_intro   = st.session_state.get('doc_custom_intro',   '').strip()
@@ -12897,9 +12897,9 @@ body{{background:transparent;overflow:hidden}}
                 </div>
               </div>
               <div class="cover-meta">
-                <div class="cover-meta-cell"><div class="label">Fleet CapEx</div><div class="value accent">${fleet_capex:,.0f}</div></div>
-                <div class="cover-meta-cell"><div class="label">Annual Savings</div><div class="value gold">${annual_savings:,.0f}</div></div>
-                <div class="cover-meta-cell"><div class="label">Add'l Thermal + K-9</div><div class="value accent">${possible_additional_savings:,.0f}</div></div>
+                <div class="cover-meta-cell"><div class="label">Fleet CapEx</div><div class="value accent">{format_usd(fleet_capex, st.session_state)}</div></div>
+                <div class="cover-meta-cell"><div class="label">Annual Savings</div><div class="value gold">{format_usd(annual_savings, st.session_state)}</div></div>
+                <div class="cover-meta-cell"><div class="label">Add'l Thermal + K-9</div><div class="value accent">{format_usd(possible_additional_savings, st.session_state)}</div></div>
                 {f'<div class="cover-meta-cell"><div class="label">Break-Even</div><div class="value">{break_even_text}</div></div>' if show_break_even_box else ''}
                 <div class="cover-meta-cell"><div class="label">Call Coverage</div><div class="value accent">{calls_covered_perc:.1f}%</div></div>
                 <div class="cover-meta-cell"><div class="label">Avg Response</div><div class="value">{avg_resp_time:.1f} min</div></div>
@@ -12919,11 +12919,11 @@ body{{background:transparent;overflow:hidden}}
     
         <!-- ── 01: EXECUTIVE SUMMARY ──────────────────────────────────── -->
         <section class="doc-section" id="executive">
-          <div class="section-eyebrow"><span class="pg-num">01</span><span class="pg-title">Executive Summary</span><span class="src" data-src="Sources: Incident coverage &amp; response time computed from uploaded CAD data via BRINC geospatial optimizer. Hardware pricing: BRINC Responder ${CONFIG['RESPONDER_COST']:,} · Guardian ${CONFIG['GUARDIAN_COST']:,} per unit{'' if st.session_state.get('pricing_tier', 'Safe Guard') == 'Custom Quote' else ' (' + st.session_state.get('pricing_tier', 'Safe Guard') + ')'}. Officer dispatch cost benchmark: $76–$120/call (IACP/DOJ). Population: US Census Bureau ACS.">ⓘ</span></div>
+          <div class="section-eyebrow"><span class="pg-num">01</span><span class="pg-title">Executive Summary</span><span class="src" data-src="Sources: Incident coverage &amp; response time computed from uploaded CAD data via BRINC geospatial optimizer. Hardware pricing: BRINC Responder {format_usd(CONFIG['RESPONDER_COST'], st.session_state)} · Guardian {format_usd(CONFIG['GUARDIAN_COST'], st.session_state)} per unit{'' if st.session_state.get('pricing_tier', 'Safe Guard') == 'Custom Quote' else ' (' + st.session_state.get('pricing_tier', 'Safe Guard') + ')'}. Officer dispatch cost benchmark: $76–$120/call (IACP/DOJ). Population: US Census Bureau ACS.">ⓘ</span></div>
           <div class="metrics-hero">
-            <div class="metric-cell"><div class="m-label">Fleet Capital Expenditure</div><div class="m-value cyan">${fleet_capex:,.0f}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
-            <div class="metric-cell"><div class="m-label">Annual Savings Capacity</div><div class="m-value gold">${annual_savings:,.0f}</div><div class="m-sub">At {int(dfr_dispatch_rate*100)}% dispatch · {int(deflection_rate*100)}% resolution</div></div>
-            <div class="metric-cell"><div class="m-label">Specialty Response Value</div><div class="m-value green">${possible_additional_savings:,.0f}</div><div class="m-sub">Thermal ${thermal_savings:,.0f} · K-9 ${k9_savings:,.0f} · Fire ${fire_savings:,.0f}</div></div>
+            <div class="metric-cell"><div class="m-label">Fleet Capital Expenditure</div><div class="m-value cyan">{format_usd(fleet_capex, st.session_state)}</div><div class="m-sub">{actual_k_responder} Responder · {actual_k_guardian} Guardian</div></div>
+            <div class="metric-cell"><div class="m-label">Annual Savings Capacity</div><div class="m-value gold">{format_usd(annual_savings, st.session_state)}</div><div class="m-sub">At {int(dfr_dispatch_rate*100)}% dispatch · {int(deflection_rate*100)}% resolution</div></div>
+            <div class="metric-cell"><div class="m-label">Specialty Response Value</div><div class="m-value green">{format_usd(possible_additional_savings, st.session_state)}</div><div class="m-sub">Thermal {format_usd(thermal_savings, st.session_state)} · K-9 {format_usd(k9_savings, st.session_state)} · Fire {format_usd(fire_savings, st.session_state)}</div></div>
             {f'<div class="metric-cell"><div class="m-label">Program Break-Even</div><div class="m-value">{break_even_text}</div><div class="m-sub">Full cost recovery timeline</div></div>' if show_break_even_box else ''}
             <div class="metric-cell"><div class="m-label">911 Call Coverage</div><div class="m-value cyan">{calls_covered_perc:.1f}%</div><div class="m-sub">of {st.session_state.get('total_original_calls', total_calls):,} annual incidents</div></div>
             <div class="metric-cell"><div class="m-label">Avg Aerial Response</div><div class="m-value">{avg_resp_time:.1f} min</div><div class="m-sub">vs. ground patrol baseline</div></div>
@@ -12940,7 +12940,7 @@ body{{background:transparent;overflow:hidden}}
               </div>
               <div>
                 <div style="font-size:13px;color:#ffffff;margin-bottom:8px;"><strong>{_tier_desc}</strong></div>
-                <div style="font-size:12px;color:#aabbdd;">Responder: <strong>${CONFIG['RESPONDER_COST']:,}</strong> · Guardian: <strong>${CONFIG['GUARDIAN_COST']:,}</strong></div>
+                <div style="font-size:12px;color:#aabbdd;">Responder: <strong>{format_usd(CONFIG['RESPONDER_COST'], st.session_state)}</strong> · Guardian: <strong>{format_usd(CONFIG['GUARDIAN_COST'], st.session_state)}</strong></div>
               </div>
             </div>
           </div>
@@ -12951,7 +12951,7 @@ body{{background:transparent;overflow:hidden}}
             and {actual_k_guardian} BRINC Guardians — across {dept_summary}. The system is projected to cover
             <strong>{calls_covered_perc:.1f}% of historical incidents</strong>, reach scenes
             <strong>{avg_time_saved:.1f} minutes faster</strong> than ground patrol, and deliver
-            <strong>${annual_savings:,.0f} in annual operational savings</strong> with a break-even horizon of {break_even_text.lower()}.
+            <strong>{format_usd(annual_savings, st.session_state)} in annual operational savings</strong> with a break-even horizon of {break_even_text.lower()}.
           </p>
           {_custom_intro_html}
           {_custom_pts_html}
@@ -12972,7 +12972,7 @@ body{{background:transparent;overflow:hidden}}
               <div class="fc-val">{actual_k_guardian} Unit{"s" if actual_k_guardian != 1 else ""}</div>
               <div class="fc-sub">{guard_radius_mi}-mile operational radius · {guard_strategy_raw}</div>
               <div style="margin-top:16px">
-                <div class="fc-row"><span class="k">Unit CapEx</span><span class="v">${CONFIG['GUARDIAN_COST']:,}</span></div>
+                <div class="fc-row"><span class="k">Unit CapEx</span><span class="v">{format_usd(CONFIG['GUARDIAN_COST'], st.session_state)}</span></div>
                 <div class="fc-row"><span class="k">Call Coverage</span><span class="v">{guard_calls_perc:.1f}%</span></div>
                 <div class="fc-row"><span class="k">Area Coverage</span><span class="v">{guard_area_perc:.1f}%</span></div>
               </div>
@@ -12983,7 +12983,7 @@ body{{background:transparent;overflow:hidden}}
               <div class="fc-val">{actual_k_responder} Unit{"s" if actual_k_responder != 1 else ""}</div>
               <div class="fc-sub">{resp_radius_mi}-mile operational radius · {resp_strategy_raw}</div>
               <div style="margin-top:16px">
-                <div class="fc-row"><span class="k">Unit CapEx</span><span class="v">${CONFIG['RESPONDER_COST']:,}</span></div>
+                <div class="fc-row"><span class="k">Unit CapEx</span><span class="v">{format_usd(CONFIG['RESPONDER_COST'], st.session_state)}</span></div>
                 <div class="fc-row"><span class="k">Call Coverage</span><span class="v">{resp_calls_perc:.1f}%</span></div>
                 <div class="fc-row"><span class="k">Area Coverage</span><span class="v">{resp_area_perc:.1f}%</span></div>
               </div>

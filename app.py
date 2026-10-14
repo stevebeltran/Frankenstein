@@ -5927,6 +5927,9 @@ def main():
                                     logs=_upload_logs,
                                 )
                                 census_stage_df, census_original_df, census_summary = build_census_staging(call_files)
+                                for _census_warning in census_summary.get('warnings') or []:
+                                    _push_upload_log(f"⚠ {_census_warning}")
+                                    st.warning(_census_warning)
                                 if (
                                     df_c_partial is None or
                                     df_c_partial.empty or

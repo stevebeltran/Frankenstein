@@ -205,6 +205,18 @@ def _normalize_headerless_excel_frame(df: pd.DataFrame) -> pd.DataFrame:
     return norm
 
 
+def _decode_text_bytes(raw_bytes: bytes) -> str:
+    if raw_bytes[:2] in (b'\xff\xfe', b'\xfe\xff') or raw_bytes[:200].count(b'\x00') > 20:
+        try:
+            return raw_bytes.decode('utf-16')
+        except UnicodeDecodeError:
+            pass
+    try:
+        return raw_bytes.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        return raw_bytes.decode('latin-1')
+
+
 def _deduplicate_columns(df):
     """Rename duplicate column names by appending _2, _3, etc."""
     seen = {}
@@ -237,6 +249,10 @@ def load_raw_call_table(uploaded_file) -> pd.DataFrame:
             import openpyxl as _oxl
 
             wb = _oxl.load_workbook(io.BytesIO(raw_bytes), read_only=True, data_only=True)
+            for _sn in wb.sheetnames:
+                # Exporters often write a stale <dimension> (e.g. "A1"); read-only mode trusts it and stops after the header.
+                if hasattr(wb[_sn], 'reset_dimensions'):
+                    wb[_sn].reset_dimensions()
             sheet_name = max(wb.sheetnames, key=lambda sn: _sheet_score(wb[sn]))
             ws = wb[sheet_name]
             row_iter = ws.iter_rows(values_only=True)
@@ -271,6 +287,8 @@ def load_raw_call_table(uploaded_file) -> pd.DataFrame:
                     raw_df = _priority_calls_df
             if _looks_like_headerless_excel_columns(headers_raw) or _looks_like_headerless_cad_export_frame(raw_df):
                 raw_df = _normalize_headerless_excel_frame(raw_df)
+            if raw_df.empty:
+                raise ValueError("openpyxl read no data rows; retrying with pandas.")
             return raw_df.reset_index(drop=True)
         except Exception:
             all_sheets = pd.read_excel(io.BytesIO(raw_bytes), engine=engine, sheet_name=None)
@@ -311,7 +329,7 @@ def load_raw_call_table(uploaded_file) -> pd.DataFrame:
     if _jacksonville_df is not None and not _jacksonville_df.empty:
         return _jacksonville_df.reset_index(drop=True)
 
-    content = raw_bytes.decode('utf-8', errors='ignore')
+    content = _decode_text_bytes(raw_bytes)
     delim = _guess_delimiter(content)
     raw_df = pd.read_csv(io.StringIO(content), sep=delim, dtype=str)
     raw_df.columns = [str(c).lower().strip() for c in raw_df.columns]
@@ -511,9 +529,13 @@ def build_census_staging(uploaded_files) -> tuple[pd.DataFrame, pd.DataFrame, di
     stage_parts = []
     original_parts = []
     diagnostics = []
+    warnings = []
     for file_idx, uploaded_file in enumerate(uploaded_files):
         raw_df = load_raw_call_table(uploaded_file)
         raw_df = raw_df.reset_index(drop=True)
+        if raw_df.empty:
+            warnings.append(f"{uploaded_file.name}: no data rows found; skipped.")
+            continue
         source_ids = [f"{file_idx}:{uploaded_file.name}:{row_idx}" for row_idx in range(len(raw_df))]
         original_df = raw_df.copy()
         original_df['_source_row_id'] = source_ids
@@ -548,10 +570,11 @@ def build_census_staging(uploaded_files) -> tuple[pd.DataFrame, pd.DataFrame, di
             part['city'].ne('') &
             part['state'].isin(_STATE_ABBRS)
         )
-        part['census_preview'] = part.apply(
-            lambda row: ', '.join([v for v in [row['street'], row['city'], row['state'], row['zip']] if v]),
-            axis=1,
-        )
+        # List comprehension, not DataFrame.apply(axis=1): apply returns a DataFrame on 0 rows.
+        part['census_preview'] = [
+            ', '.join(v for v in vals if v)
+            for vals in zip(part['street'], part['city'], part['state'], part['zip'])
+        ]
         diagnostics.append({
             'file': uploaded_file.name,
             'rows': int(len(part)),
@@ -569,6 +592,7 @@ def build_census_staging(uploaded_files) -> tuple[pd.DataFrame, pd.DataFrame, di
     original_df = pd.concat(original_parts, ignore_index=True) if original_parts else pd.DataFrame()
     summary = {
         'files': diagnostics,
+        'warnings': warnings,
         'rows_total': int(len(stage_df)),
         'rows_ready': int((stage_df['has_required_address'] & ~stage_df['is_intersection']).sum()) if not stage_df.empty else 0,
         'rows_missing': int((~stage_df['has_required_address']).sum()) if not stage_df.empty else 0,
